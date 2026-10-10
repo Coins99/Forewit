@@ -140,11 +140,13 @@ def validate_candidate(candidate: AnalysisCandidate, request: AnalysisRequest) -
 
     An over-long summary or action is shortened. The evidence must quote the email, and is
     stored at most 300 characters long and never as the whole body: it is cut to under 80%
-    of the body. The follow-up signal is checked next by _follow_up, and becomes NONE
-    rather than failing the message. Suggested actions are checked one at a time by
-    _suggestions, which drops a bad one without failing the message; they get what is left
-    of the evidence budget. Raises ValueError (pydantic's ValidationError is one); messages
-    never echo email text.
+    of the body. A body too short to keep any quote under that share (one or two
+    characters, such as "ok") stores no evidence, and the message is still analyzed; its
+    follow-up signal and its suggestions' quotes then have no room either. The follow-up
+    signal is checked next by _follow_up, and becomes NONE rather than failing the message.
+    Suggested actions are checked one at a time by _suggestions, which drops a bad one
+    without failing the message; they get what is left of the evidence budget. Raises
+    ValueError (pydantic's ValidationError is one); messages never echo email text.
     """
     if candidate.message_key != request.message_key:
         raise ValueError("the candidate key does not match its request")
@@ -154,9 +156,9 @@ def validate_candidate(candidate: AnalysisCandidate, request: AnalysisRequest) -
     # Strictly under the share: a 100-character body stores at most 79 characters.
     share_cap = math.ceil(len(request.body_text) * EVIDENCE_BODY_SHARE) - 1
     evidence_cap = min(EVIDENCE_STORE_CHARS, share_cap)
-    if evidence_cap < 2:
-        raise ValueError("the body is too short to store any evidence from it")
-    stored_evidence = _fit(evidence, evidence_cap)
+    # Two characters is the shortest a cut quote can be (one, then "…"). A shorter cap
+    # stores nothing rather than fail the message, which would send it again every run.
+    stored_evidence = _fit(evidence, evidence_cap) if evidence_cap >= 2 else ""
     deadline = resolve_deadline(candidate, request)
     action_text = clean_generated_text(candidate.action_text or "")
     budget = min(EVIDENCE_TOTAL_CHARS, share_cap) - len(stored_evidence)
