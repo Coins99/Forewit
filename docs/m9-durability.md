@@ -58,8 +58,11 @@ a new preview. Apply rechecks under a SQLite write lock and commits atomically.
 | Forget old orphaned decisions | Old Gmail decisions with no saved account identity and no linked action | Writing and all other decisions; forgotten suggestions may appear again after reconnecting |
 
 Cache age compares message receipt time, brief generation time and sync start time to
-an aware UTC cutoff. Removing a message removes it from every saved brief and makes
-its surviving source snapshots unavailable; it does not erase those snapshots.
+an aware UTC cutoff. A brief that stays keeps every message it lists, however old: a brief
+made after the cutoff can list a past day's mail or an older tracked reply, and removing
+those messages would empty it, so they stay and the preview doesn't count them. Removing
+all of an account's cache removes every brief with it. A removed message makes its
+surviving source snapshots unavailable; it does not erase those snapshots.
 Permanently deleted writing cannot be undone without a backup. A failed commit rolls
 back the cleanup; a successful cleanup followed by a view failure is reported as
 completed, with a restart needed to refresh.
