@@ -605,6 +605,11 @@ async def test_brief_displays_resolved_deadline(
         ("PERMISSION_DENIED", "Disconnect and reconnect"),
         ("PROVIDER_ERROR", "offline"),
         ("RATE_LIMITED", "retry later"),
+        # What a real sync ends with when Gmail drops, stalls or fails partway.
+        ("PROVIDER_RESPONSE_ERROR", "unusable reply"),
+        ("SYNC_RUN_TIMEOUT", "took too long"),
+        ("METADATA_ITEMS_FAILED", "may be missing"),
+        ("UNKNOWN_ERROR", "stopped unexpectedly"),
         ("AI_AUTH_FAILED", "Replace it in Settings"),
         ("AI_NETWORK_BLOCKED", "home or mobile"),
         ("AI_USAGE_LIMIT", "fewer messages"),
