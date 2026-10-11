@@ -651,7 +651,7 @@ def test_each_view_has_its_empty_state(panel: ActionsPanel, view: ActionFilter) 
     assert detail_texts(panel) == [EMPTY_TEXT[view]]
     assert shown_buttons(panel) == []
     assert EMPTY_TEXT == {
-        ActionFilter.OPEN: "No open actions. Accept a suggestion in a brief to start one.",
+        ActionFilter.OPEN: "No open actions. Create a task or accept a suggestion in a brief.",
         ActionFilter.WAITING: "Nothing you're waiting for.",
         ActionFilter.COMPLETED: "No completed actions yet.",
     }

@@ -398,6 +398,28 @@ class ActionTable(Base):
     thread_seen_until_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
+class ActionActivityTable(Base):
+    """Append-only owner activity; saved in the transaction that changes the action."""
+
+    __tablename__ = "action_activity"
+    __table_args__ = (
+        UniqueConstraint("action_id", "revision", name="uq_action_activity_revision"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+        Index("ix_action_activity_action_id", "action_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action_id: Mapped[int] = mapped_column(ForeignKey("actions.id", ondelete="CASCADE"))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    previous_status: Mapped[str | None] = mapped_column(String(16))
+    previous_completed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    undo_of_revision: Mapped[int | None] = mapped_column(Integer)
+    previous_source_count: Mapped[int | None] = mapped_column(Integer)
+    legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class ActionSuggestionTable(Base):
     """One validated action suggested by a cached analysis, at its position."""
 

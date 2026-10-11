@@ -527,6 +527,14 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             await ActionService(session).unaccept(public_id, revision)
 
+    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
+        async with self._storage().session() as session:
+            return await ActionService(session).create(edit, steps)
+
+    async def undo_action_status(self, public_id: str, revision: int) -> Action:
+        async with self._storage().session() as session:
+            return await ActionService(session).undo_status(public_id, revision)
+
     async def save_action(
         self,
         public_id: str,

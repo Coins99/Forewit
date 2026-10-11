@@ -20,6 +20,7 @@ from mailbrief.ui.brief_detail import ACCEPT, DISMISS
 from mailbrief.ui.main_window import MainWindow
 from tests.factories import make_action
 from tests.ui.brief_view import detail
+from tests.ui.test_keyboard import activate
 from tests.ui.test_workflow import FakeBackend
 
 OPEN = make_action(title="Send the deck")
@@ -75,7 +76,7 @@ async def test_completing_then_undoing(window: MainWindow, backend: FakeBackend)
 
     window.undo_button.click()
     await finish(window)
-    assert backend.action_calls[-1] == ("reopen_action", OPEN.public_id, 2)
+    assert backend.action_calls[-1] == ("undo_action_status", OPEN.public_id, 2)
 
 
 async def test_reopening_from_the_completed_tab_then_undoing(
@@ -91,7 +92,7 @@ async def test_reopening_from_the_completed_tab_then_undoing(
 
     assert backend.action_calls == [
         ("reopen_action", DONE.public_id, 4),
-        ("complete_action", OPEN.public_id, 5),
+        ("undo_action_status", OPEN.public_id, 5),
     ]
 
 
@@ -495,3 +496,54 @@ async def test_quitting_during_a_save_lets_it_finish_and_shuts_down(
     assert backend.action_calls[-1][0] == "save_action"
     assert not window.action_editor.isVisible()
     assert window.action_editor.status.text() == "Saving…"  # Nothing more to tell anyone.
+
+
+async def test_new_task_button_saves_without_gmail(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    window._show_page("actions")
+    window.actions_panel.new_task_button.click()
+    editor = window.action_editor
+    assert editor.isVisible()
+    assert editor.windowTitle() == "New task"
+    assert editor.title.text() == ""
+    editor.title.setText("Plan next week")
+    editor.notes.setPlainText("Bring a notebook")
+    editor.has_target.setChecked(True)
+    editor.target.setDate(QDate(2026, 10, 12))
+    editor.add_step.click()
+    item = editor.steps.item(0)
+    assert item is not None
+    item.setText("Check calendar")
+    editor._save()
+    await finish(window)
+    assert not editor.isVisible()
+    call = backend.action_calls[-1]
+    assert call[0] == "create_action"
+    edit = call[1]
+    assert isinstance(edit, ActionEdit)
+    assert edit.title == "Plan next week"
+    assert edit.notes == "Bring a notebook"
+    assert edit.target_date == date(2026, 10, 12)
+    assert window.status.text() == "Created: Plan next week."
+
+
+async def test_new_task_shortcut_cancel_and_failed_save(
+    window: MainWindow, backend: FakeBackend, qtbot: QtBot
+) -> None:
+    await window.initialize()
+    activate(qtbot, window)
+    QTest.keyClick(window, Qt.Key.Key_N, Qt.KeyboardModifier.ControlModifier)
+    qtbot.waitUntil(window.action_editor.isVisible)
+    window.action_editor.reject()
+    assert backend.action_calls == []
+    window._request_new_task()
+    editor = window.action_editor
+    editor.title.setText("Keep my input")
+    backend.action_fail = RuntimeError("synthetic write failure")
+    editor._save()
+    await finish(window)
+    assert editor.isVisible()
+    assert editor.title.text() == "Keep my input"
+    assert editor.status.text()

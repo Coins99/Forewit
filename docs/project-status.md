@@ -6,6 +6,11 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- P1 first slice implemented, awaiting owner desktop acceptance: [manual tasks and activity
+  history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
+  lifecycle; completion/reopening/undo history survives recovery and export. Projects and
+  life areas come next, followed by unified Today.
+
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.
 - Implemented for M1: Gmail OAuth, OS credential storage (Windows Credential Manager or

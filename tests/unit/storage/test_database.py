@@ -58,6 +58,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "sync_runs",
         "ai_consents",
         "actions",
+        "action_activity",
         "action_suggestions",
         "action_steps",
         "action_sources",

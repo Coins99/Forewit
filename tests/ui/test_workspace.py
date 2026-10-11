@@ -703,3 +703,51 @@ def test_the_heading_gains_its_year_after_new_year(qtbot: QtBot) -> None:
     assert workspace.heading.meta.accessibleName().startswith(
         "owner@example.com. Saved Thu Dec 31, 2026, 10:00"
     )
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_manual_task_activity_renders(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    from mailbrief.domain.actions import ActionActivity, ActionActivityKind, ActionStep
+    from tests.factories import make_action
+
+    apply_theme(qapp, mode)
+    workspace = build(qtbot)
+    panel = ActionsPanel()
+    action = make_action(
+        title="Plan next week",
+        notes="Choose three priorities and leave room for breaks.",
+        sources=(),
+        target_date=TODAY,
+        steps=(
+            ActionStep(step_id=1, position=0, text="Review calendar", done=True),
+            ActionStep(step_id=2, position=1, text="Write priorities", done=False),
+        ),
+        activity=tuple(
+            ActionActivity(revision=index + 1, kind=kind, occurred_at_utc=ACTIONS_NOW)
+            for index, kind in enumerate(
+                (
+                    ActionActivityKind.CREATED,
+                    ActionActivityKind.EDITED,
+                    ActionActivityKind.COMPLETED,
+                    ActionActivityKind.REOPENED,
+                )
+            )
+        ),
+        revision=4,
+    )
+    panel.show_actions(ActionFilter.OPEN, (action,), today=TODAY, zone=OWNER_ZONE, now=ACTIONS_NOW)
+    workspace.add_page("actions", panel)
+    workspace.show_page("actions")
+    workspace.sidebar.set_current("actions")
+    workspace.resize(*SIZES["desktop"])
+    show(qtbot, workspace)
+    assert len(panel.detail.findChildren(QLabel, "actionActivityEntry")) == 4
+    assert not panel.source_button.isVisible()
+    image = workspace.grab()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        dpr = image.devicePixelRatio()
+        assert image.save(str(Path(folder) / f"page-manual-{mode.value}-{dpr:g}x.png"))

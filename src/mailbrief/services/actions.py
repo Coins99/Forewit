@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.actions import (
     MAX_ACTION_STEPS,
     Action,
+    ActionActivityKind,
     ActionEdit,
     ActionFilter,
     ActionStatus,
@@ -216,6 +217,64 @@ class ActionService:
             if step_id not in listed:
                 await self._repository.delete_step(step)
 
+    async def create(self, edit: ActionEdit, steps: Sequence[StepEdit] = ()) -> Action:
+        """Create a task with no account or email source, using the same plan and workflow."""
+
+        async def run(now: datetime) -> Action:
+            listed = _check_step_list(steps)
+            if listed:
+                raise ActionConflictError("New tasks cannot reuse existing steps.")
+            row = ActionTable(
+                public_id=self._id_factory(),
+                title=edit.title,
+                ownership=edit.ownership.value,
+                status=ActionStatus.OPEN.value,
+                deadline_precision=DeadlinePrecision.NONE.value,
+                created_at_utc=now,
+                updated_at_utc=now,
+                revision=1,
+            )
+            _apply_edit(row, edit)
+            await self._repository.add_action(row)
+            await self._apply_steps(row, steps, listed, now)
+            self._repository.record_activity(row, ActionActivityKind.CREATED, now)
+            return await self._load(row)
+
+        return await self._write(run)
+
+    async def undo_status(self, public_id: str, expected_revision: int) -> Action:
+        """Undo the latest completion/reopening, retaining the original completion time."""
+
+        async def run(now: datetime) -> Action:
+            row = await self._live(public_id, expected_revision)
+            records = await self._repository.activity_rows(row.id)
+            latest = records[-1] if records else None
+            if (
+                latest is None
+                or latest.revision != expected_revision
+                or latest.kind
+                not in (ActionActivityKind.COMPLETED.value, ActionActivityKind.REOPENED.value)
+                or latest.previous_status is None
+            ):
+                raise ActionConflictError(
+                    "Only an unchanged completion or reopening can be undone."
+                )
+            previous_status, previous_completed = row.status, row.completed_at_utc
+            row.status = latest.previous_status
+            row.completed_at_utc = latest.previous_completed_at_utc
+            touch(row, now)
+            self._repository.record_activity(
+                row,
+                ActionActivityKind.UNDO,
+                now,
+                previous_status=previous_status,
+                previous_completed_at_utc=previous_completed,
+                undo_of_revision=expected_revision,
+            )
+            return await self._load(row)
+
+        return await self._write(run)
+
     async def accept(self, suggestion_id: int) -> Action:
         """Turn a suggestion into an action; accepting it again returns the same action.
 
@@ -232,6 +291,7 @@ class ActionService:
                     if existing.deleted_at_utc is not None:
                         existing.deleted_at_utc = None
                         touch(existing, now)
+                        self._repository.record_activity(existing, ActionActivityKind.RESTORED, now)
                     return await self._load(existing)
             row = await self._repository.add_action(
                 ActionTable(
@@ -257,6 +317,7 @@ class ActionService:
                     revision=1,
                 )
             )
+            self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             for position, text in enumerate(suggestion.steps):
                 self._repository.add_step(row.id, position, text, None)
             await self._repository.add_source(row.id, message, account)
@@ -311,11 +372,18 @@ class ActionService:
                     raise ActionConflictError("That suggestion already belongs to another action.")
             if target.revision != expected_revision:
                 raise ActionConflictError(_STALE)
+            previous_source_count = await self._repository.source_count(target.id)
             added = await self._repository.add_source(target.id, message, account)
             await self._repository.save_decision(
                 key, decision=SuggestionState.ACCEPTED, action_id=target.id, decided_at_utc=now
             )
             touch(target, now)
+            self._repository.record_activity(
+                target,
+                ActionActivityKind.SOURCE_ADDED,
+                now,
+                previous_source_count=previous_source_count,
+            )
             return AcceptedInto(
                 await self._load(target), source_added=added, changed=True, previous=previous
             )
@@ -336,7 +404,8 @@ class ActionService:
         The suggestion's decision becomes exactly ``previous`` (accept_into's): none, so it
         is pending again, or the earlier dismissal or acceptance with its original time.
         With ``remove_source`` (accept_into's ``source_added``), its email stops being a
-        source, but an action's last source always stays. Raises ActionConflictError unless
+        source; an email-derived action keeps its last source, while a manual task returns
+        to zero sources when the addition began there. Raises ActionConflictError unless
         the action is live, still at ``expected_revision``, and the suggestion is still
         accepted into it.
         """
@@ -360,9 +429,18 @@ class ActionService:
                     action_id=previous.action_id,
                     decided_at_utc=previous.decided_at_utc,
                 )
-            if remove_source and await self._repository.source_count(row.id) > 1:
+            records = await self._repository.activity_rows(row.id)
+            manual_add = bool(
+                records
+                and records[-1].revision == expected_revision
+                and records[-1].previous_source_count == 0
+            )
+            if remove_source and (manual_add or await self._repository.source_count(row.id) > 1):
                 await self._repository.remove_source(row.id, message.provider_message_id)
             touch(row, now)
+            self._repository.record_activity(
+                row, ActionActivityKind.UNDO, now, undo_of_revision=expected_revision
+            )
             return await self._load(row)
 
         return await self._write(run)
@@ -409,6 +487,9 @@ class ActionService:
             elif action.deleted_at_utc is not None:
                 action.deleted_at_utc = None
                 touch(action, now)
+                self._repository.record_activity(
+                    action, ActionActivityKind.UNDO, now, undo_of_revision=action.revision - 1
+                )
 
         await self._write(run)
 
@@ -426,7 +507,9 @@ class ActionService:
                     "Only an unchanged action accepted from one suggestion can be undone."
                 )
             await self._repository.delete_decisions_for(row.id)
-            await self._repository.delete_action(row)
+            row.deleted_at_utc = now
+            touch(row, now)
+            self._repository.record_activity(row, ActionActivityKind.UNDO, now, undo_of_revision=1)
 
         await self._write(run)
 
@@ -446,6 +529,7 @@ class ActionService:
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)
             touch(row, now)
+            self._repository.record_activity(row, ActionActivityKind.EDITED, now)
             return await self._load(row)
 
         return await self._write(run)
@@ -457,9 +541,17 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             if row.status != ActionStatus.OPEN.value:
                 raise ActionConflictError("The action is already completed.")
+            previous_status, previous_completed = row.status, row.completed_at_utc
             row.status = ActionStatus.COMPLETED.value
             row.completed_at_utc = now
             touch(row, now)
+            self._repository.record_activity(
+                row,
+                ActionActivityKind.COMPLETED,
+                now,
+                previous_status=previous_status,
+                previous_completed_at_utc=previous_completed,
+            )
             return await self._load(row)
 
         return await self._write(run)
@@ -471,9 +563,17 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             if row.status != ActionStatus.COMPLETED.value:
                 raise ActionConflictError("The action is already open.")
+            previous_status, previous_completed = row.status, row.completed_at_utc
             row.status = ActionStatus.OPEN.value
             row.completed_at_utc = None
             touch(row, now)
+            self._repository.record_activity(
+                row,
+                ActionActivityKind.REOPENED,
+                now,
+                previous_status=previous_status,
+                previous_completed_at_utc=previous_completed,
+            )
             return await self._load(row)
 
         return await self._write(run)
@@ -485,6 +585,7 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             row.deleted_at_utc = now
             touch(row, now)
+            self._repository.record_activity(row, ActionActivityKind.DELETED, now)
 
         await self._write(run)
 
@@ -498,6 +599,9 @@ class ActionService:
             if row.deleted_at_utc is not None:
                 row.deleted_at_utc = None
                 touch(row, now)
+                self._repository.record_activity(
+                    row, ActionActivityKind.UNDO, now, undo_of_revision=row.revision - 1
+                )
             return await self._load(row)
 
         return await self._write(run)
@@ -521,6 +625,7 @@ class ActionService:
             ]
             row.thread_seen_until_utc = max(seen)
             touch(row, now)
+            self._repository.record_activity(row, ActionActivityKind.THREAD_SEEN, now)
             return await self._load(row)
 
         return await self._write(run)
