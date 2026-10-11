@@ -8,9 +8,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, QLockFile
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from qasync import QEventLoop
 
+from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
 from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
@@ -35,6 +37,9 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
         return existing
 
     application = QApplication(list(arguments) if arguments is not None else sys.argv)
+    icon_path = Path(__file__).parent / "resources" / "MailBrief.ico"
+    if icon_path.is_file():
+        application.setWindowIcon(QIcon(str(icon_path)))
     return application
 
 
@@ -44,9 +49,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
     ``theme_failure`` is why the theme couldn't be applied, logged once desktop.log is open.
     """
     paths = AppPaths.from_qt()
-    lock = QLockFile(str(paths.data_dir / "desktop.lock"))
-    # Long-running instances must not be considered stale merely because of their age.
-    lock.setStaleLockTime(0)
+    lock = create_data_lock(paths.data_dir)
     if not lock.tryLock(0):
         message = (
             "MailBrief is already running, or a MailBrief diagnostic command is using its "
@@ -123,7 +126,27 @@ def main(arguments: Sequence[str] | None = None) -> int:
         type=Path,
         help="Run an offline package check using only this test directory, then exit.",
     )
+    parser.add_argument(
+        "--smoke-scenario",
+        choices=("full", "verify", "hold-lock", "try-lock", "upgrade"),
+        default="full",
+        help="Isolated package scenario; requires --smoke-test-dir.",
+    )
+    parser.add_argument("--export-notices", type=Path, help="Export bundled third-party notices.")
     options = parser.parse_args(arguments)
+    if options.smoke_scenario != "full" and options.smoke_test_dir is None:
+        parser.error("--smoke-scenario requires --smoke-test-dir")
+    if options.export_notices is not None:
+        source = Path(__file__).parent / "resources" / "THIRD_PARTY_NOTICES.txt"
+        if not source.is_file():
+            parser.error("Notices are available in the Windows package.")
+        # Never overwrite an existing owner file.
+        try:
+            with options.export_notices.open("x", encoding="utf-8") as stream:
+                stream.write(source.read_text("utf-8"))
+        except OSError:
+            parser.error("Cannot export notices; select a new file in a writable folder.")
+        return 0
     application = create_application([sys.argv[0]])
     use_english_locale()  # Before any widget: each takes the default locale when created.
     theme_failure: Exception | None = None
@@ -138,10 +161,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
     with QEventLoop(application) as loop:
         asyncio.set_event_loop(loop)
         if options.smoke_test_dir is not None:
-            from mailbrief.ui.smoke import check_package
+            from mailbrief.ui.smoke import run_scenario
 
             try:
-                loop.run_until_complete(check_package(options.smoke_test_dir))
+                loop.run_until_complete(
+                    run_scenario(options.smoke_test_dir, options.smoke_scenario)
+                )
             except Exception as exc:
                 # Avoid an unattended frozen GUI error dialog and secret-bearing tracebacks.
                 report = options.smoke_test_dir / "smoke-result.json"

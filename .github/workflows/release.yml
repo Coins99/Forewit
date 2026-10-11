@@ -1,0 +1,68 @@
+name: Windows draft release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate the exact release tag and version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: PYTHONPATH=src python -c "import os; from pathlib import Path; from scripts.stage_release import validate_tag; validate_tag(Path('.'), os.environ['RELEASE_TAG'])"
+
+  build:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      release-tag: ${{ github.ref_name }}
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: MailBrief-release-${{ github.sha }}
+          path: out/release
+      - name: Verify transferred asset hashes and identity
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: python scripts/stage_release.py --verify-only --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT"
+      - name: Create or verify an existing draft without replacing published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft > out/release-state.json 2> out/release-error.txt; then
+            python -c "import json; assert json.load(open('out/release-state.json'))['isDraft'], 'Refusing to modify a published release'"
+            mkdir out/existing-release
+            gh release download "$RELEASE_TAG" --dir out/existing-release
+            python scripts/stage_release.py --verify-only --destination out/existing-release --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT"
+            diff out/release/SHA256SUMS.txt out/existing-release/SHA256SUMS.txt
+          else
+            # An API/auth failure must not be mistaken for an absent release.
+            grep -q 'release not found' out/release-error.txt
+            gh release create "$RELEASE_TAG" out/release/* --draft --verify-tag \
+              --title "MailBrief $RELEASE_TAG - Windows portable candidate" \
+              --notes-file out/release/README.txt
+          fi
