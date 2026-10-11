@@ -17,6 +17,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from mailbrief.domain.actions import ACTION_TITLE_MAX_CHARS, PUBLIC_ID_CHARS
 from mailbrief.domain.common import DomainModel, normalize_utc
+from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 
 EVENT_TITLE_MAX_CHARS: Final = 200
 EVENT_NOTES_MAX_CHARS: Final = 10_000
@@ -212,9 +213,15 @@ class ActionMarker(DomainModel):
 
 
 class CalendarRange(DomainModel):
-    """The events touching a run of local days, and the open actions' dates in them."""
+    """The events touching a run of local days, and the open actions' dates in them.
+
+    ``google_events`` are the cached Google events touching those days, read-only, and
+    ``google_coverage`` the days the cache holds (None when nothing is cached).
+    """
 
     first_day: date
     last_day: date
     events: tuple[CalendarEvent, ...]
     markers: tuple[ActionMarker, ...]
+    google_events: tuple[GoogleEvent, ...] = ()
+    google_coverage: GoogleCoverage | None = None

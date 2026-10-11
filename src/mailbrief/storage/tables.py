@@ -770,6 +770,14 @@ _EVENT_TIMING_CHECK = (
 )
 
 
+_GOOGLE_TIMING_CHECK = (
+    "(all_day = 1 AND start_date IS NOT NULL AND last_date IS NOT NULL"
+    " AND last_date >= start_date AND starts_at_utc IS NULL AND ends_at_utc IS NULL)"
+    " OR (all_day = 0 AND starts_at_utc IS NOT NULL AND ends_at_utc IS NOT NULL"
+    " AND ends_at_utc >= starts_at_utc AND start_date IS NULL AND last_date IS NULL)"
+)
+
+
 class CalendarEventTable(Base):
     """One of the owner's calendar events (ADR 0018).
 
@@ -803,3 +811,55 @@ class CalendarEventTable(Base):
     revision: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )
+
+
+class GoogleCalendarTable(Base):
+    """A calendar in the owner's Google calendar list, cached to show its events (ADR 0018).
+
+    Provider data, not the owner's: replaced by every sync and removed on disconnect. The
+    synced days are the window its events were last read for, in the owner's zone then.
+    """
+
+    __tablename__ = "google_calendars"
+    __table_args__ = (UniqueConstraint("calendar_id", name="uq_google_calendars_calendar_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    calendar_id: Mapped[str] = mapped_column(String(1024), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    shown: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    synced_from: Mapped[date | None] = mapped_column(Date)
+    synced_until: Mapped[date | None] = mapped_column(Date)
+    synced_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class GoogleEventTable(Base):
+    """One cached Google event (ADR 0018): what the Calendar page shows, nothing more.
+
+    Descriptions, guests and conference details are never requested, so never stored.
+    """
+
+    __tablename__ = "google_events"
+    __table_args__ = (
+        UniqueConstraint("calendar_row_id", "event_id", name="uq_google_events_calendar_row_id"),
+        CheckConstraint(_GOOGLE_TIMING_CHECK, name="timing_shape"),
+        Index("ix_google_events_starts_at_utc", "starts_at_utc"),
+        Index("ix_google_events_start_date", "start_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    calendar_row_id: Mapped[int] = mapped_column(
+        ForeignKey("google_calendars.id", ondelete="CASCADE"), nullable=False
+    )
+    event_id: Mapped[str] = mapped_column(String(1024), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    starts_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    ends_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    start_date: Mapped[date | None] = mapped_column(Date)
+    last_date: Mapped[date | None] = mapped_column(Date)
+    location: Mapped[str | None] = mapped_column(Text)
+    web_link: Mapped[str | None] = mapped_column(Text)
+    busy: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fetched_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

@@ -23,8 +23,10 @@ from mailbrief.domain.events import (
     EventEdit,
     MarkerKind,
 )
+from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.services.calendar import day_window
 from mailbrief.storage.events import EventRepository, apply_edit, event_from_row
+from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import ActionTable, CalendarEventTable
 
 MAX_RANGE_DAYS: Final = 42
@@ -195,7 +197,8 @@ class EventService:
 
     async def list_range(self, first_day: date, last_day: date, zone: ZoneInfo) -> CalendarRange:
         """The live events touching ``first_day`` through ``last_day`` in ``zone``, all-day
-        ones first, then by start; and the open actions' dates in those days.
+        ones first, then by start; the open actions' dates in those days; and the cached
+        Google events touching them, with the days the cache covers (ADR 0018).
 
         Raises ValueError, with a static message, for a range of more than MAX_RANGE_DAYS
         days or one that ends before it starts.
@@ -207,9 +210,13 @@ class EventService:
         rows = await self._repository.touching(start_utc, end_utc, first_day, last_day)
         actions = await self._repository.dated_actions(start_utc, end_utc, first_day, last_day)
         events = sorted((event_from_row(row) for row in rows), key=CalendarEvent.sort_key)
+        google = GoogleCalendarRepository(self._session)
+        cached = await google.touching(start_utc, end_utc, first_day, last_day)
         return CalendarRange(
             first_day=first_day,
             last_day=last_day,
             events=tuple(events),
             markers=markers_for(actions, first_day, last_day, zone),
+            google_events=tuple(sorted(cached, key=GoogleEvent.sort_key)),
+            google_coverage=await google.coverage(),
         )
