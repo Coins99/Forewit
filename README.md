@@ -1,104 +1,161 @@
 # MailBrief
 
-MailBrief is a desktop app for Windows and macOS that turns today's important
-email into a short brief. Gmail is the first supported mailbox. Outlook code is retained for
-later use after Microsoft Entra access is resolved.
+MailBrief is a personal desktop app for Windows and macOS that turns important
+Gmail messages into a short daily brief with summaries, suggested actions and
+deadlines. Review the messages you want it to read, then choose whether to send
+their prepared text to Groq for AI analysis.
 
-## Current state
+![MailBrief showing a daily brief and the selected email](docs/ui/workspace-dark.png)
 
-- Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
-  a tested Microsoft Graph adapter.
-- Implemented for M1: Gmail OAuth, OS credential storage (Windows Credential Manager or
-  macOS Keychain), and an authentication
-  diagnostic. The owner verified sign-in, restoration, disconnect and reconnect.
-- Implemented for M2: Gmail Inbox metadata, pagination, safe reconciliation,
-  local ranking and a metadata sync/review diagnostic.
-- Implemented for M3, live acceptance recorded in [M3 validation](docs/m3-validation.md):
-  shortlisted body reading and preparation ([Gmail bodies](docs/gmail-bodies.md)).
-- Implemented for M4, awaiting live acceptance: consented Groq analysis and the saved
-  daily brief ([AI analysis](docs/ai-analysis.md)).
-- Implemented, awaiting acceptance: M5 desktop workflow, with full-Inbox shortlist
-  review, consent, cancellation, saved-brief restoration, offline metadata browsing,
-  graphical settings, and native packaging scripts.
-  See [desktop usage, builds and remaining acceptance](docs/m5-desktop.md).
-  macOS package execution and packaged live-account checks remain pending.
-- Implemented, awaiting live acceptance: M6 action suggestions on the brief, accepted
-  actions with editable plans and target dates, open/waiting/completed lists and undo.
-  See [M6 actions](docs/m6-actions.md).
-- M7 implemented, awaiting live acceptance: local drafts and notes, and AI drafting with
-  Groq from context you choose.
-  See [M7 drafts, notes and messages](docs/m7-drafts.md).
-- M8 implemented, awaiting live acceptance (PR #17): your time zone, messages per brief,
-  excluded senders, drafting defaults and AI limits; brief history and catch-up for missed
-  days; tracking the threads of open actions, with proposed updates to your actions and
-  replies outside today's Inbox offered in review; and refreshing while MailBrief is open,
-  with automatic analysis only by your explicit permission.
-  See [M8 daily operation](docs/m8-daily-operation.md).
-- M9 implemented, awaiting live acceptance: **Data and recovery** provides snapshot
-  backup, verification, safe restore on exit, portable writing exports, manual retention
-  previews, safe diagnostics and bundled setup/recovery help. Diagnostic commands that use
-  the database can't run while the desktop is open: they exit with code 5.
-  See [M9 durability](docs/m9-durability.md) and the
-  [owner's live-validation checklist](docs/m9-live-validation.md).
+## What you can do
 
-## The desktop window
+- Review ranked Inbox messages and open the originals in Gmail.
+- Keep track of actions, plans, target dates and follow-up replies.
+- Write local drafts and notes, with optional AI drafting from context you choose.
+- Browse saved briefs and cached mail metadata offline.
+- Set your time zone, sender exclusions and refresh preferences.
+- Back up and restore local data, and export your writing.
 
-![MailBrief in its dark theme: the header, the sidebar, the brief and the selected email](docs/ui/workspace-dark.png)
+Gmail is the active mailbox provider, with read-only access. MailBrief does not
+send mail or change your mailbox; drafts stay local until you copy or export them.
+Outlook support is retained in the codebase for later work.
 
-MailBrief is one window with three panes (PR #21):
+**Status:** this is a personal-use project under development. Features are
+implemented, but live-account and packaged-app acceptance checks remain open.
+See [project status](docs/project-status.md) for the milestone record and
+[platform acceptance](docs/m5-acceptance.md) for outstanding checks.
 
-- **Header**: when Gmail was last checked, then **Sync and review**, and **Cancel** while
-  something runs.
-- **Sidebar**: the pages **Today**, **Actions**, **Waiting**, **Drafts** and **Briefs**,
-  with counts for actions, waiting actions and drafts. Below them, **Saved mail** (the
-  offline browser of cached metadata), **Data** (backup, exports and recovery) and
-  **Settings**, the Gmail and AI status, and **Connect Gmail** or **Disconnect**.
-- **Today**: the brief's emails by section, and the selected email with its summary,
-  deadline, suggested actions, proposed updates, **Draft a reply** and **Open in Gmail**.
-- **Status strip**: the latest status along the bottom, with **Undo** after a change you
-  can reverse.
+## Get started
 
-**Sync and review** runs in two steps on its own page. Step 1, **Choose what MailBrief
-reads**: only the messages you leave checked have their bodies downloaded. Step 2,
-**Approve sending to Groq**: approve or decline what will be sent; Decline starts focused.
+### Run from source
 
-Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on macOS) open Today, Actions, Waiting, Drafts and
-Briefs. Tab runs from Sync and review through the sidebar and the page to Undo. The theme
-is dark only for now.
+You need Git, Python **3.13**, and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) **0.12.7 or newer,
+below 0.13**. Windows and macOS are supported; the macOS package targets macOS
+15 or later. Keep the checkout and its `.venv` outside folders synced by
+iCloud Drive, OneDrive or Dropbox, which can interfere with Python and Qt files.
 
-## Start here
+Run these commands in PowerShell on Windows or Terminal on macOS:
 
-- [Single Windows EXE: Desktop launch, builds and updates](docs/windows-executable.md)
-
-- [Scope](docs/mvp-scope.md)
-- [Implementation plan](docs/mvp-plan.md)
-- [Detailed email milestones and acceptance checks](docs/email-implementation-plan.md)
-- [Later desktop ecosystem and website guidelines](docs/ecosystem-roadmap.md)
-- [Gmail setup and authentication diagnostic](docs/gmail-setup.md)
-- [Gmail metadata synchronization and shortlist review](docs/gmail-metadata.md)
-- [Gmail bodies (M3) and live acceptance](docs/gmail-bodies.md)
-- [AI analysis, consent and the daily brief (M4)](docs/ai-analysis.md)
-- [Actions, target dates and plans (M6)](docs/m6-actions.md)
-- [Drafts, notes and messages (M7)](docs/m7-drafts.md)
-- [Preferences and daily operation (M8)](docs/m8-daily-operation.md)
-- [Backup, exports and retention (M9)](docs/m9-durability.md)
-- [Live validation and personal-use journal (M9)](docs/m9-live-validation.md)
-- [File change map](docs/change-map.md)
-- [Microsoft work retained for later](docs/microsoft-setup.md)
-
-## Development
-
-```powershell
+```sh
+git clone https://github.com/Coins99/MailBrief.git
+cd MailBrief
+uv python install 3.13
 uv sync --locked --all-groups
+uv run mailbrief
+```
+
+### Connect Gmail and set up AI
+
+1. Follow [Gmail setup](docs/gmail-setup.md) to enable the Gmail API and download
+   a Google **Desktop app** OAuth client JSON file. Keep that file outside the
+   repository in a stable location; MailBrief saves its path.
+2. Open **Settings** in MailBrief, select the OAuth file and save it. Choose
+   **Connect Gmail** and complete sign-in in your browser.
+3. For AI summaries or drafting, follow [AI setup](docs/ai-analysis.md#setup),
+   then save your Groq model and API key in **Settings**. Enable Groq Zero Data
+   Retention before sending private mail.
+4. Choose **Sync and review**. Select the messages MailBrief may read, then
+   approve or decline sending their prepared text to Groq.
+
+You can view saved briefs and cached metadata offline. New AI summaries and AI
+drafting need a configured Groq key and your approval. Automatic analysis needs
+separate explicit permission in the app.
+
+### Build a desktop package
+
+Build on the target operating system after installing the dependencies above:
+
+```sh
+uv run python scripts/build_desktop.py
+uv run python scripts/check_package.py
+```
+
+For a single Windows EXE, build with `--onefile`; the result is
+`out/dist/onefile/MailBrief.exe`. See
+[Windows executable instructions](docs/windows-executable.md) for verification
+and updates, or [desktop packaging](docs/m5-desktop.md#build-and-check-packages)
+for the Windows folder package and macOS app. Packages are development
+candidates; release signing and macOS notarization are not configured.
+
+## Your data
+
+MailBrief stores cached metadata, saved briefs, actions, drafts and preferences
+locally in SQLite. Gmail tokens and Groq keys use Windows Credential Manager or
+macOS Keychain. Downloaded incoming email bodies are prepared in memory rather
+than saved as a body cache.
+
+AI processing happens on Groq's servers. You review the messages or drafting
+context and approve sending it; local storage does not make AI processing local. See
+[AI analysis and consent](docs/ai-analysis.md) and
+[AI drafting](docs/m7-drafts.md) for the data sent in each workflow.
+Use **Data** in the sidebar for backup, export and recovery; see
+[data and recovery](docs/m9-durability.md).
+
+## Contributing
+
+Bug reports, documentation improvements and focused pull requests are welcome.
+For a bug, include your operating system, how you launched MailBrief, steps to
+reproduce, and expected versus actual behavior. Use synthetic examples and
+redacted screenshots; keep credentials and private mail out of issues and commits.
+
+For a change:
+
+1. Fork the repository if you do not have write access, then create a branch
+   from the latest `main`.
+2. Keep the change focused. For larger features, discuss the scope in an issue
+   first and check the [project scope](docs/mvp-scope.md).
+3. For code changes, add or update relevant tests and run the checks below.
+   Tests use fake providers and temporary databases, without real credentials,
+   live mailboxes or paid AI.
+4. Open a pull request against `main` describing the behavior changed and how
+   you verified it. Use a conventional commit prefix such as `docs:` or `fix:`.
+
+```sh
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src tests
+uv run mypy --platform win32 src tests
+uv run mypy --platform darwin src tests
 uv run pytest
+uv run python scripts/check_coverage.py
 ```
 
-Python is pinned to 3.13. Runtime code lives under `src/mailbrief`; tests mirror
-that structure under `tests`.
+CI checks Windows and macOS, including native packages. Coverage targets are
+80% overall and 90% for each service module. For documentation-only changes,
+check links, commands and accuracy against the current code and docs.
 
-Keep the checkout and its `.venv` out of folders synced by iCloud Drive (Desktop &
-Documents), OneDrive or Dropbox: they set the macOS hidden flag on `.venv` files, and then
-Python 3.13 skips hidden `.pth` files and Qt skips hidden plugins.
+### Find your way around
+
+| Path | Purpose |
+| --- | --- |
+| `src/mailbrief/domain/` | Shared data models |
+| `src/mailbrief/ports/` | Provider interfaces |
+| `src/mailbrief/providers/` | Gmail, Groq and retained Microsoft adapters |
+| `src/mailbrief/services/` | Sync, ranking, briefs, actions and drafting logic |
+| `src/mailbrief/storage/` | SQLite persistence and repositories |
+| `src/mailbrief/ui/` | PySide6 desktop interface |
+| `src/mailbrief/diagnostics/` | Developer command-line tools |
+| `tests/` | Tests mirroring the application structure |
+| `migrations/` | Alembic database migrations |
+| `scripts/` | Build, package and coverage checks |
+| `docs/` | Setup guides, design decisions and validation records |
+
+Start with the [file change map](docs/change-map.md) and
+[architecture diagram](docs/architecture.puml) for implementation work.
+[AGENTS.md](AGENTS.md) contains detailed repository guidance for coding agents.
+
+## Further reading
+
+- [Desktop usage and keyboard navigation](docs/m5-desktop.md)
+- [Actions and plans](docs/m6-actions.md)
+- [Drafts, notes and AI writing](docs/m7-drafts.md)
+- [Preferences, brief history and daily operation](docs/m8-daily-operation.md)
+- [Project status and milestone documentation](docs/project-status.md)
+- [Scope](docs/mvp-scope.md) and [implementation plan](docs/email-implementation-plan.md)
+- [Architecture decisions](docs/adr/)
+
+## License
+
+MailBrief is licensed under the [MIT License](LICENSE). Bundled fonts and icons
+have their own notices included with desktop packages.
