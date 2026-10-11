@@ -78,6 +78,7 @@ def require_resources(names: Iterable[str], revisions: Iterable[str]) -> None:
             "hourglass",
             "pencil",
             "calendar",
+            "calendar-week",
             "settings",
             "refresh",
             "clock",

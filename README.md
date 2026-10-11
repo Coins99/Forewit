@@ -16,6 +16,7 @@ GitHub sign-in is required. [Download and launch instructions](#windows-download
 
 - Review ranked Inbox messages and open the originals in Gmail.
 - Keep track of actions, plans, target dates and follow-up replies.
+- Keep your own calendar events beside your open actions' deadlines and target dates.
 - Write local drafts and notes, with optional AI drafting from context you choose.
 - Browse saved briefs and cached mail metadata offline.
 - Set your time zone, sender exclusions and refresh preferences.
@@ -75,10 +76,10 @@ separate explicit permission in the app.
 
 ## Your data
 
-MailBrief stores cached metadata, saved briefs, actions, drafts and preferences
-locally in SQLite. Gmail tokens and Groq keys use Windows Credential Manager or
-macOS Keychain. Downloaded incoming email bodies are prepared in memory rather
-than saved as a body cache.
+MailBrief stores cached metadata, saved briefs, actions, drafts, calendar events and
+preferences locally in SQLite. Gmail tokens and Groq keys use Windows Credential
+Manager or macOS Keychain. Downloaded incoming email bodies are prepared in memory
+rather than saved as a body cache.
 
 AI processing happens on Groq's servers. You review the messages or drafting
 context and approve sending it; local storage does not make AI processing local. See

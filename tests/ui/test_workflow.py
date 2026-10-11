@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import SecretStr
@@ -36,6 +37,7 @@ from mailbrief.domain.digests import (
     SyncResult,
     SyncStatus,
 )
+from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
@@ -43,6 +45,7 @@ from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
 from mailbrief.services.actions import AcceptedInto, DecisionSnapshot
 from mailbrief.services.brief import ConsentGate, ShortlistGate
 from mailbrief.services.consent import NO_CONSENT
+from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.preferences import PreferencesConflictError
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
@@ -111,6 +114,11 @@ class FakeBackend(FakeDrafts):
         self.proposals_fail: Exception | None = None
         self.proposal_calls: list[DailyDigest] = []
         self.proposals_created = 0  # What a brief run reports having proposed.
+        self.events: dict[str, CalendarEvent] = {}
+        self.deleted_events: set[str] = set()
+        self.markers: list[ActionMarker] = []
+        self.event_calls: list[tuple[object, ...]] = []
+        self.event_fail: Exception | None = None
         # Automatic runs: what each returns (or raises), how many ran, and an optional hold.
         self.automatic_calls = 0
         self.window: MainWindow | None = None  # Set by a test that watches the window's panels.
@@ -419,6 +427,76 @@ class FakeBackend(FakeDrafts):
 
     async def missed_days(self, account_email: str) -> tuple[date, ...]:
         return self.missed
+
+    # The calendar (ADR 0018): events by public ID, the action dates every range shows, and
+    # each call. event_fail makes every event call raise.
+    def _event_call(self, *call: object) -> None:
+        self.event_calls.append(call)
+        if self.event_fail is not None:
+            raise self.event_fail
+
+    async def calendar_range(
+        self, first_day: date, last_day: date, zone: ZoneInfo
+    ) -> CalendarRange:
+        self._event_call("calendar_range", first_day, last_day)
+        live = [
+            event
+            for key, event in self.events.items()
+            if key not in self.deleted_events
+            and event.days(zone)[0] <= last_day
+            and event.days(zone)[1] >= first_day
+        ]
+        return CalendarRange(
+            first_day=first_day,
+            last_day=last_day,
+            events=tuple(sorted(live, key=CalendarEvent.sort_key)),
+            markers=tuple(m for m in self.markers if first_day <= m.day <= last_day),
+        )
+
+    def _stored_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
+        return CalendarEvent(
+            public_id=public_id,
+            revision=revision,
+            created_at_utc=datetime(2026, 9, 4, 12, tzinfo=UTC),
+            updated_at_utc=datetime(2026, 9, 4, 12, tzinfo=UTC),
+            **edit.model_dump(),
+        )
+
+    async def create_event(self, edit: EventEdit) -> CalendarEvent:
+        self._event_call("create_event", edit)
+        public_id = f"00000000-0000-4000-8000-{len(self.events) + 1:012d}"
+        self.events[public_id] = self._stored_event(public_id, 1, edit)
+        return self.events[public_id]
+
+    def _live_event(self, public_id: str, revision: int | None) -> CalendarEvent:
+        event = self.events.get(public_id)
+        if event is None or public_id in self.deleted_events:
+            raise EventNotFoundError("That event was not found.")
+        if revision is not None and event.revision != revision:
+            raise EventConflictError("The event changed since it was loaded.")
+        return event
+
+    async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
+        self._event_call("save_event", public_id, revision, edit)
+        self._live_event(public_id, revision)
+        self.events[public_id] = self._stored_event(public_id, revision + 1, edit)
+        return self.events[public_id]
+
+    async def delete_event(self, public_id: str, revision: int) -> None:
+        self._event_call("delete_event", public_id, revision)
+        event = self._live_event(public_id, revision)
+        self.events[public_id] = event.model_copy(update={"revision": revision + 1})
+        self.deleted_events.add(public_id)
+
+    async def restore_event(self, public_id: str) -> CalendarEvent:
+        self._event_call("restore_event", public_id)
+        if public_id not in self.events:
+            raise EventNotFoundError("That event was not found.")
+        if public_id in self.deleted_events:
+            self.deleted_events.discard(public_id)
+            event = self.events[public_id]
+            self.events[public_id] = event.model_copy(update={"revision": event.revision + 1})
+        return self.events[public_id]
 
     async def close(self) -> None:
         self.closed = True

@@ -262,7 +262,7 @@ def rewrite_archive(
 
 def test_inspect_checks_supported_archive(archive: Path) -> None:
     metadata = inspect_backup(archive)
-    assert metadata.schema_revisions == ("20260930_0012",)
+    assert metadata.schema_revisions == ("20261011_0013",)
     assert metadata.credentials_included is False
 
 
@@ -423,7 +423,7 @@ def test_older_backup_is_upgraded_in_staging(tmp_path: Path, revision: str) -> N
     restored = tmp_path / "restored.sqlite3"
     restore_backup(backup, restored)
     assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]
-    assert query(restored, "SELECT version_num FROM alembic_version") == [("20260930_0012",)]
+    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261011_0013",)]
     assert query(original, "SELECT version_num FROM alembic_version") == [(revision,)]
 
 
@@ -557,7 +557,7 @@ def test_fake_current_schema_is_not_restored(archive: Path, tmp_path: Path) -> N
     database = tmp_path / "fake.sqlite3"
     with closing(sqlite3.connect(database)) as connection:
         connection.execute("CREATE TABLE alembic_version(version_num TEXT)")
-        connection.execute("INSERT INTO alembic_version VALUES ('20260930_0012')")
+        connection.execute("INSERT INTO alembic_version VALUES ('20261011_0013')")
         connection.commit()
     backup = archive
     payload = database.read_bytes()

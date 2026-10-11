@@ -1243,8 +1243,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20260930_0012"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20260930_0012",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261011_0013"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261011_0013",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1253,3 +1253,68 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
     command.upgrade(config, "head")
     assert _query(path, "SELECT auto_send_limit FROM ai_consents") == [(0,)]
     assert _query(path, "SELECT count(*) FROM action_sources WHERE provider = 'gmail'") == [(1,)]
+
+
+_TIMED_EVENT = (
+    "INSERT INTO calendar_events(public_id,title,all_day,starts_at_utc,ends_at_utc,time_zone,"
+    "created_at_utc,updated_at_utc) VALUES(?,'Dentist',0,'2026-10-12 13:00:00.000000',"
+    "'2026-10-12 14:00:00.000000','America/Toronto','2026-10-11 12:00:00.000000',"
+    "'2026-10-11 12:00:00.000000')"
+)
+_ALL_DAY_EVENT = (
+    "INSERT INTO calendar_events(public_id,title,all_day,start_date,last_date,time_zone,"
+    "created_at_utc,updated_at_utc) VALUES(?,'Conference',1,'2026-10-14','2026-10-16',"
+    "'America/Toronto','2026-10-11 12:00:00.000000','2026-10-11 12:00:00.000000')"
+)
+
+
+def test_calendar_events_upgrade_keeps_rows_checks_shapes_and_downgrades(
+    tmp_path: Path,
+) -> None:
+    """0013 adds the owner's events without touching earlier rows. Its CHECK keeps timed
+    and all-day events apart, and downgrading drops only the new table."""
+    path = tmp_path / "calendar.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20260925_0004")
+    _seed_before_actions(path)
+    command.upgrade(config, "20260930_0012")
+    before = _rows(path, _OLD_ROWS)
+
+    command.upgrade(config, "20261011_0013")
+
+    assert "calendar_events" in table_names(path)
+    assert _rows(path, _OLD_ROWS) == before
+    constraints = _schema(path)["calendar_events"]["constraints"]
+    assert isinstance(constraints, set)
+    assert constraints >= {
+        "pk_calendar_events",
+        "ck_calendar_events_timing_shape",
+        "ck_calendar_events_revision_positive",
+    }
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(_TIMED_EVENT, ("5b1d7c2e-3f4a-4b6c-8d9e-0a1b2c3d4e01",))
+        connection.execute(_ALL_DAY_EVENT, ("5b1d7c2e-3f4a-4b6c-8d9e-0a1b2c3d4e02",))
+        connection.commit()
+        assert connection.execute(
+            "SELECT notes, revision, deleted_at_utc FROM calendar_events ORDER BY id"
+        ).fetchall() == [("", 1, None), ("", 1, None)]
+        broken = (
+            # A timed event that ends before it starts.
+            _TIMED_EVENT.replace("14:00:00", "12:00:00"),
+            # An all-day event whose last day is before its first.
+            _ALL_DAY_EVENT.replace("'2026-10-16'", "'2026-10-13'"),
+            # An all-day event that also has times.
+            _ALL_DAY_EVENT.replace("start_date,", "starts_at_utc,start_date,").replace(
+                "VALUES(?,'Conference',1,", "VALUES(?,'Conference',1,'2026-10-14 00:00:00',"
+            ),
+        )
+        for number, statement in enumerate(broken):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement, (f"5b1d7c2e-3f4a-4b6c-8d9e-0a1b2c3d4f0{number}",))
+        with pytest.raises(sqlite3.IntegrityError):  # Public IDs are unique.
+            connection.execute(_TIMED_EVENT, ("5b1d7c2e-3f4a-4b6c-8d9e-0a1b2c3d4e01",))
+
+    command.downgrade(config, "20260930_0012")
+
+    assert "calendar_events" not in table_names(path)
+    assert _rows(path, _OLD_ROWS) == before

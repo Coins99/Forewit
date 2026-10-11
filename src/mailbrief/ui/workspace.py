@@ -69,6 +69,7 @@ PAGES: Final = (
     ("waiting", "Waiting", "hourglass"),
     ("drafts", "Drafts", "pencil"),
     ("briefs", "Briefs", "calendar"),
+    ("calendar", "Calendar", "calendar-week"),
 )
 EMPTY_BRIEF: Final = "No analyzed messages in this brief."
 

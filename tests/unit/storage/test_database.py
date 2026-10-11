@@ -69,6 +69,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "owner_consents",
         "draft_generations",
         "owner_preferences",
+        "calendar_events",
     }
     assert "body" not in Base.metadata.tables["messages"].columns
     # A draft's body is the owner's own writing (ADR 0012); its sources are snapshots only.

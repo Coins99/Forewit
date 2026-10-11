@@ -17,6 +17,7 @@ ICON_NAMES: Final = frozenset(
         "hourglass",
         "pencil",
         "calendar",
+        "calendar-week",
         "settings",
         "refresh",
         "clock",

@@ -40,6 +40,10 @@ later use after Microsoft Entra access is resolved.
   the database can't run while the desktop is open: they exit with code 5.
   See [M9 durability](m9-durability.md) and the
   [owner's live-validation checklist](m9-live-validation.md).
+- Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
+  own events (timed or all-day, with Undo) and your open actions' deadlines and target
+  dates. Showing Google Calendar and AI-proposed changes are later phases; see
+  [ADR 0018](adr/0018-calendar.md).
 
 ## The desktop window
 
@@ -49,10 +53,11 @@ MailBrief is one window with three panes (PR #21):
 
 - **Header**: when Gmail was last checked, then **Sync and review**, and **Cancel** while
   something runs.
-- **Sidebar**: the pages **Today**, **Actions**, **Waiting**, **Drafts** and **Briefs**,
-  with counts for actions, waiting actions and drafts. Below them, **Saved mail** (the
-  offline browser of cached metadata), **Data** (backup, exports and recovery) and
-  **Settings**, the Gmail and AI status, and **Connect Gmail** or **Disconnect**.
+- **Sidebar**: the pages **Today**, **Actions**, **Waiting**, **Drafts**, **Briefs** and
+  **Calendar**, with counts for actions, waiting actions and drafts. Below them,
+  **Saved mail** (the offline browser of cached metadata), **Data** (backup, exports and
+  recovery) and **Settings**, the Gmail and AI status, and **Connect Gmail** or
+  **Disconnect**.
 - **Today**: the brief's emails by section, and the selected email with its summary,
   deadline, suggested actions, proposed updates, **Draft a reply** and **Open in Gmail**.
 - **Status strip**: the latest status along the bottom, with **Undo** after a change you
@@ -62,9 +67,9 @@ MailBrief is one window with three panes (PR #21):
 reads**: only the messages you leave checked have their bodies downloaded. Step 2,
 **Approve sending to Groq**: approve or decline what will be sent; Decline starts focused.
 
-Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on macOS) open Today, Actions, Waiting, Drafts and
-Briefs. Tab runs from Sync and review through the sidebar and the page to Undo. The theme
-is dark only for now.
+Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts, Briefs
+and Calendar. Tab runs from Sync and review through the sidebar and the page to Undo.
+The theme is dark only for now.
 
 ## Start here
 

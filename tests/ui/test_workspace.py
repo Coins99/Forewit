@@ -13,7 +13,7 @@ import pytest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter
@@ -22,6 +22,7 @@ from mailbrief.domain.messages import EmailContact
 from mailbrief.ui.actions_view import ActionRow, ActionsPanel
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import ELIDE_MARGIN, ROW_ROLE, elided
+from mailbrief.ui.calendar_view import CalendarPanel
 from mailbrief.ui.theme import TEXT_PX, ThemeMode, apply_theme, current_tokens, ui_metrics
 from mailbrief.ui.workspace import (
     EMPTY_BRIEF,
@@ -33,7 +34,13 @@ from mailbrief.ui.workspace import (
 )
 from tests.factories import make_digest_item
 from tests.ui.window_wait import show
-from tests.ui.workspace_fixtures import ACTIONS_NOW, ZONE, mockup_actions, mockup_digest
+from tests.ui.workspace_fixtures import (
+    ACTIONS_NOW,
+    ZONE,
+    mockup_actions,
+    mockup_digest,
+    mockup_week,
+)
 from tests.unit.services.test_history import TODAY as HISTORY_DAY
 from tests.unit.services.test_history import summary, with_follow_ups
 
@@ -75,6 +82,41 @@ def test_workspace_renders(
         Path(folder).mkdir(parents=True, exist_ok=True)
         dpr = image.devicePixelRatio()
         assert image.save(str(Path(folder) / f"{size}-{mode.value}-{dpr:g}x.png"))
+
+
+def build_calendar(qtbot: QtBot) -> ThreePaneWorkspace:
+    """The workspace on the Calendar page with the mockup's week (ADR 0018), inside the
+    12-pixel page margins the window gives it."""
+    workspace = build(qtbot)
+    panel = CalendarPanel()
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.addWidget(panel)
+    workspace.add_page("calendar", page)
+    # The week arrives once the page is in the window, as it does in the app: rows laid
+    # out before then would miss the stylesheet's item padding.
+    panel.show_range(mockup_week(), OWNER_ZONE, TODAY)
+    workspace.show_page("calendar")
+    workspace.sidebar.set_current("calendar")
+    return workspace
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_calendar_page_renders(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    apply_theme(qapp, mode)
+    workspace = build_calendar(qtbot)
+    workspace.resize(*SIZES["desktop"])
+    show(qtbot, workspace)
+    image = workspace.grab()
+    assert not image.isNull()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        dpr = image.devicePixelRatio()
+        assert image.save(str(Path(folder) / f"page-calendar-{mode.value}-{dpr:g}x.png"))
 
 
 # The Actions page's renders: the sidebar row, then the view shown.

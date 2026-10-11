@@ -67,6 +67,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
 
+- Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
+  the owner's events, revisioned with Undo, and open actions' deadlines and target dates
+  as markers. Google read-only display, AI-proposed changes and MailBrief's own calendar
+  in Google are later phases.
+
 ## Layout (ports and adapters)
 
 - `src/mailbrief/domain/`: frozen Pydantic models; no I/O.
@@ -76,7 +81,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
-  (AI drafting: parts, preview, consent, validation).
+  (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
+  (ADR 0018). `calendar.py` is day boundaries and time zones, not the calendar feature.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,
@@ -238,6 +244,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   mail writes or sending other messages to the AI.
 - Schema changes need a new additive Alembic revision; never edit an existing revision.
 - No blocking network or database work on the Qt main thread (M5).
+- Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
+  owner applies. Deadlines and target dates are never stored as events or moved by them.
+  Google writes go only to the calendar MailBrief creates: never to other calendars, never
+  guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
 
 ## AI analysis rules (M4)
 

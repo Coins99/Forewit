@@ -4,10 +4,11 @@ import asyncio
 import contextlib
 import itertools
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Protocol, assert_never
+from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -67,6 +68,7 @@ from mailbrief.domain.drafts import (
     placeholders,
     still_to_fill,
 )
+from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
@@ -95,6 +97,7 @@ from mailbrief.services.drafting import (
 )
 from mailbrief.services.drafting import disclosure_lines as drafting_disclosure_lines
 from mailbrief.services.drafts import DraftConflictError, DraftNotFoundError, SourceNotFoundError
+from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.history import BriefDateError
 from mailbrief.services.preferences import (
     PreferencesConflictError,
@@ -121,6 +124,10 @@ from mailbrief.ui.actions_view import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
+from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
+from mailbrief.ui.calendar_view import NEW as NEW_EVENT
+from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
+from mailbrief.ui.calendar_view import CalendarPanel, week_start
 from mailbrief.ui.data_view import DataDialog
 from mailbrief.ui.deadline_text import day_text, month_day
 from mailbrief.ui.diagnostics import (
@@ -134,6 +141,7 @@ from mailbrief.ui.drafts_view import DELETE as DELETE_DRAFT
 from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
+from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
@@ -243,6 +251,15 @@ class DesktopBackend(Protocol):
         self, plan: DraftingPlan, gate: DraftingGate, cancel: asyncio.Event
     ) -> DraftingOutcome: ...
 
+    # The calendar (ADR 0018): local data only.
+    async def calendar_range(
+        self, first_day: date, last_day: date, zone: ZoneInfo
+    ) -> CalendarRange: ...
+    async def create_event(self, edit: EventEdit) -> CalendarEvent: ...
+    async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
+    async def delete_event(self, public_id: str, revision: int) -> None: ...
+    async def restore_event(self, public_id: str) -> CalendarEvent: ...
+
 
 # Raised when the brief, an action or a draft changed since it was shown; the window reloads.
 _STALE = (
@@ -252,6 +269,8 @@ _STALE = (
     ProposalNotFoundError,
     DraftConflictError,
     DraftNotFoundError,
+    EventConflictError,
+    EventNotFoundError,
 )
 # Raised when the open draft changed elsewhere; the editor keeps the text.
 _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
@@ -264,6 +283,10 @@ _EDITOR_STALE = (
     "need, then Cancel and reopen the action."
 )
 _EDITOR_FAILED = "Couldn't save. Your edits are still here; try again."
+_EVENT_STALE = (
+    "This event changed since you opened it. Your edits are still here — copy what you "
+    "need, then Cancel and reopen the event."
+)
 _NO_SOURCE = "That email is no longer in local mail."
 _DRAFT_CLOSE_FAILED = "Couldn't save. Your text is still here; try again."
 _DRAFT_EXPORT_FAILED = "Couldn't export. Check the folder and try again."
@@ -322,8 +345,8 @@ def _ready_text(ready: int) -> str:
 
 
 _RUN_WIDTH = 760
-# Ctrl+1 to Ctrl+5 (Cmd on macOS) show the sidebar's pages, in its order.
-PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs")
+# Ctrl+1 to Ctrl+6 (Cmd on macOS) show the sidebar's pages, in its order.
+PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar")
 
 
 def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
@@ -477,6 +500,9 @@ class MainWindow(QMainWindow):
             self.data_dialog.today = self._local_today
         self.action_editor = ActionEditor(self)
         self.action_editor.save_requested.connect(self._request_save_action)
+        self.event_editor = EventEditor(self)
+        self.event_editor.save_requested.connect(self._request_save_event)
+        self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self.draft_writes = DraftWrites()
         # The generation in progress: its plan, its cancel flag and its task.
         self._drafting_plan: DraftingPlan | None = None
@@ -680,6 +706,10 @@ class MainWindow(QMainWindow):
         self.drafts_panel.draft_requested.connect(self._request_draft)
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
+        self.calendar_panel = CalendarPanel()
+        self.calendar_panel.event_requested.connect(self._request_event)
+        self.calendar_panel.week_requested.connect(self._request_calendar_week)
+        workspace.add_page("calendar", _page(self.calendar_panel, "calendarPage", "Calendar"))
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
         # The status strip under the workspace.
@@ -791,6 +821,8 @@ class MainWindow(QMainWindow):
         self.actions_panel.set_busy(busy)
         self.action_editor.set_busy(busy)
         self.drafts_panel.set_busy(busy)
+        self.calendar_panel.set_busy(busy)
+        self.event_editor.set_busy(busy)
 
     # Pages. The sidebar shows Today while the review or consent is up on the run page, and
     # Actions or Waiting by the actions page's tab.
@@ -882,10 +914,12 @@ class MainWindow(QMainWindow):
             self._day_refresh_pending = not self.start(self._refresh_for_new_day, cancellable=False)
 
     async def _refresh_for_new_day(self) -> None:
-        """What counts from the day: the actions' due labels, and the Briefs page's missed
-        days and the days it can brief. Each keeps what it showed if it can't be read."""
+        """What counts from the day: the actions' due labels, the Briefs page's missed days
+        and the days it can brief, and the calendar's Today and default week. Each keeps
+        what it showed if it can't be read."""
         await self._refresh_actions()
         await self._reload_history()
+        await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
         self._counts.update(counts)
@@ -900,6 +934,7 @@ class MainWindow(QMainWindow):
         if (
             self.action_editor.isVisible()
             or self.draft_editor.isVisible()
+            or self.event_editor.isVisible()
             or not self.draft_writes.idle
         ):
             self.status.setText(
@@ -1047,6 +1082,7 @@ class MainWindow(QMainWindow):
         await self._reload_brief()
         await self._refresh_actions()
         await self._refresh_drafts()
+        await self._refresh_calendar()
         self._refresh_proposals_dialog()
 
     async def _stale(self, exc: Exception) -> None:
@@ -1278,6 +1314,84 @@ class MainWindow(QMainWindow):
         self.action_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
         self.status.setText(f"Saved: {saved.title}.")
+        await self._refresh_views()
+
+    # Calendar (ADR 0018). Loading a week, saving and deleting use start(); the page shows
+    # local data only, so it never needs Gmail or an AI provider.
+
+    async def _refresh_calendar(self) -> None:
+        first = self._calendar_week or week_start(self._local_today())
+        try:
+            shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
+            self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        except Exception as exc:
+            self._note_not_refreshed(exc)
+
+    def _request_calendar_week(self, first_day: object) -> None:
+        if isinstance(first_day, date):
+            monday = first_day
+            self.start(lambda: self._show_calendar_week(monday), cancellable=False)
+
+    async def _show_calendar_week(self, first_day: date) -> None:
+        self._calendar_week = first_day
+        await self._refresh_calendar()
+
+    def _request_event(self, kind: str, value: object) -> None:
+        if kind == NEW_EVENT and isinstance(value, date):
+            self.event_editor.edit_new(value, self.now(), self.zone)
+            self.event_editor.open()
+        elif isinstance(value, CalendarEvent):
+            event = value
+            if kind == OPEN_EVENT:
+                self.event_editor.edit_event(event, self.zone)
+                self.event_editor.open()
+            elif kind == DELETE_EVENT:
+                self.start(lambda: self._delete_event(event), cancellable=False)
+
+    def _request_save_event(self, edit: object) -> None:
+        if not isinstance(edit, EventEdit):
+            return
+        chosen = edit
+        started = self.start(lambda: self._save_event(chosen), cancellable=False)
+        if not started and not self._closing:
+            self.event_editor.keep_open(_BUSY)
+
+    async def _save_event(self, edit: EventEdit) -> None:
+        """The editor closes only once the save succeeds; otherwise it keeps the edits."""
+        editing = self.event_editor.editing()
+        try:
+            if editing is None:
+                saved = await self.backend.create_event(edit)
+            else:
+                saved = await self.backend.save_event(editing.public_id, editing.revision, edit)
+        except _STALE as exc:
+            if not self._closing:
+                self.event_editor.keep_open(_EVENT_STALE)
+            await self._stale(exc)
+            return
+        except Exception:
+            if not self._closing:
+                self.event_editor.keep_open(_EDITOR_FAILED)
+            raise  # _run logs it and reports the failure.
+        self.event_editor.finish_saved()
+        self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
+        self._calendar_week = week_start(saved.days(self.zone)[0])  # Show where it went.
+        self.status.setText(f"Saved: {saved.title}.")
+        await self._refresh_views()
+
+    async def _delete_event(self, event: CalendarEvent) -> None:
+        try:
+            await self.backend.delete_event(event.public_id, event.revision)
+        except _STALE as exc:
+            await self._stale(exc)
+            return
+        public_id = event.public_id
+
+        async def undo() -> None:
+            await self.backend.restore_event(public_id)
+
+        self._offer_undo("Undo delete", undo)
+        self.status.setText(f"Deleted: {event.title}.")
         await self._refresh_views()
 
     # Drafts. Creating, opening and deleting use start(); the open draft's writes go
@@ -1868,6 +1982,7 @@ class MainWindow(QMainWindow):
             )
         await self._refresh_actions()
         await self._refresh_drafts()
+        await self._refresh_calendar()
         await self._refresh_ai_status()
         try:
             email = await self.backend.connect(silent_only=True)
@@ -2071,6 +2186,7 @@ class MainWindow(QMainWindow):
                 self.proposals_dialog,
                 self.action_editor,
                 self.draft_editor,
+                self.event_editor,
             )
         )
 
@@ -2377,6 +2493,7 @@ class MainWindow(QMainWindow):
         if self.data_dialog is not None:
             self.data_dialog.reject()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
+        self.event_editor.force_close()
         self._cancel_drafting()
         final = self.draft_editor.final_edit() if self.draft_editor.isVisible() else None
         if final is not None:
