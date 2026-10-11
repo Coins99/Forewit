@@ -143,7 +143,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   most 120, and evidence of at most 160, and one follow-up signal with a quote of at most
   160. All stored evidence for one email totals at most 600 characters and stays under 80%
   of its body. A summary of a very short email may restate it; a body of one or two
-  characters, too short to quote under 80%, stores no evidence and is still analyzed.
+  characters leaves room under 80% for one character at most, too little for a quote, so
+  it stores no evidence, for itself or its suggestions, and is still analyzed.
 - Text the AI writes itself (summary, action text, suggestion titles and steps) and
   deadline phrases are stripped of control and format characters before they are stored.
   Mail and AI text reaches the UI only through plain-text widgets or escaped HTML, and only
@@ -244,7 +245,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Accept only responses that validate against the versioned Pydantic schema. Cache by
   input hash, provider, model, prompt version and schema version.
 - Store evidence at most 300 characters long and never as a whole body (under 80% of it);
-  a body too short to quote under that share stores none.
+  a body of one or two characters, with room for one character at most, stores none.
 - Each result may carry up to five action suggestions (schema version 6). A suggestion
   whose evidence does not quote the email is dropped; a deadline phrase that does not quote
   it drops only that suggestion's deadline. Target dates come from Python, never the model.

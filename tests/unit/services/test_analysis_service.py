@@ -918,9 +918,21 @@ def test_a_body_too_short_to_quote_stores_no_evidence(body: str) -> None:
 
     analysis = validate_candidate(candidate, request)
 
-    # Any quote of one or two characters would be 80% of the body or more.
+    # Under 80% of a one- or two-character body there is room for one character at most.
     assert analysis.evidence == ""
     assert analysis.follow_up is FollowUpKind.NONE and analysis.follow_up_evidence is None
+    assert [suggestion.evidence for suggestion in analysis.suggestions] == [None]
+
+
+def test_a_two_character_body_keeps_no_one_character_quote_either() -> None:
+    """One character fits under 80% of "Ok", but it is no quote: neither the email nor a
+    suggestion keeps one, so the email stores no evidence at all."""
+    request = make_request(body_text="Ok")
+    candidate = good_candidate(request, evidence="O", actions=[good_action(request, evidence="O")])
+
+    analysis = validate_candidate(candidate, request)
+
+    assert analysis.evidence == ""
     assert [suggestion.evidence for suggestion in analysis.suggestions] == [None]
 
 
