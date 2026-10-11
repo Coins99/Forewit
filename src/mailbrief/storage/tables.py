@@ -760,3 +760,46 @@ class OwnerPreferencesTable(Base):
         Integer, nullable=False, default=1, server_default=text("1")
     )
     updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+_EVENT_TIMING_CHECK = (
+    "(all_day = 1 AND start_date IS NOT NULL AND last_date IS NOT NULL"
+    " AND last_date >= start_date AND starts_at_utc IS NULL AND ends_at_utc IS NULL)"
+    " OR (all_day = 0 AND starts_at_utc IS NOT NULL AND ends_at_utc IS NOT NULL"
+    " AND ends_at_utc > starts_at_utc AND start_date IS NULL AND last_date IS NULL)"
+)
+
+
+class CalendarEventTable(Base):
+    """One of the owner's calendar events (ADR 0018).
+
+    Events have no account foreign key: they belong to the owner. A timed event keeps two
+    UTC instants and the zone it was entered in; an all-day event keeps its first and last
+    local days. The CHECK keeps the two shapes apart. Rows change only through ORM objects.
+    """
+
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_calendar_events_public_id"),
+        CheckConstraint(_EVENT_TIMING_CHECK, name="timing_shape"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+        Index("ix_calendar_events_starts_at_utc", "starts_at_utc"),
+        Index("ix_calendar_events_start_date", "start_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    starts_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    ends_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    start_date: Mapped[date | None] = mapped_column(Date)
+    last_date: Mapped[date | None] = mapped_column(Date)
+    time_zone: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )

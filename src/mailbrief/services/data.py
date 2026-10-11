@@ -36,6 +36,7 @@ EXPORT_TABLES = (
     "draft_versions",
     "draft_sources",
     "draft_generations",
+    "calendar_events",
 )
 
 

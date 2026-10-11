@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
 
@@ -34,6 +35,7 @@ from mailbrief.domain.drafts import (
     DraftVersion,
     DraftVersionInfo,
 )
+from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.providers.gmail.cache import GmailCredentialStore
@@ -64,6 +66,7 @@ from mailbrief.services.drafting import (
     DraftingService,
 )
 from mailbrief.services.drafts import DraftService
+from mailbrief.services.events import EventService
 from mailbrief.services.history import BriefHistory, check_brief_date
 from mailbrief.services.preferences import (
     PreferencesService,
@@ -651,6 +654,30 @@ class DesktopRuntime:
                 excluded_senders=preferences.excluded_senders,
             )
             return await service.generate(plan, gate, cancel)
+
+    # The calendar (ADR 0018): local data only, so nothing here builds a provider.
+
+    async def calendar_range(
+        self, first_day: date, last_day: date, zone: ZoneInfo
+    ) -> CalendarRange:
+        async with self._storage().session() as session:
+            return await EventService(session).list_range(first_day, last_day, zone)
+
+    async def create_event(self, edit: EventEdit) -> CalendarEvent:
+        async with self._storage().session() as session:
+            return await EventService(session).create(edit)
+
+    async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
+        async with self._storage().session() as session:
+            return await EventService(session).save(public_id, revision, edit)
+
+    async def delete_event(self, public_id: str, revision: int) -> None:
+        async with self._storage().session() as session:
+            await EventService(session).delete(public_id, revision)
+
+    async def restore_event(self, public_id: str) -> CalendarEvent:
+        async with self._storage().session() as session:
+            return await EventService(session).restore(public_id)
 
     async def close(self) -> None:
         if self._database is not None:
