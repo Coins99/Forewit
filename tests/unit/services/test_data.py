@@ -22,6 +22,8 @@ from mailbrief.storage.database import Database
 from mailbrief.storage.tables import (
     AccountTable,
     ActionTable,
+    DigestItemTable,
+    DigestTable,
     DraftTable,
     DraftVersionTable,
     MessageTable,
@@ -123,6 +125,61 @@ async def test_age_cleanup_keeps_recent_mail(owner_database: Database) -> None:
     await apply_cleanup(owner_database, preview)
     async with owner_database.session() as session:
         assert [row.id for row in await session.scalars(select(MessageTable))] == [2]
+
+
+async def test_age_cleanup_keeps_the_messages_a_kept_brief_lists(owner_database: Database) -> None:
+    async with owner_database.transaction() as session:
+        for identifier, age in ((1, 10), (2, 100)):
+            session.add(
+                DigestTable(
+                    id=identifier,
+                    account_id=1,
+                    local_date=(NOW - timedelta(days=age)).date(),
+                    timezone_name="UTC",
+                    status="complete",
+                    generated_at_utc=NOW - timedelta(days=age),
+                )
+            )
+        await session.flush()
+        # The recent brief lists the 100-day-old message, as it would a tracked reply; the
+        # old brief lists it too, and goes with the cutoff.
+        session.add(DigestItemTable(digest_id=1, message_id=1, position=0, section="follow_ups"))
+        session.add(DigestItemTable(digest_id=2, message_id=1, position=0, section="highlights"))
+    request = CleanupRequest(CleanupKind.CACHE, 1, NOW - timedelta(days=90))
+
+    preview = await preview_cleanup(owner_database, request)
+    await apply_cleanup(owner_database, preview)
+
+    assert (preview.messages, preview.briefs) == (0, 1)
+    async with owner_database.session() as session:
+        assert sorted(row.id for row in await session.scalars(select(MessageTable))) == [1, 2]
+        assert [row.id for row in await session.scalars(select(DigestTable))] == [1]
+        items = await session.scalars(select(DigestItemTable))
+        assert [(item.digest_id, item.message_id) for item in items] == [(1, 1)]
+
+
+async def test_removing_all_cached_mail_removes_every_brief(owner_database: Database) -> None:
+    async with owner_database.transaction() as session:
+        session.add(
+            DigestTable(
+                id=1,
+                account_id=1,
+                local_date=NOW.date(),
+                timezone_name="UTC",
+                status="complete",
+                generated_at_utc=NOW,
+            )
+        )
+        await session.flush()
+        session.add(DigestItemTable(digest_id=1, message_id=1, position=0, section="highlights"))
+
+    preview = await preview_cleanup(owner_database, CleanupRequest(CleanupKind.CACHE, 1))
+    await apply_cleanup(owner_database, preview)
+
+    assert (preview.messages, preview.briefs) == (2, 1)
+    async with owner_database.session() as session:
+        assert list(await session.scalars(select(MessageTable))) == []
+        assert list(await session.scalars(select(DigestTable))) == []
 
 
 async def test_permanent_delete_only_old_soft_deleted_writing(owner_database: Database) -> None:

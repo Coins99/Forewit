@@ -905,11 +905,63 @@ def test_validate_candidate_keeps_stored_evidence_strictly_under_80_percent(
     assert analysis.evidence.endswith("…") is (stored_chars < 80)
 
 
-def test_validate_candidate_rejects_evidence_from_a_body_too_short_to_quote() -> None:
+@pytest.mark.parametrize("body", ["Ok", "k", "\N{THUMBS UP SIGN}"], ids=["two", "one", "emoji"])
+def test_a_body_too_short_to_quote_stores_no_evidence(body: str) -> None:
+    request = make_request(body_text=body)
+    candidate = good_candidate(
+        request,
+        evidence=body,
+        follow_up="delivered",
+        follow_up_evidence=body,
+        actions=[good_action(request, evidence=body)],
+    )
+
+    analysis = validate_candidate(candidate, request)
+
+    # Any quote of one or two characters would be 80% of the body or more.
+    assert analysis.evidence == ""
+    assert analysis.follow_up is FollowUpKind.NONE and analysis.follow_up_evidence is None
+    assert [suggestion.evidence for suggestion in analysis.suggestions] == [None]
+
+
+def test_a_short_body_still_needs_evidence_that_quotes_the_email() -> None:
     request = make_request(body_text="Ok")
 
     with pytest.raises(ValueError):
-        validate_candidate(good_candidate(request, evidence="Ok"), request)
+        validate_candidate(good_candidate(request, evidence="Sure thing"), request)
+
+
+async def test_a_one_or_two_character_email_is_analyzed_once_and_cached(
+    session: AsyncSession,
+) -> None:
+    account_id, shortlist = await seed(session, 1)
+    body = [
+        PreparedBody(
+            provider_message_id=shortlist[0].message.provider_message_id,
+            status=BodyStatus.READY,
+            text="ok",
+            source=BodySource.PLAIN,
+        )
+    ]
+    provider = FakeAIProvider([answer_all(evidence="ok")])
+    service = AnalysisService(session, provider, key_factory=counting_keys())
+    plan = await service.plan(
+        account_id=account_id, shortlist=shortlist, bodies=body, timezone_name=ZONE
+    )
+
+    run = await service.execute(plan)
+
+    assert outcomes(run) == [ANALYZED]
+    assert len(provider.batches) == 1  # Not retried as a failure.
+    analysis = run.messages[0].analysis
+    assert analysis is not None and analysis.evidence == ""
+    # The next run reuses the cached analysis and sends nothing.
+    again = AnalysisService(session, FakeAIProvider(), key_factory=counting_keys())
+    plan = await again.plan(
+        account_id=account_id, shortlist=shortlist, bodies=body, timezone_name=ZONE
+    )
+    assert [item.outcome for item in plan.messages] == [AnalysisOutcome.REUSED]
+    assert plan.to_send == []
 
 
 def test_validate_candidate_resolves_the_deadline() -> None:

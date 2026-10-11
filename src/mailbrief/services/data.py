@@ -18,6 +18,7 @@ from mailbrief.storage.tables import (
     AccountTable,
     ActionTable,
     Base,
+    DigestItemTable,
     DigestTable,
     DraftTable,
     DraftVersionTable,
@@ -173,6 +174,19 @@ async def _selections(
         if request.before is not None:
             statement = statement.where(timestamp < request.before)
         selections[cls] = statement
+    if request.before is not None:
+        # A brief's items go with their messages, so a brief that stays keeps its messages,
+        # however old: one made after the cutoff can list a day or tracked reply before it.
+        listed_by_kept_brief = (
+            select(DigestItemTable.message_id)
+            .join(DigestTable, DigestItemTable.digest_id == DigestTable.id)
+            .where(
+                DigestItemTable.message_id == MessageTable.id,
+                DigestTable.generated_at_utc >= request.before,
+            )
+            .exists()
+        )
+        selections[MessageTable] = selections[MessageTable].where(~listed_by_kept_brief)
     return selections
 
 

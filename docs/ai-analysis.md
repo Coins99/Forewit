@@ -235,7 +235,9 @@ end of that day), then the rest by rank.
 A summary longer than 240 characters, or an action longer than 1,000, is cut at a word
 and ends in "…". The evidence quote must appear in the email, and is never stored as the
 whole body: it is kept to at most 300 characters and strictly under 80% of the body, cut at a word
-and ending in "…" when longer.
+and ending in "…" when longer. A body of one or two characters, such as "ok", is too short to
+keep any quote under that share: the quote is still checked, nothing is stored, and the email is
+analyzed and cached like any other rather than failing and being sent again on every run.
 
 If nothing could be analyzed, no brief is written and today's last saved brief stays.
 By default the command prints counts only. `--show` also prints each item's sender, subject,

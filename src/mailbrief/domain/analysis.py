@@ -319,7 +319,8 @@ class MessageAnalysis(DomainModel):
     deadline_at_utc: datetime | None = None
     deadline_timezone: str | None = None  # The zone used to resolve the date or instant.
     confidence: float = Field(ge=0, le=1)
-    evidence: str = Field(min_length=1, max_length=EVIDENCE_MAX_CHARS, repr=False)
+    # Empty only when the body is too short to keep any quote under EVIDENCE_BODY_SHARE.
+    evidence: str = Field(max_length=EVIDENCE_MAX_CHARS, repr=False)
     suggestions: tuple[ActionSuggestion, ...] = ()
     follow_up: FollowUpKind = FollowUpKind.NONE
     follow_up_evidence: str | None = Field(

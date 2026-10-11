@@ -142,7 +142,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   five suggestions, each with a title of at most 120 characters, at most five steps of at
   most 120, and evidence of at most 160, and one follow-up signal with a quote of at most
   160. All stored evidence for one email totals at most 600 characters and stays under 80%
-  of its body. A summary of a very short email may restate it.
+  of its body. A summary of a very short email may restate it; a body of one or two
+  characters, too short to quote under 80%, stores no evidence and is still analyzed.
 - Text the AI writes itself (summary, action text, suggestion titles and steps) and
   deadline phrases are stripped of control and format characters before they are stored.
   Mail and AI text reaches the UI only through plain-text widgets or escaped HTML, and only
@@ -242,7 +243,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   supported; enable Groq Zero Data Retention in Console Data Controls before live mail use.
 - Accept only responses that validate against the versioned Pydantic schema. Cache by
   input hash, provider, model, prompt version and schema version.
-- Store evidence at most 300 characters long and never as a whole body (under 80% of it).
+- Store evidence at most 300 characters long and never as a whole body (under 80% of it);
+  a body too short to quote under that share stores none.
 - Each result may carry up to five action suggestions (schema version 6). A suggestion
   whose evidence does not quote the email is dropped; a deadline phrase that does not quote
   it drops only that suggestion's deadline. Target dates come from Python, never the model.
