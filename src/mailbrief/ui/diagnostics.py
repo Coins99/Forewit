@@ -12,6 +12,16 @@ ERROR_MESSAGES = {
     "PERMISSION_DENIED": "Gmail permission denied. Disconnect and reconnect with read-only access.",
     "RATE_LIMITED": "Gmail rate limit reached; retry later.",
     "PROVIDER_ERROR": "Gmail is offline or unavailable. Check your connection and retry.",
+    # The codes a sync ends with when Gmail drops, stalls or answers badly after sign-in.
+    # services/sync.py SYNC_ERROR_CODES lists every sync code; each one needs an entry here.
+    "PROVIDER_RESPONSE_ERROR": (
+        "Gmail couldn't be reached or sent an unusable reply. Check your connection and retry."
+    ),
+    "SYNC_RUN_TIMEOUT": "The Gmail sync took too long and stopped early. Retry to finish it.",
+    "METADATA_ITEMS_FAILED": (
+        "Some messages couldn't be read from Gmail and may be missing. Retry later."
+    ),
+    "UNKNOWN_ERROR": "The Gmail sync stopped unexpectedly. Retry later.",
     "AI_KEY_MISSING": "Add a Groq API key in Settings.",
     "AI_AUTH_FAILED": "Groq rejected the API key. Replace it in Settings.",
     "AI_NETWORK_BLOCKED": (
@@ -38,6 +48,8 @@ ERROR_MESSAGES = {
     "ANALYSIS_FAILED": "No message could be analyzed. Review your selection and AI settings.",
     "CARRIED_BODY_FAILED": "A message in today's brief couldn't be read.",
 }
+# For a code without its own entry; it can't know which step failed, so it names none.
+UNKNOWN_GUIDANCE = "Something went wrong. Retry later."
 
 logger = logging.getLogger("mailbrief.desktop")
 logger.propagate = False
@@ -82,7 +94,7 @@ def log_automatic_run(result: BriefRunResult) -> None:
 def error_guidance(code: str) -> str:
     safe_code = code if code in ERROR_MESSAGES else "UNKNOWN"
     logger.warning("code=%s", safe_code)
-    return ERROR_MESSAGES.get(code, "Some messages could not be processed. Try another selection.")
+    return ERROR_MESSAGES.get(code, UNKNOWN_GUIDANCE)
 
 
 def configuration_guidance(exc: ConfigurationError) -> str:

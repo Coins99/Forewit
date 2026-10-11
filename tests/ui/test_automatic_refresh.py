@@ -490,6 +490,10 @@ async def test_nothing_runs_before_saved_data_is_open_or_while_closing(
     [
         ("RATE_LIMITED", "Gmail rate limit reached; retry later."),
         ("PROVIDER_ERROR", "Gmail is offline or unavailable. Check your connection and retry."),
+        (
+            "PROVIDER_RESPONSE_ERROR",
+            "Gmail couldn't be reached or sent an unusable reply. Check your connection and retry.",
+        ),
     ],
 )
 async def test_a_failed_sync_is_reported_with_the_static_guidance(

@@ -15,6 +15,7 @@ from mailbrief.providers.gmail.provider import GmailProvider
 from mailbrief.services.application import ApplicationService
 from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository, SyncRunRepository
+from mailbrief.ui.diagnostics import ERROR_MESSAGES, error_guidance
 from tests.unit.providers.gmail.metadata_fixtures import (
     ACCOUNT,
     NOW,
@@ -135,6 +136,38 @@ async def test_failed_second_page_preserves_first(
     assert result.status is SyncStatus.PARTIAL
     assert result.message_count == 1 and len(shortlist) == 1
     assert result.error_code == "PERMISSION_DENIED"
+
+
+@pytest.mark.parametrize("first_page_arrives", [False, True], ids=["at-once", "mid-sync"])
+async def test_losing_gmail_after_sign_in_is_reported_as_a_connection_problem(
+    session: AsyncSession, respx_mock: respx.MockRouter, first_page_arrives: bool
+) -> None:
+    """The real adapter's code, not a hand-picked one: Gmail that can't be reached once
+    sign-in has worked ends the sync with guidance about the connection, whether nothing
+    arrived or the first page did."""
+
+    def listing(request: httpx.Request) -> httpx.Response:
+        if first_page_arrives and "pageToken" not in request.url.params:
+            return httpx.Response(200, json={"messages": [{"id": "a"}], "nextPageToken": "next"})
+        raise httpx.ConnectError("private-detail", request=request)
+
+    respx_mock.get(MESSAGES_URL).mock(side_effect=listing)
+    if first_page_arrives:
+        respx_mock.get(MESSAGES_URL + "/a").respond(json=metadata("a"))
+    async with httpx.AsyncClient() as http:
+        app = ApplicationService(
+            GmailProvider(FakeSession(), GmailClient(http, FakeSession(), sleep=no_sleep)),
+            MessageRepository(session),
+            SyncRunRepository(session),
+            AccountRepository(session),
+        )
+        result, shortlist = await app.prepare_daily_shortlist(now_utc=NOW, tz_key="UTC")
+    assert result.status is (SyncStatus.PARTIAL if first_page_arrives else SyncStatus.FAILED)
+    assert len(shortlist) == (1 if first_page_arrives else 0)
+    assert result.error_code == "PROVIDER_RESPONSE_ERROR"
+    guidance = error_guidance(result.error_code)
+    assert "Check your connection" in guidance and "private-detail" not in guidance
+    assert guidance == ERROR_MESSAGES["PROVIDER_RESPONSE_ERROR"]
 
 
 async def test_ambiguous_no_content_preserves_cached_inbox_and_last_success(

@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from mailbrief.domain.digests import SyncProgress, SyncResult, SyncStage, SyncStatus
 from mailbrief.ports.email_provider import EmailProvider
@@ -28,6 +28,20 @@ logger = logging.getLogger(__name__)
 MAX_RUN_WORK_SECONDS = 180.0
 MAX_SINGLE_WAIT_SECONDS = 60.0
 MAX_TOTAL_WAIT_SECONDS = 120.0
+SYNC_RUN_TIMEOUT: Final = "SYNC_RUN_TIMEOUT"
+METADATA_ITEMS_FAILED: Final = "METADATA_ITEMS_FAILED"
+# Every code a sync can end with, besides a provider's own rate-limit code, which is passed
+# on as it is. The desktop has guidance for each one (ui/diagnostics.py ERROR_MESSAGES).
+SYNC_ERROR_CODES: Final = (
+    "AUTH_REQUIRED",
+    "PERMISSION_DENIED",
+    "RATE_LIMITED",
+    "PROVIDER_RESPONSE_ERROR",
+    "PROVIDER_ERROR",
+    "UNKNOWN_ERROR",
+    SYNC_RUN_TIMEOUT,
+    METADATA_ITEMS_FAILED,
+)
 
 
 def sanitize_error_code(exc: Exception) -> str:
@@ -152,7 +166,7 @@ class SyncService:
                 if work_budget_exceeded():
                     logger.warning("Sync run exceeded its active-work budget before a page")
                     status = SyncStatus.PARTIAL if pages_count > 0 else SyncStatus.FAILED
-                    return await finish(status, "SYNC_RUN_TIMEOUT")
+                    return await finish(status, SYNC_RUN_TIMEOUT)
 
                 try:
                     pages = self._provider.iter_message_pages(
@@ -184,7 +198,7 @@ class SyncService:
 
                         if continuation is not None and work_budget_exceeded():
                             logger.warning("Sync run exceeded its active-work budget")
-                            return await finish(SyncStatus.PARTIAL, "SYNC_RUN_TIMEOUT")
+                            return await finish(SyncStatus.PARTIAL, SYNC_RUN_TIMEOUT)
                     break
 
                 except ProviderRateLimitError as exc:
@@ -226,7 +240,7 @@ class SyncService:
         if cancel is not None and cancel.is_set():
             return await finish(SyncStatus.CANCELLED, None)
         if failed_count:
-            return await finish(SyncStatus.PARTIAL, "METADATA_ITEMS_FAILED")
+            return await finish(SyncStatus.PARTIAL, METADATA_ITEMS_FAILED)
 
         await self._message_repo.reconcile_inbox(
             account_id, window.start_utc, window.end_utc, seen_ids
