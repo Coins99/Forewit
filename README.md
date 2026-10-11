@@ -27,23 +27,25 @@ See [project status](docs/project-status.md) for the milestone record and
 
 ## Get started
 
-### Run from source
+### Windows: run the bundled EXE
 
-You need Git, Python **3.13**, and
-[uv](https://docs.astral.sh/uv/getting-started/installation/) **0.12.7 or newer,
-below 0.13**. Windows and macOS are supported; the macOS package targets macOS
-15 or later. Keep the checkout and its `.venv` outside folders synced by
-iCloud Drive, OneDrive or Dropbox, which can interfere with Python and Qt files.
+The single-file Windows build bundles Python and all application dependencies.
+You do not need to install Python, uv or Git to run it.
 
-Run these commands in PowerShell on Windows or Terminal on macOS:
+1. Get the bundled `MailBrief.exe` from a project release or a build shared by
+   the maintainer. Published builds appear on the
+   [Releases page](https://github.com/Coins99/MailBrief/releases).
+2. Save the EXE wherever you want to keep the app, such as your Desktop.
+3. Double-click it. Allow a few seconds for the window to appear, then follow
+   the Gmail and AI setup below.
 
-```sh
-git clone https://github.com/Coins99/MailBrief.git
-cd MailBrief
-uv python install 3.13
-uv sync --locked --all-groups
-uv run mailbrief
-```
+The current Windows package targets Windows 11 x64. See
+[Windows executable instructions](docs/windows-executable.md) for verification,
+updates and saved-data details. Build candidates still need acceptance checks;
+a public release may not yet be available.
+
+For macOS packages, see [desktop packaging](docs/m5-desktop.md#build-and-check-packages).
+To run from source or build your own package, use the contributor instructions below.
 
 ### Connect Gmail and set up AI
 
@@ -61,22 +63,6 @@ uv run mailbrief
 You can view saved briefs and cached metadata offline. New AI summaries and AI
 drafting need a configured Groq key and your approval. Automatic analysis needs
 separate explicit permission in the app.
-
-### Build a desktop package
-
-Build on the target operating system after installing the dependencies above:
-
-```sh
-uv run python scripts/build_desktop.py
-uv run python scripts/check_package.py
-```
-
-For a single Windows EXE, build with `--onefile`; the result is
-`out/dist/onefile/MailBrief.exe`. See
-[Windows executable instructions](docs/windows-executable.md) for verification
-and updates, or [desktop packaging](docs/m5-desktop.md#build-and-check-packages)
-for the Windows folder package and macOS app. Packages are development
-candidates; release signing and macOS notarization are not configured.
 
 ## Your data
 
@@ -98,6 +84,42 @@ Bug reports, documentation improvements and focused pull requests are welcome.
 For a bug, include your operating system, how you launched MailBrief, steps to
 reproduce, and expected versus actual behavior. Use synthetic examples and
 redacted screenshots; keep credentials and private mail out of issues and commits.
+
+### Run from source
+
+You need Git, Python **3.13**, and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) **0.12.7 or newer,
+below 0.13**. Windows and macOS are supported; the macOS package targets macOS
+15 or later. Keep the checkout and its `.venv` outside folders synced by
+iCloud Drive, OneDrive or Dropbox, which can interfere with Python and Qt files.
+
+Run these commands in PowerShell on Windows or Terminal on macOS:
+
+```sh
+git clone https://github.com/Coins99/MailBrief.git
+cd MailBrief
+uv python install 3.13
+uv sync --locked --all-groups
+uv run mailbrief
+```
+
+### Build a desktop package
+
+Build on the target operating system after installing the dependencies above:
+
+```sh
+uv run python scripts/build_desktop.py
+uv run python scripts/check_package.py
+```
+
+For a single Windows EXE, build with `--onefile`; the result is
+`out/dist/onefile/MailBrief.exe`. See
+[Windows executable instructions](docs/windows-executable.md) for verification
+and updates, or [desktop packaging](docs/m5-desktop.md#build-and-check-packages)
+for the Windows folder package and macOS app. Packages are development
+candidates; release signing and macOS notarization are not configured.
+
+### Submit a change
 
 For a change:
 
