@@ -27,22 +27,26 @@ See [project status](docs/project-status.md) for the milestone record and
 
 ## Get started
 
-### Windows: run the bundled EXE
+### Windows: download, extract and run
 
-The single-file Windows build bundles Python and all application dependencies.
-You do not need to install Python, uv or Git to run it.
+1. Open [MailBrief's CI builds](https://github.com/Coins99/MailBrief/actions/workflows/ci.yml)
+   and choose the latest successful run on **main**.
+2. Under **Artifacts**, download **MailBrief-Windows-onefile-...**. GitHub
+   requires you to sign in to download build artifacts.
+3. Right-click the downloaded ZIP and choose **Extract All**.
+4. Open the extracted folder and double-click **MailBrief.exe**. Allow a few
+   seconds for the window to appear, then follow the Gmail and AI setup below.
 
-1. Get the bundled `MailBrief.exe` from a project release or a build shared by
-   the maintainer. Published builds appear on the
-   [Releases page](https://github.com/Coins99/MailBrief/releases).
-2. Save the EXE wherever you want to keep the app, such as your Desktop.
-3. Double-click it. Allow a few seconds for the window to appear, then follow
-   the Gmail and AI setup below.
+The EXE includes Python and all application dependencies. No separate Python,
+uv or Git installation is needed. GitHub's **Code > Download ZIP** contains the
+source code; use the build artifact above to get the runnable app.
 
+Windows build artifacts are kept for three days. These are development builds;
+when a release is published, it will appear on the
+[Releases page](https://github.com/Coins99/MailBrief/releases).
 The current Windows package targets Windows 11 x64. See
-[Windows executable instructions](docs/windows-executable.md) for verification,
-updates and saved-data details. Build candidates still need acceptance checks;
-a public release may not yet be available.
+[Windows executable instructions](docs/windows-executable.md) for updates and
+saved-data details.
 
 For macOS packages, see [desktop packaging](docs/m5-desktop.md#build-and-check-packages).
 To run from source or build your own package, use the contributor instructions below.
