@@ -74,6 +74,8 @@ is dark only for now.
 - [Implementation plan](mvp-plan.md)
 - [Detailed email milestones and acceptance checks](email-implementation-plan.md)
 - [Later desktop ecosystem and website guidelines](ecosystem-roadmap.md)
+- [Future planner feature inventory](future-feature-inventory.md) and
+  [researched future implementation plan](future-implementations.md)
 - [Gmail setup and authentication diagnostic](gmail-setup.md)
 - [Gmail metadata synchronization and shortlist review](gmail-metadata.md)
 - [Gmail bodies (M3) and live acceptance](gmail-bodies.md)

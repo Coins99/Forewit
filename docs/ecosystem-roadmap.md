@@ -4,6 +4,14 @@ Updated: 2026-09-25. Provisional directions, not committed specifications.
 Finish the [personal email workspace](email-implementation-plan.md) first.
 Build the entire desktop ecosystem before implementing the server-hosted website.
 
+The 2026-10-11 planning work expands these directions in the
+[complete future feature inventory](future-feature-inventory.md) and
+[researched future implementation plan](future-implementations.md). The current
+product direction is a general personal planner proof of concept with custom
+progress dashboards; student features are shelved. Those documents distinguish
+POC scope, later features, research evidence and implementation recommendations.
+They do not change the existing email milestones or accepted architecture rules.
+
 ## Product structure
 
 Possible navigation: Today, Mail, Tasks, Calendar, Notes, Insights, Settings.

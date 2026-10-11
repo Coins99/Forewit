@@ -102,6 +102,8 @@ checks and pull request guidance.
 - [Project status and milestone documentation](docs/project-status.md)
 - [Scope](docs/mvp-scope.md) and [implementation plan](docs/email-implementation-plan.md)
 - [Architecture decisions](docs/adr/)
+- [Future planner feature inventory](docs/future-feature-inventory.md) and
+  [researched implementation plan](docs/future-implementations.md)
 
 ## License
 
