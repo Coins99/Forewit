@@ -96,6 +96,7 @@ def resource_names() -> set[str]:
         "certifi/cacert.pem",
         "mailbrief/ui/theme/fonts/Inter-Regular.ttf",
         "mailbrief/ui/theme/icons/refresh.svg",
+        "mailbrief/ui/theme/icons/calendar-week.svg",
         "tzdata/zoneinfo/America/Toronto",
         "mailbrief/resources/THIRD_PARTY_NOTICES.txt",
     ],
