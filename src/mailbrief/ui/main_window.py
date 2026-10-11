@@ -345,7 +345,7 @@ def _ready_text(ready: int) -> str:
 
 
 _RUN_WIDTH = 760
-# Ctrl+1 to Ctrl+5 (Cmd on macOS) show the sidebar's pages, in its order.
+# Ctrl+1 to Ctrl+6 (Cmd on macOS) show the sidebar's pages, in its order.
 PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar")
 
 
