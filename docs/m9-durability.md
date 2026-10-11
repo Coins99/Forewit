@@ -185,6 +185,19 @@ passed the distribution audit and two independent offline smoke processes at 100
 The data dialog was also visually inspected at 200% with an OS font.
 Native macOS build/execution runs in CI; it cannot be performed locally on Windows.
 
+Windows, 11 October 2026, `main` at e122fa8 (after PR #44), Python 3.13.5 with
+dependencies from `uv.lock`: full suite **3,110 passed, 3 skipped**, **97.37%** combined
+statement/branch coverage; all required services meet 90%. Ruff format/lint and strict
+mypy (native, win32 and darwin) passed. The native Windows package built and passed the
+distribution audit and two independent offline smoke processes at 100%/200%. The Qt tests
+(`tests/ui` and `tests/unit/test_app.py`) also ran serially on the native Windows platform
+(`QT_QPA_PLATFORM=windows`) at 125% display scaling, which CI's offscreen Windows run
+doesn't cover: **776 passed, 1 skipped**. The skips are the Unix-domain-socket test, the
+symlinked-database restore test (it needs Developer Mode, which was off) and the light
+render of the Completed view, which the gallery skips on purpose. The run used the
+machine's Eastern time rather than CI's Tokyo time, and reported only the known MSAL
+deprecation and SQLAlchemy connection-cleanup warnings.
+
 Engineering review replaced quadratic cleanup previews and full-cache materialization
 with SQL counts and bounded batches. Regression tests cover failed-save tracking per
 draft, closed dialogs remaining closed after asynchronous work, recovery help without
