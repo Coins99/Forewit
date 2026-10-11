@@ -4,7 +4,10 @@ import asyncio
 import importlib
 import json
 import os
+import sqlite3
 import sys
+import time
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import QApplication
 from mailbrief.domain.drafts import DraftEdit, DraftKind
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
+from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.services.data import (
     CleanupKind,
     CleanupRequest,
@@ -25,8 +29,10 @@ from mailbrief.services.data import (
     export_writing,
     preview_cleanup,
 )
+from mailbrief.services.drafts import DraftService
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
+from mailbrief.storage.migrate import migration_config, upgrade_database
 from mailbrief.storage.recovery import inspect_backup, restore_backup
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.ui.main_window import MainWindow
@@ -36,6 +42,130 @@ from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import FONT_FAMILY, current_tokens, icon_pixmap
 
 SMOKE_ZONE = "America/New_York"
+
+
+async def verify_writing(runtime: DesktopRuntime) -> None:
+    """Check both current writing and its saved checkpoint, without reseeding either."""
+    notes = await runtime.list_drafts()
+    if len(notes) != 1:
+        raise RuntimeError("Previous writing was not preserved.")
+    note = await runtime.get_draft(notes[0].public_id)
+    versions = await runtime.draft_versions(note.public_id)
+    if note.body != "Synthetic owner writing." or not versions:
+        raise RuntimeError("Previous writing versions were not preserved.")
+    version = await runtime.draft_version(note.public_id, versions[0].number)
+    if version.body != note.body or version.title != note.title:
+        raise RuntimeError("Previous writing checkpoint was not preserved.")
+
+
+async def verify_persistence(directory: Path) -> None:
+    """Inspect the previous process's records before performing any seed or save."""
+    if not (directory / "smoke.sqlite3").is_file():
+        raise RuntimeError("Missing previous package profile.")
+    runtime = DesktopRuntime(directory / "smoke.sqlite3")
+    try:
+        await runtime.load_saved()
+        if (await runtime.get_preferences()).groq_model != "smoke-test-model":
+            raise RuntimeError("Previous settings were not preserved.")
+        if (await runtime.get_owner_preferences()).time_zone != SMOKE_ZONE:
+            raise RuntimeError("Previous preferences were not preserved.")
+        await verify_writing(runtime)
+    finally:
+        await runtime.close()
+
+
+async def check_upgrade(directory: Path) -> None:
+    """Migrate an old disposable profile and reject an unknown schema without writes."""
+    from alembic import command
+
+    path = directory / "upgrade.sqlite3"
+    if path.exists():
+        raise RuntimeError("Upgrade scenario requires a new test profile.")
+    await asyncio.to_thread(command.upgrade, migration_config(path), "20260929_0009")
+    database = Database.from_path(path)
+    try:
+        async with database.session() as session:
+            service = DraftService(session)
+            note = await service.create(DraftKind.NOTE)
+            note = await service.autosave(
+                note.public_id,
+                note.revision,
+                DraftEdit(title="Before upgrade", body="Synthetic upgrade writing."),
+            )
+    finally:
+        await database.dispose()
+    await asyncio.to_thread(upgrade_database, path)
+    backups = await asyncio.to_thread(
+        lambda: list(directory.glob("upgrade.sqlite3.pre-upgrade-*.sqlite3"))
+    )
+    if not backups:
+        raise RuntimeError("Upgrade did not retain its original database.")
+    database = Database.from_path(path)
+    try:
+        async with database.session() as session:
+            restored = await DraftService(session).get(note.public_id)
+            if restored.body != "Synthetic upgrade writing.":
+                raise RuntimeError("Upgrade lost writing.")
+    finally:
+        await database.dispose()
+    await asyncio.to_thread(check_unknown_schema, directory / "unknown.sqlite3")
+
+
+def check_unknown_schema(unknown: Path) -> None:
+    """An unsupported synthetic database must be refused before modification."""
+    with closing(sqlite3.connect(unknown)) as connection:
+        connection.execute("CREATE TABLE alembic_version (version_num TEXT NOT NULL)")
+        connection.execute("INSERT INTO alembic_version VALUES ('unknown_future_schema')")
+        connection.commit()
+    original = unknown.read_bytes()
+    try:
+        upgrade_database(unknown)
+    except Exception:
+        if unknown.read_bytes() != original:
+            raise RuntimeError("Unsupported database was modified.") from None
+    else:
+        raise RuntimeError("Unsupported database was accepted.")
+
+
+async def run_scenario(directory: Path, scenario: str) -> None:
+    """All scenarios use the explicitly selected disposable folder; none read the vault."""
+    await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+    # The one-file bootloader owns the parent process; the checker needs the child's PID
+    # to terminate only its own test process if a scenario stalls or is forcibly stopped.
+    (directory / f"child-{os.getppid()}.json").write_text(
+        json.dumps({"pid": os.getpid()}),
+        encoding="utf-8",
+    )
+    if scenario == "full":
+        await check_package(directory)
+        return
+    result: dict[str, object] = {"ok": True, "scenario": scenario}
+    if scenario == "verify":
+        await verify_persistence(directory)
+    elif scenario == "upgrade":
+        await check_upgrade(directory)
+    else:
+        lock = create_data_lock(directory)
+        acquired = lock.tryLock(0)
+        result["acquired"] = acquired
+        try:
+            if scenario == "hold-lock":
+                if not acquired:
+                    raise RuntimeError("Test lock unavailable.")
+                await verify_persistence(directory)
+                (directory / "lock-ready.json").write_text(
+                    json.dumps({"pid": os.getpid()}),
+                    encoding="utf-8",
+                )
+                deadline = time.monotonic() + 60
+                while not (directory / "stop-lock").exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Lock scenario timed out.")
+                    await asyncio.sleep(0.1)
+        finally:
+            if acquired:
+                lock.unlock()
+    (directory / "smoke-result.json").write_text(json.dumps(result), encoding="utf-8")
 
 
 async def seed_metadata(path: Path) -> None:
@@ -108,6 +238,12 @@ async def check_package(directory: Path) -> None:
         raise RuntimeError("Bundled font unavailable.")
     if icon_pixmap("refresh", current_tokens().text, 16).isNull():
         raise RuntimeError("Bundled icons unavailable.")
+    if (
+        sys.platform == "win32"
+        and getattr(sys, "frozen", False)
+        and application.windowIcon().isNull()
+    ):
+        raise RuntimeError("Application icon unavailable.")
     for _ in range(2):
         runtime = DesktopRuntime(directory / "smoke.sqlite3")
         try:
@@ -131,12 +267,7 @@ async def check_package(directory: Path) -> None:
                     DraftEdit(title="Package note", body="Synthetic owner writing."),
                 )
                 await runtime.checkpoint_draft(note.public_id, note.revision)
-            note_summary = (await runtime.list_drafts())[0]
-            note = await runtime.get_draft(note_summary.public_id)
-            if note.body != "Synthetic owner writing." or not await runtime.draft_versions(
-                note.public_id
-            ):
-                raise RuntimeError("Writing or version restoration failed.")
+            await verify_writing(runtime)
             window = MainWindow(runtime, database_path=directory / "smoke.sqlite3")
             window.show()
             QApplication.processEvents()

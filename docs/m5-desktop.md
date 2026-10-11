@@ -118,6 +118,10 @@ uv run python scripts/check_package.py
 
 - Windows: `out/dist/MailBrief/MailBrief.exe` inside an **onedir** package. Keep
   the entire `MailBrief` folder together, including `_internal`.
+- Windows single file: add `--onefile` to the build command. Copy only
+  `out/dist/onefile/MailBrief.exe` to the Desktop. Verify with
+  `check_package.py --layout onefile --executable out/dist/onefile/MailBrief.exe`.
+  See [single-file setup, persistence and updates](windows-executable.md).
 - macOS: `out/dist/MailBrief.app`, built on macOS for the build machine's
   architecture. Release signing/notarization is not configured.
 

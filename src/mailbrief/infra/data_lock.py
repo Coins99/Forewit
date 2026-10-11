@@ -13,6 +13,13 @@ class DataInUseError(ConfigurationError):
     """A data folder cannot be used exclusively by this operation."""
 
 
+def create_data_lock(directory: Path) -> QLockFile:
+    """Use one identity and stale-lock policy for desktop, diagnostics and package checks."""
+    lock = QLockFile(str(directory / "desktop.lock"))
+    lock.setStaleLockTime(0)
+    return lock
+
+
 @contextmanager
 def data_directory_lock(database: Path) -> Iterator[None]:
     """Hold the desktop's lock until database operations and shutdown finish."""
@@ -26,8 +33,7 @@ def data_directory_lock(database: Path) -> Iterator[None]:
     acquired = False
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        lock = QLockFile(str(directory / "desktop.lock"))
-        lock.setStaleLockTime(0)
+        lock = create_data_lock(directory)
         acquired = lock.tryLock(0)
         if not acquired:
             raise DataInUseError(

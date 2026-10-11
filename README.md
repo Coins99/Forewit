@@ -68,6 +68,8 @@ is dark only for now.
 
 ## Start here
 
+- [Single Windows EXE: Desktop launch, builds and updates](docs/windows-executable.md)
+
 - [Scope](docs/mvp-scope.md)
 - [Implementation plan](docs/mvp-plan.md)
 - [Detailed email milestones and acceptance checks](docs/email-implementation-plan.md)

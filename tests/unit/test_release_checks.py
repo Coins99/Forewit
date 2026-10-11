@@ -1,11 +1,14 @@
 """Release gates fail on missing service coverage and accidentally bundled private files."""
 
+import subprocess
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from scripts.check_coverage import SERVICES, check
-from scripts.check_package import audit_distribution
+from scripts.check_package import audit_distribution, stop_process
 
 
 def test_service_coverage_counts_branches_and_requires_every_service(tmp_path: Path) -> None:
@@ -52,3 +55,19 @@ def test_distribution_audit_refuses_private_files(tmp_path: Path, name: str) -> 
     (tmp_path / name).write_bytes(b"synthetic private marker")
     with pytest.raises(ValueError, match="private or development"):
         audit_distribution(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows bootloader cleanup")
+@pytest.mark.parametrize(
+    "failure", [OSError("Unavailable"), subprocess.TimeoutExpired("taskkill", 15)]
+)
+def test_failed_tree_cleanup_still_stops_owned_parent(tmp_path: Path, failure: Exception) -> None:
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], text=True)
+    try:
+        with patch("scripts.check_package.subprocess.run", side_effect=failure):
+            stop_process(process, tmp_path)
+        assert process.poll() is not None
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=15)

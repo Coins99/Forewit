@@ -12,6 +12,21 @@ marked passed by synthetic tests. M5 is not accepted until they are recorded her
   access, persistence after restart, key removal and reconnect.
 - [ ] Complete the daily workflow and source-link checks below on macOS.
 
+## Windows single-file candidate
+
+- [ ] Copy only the EXE to a clean Windows 11 x64 user's Desktop; double-click without
+  Python or the source checkout. Verify icon, native dialogs and no console/UAC prompt.
+- [ ] Move/rename it and launch via a shortcut from another working directory. Saved
+  writing/settings and credentials must stay in the same existing profile.
+- [ ] Launch differently named copies; only one may write the profile.
+- [ ] With normal Windows security settings, record downloaded-file warnings/blocks,
+  EXE hash/size, five launch times and extraction disk use. Do not disable protections.
+- [ ] Verify update replacement and compatible-code/database backup recovery using
+  disposable records. Replacing an EXE alone does not roll back an upgraded schema.
+
+These owner checks are separate from automated frozen smoke. See
+[Windows executable instructions](windows-executable.md).
+
 ## Packaged real-account workflow (Windows and macOS)
 
 - [ ] In a clean OS profile, launch the complete package folder/app bundle and configure

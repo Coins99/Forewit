@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      release-tag:
+        type: string
+        default: ''
 
 # One run per pull request, or per commit pushed to main. A new push to a pull request
 # cancels that pull request's older run; runs on main always finish.
@@ -25,7 +30,8 @@ jobs:
     # Twice the longest measured job, rounded up to 5 minutes, and at least 20. On fb930da
     # (PR #34), Windows jobs took 6.9 and 7.3 minutes (Test 264 s and 291 s) and macOS jobs 7.3
     # and 8.7 minutes (Test 92 s and 125 s, Cocoa 254 s and 279 s).
-    timeout-minutes: 20
+    # Allow both Windows package builds and the frozen-process scenarios.
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
 
@@ -39,6 +45,8 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.release-tag != '' && '0' || '1' }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -96,18 +104,41 @@ jobs:
       - name: Verify package startup and repeat launch offline
         run: uv run python scripts/check_package.py
 
+      - name: Build Windows single executable
+        if: runner.os == 'Windows'
+        run: uv run python scripts/build_desktop.py --onefile
+
+      - name: Verify copied single executable and frozen lifecycle
+        if: runner.os == 'Windows'
+        run: uv run python scripts/check_package.py --layout onefile --executable out/dist/onefile/MailBrief.exe
+
+      - name: Stage Windows release assets
+        if: runner.os == 'Windows' && inputs.release-tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: uv run python scripts/stage_release.py --tag "$env:RELEASE_TAG"
+
       - name: Archive macOS app preserving permissions and symlinks
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent out/dist/MailBrief.app out/MailBrief-macOS.zip
 
-      - name: Upload Windows package
-        if: runner.os == 'Windows'
+      - name: Upload Windows single executable
+        if: runner.os == 'Windows' && inputs.release-tag == ''
         uses: actions/upload-artifact@v7
         with:
-          name: MailBrief-Windows
-          path: out/dist/MailBrief/
+          name: MailBrief-Windows-onefile-${{ github.sha }}
+          path: out/dist/onefile/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
+
+      - name: Upload verified Windows release assets
+        if: runner.os == 'Windows' && inputs.release-tag != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: MailBrief-release-${{ github.sha }}
+          path: out/release/
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Upload macOS package
         if: runner.os == 'macOS'

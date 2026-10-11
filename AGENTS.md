@@ -126,6 +126,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `src/mailbrief/app.py` owns the qasync loop.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
+- Windows single-file builds use `build_desktop.py --onefile` and produce
+  `out/dist/onefile/MailBrief.exe`; check with `check_package.py --layout onefile
+  --executable out/dist/onefile/MailBrief.exe`. Keep the existing Qt profile identity.
+  `scripts/package_manifest.py` audits embedded resources; `scripts/stage_release.py`
+  rejects dirty, mismatched or modified release candidates. Version tags create a draft
+  Windows release only. See `docs/windows-executable.md` for pending owner acceptance.
 
 ## Invariants (never break these)
 
