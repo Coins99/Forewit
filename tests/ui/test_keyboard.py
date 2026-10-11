@@ -1,4 +1,4 @@
-"""The keyboard: Ctrl+1 to Ctrl+6 (Cmd on macOS) show the sidebar's pages, and Tab runs
+"""The keyboard: Ctrl+1 to Ctrl+5 (Cmd on macOS) show the sidebar's pages, and Tab runs
 from Sync and review through the sidebar and the page to Undo, then back to the start.
 
 The theme is applied first: under Fusion, buttons take focus by Tab on every platform.

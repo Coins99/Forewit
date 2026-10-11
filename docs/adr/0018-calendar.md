@@ -21,9 +21,11 @@ scheduled time distinct, and asks for external adapters to be read-only first.
 - **Where changes land.** The owner's events live in MailBrief, owned by the owner and
   revisioned like actions. In Google, MailBrief writes only to a secondary "MailBrief"
   calendar that it creates (`calendar.app.created`). Every other calendar is read-only
-  (`calendar.events.readonly`, `calendar.calendarlist.readonly`). MailBrief never edits,
-  moves or deletes an event it did not create, never adds guests and never sends
-  invitations.
+  (`calendar.events.readonly`, `calendar.calendarlist.readonly`). MailBrief never
+  creates, edits, moves or deletes an event outside the MailBrief calendar, never adds
+  guests and never sends invitations. The scope enforces the calendar boundary, not who
+  made an event: events the owner adds to the MailBrief calendar in Google are still the
+  owner's, and phase 4 decides how edits there and in MailBrief reconcile.
 - **A separate sign-in.** Calendar access is its own OAuth grant with its own entry in the
   OS credential vault. The Gmail grant stays exactly `gmail.readonly`: the calendar
   credential cannot read mail and the mail credential cannot touch the calendar.

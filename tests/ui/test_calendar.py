@@ -130,6 +130,47 @@ def test_text_helpers() -> None:
     assert marker_text(due, TORONTO) == "Deadline 17:00 · Pay the invoice · waiting for others"
 
 
+def test_local_instant_follows_dst_like_a_clock() -> None:
+    # 02:30 never happens on 14 March 2027 in Toronto: it reads as 03:30 EDT (07:30 UTC).
+    skipped = local_instant(date(2027, 3, 14), time(2, 30), TORONTO)
+    assert skipped.astimezone(UTC) == datetime(2027, 3, 14, 7, 30, tzinfo=UTC)
+    # 01:30 happens twice on 1 November 2026: the first, still EDT (05:30 UTC).
+    repeated = local_instant(date(2026, 11, 1), time(1, 30), TORONTO)
+    assert repeated.astimezone(UTC) == datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
+
+
+def test_mail_derived_titles_stay_plain_text(panel: CalendarPanel) -> None:
+    """Action titles come from email; rows never render them as rich text or tooltips."""
+    markup = '<b>Pay</b> <a href="https://evil.example">now</a>'
+    event = stored(timed(TODAY, 9, 10, "<i>Dentist</i>"))
+    panel.show_range(
+        week(event, markers=(marker(MarkerKind.TARGET, TODAY, action_title=markup),)),
+        TORONTO,
+        TODAY,
+    )
+    texts = rows(panel)
+    assert f"Target · {markup}" in texts and "09:00–10:00 · <i>Dentist</i>" in texts
+    assert all(panel.list.item(n).toolTip() == "" for n in range(panel.list.count()))
+
+
+def test_buttons_have_their_own_mnemonics(panel: CalendarPanel) -> None:
+    """Letters no window-level control uses: S, C, D, L, R, U, T and M are taken."""
+    texts = [
+        button.text()
+        for button in (
+            panel.previous_button,
+            panel.this_week_button,
+            panel.next_button,
+            panel.new_button,
+            panel.open_button,
+            panel.delete_button,
+        )
+    ]
+    letters = [text[text.index("&") + 1].casefold() for text in texts]
+    assert len(set(letters)) == len(letters)
+    assert not set(letters) & set("scdlrutm")
+
+
 def test_week_rows_order_each_day(panel: CalendarPanel) -> None:
     standup = stored(timed(TODAY, 9, 10, "Standup"), 1)
     lunch = stored(timed(TODAY, 12, 13, "Lunch"), 2)
@@ -352,7 +393,8 @@ async def test_stale_save_keeps_the_editor_open(window: MainWindow, backend: Fak
     assert window.event_editor.isVisible()
     assert "changed since you opened it" in window.event_editor.status.text()
     assert window.event_editor.title.text() == "Dentist, moved"
-    assert isinstance(backend.events[event.public_id], CalendarEvent)
+    kept = backend.events[event.public_id]
+    assert (kept.title, kept.revision) == ("Dentist", 2)  # The newer event is untouched.
     assert not calls(backend, "create_event")
     assert [call[:3] for call in calls(backend, "save_event")] == [
         ("save_event", event.public_id, 1)
@@ -377,6 +419,22 @@ async def test_delete_offers_undo(window: MainWindow, backend: FakeBackend) -> N
     await finish(window)
     assert calls(backend, "restore_event") == [("restore_event", event.public_id)]
     assert any(text.endswith("· Dentist") for text in rows(panel))
+
+
+async def test_a_new_day_moves_today_and_the_default_week(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    first = week_start(window._local_today())
+    window.now = lambda: NOW + timedelta(days=7)
+    await window._refresh_for_new_day()
+    later = first + timedelta(days=7)
+    assert calls(backend, "calendar_range")[-1] == (
+        "calendar_range",
+        later,
+        later + timedelta(days=6),
+    )
+    assert window.calendar_panel.first_day == later
 
 
 async def test_unreadable_calendar_keeps_the_page(window: MainWindow, backend: FakeBackend) -> None:

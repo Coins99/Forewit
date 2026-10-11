@@ -26,9 +26,10 @@ with setup, failure recovery and keyboard instructions.
 ## Portable writing exports
 
 **Export all writing** produces UTF-8 JSON, format `mailbrief-writing`, version 1.
-It includes every action and draft/note/message, including completed and soft-deleted
-writing, ordered steps, source snapshots, proposals, saved versions and generation
-records. It excludes cached mail/analyses/briefs, account records, settings and secrets.
+It includes every action, draft/note/message and calendar event (ADR 0018), including
+completed and soft-deleted ones, ordered steps, source snapshots, proposals, saved
+versions and generation records. It excludes cached mail/analyses/briefs, account
+records, settings and secrets.
 Incoming full bodies are never downloaded by export. Text typed or pasted by the
 owner is exported exactly as stored.
 

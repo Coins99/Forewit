@@ -45,8 +45,8 @@ from mailbrief.ui.diagnostics import log_failure
 HELP = """Your data stays on this computer. Disconnect removes Gmail credentials only.
 Backup saves a consistent database snapshot, including your writing and preferences;
 OAuth tokens and API keys stay in the OS credential vault. Backups are not encrypted.
-Export saves all actions, drafts and notes, including deleted writing, source snapshots
-and saved versions, as portable UTF-8 JSON. Keep backups and exports private.
+Export saves all actions, drafts, notes and calendar events, including deleted ones,
+source snapshots and saved versions, as portable UTF-8 JSON. Keep backups and exports private.
 Restore validates and upgrades the archive, closes MailBrief, keeps a pre-restore copy
 beside the database, and clears automatic AI permission. Relaunch after restoring.
 Device setup (OAuth client path and model) and vault credentials are configured separately.

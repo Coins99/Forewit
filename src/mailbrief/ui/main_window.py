@@ -345,7 +345,7 @@ def _ready_text(ready: int) -> str:
 
 
 _RUN_WIDTH = 760
-# Ctrl+1 to Ctrl+6 (Cmd on macOS) show the sidebar's pages, in its order.
+# Ctrl+1 to Ctrl+5 (Cmd on macOS) show the sidebar's pages, in its order.
 PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar")
 
 
@@ -914,10 +914,12 @@ class MainWindow(QMainWindow):
             self._day_refresh_pending = not self.start(self._refresh_for_new_day, cancellable=False)
 
     async def _refresh_for_new_day(self) -> None:
-        """What counts from the day: the actions' due labels, and the Briefs page's missed
-        days and the days it can brief. Each keeps what it showed if it can't be read."""
+        """What counts from the day: the actions' due labels, the Briefs page's missed days
+        and the days it can brief, and the calendar's Today and default week. Each keeps
+        what it showed if it can't be read."""
         await self._refresh_actions()
         await self._reload_history()
+        await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
         self._counts.update(counts)

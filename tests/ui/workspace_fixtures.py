@@ -28,6 +28,7 @@ from mailbrief.domain.digests import (
     DigestSection,
     DigestStatus,
 )
+from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
 from mailbrief.domain.messages import EmailContact
 from tests.factories import (
     fingerprint_of,
@@ -309,3 +310,82 @@ def mockup_actions() -> dict[ActionFilter, tuple[Action, ...]]:
         ActionFilter.WAITING: (contract, quote),
         ActionFilter.COMPLETED: (expenses,),
     }
+
+
+def _event(number: int, **fields: object) -> CalendarEvent:
+    return CalendarEvent.model_validate(
+        {
+            "public_id": f"0c1d2e3f-4a5b-4c6d-8e7f-{number:012d}",
+            "notes": "",
+            "time_zone": ZONE,
+            "revision": 1,
+            "created_at_utc": datetime(2026, 10, 1, 12, tzinfo=UTC),
+            "updated_at_utc": datetime(2026, 10, 1, 12, tzinfo=UTC),
+            "starts_at_utc": None,
+            "ends_at_utc": None,
+            "start_date": None,
+            "last_date": None,
+        }
+        | fields
+    )
+
+
+def mockup_week() -> CalendarRange:
+    """The mockup brief's week on the Calendar page (ADR 0018): events of each shape, one
+    crossing midnight, and the finance action's target and deadline as markers."""
+    return CalendarRange(
+        first_day=date(2026, 10, 5),
+        last_day=date(2026, 10, 11),
+        events=(
+            _event(
+                1,
+                title="Team standup",
+                all_day=False,
+                starts_at_utc=datetime(2026, 10, 5, 13, 0, tzinfo=UTC),
+                ends_at_utc=datetime(2026, 10, 5, 13, 30, tzinfo=UTC),
+            ),
+            _event(
+                2,
+                title="Conference in Montréal",
+                all_day=True,
+                start_date=date(2026, 10, 7),
+                last_date=date(2026, 10, 8),
+            ),
+            _event(
+                3,
+                title="Finance review",
+                all_day=False,
+                starts_at_utc=datetime(2026, 10, 9, 14, 0, tzinfo=UTC),
+                ends_at_utc=datetime(2026, 10, 9, 15, 0, tzinfo=UTC),
+            ),
+            _event(
+                4,
+                title="Flight home",
+                all_day=False,
+                starts_at_utc=datetime(2026, 10, 10, 2, 0, tzinfo=UTC),
+                ends_at_utc=datetime(2026, 10, 10, 5, 15, tzinfo=UTC),
+            ),
+        ),
+        markers=(
+            ActionMarker(
+                kind=MarkerKind.TARGET,
+                day=date(2026, 10, 8),
+                action_public_id=FINANCE_ACTION,
+                action_title="Approve the Q3 budget",
+            ),
+            ActionMarker(
+                kind=MarkerKind.DEADLINE,
+                day=date(2026, 10, 9),
+                due_at_utc=datetime(2026, 10, 9, 21, 0, tzinfo=UTC),
+                action_public_id=FINANCE_ACTION,
+                action_title="Approve the Q3 budget",
+            ),
+            ActionMarker(
+                kind=MarkerKind.DEADLINE,
+                day=date(2026, 10, 7),
+                action_public_id=DECK_ACTION,
+                action_title="Send the conference deck",
+                waiting=True,
+            ),
+        ),
+    )

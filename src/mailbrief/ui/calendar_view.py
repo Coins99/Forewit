@@ -118,9 +118,9 @@ class CalendarPanel(QWidget):
         self.heading.setObjectName("calendarHeading")
         self.heading.setWordWrap(False)
         top.addWidget(self.heading, 1)
-        self.previous_button = outline_button("Previous week", "previousWeekButton")
-        self.this_week_button = outline_button("This week", "thisWeekButton")
-        self.next_button = outline_button("Next week", "nextWeekButton")
+        self.previous_button = outline_button("&Previous week", "previousWeekButton", mnemonic=True)
+        self.this_week_button = outline_button("This wee&k", "thisWeekButton", mnemonic=True)
+        self.next_button = outline_button("Ne&xt week", "nextWeekButton", mnemonic=True)
         for button in (self.previous_button, self.this_week_button, self.next_button):
             top.addWidget(button)
         layout.addLayout(top)
@@ -137,9 +137,9 @@ class CalendarPanel(QWidget):
         self.note.setObjectName("calendarNote")
         layout.addWidget(self.note)
         buttons = QHBoxLayout()
-        self.new_button = outline_button("New event", "newEventButton")
-        self.open_button = outline_button("Open", "openEventButton")
-        self.delete_button = outline_button("Delete event", "deleteEventButton")
+        self.new_button = outline_button("Ne&w event", "newEventButton", mnemonic=True)
+        self.open_button = outline_button("&Open", "openEventButton", mnemonic=True)
+        self.delete_button = outline_button("Delete &event", "deleteEventButton", mnemonic=True)
         for button in (self.new_button, self.open_button, self.delete_button):
             buttons.addWidget(button)
         buttons.addStretch(1)  # Buttons keep their own width.

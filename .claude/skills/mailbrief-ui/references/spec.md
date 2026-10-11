@@ -254,8 +254,9 @@ The brief list's chips keep their shorter forms (see Brief list).
   spacing 8.
 - `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 6, 10, 6, 10,
   spacing 2. A fixed-height `QListView#sidebarNav` with pages today (Today, sun), actions
-  (Actions, checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil) and briefs
-  (Briefs, calendar). Rows 31px: selected rows get a rounded selection fill (radius 8);
+  (Actions, checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs
+  (Briefs, calendar) and calendar (Calendar, calendar-week). Rows 31px: selected rows get
+  a rounded selection fill (radius 8);
   a 14px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
   right-aligned in text_secondary; the brief list's focus ring. Below: a stretch, then
   `NavButton` rows painted like page rows: `saved_mail` (Saved mail, mail, "Saved &mail"),
@@ -332,8 +333,17 @@ The brief list's chips keep their shorter forms (see Brief list).
   is being confirmed there, and reloads Briefs when it ends.
 - Drafts: with no drafts the list is hidden and `draftsEmpty`, a muted, centred, wrapping
   message, fills the page; with drafts the list shows and the message hides.
-- Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+5 (Cmd on macOS), call
-  `_request_page` with today, actions, waiting, drafts and briefs (`PAGE_SHORTCUTS`,
+- Calendar (ADR 0018, `ui/calendar_view.py`): a 15px Medium heading "Calendar · Oct 12 –
+  18" with outline Previous week, This week and Next week; one `ActivatingList` row per day
+  heading (Medium, enabled but not selectable, "· Today" on the owner's day) followed by
+  that day's all-day events, then open actions' deadline and target markers, then timed
+  events by start. Rows are plain item text, never tooltips. `calendarEmpty` (muted) shows
+  under the week when it holds nothing; `calendarNote` (muted) explains markers when there
+  are some. Outline New event, Open and Delete event below. Mnemonics avoid every
+  window-level letter. `EventEditor` is a dialog (title, All day, Starts and Ends as
+  `yyyy-MM-dd` and `HH:mm`, notes) that locks while saving, like the action editor.
+- Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+6 (Cmd on macOS), call
+  `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.
 - Tab order (`_link_tab_order`, at startup and on each `rebuilt`): Sync and review,
   Cancel, the sidebar's page list, Saved mail, Data, Settings, Connect or Disconnect, then

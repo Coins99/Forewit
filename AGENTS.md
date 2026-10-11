@@ -246,8 +246,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - No blocking network or database work on the Qt main thread (M5).
 - Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
   owner applies. Deadlines and target dates are never stored as events or moved by them.
-  Google writes go only to the calendar MailBrief creates: never other events, guests or
-  invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
+  Google writes go only to the calendar MailBrief creates: never to other calendars, never
+  guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
 
 ## AI analysis rules (M4)
 
