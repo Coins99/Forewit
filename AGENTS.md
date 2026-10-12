@@ -74,9 +74,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 
 - Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
-  as markers. Phase 2a: the read-only Google Calendar sign-in, sync and cache, not yet
-  shown in the desktop. Showing it (2b), AI-proposed changes and MailBrief's own
-  calendar in Google are later phases.
+  as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
+  live acceptance: Google Calendar read-only beside the owner's events. AI-proposed
+  changes and MailBrief's own calendar in Google are later phases. See `docs/calendar.md`.
 
 ## Layout (ports and adapters)
 

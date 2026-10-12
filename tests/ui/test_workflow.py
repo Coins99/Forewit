@@ -38,6 +38,7 @@ from mailbrief.domain.digests import (
     SyncStatus,
 )
 from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
@@ -46,6 +47,7 @@ from mailbrief.services.actions import AcceptedInto, DecisionSnapshot
 from mailbrief.services.brief import ConsentGate, ShortlistGate
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.events import EventConflictError, EventNotFoundError
+from mailbrief.services.google_calendar import sync_window
 from mailbrief.services.preferences import PreferencesConflictError
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
@@ -119,6 +121,16 @@ class FakeBackend(FakeDrafts):
         self.markers: list[ActionMarker] = []
         self.event_calls: list[tuple[object, ...]] = []
         self.event_fail: Exception | None = None
+        # Google Calendar (ADR 0018, phase 2): the saved account, the cache a sync fills,
+        # and each call. calendar_fail makes every calendar call raise.
+        self.calendar_saved: str | None = None
+        self.calendar_connects_as = "owner@example.com"
+        self.calendar_fail: Exception | None = None
+        self.calendar_calls: list[tuple[object, ...]] = []
+        self.google_events: list[GoogleEvent] = []
+        self.google_coverage: GoogleCoverage | None = None
+        self.calendar_result = CalendarSyncResult(calendars=1, synced=1, failed=0, events=0)
+        self.calendar_now = datetime(2026, 9, 4, 12, tzinfo=UTC)
         # Automatic runs: what each returns (or raises), how many ran, and an optional hold.
         self.automatic_calls = 0
         self.window: MainWindow | None = None  # Set by a test that watches the window's panels.
@@ -459,6 +471,12 @@ class FakeBackend(FakeDrafts):
             last_day=last_day,
             events=tuple(sorted(live, key=CalendarEvent.sort_key)),
             markers=tuple(m for m in self.markers if first_day <= m.day <= last_day),
+            google_events=tuple(
+                event
+                for event in self.google_events
+                if event.days(zone)[0] <= last_day and event.days(zone)[1] >= first_day
+            ),
+            google_coverage=self.google_coverage,
         )
 
     def _stored_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
@@ -505,6 +523,33 @@ class FakeBackend(FakeDrafts):
             event = self.events[public_id]
             self.events[public_id] = event.model_copy(update={"revision": event.revision + 1})
         return self.events[public_id]
+
+    def _calendar_call(self, *call: object) -> None:
+        self.calendar_calls.append(call)
+        if self.calendar_fail is not None:
+            raise self.calendar_fail
+
+    async def calendar_account(self) -> str | None:
+        return self.calendar_saved
+
+    async def connect_calendar(self) -> str:
+        self._calendar_call("connect_calendar")
+        self.calendar_saved = self.calendar_connects_as
+        return self.calendar_saved
+
+    async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
+        self._calendar_call("sync_calendar", around)
+        first, last = sync_window(around)
+        self.google_coverage = GoogleCoverage(
+            first_day=first, last_day=last, synced_at_utc=self.calendar_now
+        )
+        return self.calendar_result
+
+    async def disconnect_calendar(self) -> None:
+        self._calendar_call("disconnect_calendar")
+        self.calendar_saved = None
+        self.google_events = []
+        self.google_coverage = None
 
     async def close(self) -> None:
         self.closed = True
