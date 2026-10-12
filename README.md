@@ -77,6 +77,12 @@ separate explicit permission in the app.
 
 ## Your data
 
+New task suggestions need a configured Groq model and API key. Choose **Sync and
+review**, select today's messages and review the AI transmission approval. Suggestions
+appear in the resulting brief; choose **Accept** to add one to Actions. Inbox and
+Calendar sync alone do not generate AI suggestions. Automatic analysis needs its own
+explicit permission in Settings.
+
 MailBrief stores cached metadata, saved briefs, actions, drafts, calendar events and
 preferences locally in SQLite. Gmail tokens and Groq keys use Windows Credential
 Manager or macOS Keychain. Downloaded incoming email bodies are prepared in memory
