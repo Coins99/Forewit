@@ -3,10 +3,10 @@
 from datetime import datetime
 
 from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
-from mailbrief.providers.gcal.auth import CalendarAuth
 from mailbrief.providers.gcal.client import CalendarClient
 from mailbrief.providers.gcal.errors import calendar_response_error
 from mailbrief.providers.gcal.mapper import map_calendar, map_event
+from mailbrief.providers.gmail.auth import GmailAuth
 
 # The most calendars listed: the primary first, then those shown in Google Calendar, so
 # the cap never drops a shown calendar in favour of one the owner left unticked.
@@ -14,12 +14,12 @@ MAX_CALENDARS = 20
 
 
 class GoogleCalendarReader:
-    def __init__(self, auth: CalendarAuth, client: CalendarClient) -> None:
+    def __init__(self, auth: GmailAuth, client: CalendarClient) -> None:
         self._auth = auth
         self._client = client
 
     @property
-    def auth(self) -> CalendarAuth:
+    def auth(self) -> GmailAuth:
         return self._auth
 
     async def list_calendars(self) -> tuple[GoogleCalendarInfo, ...]:

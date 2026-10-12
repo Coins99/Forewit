@@ -1,6 +1,7 @@
 # ADR 0018: A calendar, with MailBrief's own calendar in Google
 
-Date: 2026-10-11. Status: accepted.
+Date: 2026-10-11. Status: accepted. Its separate calendar sign-in is replaced by ADR 0019
+(one Google sign-in for Gmail and Calendar).
 
 Builds on ADR 0005 (SQLite local storage), ADR 0007 (Gmail first), ADR 0011 (actions),
 ADR 0013 (AI drafting) and ADR 0016 (follow-up proposals).

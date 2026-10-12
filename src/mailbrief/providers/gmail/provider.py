@@ -51,6 +51,12 @@ class GmailProvider:
         self._slots = asyncio.Semaphore(5)
 
     @property
+    def calendar_allowed(self) -> bool:
+        """Whether the sign-in also allows Google Calendar (ADR 0019); False for sessions that
+        don't say."""
+        return bool(getattr(self._auth, "calendar_allowed", False))
+
+    @property
     def provider_kind(self) -> ProviderKind:
         return ProviderKind.GMAIL
 

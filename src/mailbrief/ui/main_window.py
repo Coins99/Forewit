@@ -75,6 +75,7 @@ from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
+from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     ProviderError,
@@ -132,12 +133,18 @@ from mailbrief.ui.actions_view import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
-from mailbrief.ui.calendar_view import CONNECT as CONNECT_CALENDAR
+from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
-from mailbrief.ui.calendar_view import DISCONNECT as DISCONNECT_CALENDAR
+from mailbrief.ui.calendar_view import (
+    GOOGLE_ASK,
+    GOOGLE_OFF,
+    GOOGLE_ON,
+    OPEN_GOOGLE,
+    CalendarPanel,
+    week_start,
+)
 from mailbrief.ui.calendar_view import NEW as NEW_EVENT
 from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
-from mailbrief.ui.calendar_view import OPEN_GOOGLE, CalendarPanel, week_start
 from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
 from mailbrief.ui.data_view import DataDialog
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
@@ -272,10 +279,9 @@ class DesktopBackend(Protocol):
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
     async def restore_event(self, public_id: str) -> CalendarEvent: ...
-    # Google Calendar, read-only (ADR 0018, phase 2). calendar_account reads the vault only.
-    async def calendar_account(self) -> str | None: ...
-    async def connect_calendar(self) -> str: ...
-    async def disconnect_calendar(self) -> None: ...
+    # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
+    async def calendar_allowed(self) -> bool | None: ...
+    async def allow_calendar(self) -> bool: ...
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult: ...
 
 
@@ -301,13 +307,21 @@ _EDITOR_STALE = (
     "need, then Cancel and reopen the action."
 )
 _EDITOR_FAILED = "Couldn't save. Your edits are still here; try again."
-_CALENDAR_NOT_CONNECTED = "Google Calendar isn't connected."
-_CALENDAR_SIGN_IN = "Google Calendar needs you to connect it again."
+_CALENDAR_NOT_CONNECTED = "Connect Gmail to see your Google Calendar here."
+_CALENDAR_ASK = "Google Calendar isn't allowed yet. Choose Allow Google Calendar."
+_CALENDAR_ALLOWING = "Allow Google Calendar in your browser."
+_CALENDAR_NOT_GRANTED = (
+    "Google didn't grant calendar access. Choose Allow Google Calendar and tick both calendar "
+    "boxes."
+)
+_CALENDAR_ALLOW_STOPPED = (
+    "Google Calendar wasn't allowed; Gmail is still connected. Choose Allow Google Calendar "
+    "and pick your Gmail account."
+)
 _CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
 _CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
-_CALENDAR_DISCONNECTED = "Google Calendar disconnected; its events are no longer kept in MailBrief."
 _CALENDAR_STOPPED = {
-    "AUTH_REQUIRED": "Google Calendar stopped: connect it again.",
+    "AUTH_REQUIRED": "Google Calendar stopped: connect Gmail again.",
     "PERMISSION_DENIED": "Google Calendar stopped: access was denied.",
     "RATE_LIMITED": "Google Calendar stopped: it is busy; try again in a minute.",
 }
@@ -545,7 +559,7 @@ class MainWindow(QMainWindow):
         self.event_editor = EventEditor(self)
         self.event_editor.save_requested.connect(self._request_save_event)
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
-        self._calendar_account: str | None = None  # The connected Google Calendar account.
+        self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
 
         self.action_editor.create_requested.connect(self._request_create_action)
@@ -1405,7 +1419,7 @@ class MainWindow(QMainWindow):
             shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
             self.calendar_panel.show_range(shown, self.zone, self._local_today())
             self._calendar_shown = shown
-            self.calendar_panel.set_google(self._calendar_account, self._google_note(shown))
+            self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
         except Exception as exc:
             self._note_not_refreshed(exc)
 
@@ -1484,17 +1498,24 @@ class MainWindow(QMainWindow):
     # by _run, whose sign-in handling belongs to Gmail: a calendar problem must never show
     # Gmail as disconnected.
 
-    async def _load_calendar_account(self) -> None:
+    async def _load_calendar_access(self) -> None:
         try:
-            self._calendar_account = await self.backend.calendar_account()
+            self._calendar_allowed = await self.backend.calendar_allowed()
         except Exception as exc:
             log_failure(exc)
-            self._calendar_account = None
+            self._calendar_allowed = None
+
+    def _google_mode(self) -> str:
+        if self._account_email is None:
+            return GOOGLE_OFF
+        return GOOGLE_ASK if self._calendar_allowed is False else GOOGLE_ON
 
     def _google_note(self, shown: CalendarRange) -> str:
-        account = self._calendar_account
+        account = self._account_email
         if account is None:
             return _CALENDAR_NOT_CONNECTED
+        if self._calendar_allowed is False:
+            return _CALENDAR_ASK
         coverage = shown.google_coverage
         if coverage is None:
             return f"Google Calendar: {account} · not loaded yet"
@@ -1512,7 +1533,7 @@ class MainWindow(QMainWindow):
     def _calendar_sync_due(self) -> bool:
         shown = self._calendar_shown
         return (
-            self._calendar_account is not None
+            self._calendar_allowed is True
             and shown is not None
             and needs_sync(shown.google_coverage, shown.first_day, shown.last_day, self.now())
         )
@@ -1521,39 +1542,52 @@ class MainWindow(QMainWindow):
         async def refresh() -> None:
             await self._sync_calendar(quiet=False)
 
-        if kind == CONNECT_CALENDAR:
-            operation: Callable[[], Awaitable[None]] = self._connect_calendar
+        if kind == ALLOW_CALENDAR:
+            operation: Callable[[], Awaitable[None]] = self._allow_calendar
         elif kind == REFRESH_CALENDAR:
             operation = refresh
-        elif kind == DISCONNECT_CALENDAR:
-            operation = self._disconnect_calendar
         else:
             return
         if not self.start(operation, cancellable=False) and not self._closing:
             self.status.setText(_BUSY)
 
-    def _calendar_failed(self, exc: Exception) -> None:
-        """Say what went wrong in fixed words; a sign-in problem shows Connect again."""
+    def _calendar_failed(self, exc: Exception, *, quiet: bool = False) -> None:
+        """Say what went wrong in fixed words; a quiet sync adds it to what the line says."""
         log_failure(exc)
-        if isinstance(exc, AuthenticationRequiredError):
-            self._calendar_account = None
-            self.status.setText(_CALENDAR_SIGN_IN)
+        if isinstance(exc, CalendarNotAllowedError):
+            self._calendar_allowed = False
+            message = _CALENDAR_ASK
         elif isinstance(exc, ProviderPermissionError):
-            self.status.setText(str(exc))  # Static guidance by contract.
+            message = str(exc)  # Static guidance by contract.
         elif isinstance(exc, ConfigurationError):
-            self.status.setText(configuration_guidance(exc))
+            message = configuration_guidance(exc)
         elif isinstance(exc, ProviderRateLimitError):
-            self.status.setText(_CALENDAR_BUSY)
+            message = _CALENDAR_BUSY
         else:
-            self.status.setText(_CALENDAR_UNREACHABLE)
+            message = _CALENDAR_UNREACHABLE
+        self.status.setText(f"{self.status.text()} {message}" if quiet else message)
 
-    async def _connect_calendar(self) -> None:
+    async def _allow_calendar(self) -> None:
+        """Ask Google, in the browser, to add Calendar to the one Google sign-in."""
+        self.status.setText(_CALENDAR_ALLOWING)
         try:
-            self._calendar_account = await self.backend.connect_calendar()
+            allowed = await self.backend.allow_calendar()
         except asyncio.CancelledError:
             raise
+        except AuthenticationRequiredError as exc:
+            # Cancelled, timed out or another account in the browser. Asking again never
+            # touches the saved sign-in, so Gmail stays connected.
+            log_failure(exc)
+            self.status.setText(_CALENDAR_ALLOW_STOPPED)
+            await self._refresh_calendar()
+            return
         except Exception as exc:
             self._calendar_failed(exc)
+            await self._refresh_calendar()
+            return
+        self._calendar_allowed = allowed
+        if not allowed:
+            self.status.setText(_CALENDAR_NOT_GRANTED)
             await self._refresh_calendar()
             return
         await self._sync_calendar(quiet=False)
@@ -1563,25 +1597,19 @@ class MainWindow(QMainWindow):
         around = self._calendar_week or week_start(self._local_today())
         try:
             result = await self.backend.sync_calendar(around, self.zone)
-        except asyncio.CancelledError:
-            raise
+        except (asyncio.CancelledError, AuthenticationRequiredError):
+            raise  # A sign-in problem is the one Google sign-in's: _run reports it.
         except Exception as exc:
-            self._calendar_failed(exc)
+            self._calendar_failed(exc, quiet=quiet)
         else:
-            if not quiet or result.failed or result.stopped_code:
+            if result.stopped_code == "AUTH_REQUIRED":
+                # Google rejected the one sign-in partway through: _run reports it as Gmail's.
+                await self._refresh_calendar()
+                raise AuthenticationRequiredError("Google rejected the sign-in.")
+            if not quiet:
                 self.status.setText(calendar_sync_text(result))
-        await self._refresh_calendar()
-
-    async def _disconnect_calendar(self) -> None:
-        try:
-            await self.backend.disconnect_calendar()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self._calendar_failed(exc)
-            return
-        self._calendar_account = None
-        self.status.setText(_CALENDAR_DISCONNECTED)
+            elif result.failed or result.stopped_code:
+                self.status.setText(f"{self.status.text()} {calendar_sync_text(result)}")
         await self._refresh_calendar()
 
     def _open_calendar_link(self, event: GoogleEvent) -> None:
@@ -2177,7 +2205,6 @@ class MainWindow(QMainWindow):
             )
         await self._refresh_actions()
         await self._refresh_drafts()
-        await self._load_calendar_account()
         await self._refresh_calendar()
         await self._refresh_ai_status()
         try:
@@ -2194,6 +2221,8 @@ class MainWindow(QMainWindow):
         else:
             self._set_account(email)
             self.connection.setText(f"Gmail: connected as {email}")
+            await self._load_calendar_access()
+            await self._refresh_calendar()
             self._launch_soon()
 
     def _launch_soon(self) -> None:
@@ -2208,6 +2237,10 @@ class MainWindow(QMainWindow):
         self._set_account(email)
         self.connection.setText(f"Gmail: connected as {email}")
         self.status.setText("Connected. Sync to review today's messages.")
+        await self._load_calendar_access()
+        await self._refresh_calendar()
+        if self._calendar_allowed:
+            await self._sync_calendar(quiet=True)
         await self._show_auto_send()  # The permission shown is the connected account's.
         await self._reload_history()  # The new account's missed days.
         self._launch_soon()  # Only the first connection of a start counts as the launch.
@@ -2217,6 +2250,8 @@ class MainWindow(QMainWindow):
         self._set_account(None)
         self.connection.setText("Gmail: disconnected")
         self.status.setText("Local credentials removed. Saved briefs remain on this device.")
+        self._calendar_allowed = None
+        await self._refresh_calendar()  # Its Google events went with the sign-in.
         await self._show_auto_send()
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
@@ -2361,6 +2396,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(self.status.text() + " " + guidance)
                 if code.startswith("AI_"):
                     self.ai.setText("AI: " + guidance)
+        if result.status is not BriefStatus.CANCELLED and self._calendar_allowed:
+            await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
 
     # Automatic refresh (ADR 0017): while MailBrief is open, on the owner's schedule. It has
     # no review, no consent question and no dialog; everything it says goes to the status line.
@@ -2478,6 +2515,12 @@ class MainWindow(QMainWindow):
         if result.status is not BriefStatus.CANCELLED:
             await self._refresh_actions()  # Thread activity and proposals may have changed.
         await self._reload_history()  # Today's brief may be new or changed.
+        if (
+            result.status is not BriefStatus.CANCELLED
+            and self._calendar_allowed
+            and self._account_email is not None
+        ):
+            await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
 
     async def _show_auto_send(self) -> None:
         """The automatic-analysis line in Settings, from the connected account's active
