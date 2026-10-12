@@ -39,3 +39,33 @@ async def test_factory_requires_client_path(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(ConfigurationError, match="MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH"):
         async with factory.gmail_auth(Settings()) as _:
             pass
+
+
+async def test_bundled_client_and_explicit_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from mailbrief import config
+
+    bundled = tmp_path / "google-oauth.json"
+    bundled.write_text(
+        json.dumps(
+            {
+                "installed": {
+                    "client_id": "app.apps.googleusercontent.com",
+                    "client_secret": "synthetic",
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(config, "BUNDLED_GOOGLE_CLIENT", bundled)
+    monkeypatch.setattr(
+        factory, "GmailCredentialStore", lambda: GmailCredentialStore(MemoryVault())
+    )
+    async with factory.gmail_auth(Settings(gmail_oauth_client_path=None)) as auth:
+        assert auth._client.client_id == "app.apps.googleusercontent.com"
+    override = tmp_path / "custom.json"
+    assert Settings(gmail_oauth_client_path=override).require_gmail_oauth_client_path() == override
+    override.write_text("invalid")
+    with pytest.raises(ConfigurationError, match="not valid JSON"):
+        async with factory.gmail_auth(Settings(gmail_oauth_client_path=override)):
+            pass

@@ -47,6 +47,60 @@ TEST_WINDOW = DayWindow(
 )
 
 
+@pytest.mark.parametrize("outcome", ["complete", "failed", "cancelled", "malformed"])
+async def test_full_inbox_reconciles_only_complete_scan(
+    async_session: AsyncSession, test_account: int, outcome: str
+) -> None:
+    from datetime import timedelta
+
+    old = make_message(
+        provider_message_id="old", received_at_utc=TEST_WINDOW.start_utc - timedelta(days=400)
+    )
+    missing = make_message(
+        provider_message_id="missing", received_at_utc=TEST_WINDOW.start_utc - timedelta(days=200)
+    )
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [missing])
+    await async_session.commit()
+    cancel = asyncio.Event()
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            yield MessagePage(page_number=1, messages=(old,), continuation="next")
+            if outcome == "failed":
+                raise ProviderResponseError("synthetic failure")
+            if outcome == "cancelled":
+                cancel.set()
+            yield MessagePage(
+                page_number=2, messages=(), failed_message_count=int(outcome == "malformed")
+            )
+
+    provider = FakeEmailProvider()
+    result = await SyncService(
+        provider=provider,
+        message_repo=repo,
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+    ).sync_inbox(
+        reader=Reader(),
+        account_id=test_account,
+        account_identity="user@example.com",
+        cancel=cancel,
+    )
+    rows, _ = await repo.get_inbox_page(test_account)
+    ids = {r.provider_message_id for r in rows}
+    assert "old" in ids
+    assert ("missing" not in ids) == (outcome == "complete")
+    assert (result.status is SyncStatus.COMPLETE) == (outcome == "complete")
+    account = await AccountRepository(async_session).get_by_id(test_account)
+    assert account is not None and account.last_sync_at_utc is None
+    assert not provider.body_fetch_called
+    with pytest.raises(ValueError):
+        await repo.get_inbox_page(test_account, offset=-1)
+
+
 class FakeEmailProvider(EmailProvider):
     """Configurable test provider yielding staged message pages."""
 

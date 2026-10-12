@@ -99,6 +99,8 @@ jobs:
         run: uv run python scripts/check_coverage.py
 
       - name: Build desktop package
+        env:
+          MAILBRIEF_BUILD_GOOGLE_OAUTH_JSON: ${{ secrets.MAILBRIEF_GOOGLE_OAUTH_JSON }}
         run: uv run python scripts/build_desktop.py
 
       - name: Verify package startup and repeat launch offline
@@ -106,6 +108,8 @@ jobs:
 
       - name: Build Windows single executable
         if: runner.os == 'Windows'
+        env:
+          MAILBRIEF_BUILD_GOOGLE_OAUTH_JSON: ${{ secrets.MAILBRIEF_GOOGLE_OAUTH_JSON }}
         run: uv run python scripts/build_desktop.py --onefile
 
       - name: Verify copied single executable and frozen lifecycle

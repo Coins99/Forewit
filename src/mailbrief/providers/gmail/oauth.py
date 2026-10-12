@@ -51,6 +51,15 @@ class DesktopClient:
             raise GmailSetupError(
                 "Cannot read the OAuth client file; check file access and UTF-8 encoding."
             ) from None
+        return cls.from_json(contents)
+
+    @classmethod
+    def from_json(cls, contents: str) -> "DesktopClient":
+        """Validate a native client registration without exposing its contents in errors."""
+        if len(contents) > 64_000:
+            raise GmailSetupError(
+                "The OAuth client file is too large; download the Desktop client JSON."
+            )
         try:
             data = json.loads(contents)
         except ValueError:

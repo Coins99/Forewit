@@ -16,6 +16,35 @@ from mailbrief.services.calendar import local_day_window
 from tests.unit.providers.gmail.metadata_fixtures import NOW, FakeSession, metadata, no_sleep
 
 
+async def test_full_inbox_includes_old_messages_and_paginates(respx_mock: respx.MockRouter) -> None:
+    listing = respx_mock.get(MESSAGES_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"messages": [{"id": "old"}], "nextPageToken": "next"}),
+            httpx.Response(200, json={"messages": [{"id": "new"}, {"id": "archived"}]}),
+        ]
+    )
+    respx_mock.get(MESSAGES_URL + "/old").respond(
+        json=metadata("old", received=NOW - timedelta(days=400))
+    )
+    respx_mock.get(MESSAGES_URL + "/new").respond(json=metadata("new", received=NOW))
+    respx_mock.get(MESSAGES_URL + "/archived").respond(json=metadata("archived", inbox=False))
+    async with httpx.AsyncClient() as http:
+        provider = GmailProvider(FakeSession(), GmailClient(http, FakeSession()))
+        await provider.connect()
+        pages = [page async for page in provider.iter_inbox_pages()]
+    assert [[m.provider_message_id for m in p.messages] for p in pages] == [["old"], ["new"]]
+    assert all(call.request.url.params["q"] == "" for call in listing.calls)
+    assert all(call.request.url.params["labelIds"] == "INBOX" for call in listing.calls)
+    assert listing.calls[1].request.url.params["pageToken"] == "next"
+
+
+async def test_full_inbox_requires_connection() -> None:
+    async with httpx.AsyncClient() as http:
+        provider = GmailProvider(FakeSession(), GmailClient(http, FakeSession()))
+        with pytest.raises(AuthenticationRequiredError):
+            _ = [page async for page in provider.iter_inbox_pages()]
+
+
 async def test_pages_dedup_boundaries_and_disappearance(respx_mock: respx.MockRouter) -> None:
     window = local_day_window(NOW, ZoneInfo("America/Toronto"))
     listing = respx_mock.get(MESSAGES_URL).mock(

@@ -21,11 +21,8 @@ async def gmail_auth(settings: Settings) -> AsyncIterator[GmailAuth]:
     """Own network resources and require the OS credential vault; no token files."""
     try:
         path = settings.require_gmail_oauth_client_path()
-    except ConfigurationError:
-        raise GmailSetupError(
-            "Set MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH in this terminal "
-            "to your Desktop OAuth JSON file."
-        ) from None
+    except ConfigurationError as exc:
+        raise GmailSetupError(str(exc)) from None
     client = await asyncio.to_thread(DesktopClient.load, path)
     store = GmailCredentialStore()
     async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as http:

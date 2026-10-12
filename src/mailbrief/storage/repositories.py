@@ -343,6 +343,22 @@ class MessageRepository:
         rows = list(result.all())
         return rows[:page_size], len(rows) > page_size
 
+    async def get_inbox_page(
+        self, account_id: int, offset: int = 0, page_size: int = 100
+    ) -> tuple[list[MessageTable], bool]:
+        """Read the current cached Inbox across all dates, newest first."""
+        if offset < 0 or not 1 <= page_size <= 200:
+            raise ValueError("Invalid Inbox page bounds.")
+        result = await self._session.scalars(
+            select(MessageTable)
+            .where(MessageTable.account_id == account_id, MessageTable.is_in_inbox.is_(True))
+            .order_by(MessageTable.received_at_utc.desc(), MessageTable.id.asc())
+            .offset(offset)
+            .limit(page_size + 1)
+        )
+        rows = list(result.all())
+        return rows[:page_size], len(rows) > page_size
+
     async def reconcile_inbox(
         self, account_id: int, start_utc: datetime, end_utc: datetime, seen_ids: set[str]
     ) -> None:

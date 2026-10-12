@@ -17,6 +17,8 @@ from mailbrief.domain.preferences import (
 )
 from mailbrief.errors import ConfigurationError
 
+BUNDLED_GOOGLE_CLIENT = Path(__file__).parent / "resources" / "google-oauth.json"
+
 
 class Settings(BaseSettings):
     """Configuration loaded from ``MAILBRIEF_`` environment variables."""
@@ -75,7 +77,10 @@ class Settings(BaseSettings):
     def require_gmail_oauth_client_path(self) -> Path:
         """Return the configured Google desktop OAuth client file."""
         if self.gmail_oauth_client_path is None:
+            if BUNDLED_GOOGLE_CLIENT.is_file():
+                return BUNDLED_GOOGLE_CLIENT
             raise ConfigurationError(
-                "Gmail integration is not configured; set MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH."
+                "This build has no Google sign-in configuration. Use a configured MailBrief build. "
+                "Set MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH to use a custom Desktop OAuth client file."
             )
         return self.gmail_oauth_client_path.expanduser()

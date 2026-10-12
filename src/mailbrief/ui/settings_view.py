@@ -45,12 +45,14 @@ class SettingsDialog(QDialog):
         self.fields = QWidget()
         form = QFormLayout(self.fields)
         self.oauth_path = QLineEdit()
+        self.oauth_path.setObjectName("customGoogleOAuthPath")
+        self.oauth_path.setPlaceholderText("Optional: leave blank to use MailBrief Google sign-in")
         self.oauth_path.setAccessibleName("Google Desktop OAuth client file")
         self.browse_button = QPushButton("&Browse…")
         path_row = QHBoxLayout()
         path_row.addWidget(self.oauth_path, 1)
         path_row.addWidget(self.browse_button)
-        form.addRow("Google OAuth client", path_row)
+        form.addRow("Custom Google client (optional)", path_row)
         self.model = QLineEdit()
         self.model.setMaxLength(128)
         self.model.setPlaceholderText("openai/gpt-oss-120b")
@@ -72,7 +74,8 @@ class SettingsDialog(QDialog):
         form.addRow(self.revoke_button)
         connection_layout.addWidget(self.fields)
         notice = QLabel(
-            "Choose a Google Desktop OAuth client JSON file and a Groq model that supports "
+            "Sign in with Google using MailBrief's configuration. A custom Desktop OAuth "
+            "client file is optional for development builds. Choose a Groq model that supports "
             "Structured Outputs. Enable Zero Data Retention in Groq Console before sending mail. "
             "Only the file location and model are saved in desktop settings. "
             "Removing the key or revoking consent keeps saved briefs and cached analyses."

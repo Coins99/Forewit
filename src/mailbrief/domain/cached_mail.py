@@ -26,3 +26,10 @@ class CachedMailPage(DomainModel):
     messages: tuple[NormalizedMessage, ...] = ()
     offset: int = Field(default=0, ge=0)
     has_more: bool = False
+
+
+class InboxPage(DomainModel):
+    account_email: str
+    messages: tuple[NormalizedMessage, ...] = ()
+    offset: int = Field(default=0, ge=0)
+    has_more: bool = False

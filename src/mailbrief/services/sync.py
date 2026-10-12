@@ -3,11 +3,12 @@
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any, Final
 
 from mailbrief.domain.digests import SyncProgress, SyncResult, SyncStage, SyncStatus
+from mailbrief.domain.messages import MessagePage
 from mailbrief.ports.email_provider import EmailProvider
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
@@ -16,6 +17,7 @@ from mailbrief.ports.errors import (
     ProviderRateLimitError,
     ProviderResponseError,
 )
+from mailbrief.ports.inbox import InboxReader
 from mailbrief.services.calendar import DayWindow
 from mailbrief.storage.repositories import (
     AccountRepository,
@@ -102,6 +104,62 @@ class SyncService:
         last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are
         honored by resuming from the last committed page.
         """
+
+        def pages(continuation: str | None) -> AsyncIterator[MessagePage]:
+            return self._provider.iter_message_pages(
+                range_start_utc=window.start_utc,
+                range_end_utc=window.end_utc,
+                continuation=continuation,
+            )
+
+        return await self._sync_pages(
+            account_id=account_id,
+            account_identity=account_identity,
+            window=window,
+            pages=pages,
+            progress=progress,
+            cancel=cancel,
+            record_last_sync=record_last_sync,
+        )
+
+    async def sync_inbox(
+        self,
+        *,
+        reader: InboxReader,
+        account_id: int,
+        account_identity: str,
+        progress: Callable[[SyncProgress], None] | None = None,
+        cancel: asyncio.Event | None = None,
+    ) -> SyncResult:
+        """Sync all current Inbox metadata; reconcile only after complete enumeration.
+
+        This does not advance the daily-brief watermark or download bodies.
+        """
+        now = datetime.now(UTC)
+        window = DayWindow(
+            now.date(), "UTC", datetime.min.replace(tzinfo=UTC), datetime.max.replace(tzinfo=UTC)
+        )
+        return await self._sync_pages(
+            account_id=account_id,
+            account_identity=account_identity,
+            window=window,
+            pages=reader.iter_inbox_pages,
+            progress=progress,
+            cancel=cancel,
+            record_last_sync=False,
+        )
+
+    async def _sync_pages(
+        self,
+        *,
+        account_id: int,
+        account_identity: str,
+        window: DayWindow,
+        pages: Callable[[str | None], AsyncIterator[MessagePage]],
+        progress: Callable[[SyncProgress], None] | None,
+        cancel: asyncio.Event | None,
+        record_last_sync: bool,
+    ) -> SyncResult:
         sync_run = await self._sync_run_repo.create_sync_run(
             account_id=account_id,
             range_start_utc=window.start_utc,
@@ -169,12 +227,7 @@ class SyncService:
                     return await finish(status, SYNC_RUN_TIMEOUT)
 
                 try:
-                    pages = self._provider.iter_message_pages(
-                        range_start_utc=window.start_utc,
-                        range_end_utc=window.end_utc,
-                        continuation=continuation,
-                    )
-                    async for page in pages:
+                    async for page in pages(continuation):
                         if cancel is not None and cancel.is_set():
                             return await finish(SyncStatus.CANCELLED, None)
 

@@ -144,6 +144,23 @@ class GmailProvider:
         if end <= start:
             raise ValueError("The Gmail time window must have a positive duration.")
         query = f"after:{math.floor(start.timestamp()) - 1} before:{math.ceil(end.timestamp()) + 1}"
+        async for page in self._iter_pages(query, continuation, start, end):
+            yield page
+
+    async def iter_inbox_pages(self, continuation: str | None = None) -> AsyncIterator[MessagePage]:
+        """List only Inbox metadata, with no received-date restriction."""
+        async for page in self._iter_pages("", continuation):
+            yield page
+
+    async def _iter_pages(
+        self,
+        query: str,
+        continuation: str | None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> AsyncIterator[MessagePage]:
+        if self._account is None:
+            raise AuthenticationRequiredError("Connect Gmail before synchronizing.")
         seen_ids: set[str] = set()
         seen_tokens: set[str] = set()
         token: str | None = None
@@ -164,7 +181,13 @@ class GmailProvider:
                     message = map_metadata(raw, account)
                     if message.provider_message_id != identifier:
                         raise response_error("Gmail returned mismatched message metadata.")
-                    if not message.is_in_inbox or not start <= message.received_at_utc < end:
+                    if not message.is_in_inbox:
+                        return None
+                    if (
+                        start is not None
+                        and end is not None
+                        and not start <= message.received_at_utc < end
+                    ):
                         return None
                     return message
                 except ProviderResponseError as exc:

@@ -25,9 +25,9 @@ from mailbrief.domain.briefs import (
     BriefRunResult,
     TransmissionPreview,
 )
-from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage, InboxPage
 from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
-from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress
+from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress, SyncResult
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
 from mailbrief.domain.drafts import (
     Draft,
@@ -94,6 +94,7 @@ from mailbrief.services.preferences import (
     owner_zone,
 )
 from mailbrief.services.proposals import ProposalService
+from mailbrief.services.sync import SyncService
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
@@ -406,6 +407,57 @@ class DesktopRuntime:
                 )
                 for account in accounts
                 if account.provider == ProviderKind.GMAIL.value
+            )
+
+    async def sync_inbox(
+        self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
+    ) -> SyncResult:
+        settings = (await self.get_preferences()).settings()
+        async with (
+            gmail_provider(settings, silent_only=True) as provider,
+            self._storage().session() as session,
+        ):
+            identity = await provider.connect()
+            accounts = AccountRepository(session)
+            account = await accounts.upsert(identity)
+            await session.commit()
+            return await SyncService(
+                provider=provider,
+                message_repo=MessageRepository(session),
+                sync_run_repo=SyncRunRepository(session),
+                account_repo=accounts,
+            ).sync_inbox(
+                reader=provider,
+                account_id=account.id,
+                account_identity=identity.email_address,
+                cancel=cancel,
+                progress=progress,
+            )
+
+    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async with self._storage().session() as session:
+            accounts = await AccountRepository(session).list_all()
+            account = next(
+                (
+                    a
+                    for a in accounts
+                    if a.provider == ProviderKind.GMAIL.value and a.email_address == account_email
+                ),
+                None,
+            )
+            if account is None:
+                return InboxPage(account_email=account_email)
+            rows, more = await MessageRepository(session).get_inbox_page(account.id, offset)
+            return InboxPage(
+                account_email=account_email,
+                offset=offset,
+                has_more=more,
+                messages=tuple(
+                    MessageRepository.to_domain(
+                        row, account.provider_account_id, ProviderKind.GMAIL
+                    )
+                    for row in rows
+                ),
             )
 
     async def cached_messages(self, account_id: int, day: date, offset: int = 0) -> CachedMailPage:

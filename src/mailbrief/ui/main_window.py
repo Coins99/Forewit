@@ -43,7 +43,7 @@ from mailbrief.domain.briefs import (
     BriefStatus,
     TransmissionPreview,
 )
-from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage, InboxPage
 from mailbrief.domain.calendar_planning import (
     PlanningOptions,
     PlanningOutcome,
@@ -177,6 +177,7 @@ from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
+from mailbrief.ui.inbox_view import InboxPanel
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
@@ -190,6 +191,10 @@ from mailbrief.ui.workspace import ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
+    async def sync_inbox(
+        self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
+    ) -> SyncResult: ...
+    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage: ...
     async def cached_accounts(self) -> tuple[CachedAccount, ...]: ...
     async def cached_messages(
         self, account_id: int, day: date, offset: int = 0
@@ -426,8 +431,8 @@ def _ready_text(ready: int) -> str:
 
 
 _RUN_WIDTH = 760
-# Ctrl+1 to Ctrl+6 (Cmd on macOS) show the sidebar's pages, in its order.
-PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar")
+# Ctrl+1 to Ctrl+7 (Cmd on macOS) show the sidebar's pages, in its order.
+PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar", "inbox")
 
 
 def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
@@ -689,11 +694,11 @@ class MainWindow(QMainWindow):
         self.ai = wrap_label("AI: checking configuration…", tone="muted", px=CAPTION_PX)
         self.ai.setObjectName("aiStatus")
         self.connect_button = outline_button(
-            "&Connect Gmail",
+            "&Google sign-in",
             "connectButton",
             mnemonic=True,
             px=SMALL_PX,
-            accessible_name="Connect Gmail",
+            accessible_name="Sign in with Google",
         )
         self.disconnect_button = outline_button(
             "&Disconnect",
@@ -831,6 +836,13 @@ class MainWindow(QMainWindow):
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
         self.calendar_panel = CalendarPanel()
+        self.inbox_panel = InboxPanel()
+        self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
+        self.inbox_panel.page_requested.connect(
+            lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
+        )
+        self.inbox_panel.source_requested.connect(self._open_source)
+        workspace.add_page("inbox", self.inbox_panel)
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
@@ -953,6 +965,7 @@ class MainWindow(QMainWindow):
         self.action_editor.set_busy(busy)
         self.drafts_panel.set_busy(busy)
         self.calendar_panel.set_busy(busy)
+        self.inbox_panel.set_busy(busy)
         self.event_editor.set_busy(busy)
 
     # Pages. The sidebar shows Today while the review or consent is up on the run page, and
@@ -990,6 +1003,10 @@ class MainWindow(QMainWindow):
             self.workspace.sidebar.set_current(self._sidebar_key())
 
     def _request_page(self, key: str) -> None:
+        if key == "inbox":
+            self._show_page(key)
+            self.start(self._load_inbox, cancellable=False)
+            return
         if key == "briefs":
             # Briefs loads first; the sidebar moves once its page shows.
             self.workspace.sidebar.set_current(self._sidebar_key())
@@ -2390,6 +2407,7 @@ class MainWindow(QMainWindow):
         else:
             self._set_account(email)
             self.connection.setText(f"Gmail: connected as {email}")
+            await self._refresh_inbox(quiet=True)
             await self._load_calendar_access()
             await self._refresh_calendar()
             self._launch_soon()
@@ -2401,11 +2419,15 @@ class MainWindow(QMainWindow):
         asyncio.get_running_loop().call_soon(self.scheduler.launched)
 
     async def _connect(self) -> None:
+        origin = self.workspace.current_page()
         self.status.setText("Connecting to Gmail. Complete sign-in in your browser.")
         email = await self.backend.connect(silent_only=False)
         self._set_account(email)
         self.connection.setText(f"Gmail: connected as {email}")
-        self.status.setText("Connected. Sync to review today's messages.")
+        self.inbox_panel.clear()
+        if origin == "today":
+            self._show_page_unless_moved(origin, "inbox")
+        await self._refresh_inbox()
         await self._load_calendar_access()
         await self._refresh_calendar()
         if self._calendar_allowed:
@@ -2417,11 +2439,54 @@ class MainWindow(QMainWindow):
     async def _disconnect(self) -> None:
         await self.backend.disconnect()
         self._set_account(None)
+        self.inbox_panel.clear()
         self.connection.setText("Gmail: disconnected")
         self.status.setText("Local credentials removed. Saved briefs remain on this device.")
         self._calendar_allowed = None
         await self._refresh_calendar()  # Its Google events went with the sign-in.
         await self._show_auto_send()
+
+    async def _load_inbox(self, offset: int = 0) -> None:
+        if self._account_email is None:
+            self.inbox_panel.clear()
+            return
+        self.inbox_panel.zone = self.zone
+        self.inbox_panel.show_page(await self.backend.inbox_messages(self._account_email, offset))
+
+    async def _refresh_inbox(self, *, quiet: bool = False) -> None:
+        previous_status = self.status.text()
+        if self._account_email is None:
+            self.status.setText("Sign in with Google to refresh your Inbox.")
+            return
+        self.status.setText("Syncing your full Gmail Inbox…")
+        try:
+            result = await self.backend.sync_inbox(self._cancel, self._progress)
+        except (ConfigurationError, AuthenticationRequiredError) as exc:
+            self._set_account(None)
+            self.inbox_panel.clear()
+            guidance = (
+                configuration_guidance(exc)
+                if isinstance(exc, ConfigurationError)
+                else ("Sign in with Google to continue.")
+            )
+            self.connection.setText("Gmail: " + guidance)
+            self.status.setText(guidance)
+            self.inbox_panel.sync_status.setText(guidance)
+            return
+        await self._load_inbox()
+        if result.status is SyncStatus.COMPLETE:
+            self.status.setText(f"Inbox synced: {result.message_count} messages across all dates.")
+        else:
+            self.status.setText("Inbox sync incomplete. Cached messages may be stale.")
+            if result.error_code:
+                self.status.setText(self.status.text() + " " + error_guidance(result.error_code))
+            if result.error_code == "AUTH_REQUIRED":
+                self._set_account(None)
+                self.inbox_panel.clear()
+                self.connection.setText("Gmail: session expired. Sign in with Google to continue.")
+        self.inbox_panel.sync_status.setText(self.status.text())
+        if quiet and result.status is SyncStatus.COMPLETE:
+            self.status.setText(previous_status)
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
     # owner's explicit choice, one day at a time, for the connected account.
@@ -2505,6 +2570,10 @@ class MainWindow(QMainWindow):
             self.scheduler.note_run(self.now())
 
     async def _generate_brief(self, local_date: date | None = None) -> None:
+        if local_date is None:
+            await self._refresh_inbox(quiet=True)
+            if self._cancel.is_set():
+                return
         self._offer_undo()  # A new brief replaces the suggestions that Undo would refer to.
         if local_date is None and self._shown is not None:
             self._set_shown(None)  # Sync and review returns to the latest brief.
@@ -2617,6 +2686,9 @@ class MainWindow(QMainWindow):
         self._synced_at = None  # No review: its sync has just finished when it returns.
         self.status.setText(_AUTOMATIC + "checking Gmail…")
         try:
+            await self._refresh_inbox(quiet=True)
+            if self._cancel.is_set():
+                return
             result = await self.backend.generate_automatic(self._cancel, self._progress)
             await self._automatic_finished(result)
         finally:
