@@ -13,7 +13,8 @@ writing**. Deadlines and target dates come from your open actions and change onl
 Pick a time from the list (every 15 minutes) or type one as `HH:mm`. The end's list says
 how long the event lasts, and runs past midnight into the next day. Moving the start
 moves the end with it. An end at or before the start, or more than 31 days after it, isn't
-taken: the editor puts the time back and says why.
+taken: the editor puts the time back and says why. If that happens as you press Return or
+Save, nothing is saved yet: check the times, then save again.
 
 ## Google Calendar, read-only
 

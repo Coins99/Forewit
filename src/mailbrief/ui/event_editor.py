@@ -3,7 +3,8 @@
 Dates and times use fixed numeric formats, so nothing depends on the system language. A
 time is typed or chosen from a list in 15-minute steps; the end's list says how long the
 event lasts. The editor never takes an end at or before the start: moving the start keeps
-the event's length, and an end that doesn't fit is refused with the reason.
+the event's length, and an end that doesn't fit is refused with the reason. A Save
+that comes with a refusal waits, so the reason stays on screen.
 """
 
 import re
@@ -174,6 +175,10 @@ class TimeBox(QComboBox):
         view.setMinimumWidth(view.sizeHintForColumn(0) + 2 * view.frameWidth() + 24)
         self.setTime(self._time)
 
+    def commit_typed(self) -> None:
+        """Take a time typed but not yet taken, as leaving the field would."""
+        self._typed()
+
     def _chosen(self, index: int) -> None:
         if index >= 0:
             self.committed.emit(self.itemData(index))
@@ -204,6 +209,9 @@ class EventEditor(QDialog):
         self._start = datetime(2000, 1, 1, _DEFAULT_HOUR, tzinfo=UTC)
         self._end = self._start + _DEFAULT_LENGTH
         self._syncing = False  # The editor is filling the fields itself.
+        # A typed time was just refused and the fields went back: the Save that came with
+        # it (Return, or the click that took focus from the field) waits once.
+        self._refused = False
         layout = QVBoxLayout(self)
         self._fields = QWidget()
         form = QFormLayout(self._fields)
@@ -212,6 +220,7 @@ class EventEditor(QDialog):
         self.title.setObjectName("eventTitle")
         self.title.setMaxLength(EVENT_TITLE_MAX_CHARS)
         self.title.setAccessibleName("Title")
+        self.title.textEdited.connect(self._edited_elsewhere)
         form.addRow("Title", self.title)
         self.all_day = QCheckBox("All day")
         self.all_day.setObjectName("eventAllDay")
@@ -236,6 +245,7 @@ class EventEditor(QDialog):
         self.notes.setObjectName("eventNotes")
         self.notes.setAccessibleName("Notes")
         self.notes.setTabChangesFocus(True)
+        self.notes.textChanged.connect(self._edited_elsewhere)
         form.addRow("Notes", self.notes)
         layout.addWidget(self._fields)
         self.status = plain_label("", tone="muted")
@@ -251,15 +261,16 @@ class EventEditor(QDialog):
         self._loaded_input = self._input()
 
     def _input(self) -> tuple[object, ...]:
-        """Everything the owner can change here, to tell whether any of it is unsaved."""
+        """Everything the owner can change here, to tell whether any of it is unsaved. The
+        times are their text, so a time typed but not yet taken counts too."""
         return (
             self.title.text(),
             self.notes.toPlainText(),
             self.all_day.isChecked(),
             self.start_date.date(),
-            self.start_time.time(),
+            self.start_time.currentText(),
             self.end_date.date(),
-            self.end_time.time(),
+            self.end_time.currentText(),
         )
 
     def has_unsaved_input(self) -> bool:
@@ -346,6 +357,10 @@ class EventEditor(QDialog):
         finally:
             self._syncing = False
 
+    def _edited_elsewhere(self) -> None:
+        """The owner moved on from a refused time, so the next Save goes ahead."""
+        self._refused = False
+
     def _show_times(self, all_day: bool) -> None:
         self.start_time.setVisible(not all_day)
         self.end_time.setVisible(not all_day)
@@ -354,6 +369,7 @@ class EventEditor(QDialog):
         self._show_times(all_day)
         if self._syncing:
             return
+        self._refused = False
         if not all_day and self._end <= self._start:
             self._end = self._start + _DEFAULT_LENGTH  # Back to times: an end after the start.
         self._show_moments(self._start, self._end)  # The end date's range follows the shape.
@@ -373,6 +389,7 @@ class EventEditor(QDialog):
     def _move_start(self, start: datetime) -> None:
         """A new start keeps the event's length, so the end moves with it."""
         length = self._end - self._start
+        self._refused = False
         self.status.setText("")
         self._show_moments(start, start.astimezone(UTC) + length)
 
@@ -400,17 +417,21 @@ class EventEditor(QDialog):
         elif not self.all_day.isChecked() and late > timedelta(days=EVENT_MAX_DAYS):
             self._refuse(TOO_LONG)
         else:
+            self._refused = False
             self.status.setText("")
             self._show_moments(self._start, end)
 
     def _refuse(self, message: str) -> None:
-        """Put the fields back to the last start and end they accepted, and say why."""
+        """Put the fields back to the last start and end they accepted, and say why. The
+        Save that came with it, if any, waits (see _save)."""
         self._show_moments(self._start, self._end)
         self.status.setText(message)
+        self._refused = True
 
     def _reset(self) -> None:
         self.status.setText("")
         self._saving = False
+        self._refused = False
         self._fields.setEnabled(True)
         self._update_buttons()
         self._loaded_input = self._input()  # What was just loaded counts as saved.
@@ -458,6 +479,16 @@ class EventEditor(QDialog):
 
     def _save(self) -> None:
         if self._busy or self._saving:
+            return
+        # A time still being typed counts, as if the owner had left its field: a Save can
+        # come without focus leaving it (a screen reader's press, for one).
+        self.start_time.commit_typed()
+        self.end_time.commit_typed()
+        if self._refused:
+            # A time was just refused (here, or by the Return or click that brought this
+            # Save) and the fields went back: saving now would save what the owner was
+            # trying to change.
+            self._refused = False
             return
         edit = self.built_edit()
         if isinstance(edit, str):

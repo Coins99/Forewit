@@ -1,14 +1,16 @@
 """The event editor's times: lists in 15-minute steps, ends that say how long, and every way
 an end could land at or before the start refused (ADR 0018)."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date, time, timedelta
 
 import pytest
-from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QDialogButtonBox, QWidget
 from pytestqt.qtbot import QtBot
 
+from mailbrief.domain.events import EventEdit
 from mailbrief.ui.event_editor import (
     BAD_TIME,
     ENDS_FIRST,
@@ -17,6 +19,7 @@ from mailbrief.ui.event_editor import (
     TimeBox,
     day_times,
     length_text,
+    local_instant,
     parse_clock,
 )
 from tests.ui.test_calendar import NOW, TODAY, TORONTO
@@ -45,6 +48,19 @@ def choose(box: TimeBox, start: str) -> None:
     index = next(i for i in range(box.count()) if box.itemText(i).startswith(start))
     box.setCurrentIndex(index)
     box.activated.emit(index)
+
+
+def saves(editor: EventEditor) -> list[EventEdit]:
+    """Every edit the editor asks to save from now on."""
+    asked: list[EventEdit] = []
+    editor.save_requested.connect(asked.append)
+    return asked
+
+
+def press_save(editor: EventEditor) -> None:
+    button = editor.buttons.button(QDialogButtonBox.StandardButton.Save)
+    assert button is not None
+    button.click()
 
 
 def items(box: TimeBox) -> list[str]:
@@ -164,3 +180,70 @@ def test_clock_changes(editor: EventEditor) -> None:
     type_time(editor.start_time, "00:30")
     ends = items(editor.end_time)
     assert "01:45 (1 hr 15 mins)" in ends and "02:00 (2 hrs 30 mins)" in ends
+
+
+def test_a_save_that_comes_with_a_refusal_waits(editor: EventEditor) -> None:
+    asked = saves(editor)
+    type_time(editor.end_time, "14:00")  # Before the 15:00 start: refused, back to 16:00.
+    press_save(editor)  # The click that took focus from the field.
+    assert asked == [] and editor.status.text() == ENDS_FIRST
+    press_save(editor)  # The owner has seen why: what the fields show is saved.
+    assert len(asked) == 1
+    assert asked[0].ends_at_utc == local_instant(TODAY, time(16), TORONTO)
+
+
+def test_return_after_a_refused_time_keeps_the_dialog_open(
+    editor: EventEditor, qtbot: QtBot
+) -> None:
+    asked = saves(editor)
+    editor.show()  # Return reaches Save, the dialog's default button, only when shown.
+    qtbot.waitExposed(editor)
+    for box, typed, reason in (
+        (editor.end_time, "14:00", ENDS_FIRST),
+        (editor.start_time, "25:00", BAD_TIME),
+    ):
+        box.setEditText(typed)
+        QTest.keyClick(box, Qt.Key.Key_Return)
+        assert asked == [] and editor.status.text() == reason
+        assert shown(editor) == ("2026-10-14", "15:00", "2026-10-14", "16:00")
+    QTest.keyClick(editor.end_time, Qt.Key.Key_Return)  # Nothing new typed: Return saves.
+    assert len(asked) == 1
+
+
+def test_moving_on_after_a_refusal_lets_save_go_ahead(editor: EventEditor, qtbot: QtBot) -> None:
+    asked = saves(editor)
+    editor.show()
+    qtbot.waitExposed(editor)
+    moves: tuple[Callable[[], object], ...] = (
+        lambda: QTest.keyClicks(editor.title, " check-up"),
+        lambda: QTest.keyClicks(editor.notes, "Bring the form."),
+        lambda: type_time(editor.end_time, "16:30"),
+        lambda: editor.all_day.setChecked(True),
+    )
+    for number, move_on in enumerate(moves, start=1):
+        type_time(editor.end_time, "14:00")
+        move_on()
+        press_save(editor)
+        assert len(asked) == number
+        editor.keep_open("")  # As the window does when a save can't happen.
+
+
+def test_a_typed_time_counts_as_unsaved_before_it_is_taken(editor: EventEditor) -> None:
+    editor.edit_new(TODAY, NOW, TORONTO)
+    assert not editor.has_unsaved_input()
+    editor.end_time.setEditText("17:30")  # Typed, still in the field.
+    assert editor.end_time.time().toString("HH:mm") == "16:00"
+    assert editor.has_unsaved_input()  # A quit would ask first.
+    type_time(editor.end_time, "16:00")  # Back to what was loaded.
+    assert not editor.has_unsaved_input()
+
+
+def test_save_takes_a_time_still_being_typed(editor: EventEditor) -> None:
+    asked = saves(editor)
+    editor.end_time.setEditText("14:00")  # Still in the field; Save comes without leaving it.
+    press_save(editor)
+    assert asked == [] and editor.status.text() == ENDS_FIRST
+    editor.end_time.setEditText("17:30")
+    press_save(editor)
+    assert len(asked) == 1
+    assert asked[0].ends_at_utc == local_instant(TODAY, time(17, 30), TORONTO)

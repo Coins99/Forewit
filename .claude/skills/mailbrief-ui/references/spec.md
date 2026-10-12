@@ -346,8 +346,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   choose from 15-minute steps; the end's list runs 15 minutes to 24 hours after the start,
   each with the length ("00:00 (9 hrs)"), and times a DST change skips are left out.
   Moving the start keeps the length; an end at or before the start, past 31 days or not a
-  time is refused, the fields go back, and the status line says why. The end date's range
-  runs from the start's day to 31 days on (30 for all-day events).
+  time is refused, the fields go back, and the status line says why. Save first takes a
+  time still being typed, as leaving its field would. The Save that comes
+  with a refusal (Return, or the click that took focus from the field) waits, so the
+  reason stays on screen; the next Save saves what the fields show, and changing anything
+  else first lets it go ahead. A time typed but not yet taken counts as unsaved input.
+  The end date's range runs from the start's day to 31 days on (30 for all-day events).
   Google Calendar (phase 2, one sign-in per ADR 0019): under the heading, `googleStatus`
   (muted) says whether Gmail is connected, whether Calendar is allowed and when the saved
   copy was read, beside outline Allow Google Calendar (only when the sign-in lacks it) or
