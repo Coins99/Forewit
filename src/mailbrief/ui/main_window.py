@@ -86,6 +86,7 @@ from mailbrief.domain.events import (
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -127,6 +128,7 @@ from mailbrief.services.preferences import (
     PreferencesUnavailableError,
     owner_zone,
 )
+from mailbrief.services.projects import ProjectConflictError
 from mailbrief.services.proposals import ProposalNotFoundError
 from mailbrief.services.ranking import (
     DECLINED_TEXT,
@@ -182,6 +184,7 @@ from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
+from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
@@ -258,6 +261,19 @@ class DesktopBackend(Protocol):
     async def dismiss_suggestion(self, suggestion_id: int) -> None: ...
     async def restore_suggestion(self, suggestion_id: int) -> None: ...
     async def unaccept_action(self, public_id: str, revision: int) -> None: ...
+    async def list_projects(self) -> tuple[Project, ...]: ...
+    async def list_areas(self) -> tuple[LifeArea, ...]: ...
+    async def save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> Project | LifeArea: ...
+    async def archive_project(self, public_id: str, revision: int, archived: bool) -> Project: ...
+    async def delete_area(self, public_id: str, revision: int) -> None: ...
+    async def list_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> tuple[Action, ...]: ...
+    async def count_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> int: ...
     async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action: ...
     async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
@@ -331,6 +347,7 @@ _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
 _PICK_ONE = "Select at least one message to analyze, or Cancel."
 _NOT_REFRESHED = "The view could not be refreshed; restart MailBrief to see the latest."
 _BUSY = "MailBrief is busy; try again in a moment."
+_CANCELLED = "Cancelled. The displayed saved brief is unchanged."
 _BRIEFS_UNAVAILABLE = "Saved briefs open once local storage loads. Choose Retry loading saved data."
 _EDITOR_STALE = (
     "This action changed since you opened it. Your edits are still here — copy what you "
@@ -349,6 +366,10 @@ _CALENDAR_ALLOW_STOPPED = (
     "and pick your Gmail account."
 )
 _CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
+_CALENDAR_CANCELLED = "Cancelled. The Calendar page shows what was saved."
+_CALENDAR_ALLOW_CANCELLED = (
+    "Cancelled. Gmail is still connected; choose Allow Google Calendar to try again."
+)
 _CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
 _CALENDAR_STOPPED = {
     "AUTH_REQUIRED": "Google Calendar stopped: connect Gmail again.",
@@ -612,6 +633,12 @@ class MainWindow(QMainWindow):
         self.zone = resolve_timezone(None)
         if self.data_dialog is not None:
             self.data_dialog.today = self._local_today
+        self._projects: tuple[Project, ...] = ()
+        self._areas: tuple[LifeArea, ...] = ()
+        self.projects_dialog = ProjectsDialog(self)
+        self.projects_dialog.save_requested.connect(self._request_save_organization)
+        self.projects_dialog.archive_requested.connect(self._request_archive_project)
+        self.projects_dialog.delete_area_requested.connect(self._request_delete_area)
         self.action_editor = ActionEditor(self)
         self.action_editor.save_requested.connect(self._request_save_action)
         self.event_editor = EventEditor(self)
@@ -627,6 +654,10 @@ class MainWindow(QMainWindow):
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
+        # Reads of the week shown run beside start()'s operations: they change nothing. The
+        # newest read wins, and shutdown waits for them before closing the database.
+        self._calendar_reads: set[asyncio.Task[None]] = set()
+        self._calendar_read = 0
 
         self.action_editor.create_requested.connect(self._request_create_action)
         self.draft_writes = DraftWrites()
@@ -821,6 +852,10 @@ class MainWindow(QMainWindow):
         workspace.detail.reply_requested.connect(self._request_reply)
         workspace.detail.source_requested.connect(self._open_source)
         self.actions_panel = ActionsPanel()
+        self.actions_panel.organize_requested.connect(self._open_organization)
+        self.actions_panel.group_changed.connect(
+            lambda: self.start(self._refresh_actions, cancellable=False)
+        )
         self.actions_panel.new_task_requested.connect(self._request_new_task)
         self.new_task_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
         self.new_task_shortcut.activated.connect(self._request_new_task)
@@ -963,6 +998,7 @@ class MainWindow(QMainWindow):
         self.undo_button.setEnabled(not busy)
         self.actions_panel.set_busy(busy)
         self.action_editor.set_busy(busy)
+        self.projects_dialog.set_busy(busy)
         self.drafts_panel.set_busy(busy)
         self.calendar_panel.set_busy(busy)
         self.inbox_panel.set_busy(busy)
@@ -1017,7 +1053,7 @@ class MainWindow(QMainWindow):
             return
         self._show_page(key)
         if key == "calendar" and self._calendar_sync_due():
-            self.start(lambda: self._sync_calendar(quiet=True), cancellable=False)
+            self._start_calendar_sync()
 
     def _leave_run_page(self) -> None:
         """Back to Today once neither the review nor the consent is waiting."""
@@ -1069,6 +1105,8 @@ class MainWindow(QMainWindow):
         what it showed if it can't be read."""
         await self._refresh_actions()
         await self._reload_history()
+        if self._calendar_week is not None:
+            self._show_calendar_week(self._calendar_week)  # Now this week: follow today.
         await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
@@ -1194,11 +1232,25 @@ class MainWindow(QMainWindow):
         now = self.now()
         today = now.astimezone(self.zone).date()
         try:
+            projects = await self.backend.list_projects()
+            areas = await self.backend.list_areas()
+            self._projects, self._areas = projects, areas
+            self.action_editor.set_projects(self._projects)
+            self.actions_panel.show_groups(self._projects, self._areas)
+            group, group_id = self.actions_panel.grouping()
             for view in ActionFilter:
-                actions = await self.backend.list_actions(view)
+                actions = (
+                    await self.backend.list_actions(view)
+                    if group == "all"
+                    else await self.backend.list_grouped_actions(view, group, group_id)
+                )
                 # Only the completed list is capped; say so when more exist.
                 total = (
-                    await self.backend.count_actions(view)
+                    (
+                        await self.backend.count_actions(view)
+                        if group == "all"
+                        else await self.backend.count_grouped_actions(view, group, group_id)
+                    )
                     if view is ActionFilter.COMPLETED and len(actions) >= COMPLETED_LIST_LIMIT
                     else None
                 )
@@ -1206,9 +1258,17 @@ class MainWindow(QMainWindow):
                     view, actions, today=today, zone=self.zone, now=now, total=total
                 )
                 if view is ActionFilter.OPEN:
-                    self._set_counts(actions=len(actions))
+                    self._set_counts(
+                        actions=len(actions)
+                        if group == "all"
+                        else await self.backend.count_actions(view)
+                    )
                 elif view is ActionFilter.WAITING:
-                    self._set_counts(waiting=len(actions))
+                    self._set_counts(
+                        waiting=len(actions)
+                        if group == "all"
+                        else await self.backend.count_actions(view)
+                    )
         except Exception as exc:
             self._note_not_refreshed(exc)
 
@@ -1387,6 +1447,104 @@ class MainWindow(QMainWindow):
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
             self.dialog_guard.show_dialog(self.proposals_dialog)
 
+    def _open_organization(self) -> None:
+        if self._closing or self._dialog_open() or (self.task is not None and not self.task.done()):
+            return
+        self.projects_dialog.show_records(self._projects, self._areas)
+        self.projects_dialog.open()
+        self.start(self._load_organization, cancellable=False)
+
+    async def _load_organization(self) -> None:
+        try:
+            projects = await self.backend.list_projects()
+            areas = await self.backend.list_areas()
+        except Exception as exc:
+            log_failure(exc)
+            self.projects_dialog.status.setText("Could not reload. Close and reopen to retry.")
+            return
+        self._projects, self._areas = projects, areas
+        self.projects_dialog.show_records(projects, areas)
+
+    def _cache_organization(self, saved: Project | LifeArea) -> None:
+        if isinstance(saved, Project):
+            self._projects = tuple(
+                item for item in self._projects if item.public_id != saved.public_id
+            ) + (saved,)
+        else:
+            self._areas = tuple(
+                item for item in self._areas if item.public_id != saved.public_id
+            ) + (saved,)
+
+    def _request_save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> None:
+        self.start(
+            lambda: self._save_organization(kind, public_id, revision, edit), cancellable=False
+        )
+
+    async def _save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> None:
+        try:
+            saved = await self.backend.save_organization(kind, public_id, revision, edit)
+        except Exception as exc:
+            log_failure(exc)
+            self.projects_dialog.status.setText(
+                "Could not save. Your input is still here. "
+                "Retry, or discard edits and reopen to reload."
+            )
+            return
+        self._offer_undo()
+        self._cache_organization(saved)
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas, saved.public_id)
+        self.projects_dialog.status.setText("Saved.")
+        self.status.setText("Organization saved.")
+
+    def _request_archive_project(self, project: Project, archived: bool) -> None:
+        self.start(lambda: self._archive_project(project, archived), cancellable=False)
+
+    async def _archive_project(self, project: Project, archived: bool) -> None:
+        try:
+            saved = await self.backend.archive_project(
+                project.public_id, project.revision, archived
+            )
+        except ProjectConflictError:
+            self.projects_dialog.status.setText(
+                "That project changed. Close and reopen to reload it."
+            )
+            return
+        self._offer_undo()
+        self._cache_organization(saved)
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas, project.public_id)
+        self.status.setText(
+            "Project archived. Its tasks remain." if archived else "Project reopened."
+        )
+
+    def _request_delete_area(self, area: LifeArea) -> None:
+        self.start(lambda: self._delete_area(area), cancellable=False)
+
+    async def _delete_area(self, area: LifeArea) -> None:
+        try:
+            await self.backend.delete_area(area.public_id, area.revision)
+        except ProjectConflictError:
+            self.projects_dialog.status.setText("That area changed. Close and reopen to reload it.")
+            return
+        self._offer_undo()
+        self._areas = tuple(item for item in self._areas if item.public_id != area.public_id)
+        self._projects = tuple(
+            item.model_copy(
+                update={"area_public_id": None, "area_name": None, "revision": item.revision + 1}
+            )
+            if item.area_public_id == area.public_id
+            else item
+            for item in self._projects
+        )
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas)
+        self.status.setText("Life area removed. Its projects and tasks remain.")
+
     def _request_new_task(self) -> None:
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
@@ -1407,6 +1565,7 @@ class MainWindow(QMainWindow):
                 self.action_editor.keep_open(_EDITOR_FAILED)
             raise
         self.action_editor.finish_saved()
+        self.actions_panel.clear_group()
         self._offer_undo()
         self.status.setText(f"Created: {created.title}.")
         self.actions_panel.show_view(
@@ -1495,29 +1654,76 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
 
-    # Calendar (ADR 0018). Loading a week, saving and deleting use start(); the page shows
-    # local data only, so it never needs Gmail or an AI provider.
+    # Calendar (ADR 0018). Saving and deleting use start(); reading a week doesn't, so the
+    # page can move between weeks and open the editor while another operation runs. The
+    # page shows local data only, so it never needs Gmail or an AI provider.
 
     async def _refresh_calendar(self) -> None:
+        self._calendar_read += 1
+        read = self._calendar_read
         first = self._calendar_week or week_start(self._local_today())
         try:
             shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
-            self.calendar_panel.show_range(shown, self.zone, self._local_today())
-            self._calendar_shown = shown
-            self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
         except Exception as exc:
-            self._note_not_refreshed(exc)
+            if read == self._calendar_read:
+                self._note_not_refreshed(exc)
+            return
+        if read != self._calendar_read:
+            return  # A newer read, perhaps of another week, shows the page.
+        self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        self._calendar_shown = shown
+        self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
+
+    def _show_calendar_week(self, monday: date) -> None:
+        """Show the week of ``monday`` from now on; this week's follows today, so the page
+        moves on by itself when a new week starts."""
+        self._calendar_week = None if monday == week_start(self._local_today()) else monday
 
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
-            monday = first_day
-            self.start(lambda: self._show_calendar_week(monday), cancellable=False)
+            self._show_calendar_week(first_day)
+            self._read_calendar(sync=True)
 
-    async def _show_calendar_week(self, first_day: date) -> None:
-        self._calendar_week = first_day
-        await self._refresh_calendar()
-        if self._calendar_sync_due():
+    def _read_calendar(self, *, sync: bool = False) -> None:
+        """Read the week shown beside any running operation; then, with ``sync``, read
+        Google Calendar for it when that is due and nothing else is running."""
+        if self._closing:
+            return
+
+        async def read() -> None:
+            await self._refresh_calendar()
+            if sync and self._calendar_sync_due():
+                self._start_calendar_sync()
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    async def drain_calendar_reads(self) -> None:
+        """Wait for the reads of the week in progress."""
+        while pending := [task for task in self._calendar_reads if not task.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def _start_calendar_sync(self) -> bool:
+        async def sync() -> None:
             await self._sync_calendar(quiet=True)
+
+        return self.start(self._calendar_work(sync), cancelled=_CALENDAR_CANCELLED)
+
+    def _calendar_work(
+        self, operation: Callable[[], Awaitable[None]]
+    ) -> Callable[[], Awaitable[None]]:
+        """``operation``, which Cancel and quitting can stop: the cache keeps each calendar
+        a stopped sync finished, so the page is read again to show them."""
+
+        async def work() -> None:
+            try:
+                await operation()
+            except asyncio.CancelledError:
+                self._read_calendar()
+                raise
+
+        return work
 
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
@@ -1531,7 +1737,9 @@ class MainWindow(QMainWindow):
                 self.event_editor.edit_event(event, self.zone)
                 self.dialog_guard.show_dialog(self.event_editor)
             elif kind == DELETE_EVENT:
-                self.start(lambda: self._delete_event(event), cancellable=False)
+                started = self.start(lambda: self._delete_event(event), cancellable=False)
+                if not started and not self._closing:
+                    self.status.setText(_BUSY)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -1560,9 +1768,10 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.event_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
-        self._calendar_week = week_start(saved.days(self.zone)[0])  # Show where it went.
+        self._show_calendar_week(week_start(saved.days(self.zone)[0]))  # Show where it went.
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
+        self.calendar_panel.select_event(saved.public_id)
 
     async def _delete_event(self, event: CalendarEvent) -> None:
         try:
@@ -1629,11 +1838,13 @@ class MainWindow(QMainWindow):
 
         if kind == ALLOW_CALENDAR:
             operation: Callable[[], Awaitable[None]] = self._allow_calendar
+            cancelled = _CALENDAR_ALLOW_CANCELLED
         elif kind == REFRESH_CALENDAR:
-            operation = refresh
+            operation, cancelled = refresh, _CALENDAR_CANCELLED
         else:
             return
-        if not self.start(operation, cancellable=False) and not self._closing:
+        started = self.start(self._calendar_work(operation), cancelled=cancelled)
+        if not started and not self._closing:
             self.status.setText(_BUSY)
 
     def _calendar_failed(self, exc: Exception, *, quiet: bool = False) -> None:
@@ -2177,27 +2388,34 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Saved: {draft.display_title}.")
             await self._refresh_drafts()
 
-    def start(self, operation: Callable[[], Awaitable[None]], *, cancellable: bool = True) -> bool:
+    def start(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        cancellable: bool = True,
+        cancelled: str = _CANCELLED,
+    ) -> bool:
         """Only one operation may own the providers and workflow at a time.
 
         Returns whether this operation started; it does not while closing or busy.
+        ``cancelled`` is what the status line says when Cancel or quitting stops it.
         """
         if self._closing or (self.task is not None and not self.task.done()):
             return False
         self._cancel = asyncio.Event()
         self._cancellable = cancellable
         self._set_busy(True)
-        self.task = asyncio.create_task(self._run(operation))
+        self.task = asyncio.create_task(self._run(operation, cancelled))
         return True
 
-    async def _run(self, operation: Callable[[], Awaitable[None]]) -> None:
+    async def _run(self, operation: Callable[[], Awaitable[None]], cancelled: str) -> None:
         failed = True
         try:
             await operation()
             failed = False
         except asyncio.CancelledError:
             failed = False
-            self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+            self.status.setText(cancelled)
         except AuthenticationRequiredError as exc:
             log_failure(exc)
             self._set_account(None)
@@ -2606,7 +2824,7 @@ class MainWindow(QMainWindow):
                             "No analyzed messages in this selection. Empty brief saved."
                         )
             case BriefStatus.CANCELLED:
-                self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+                self.status.setText(_CANCELLED)
             case BriefStatus.CONSENT_DECLINED:
                 self.status.setText("Transmission declined. No messages sent to AI in this run.")
             case BriefStatus.SYNC_FAILED:
@@ -2656,6 +2874,7 @@ class MainWindow(QMainWindow):
                 self.cached_dialog,
                 self.proposals_dialog,
                 self.action_editor,
+                self.projects_dialog,
                 self.draft_editor,
                 self.event_editor,
                 self.planning_dialog,
@@ -3020,6 +3239,7 @@ class MainWindow(QMainWindow):
         self.proposals_dialog.reject()
         if self.data_dialog is not None:
             self.data_dialog.reject()
+        self.projects_dialog.force_close()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
         self._cancel_planning()
@@ -3041,6 +3261,9 @@ class MainWindow(QMainWindow):
             if self.task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.task
+            for read in self._calendar_reads:
+                read.cancel()
+            await self.drain_calendar_reads()
             await self.draft_writes.drain()
         finally:
             try:

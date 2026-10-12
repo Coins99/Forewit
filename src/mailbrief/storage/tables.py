@@ -349,6 +349,45 @@ class SyncRunTable(Base):
     )
 
 
+class LifeAreaTable(Base):
+    __tablename__ = "life_areas"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_life_areas_public_id"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
+
+class ProjectTable(Base):
+    __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_projects_public_id"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False)
+    area_public_id: Mapped[str | None] = mapped_column(
+        ForeignKey("life_areas.public_id", ondelete="SET NULL")
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    archived_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
+
 class ActionTable(Base):
     """An action the owner accepted.
 
@@ -368,6 +407,9 @@ class ActionTable(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_public_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.public_id", ondelete="SET NULL")
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     ownership: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -417,6 +459,8 @@ class ActionActivityTable(Base):
     previous_completed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     undo_of_revision: Mapped[int | None] = mapped_column(Integer)
     previous_source_count: Mapped[int | None] = mapped_column(Integer)
+    project_public_id: Mapped[str | None] = mapped_column(String(36))
+    area_public_id: Mapped[str | None] = mapped_column(String(36))
     legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

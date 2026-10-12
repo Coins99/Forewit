@@ -1243,8 +1243,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261013_0015"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0015",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0016"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0016",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1343,9 +1343,9 @@ def test_p1_backfills_only_known_legacy_activity(tmp_path: Path) -> None:
                 ),
             )
         connection.commit()
-    before = _query(path, "SELECT * FROM actions ORDER BY id")
+    before = _rows(path, ("actions",))
     command.upgrade(config, "head")
-    assert _query(path, "SELECT * FROM actions ORDER BY id") == before
+    assert _earlier_columns(_rows(path, ("actions",)), before) == before
     assert _query(
         path, "SELECT action_id,revision,kind,legacy FROM action_activity ORDER BY id"
     ) == [(1, 1, "created", 1), (2, 1, "created", 1), (2, 5, "completed", 1)]

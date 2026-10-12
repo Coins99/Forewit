@@ -46,8 +46,9 @@ from mailbrief.ui.dialog_guard import DialogGuard
 HELP = """Your data stays on this computer. Disconnect removes Gmail credentials only.
 Backup saves a consistent database snapshot, including your writing and preferences;
 OAuth tokens and API keys stay in the OS credential vault. Backups are not encrypted.
-Export saves all actions, drafts, notes and calendar events, including deleted ones,
-source snapshots and saved versions, as portable UTF-8 JSON. Keep backups and exports private.
+Export saves actions, activity, projects, life areas, drafts, notes and calendar events,
+including deleted records, source snapshots and saved versions, as portable UTF-8 JSON.
+Keep backups and exports private.
 Restore validates and upgrades the archive, closes MailBrief, keeps a pre-restore copy
 beside the database, and clears automatic AI permission. Relaunch after restoring.
 Device setup (OAuth client path and model) and vault credentials are configured separately.

@@ -9,6 +9,10 @@ Decisions and limits are in [ADR 0018](adr/0018-calendar.md).
 **New event** adds a timed or all-day event; **Open** changes it and **Delete event**
 hides it, with Undo. Events are kept on this computer, in backups and in **Export all
 writing**. Deadlines and target dates come from your open actions and change only there.
+**This week** shows the current week from then on, so a new week moves the page on by
+itself. While MailBrief is busy with something else, such as a review waiting for you, you
+can still move between weeks and open or add events; Save and **Delete event** wait until
+it finishes.
 
 Pick a time from the list (every 15 minutes) or type one as `HH:mm`. Up and Down move it to
 the next quarter hour, later or earlier, as they move a date; Page Up and Page Down (Fn+Up
@@ -46,7 +50,8 @@ looking at: titles, times and links. Descriptions, locations, guests and meeting
 are never requested. Calendars shared with you as free/busy only, and working-location
 entries, are skipped. The window refreshes when you connect, when you choose **Refresh**,
 and when you open the page or move to a week the saved copy doesn't hold or that is more
-than 15 minutes old.
+than 15 minutes old. **Cancel** at the top stops a refresh, or **Allow Google Calendar**
+while it waits for your browser; quitting stops them too. What was already read is kept.
 
 **Disconnect** in the sidebar forgets the one sign-in and the saved Google events. It does
 not revoke MailBrief's access in your Google account; do that at

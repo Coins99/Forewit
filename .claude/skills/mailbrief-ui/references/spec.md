@@ -340,7 +340,17 @@ The brief list's chips keep their shorter forms (see Brief list).
   events by start. Rows are plain item text, never tooltips. `calendarEmpty` (muted) shows
   under the week when it holds nothing; `calendarNote` (muted) explains markers when there
   are some. Outline New event, Open and Delete event below. Mnemonics avoid every
-  window-level letter. `EventEditor` is a dialog (title, All day, Starts and Ends as a
+  window-level letter. An event ending at midnight belongs to the day before; when the row
+  isn't that day, its end is dated as the clock says ("22:00–Oct 14 00:00"). A refresh
+  keeps the selected row (an event, Google event or marker, on the same day when it's
+  still there), and a saved event is selected. This week, or moving back to it, follows
+  today, so a new week moves the page on. Reading weeks doesn't go through `start()`: while
+  another operation runs, the weeks, New event, Open, Open in Google Calendar and Plan with
+  AI still work (the newest read of the week wins), and Delete event, Allow and Refresh
+  wait. The editor's Save waits too, and its status line says `WAITING` ("MailBrief is
+  busy; Save works again once it finishes."). Allow, Refresh and the page's quiet syncs
+  can be cancelled, and quitting stops them.
+  `EventEditor` is a dialog (title, All day, Starts and Ends as a
   `DateBox`, a `yyyy-MM-dd` date with its calendar popup, and a `TimeBox`, notes) that
   locks while saving, like the action editor. A `TimeBox` is an editable combo box: type
   `HH:mm`, or choose from 15-minute steps; the end's list runs 15 minutes to 24 hours after
@@ -359,7 +369,9 @@ The brief list's chips keep their shorter forms (see Brief list).
   time still being typed, as leaving its field would. The Save that comes with a refusal
   (Return, or the click that took focus from the field) waits, so the reason stays on
   screen; the next Save saves what the fields show, and changing anything else first lets
-  it go ahead. The end date's range runs from the start's day to 31 days on (30 for all-day events).
+  it go ahead. The end date's range runs from the start's day to 31 days on (30 for all-day
+  events). Ticking All day on an event that ends at midnight ends it the day before, and
+  unticking straight away brings its times back.
   Google Calendar (phase 2, one sign-in per ADR 0019): under the heading, `googleStatus`
   (muted) says whether Gmail is connected, whether Calendar is allowed and when the saved
   copy was read, beside outline Allow Google Calendar (only when the sign-in lacks it) or

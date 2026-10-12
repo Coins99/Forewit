@@ -34,7 +34,9 @@ from mailbrief.domain.analysis import (
     TargetReason,
 )
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
+from mailbrief.domain.projects import Project
 from mailbrief.storage.database import sorted_batches
+from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.proposals import ProposalRepository, proposal_from_row
 from mailbrief.storage.tables import (
     AccountTable,
@@ -45,6 +47,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     AnalysisTable,
     MessageTable,
+    ProjectTable,
     SuggestionDecisionTable,
 )
 
@@ -250,11 +253,13 @@ def action_from_rows(
     thread: ThreadActivity | None = None,
     proposals: Sequence[ActionProposal] = (),
     activity: Sequence[ActionActivity] = (),
+    project: Project | None = None,
 ) -> Action:
     """Rebuild an action; each source pairs its snapshot with the cached Inbox state, if any,
     ``thread`` is its derived thread activity, and ``proposals`` its pending proposals."""
     return Action(
         public_id=row.public_id,
+        project=project,
         title=row.title,
         ownership=ActionOwnership(row.ownership),
         status=ActionStatus(row.status),
@@ -363,7 +368,7 @@ class ActionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    def record_activity(
+    async def record_activity(
         self,
         row: ActionTable,
         kind: ActionActivityKind,
@@ -374,6 +379,11 @@ class ActionRepository:
         undo_of_revision: int | None = None,
         previous_source_count: int | None = None,
     ) -> None:
+        project = (
+            None
+            if row.project_public_id is None
+            else await ProjectRepository(self._session).project(row.project_public_id)
+        )
         self._session.add(
             ActionActivityTable(
                 action_id=row.id,
@@ -384,6 +394,8 @@ class ActionRepository:
                 previous_completed_at_utc=previous_completed_at_utc,
                 undo_of_revision=undo_of_revision,
                 previous_source_count=previous_source_count,
+                project_public_id=row.project_public_id,
+                area_public_id=None if project is None else project.area_public_id,
                 legacy=False,
             )
         )
@@ -649,12 +661,35 @@ class ActionRepository:
             ActionTable.ownership == ownership.value,
         ]
 
-    async def list_rows(self, view: ActionFilter, *, limit: int | None) -> list[ActionTable]:
+    @staticmethod
+    def _group(kind: str, public_id: str | None) -> list[ColumnElement[bool]]:
+        if kind == "all":
+            return []
+        if kind == "unassigned":
+            return [ActionTable.project_public_id.is_(None)]
+        if kind == "project" and public_id is not None:
+            return [ActionTable.project_public_id == public_id]
+        if kind == "area" and public_id is not None:
+            return [
+                ActionTable.project_public_id.in_(
+                    select(ProjectTable.public_id).where(ProjectTable.area_public_id == public_id)
+                )
+            ]
+        raise ValueError("Choose a project, life area or unassigned tasks.")
+
+    async def list_rows(
+        self,
+        view: ActionFilter,
+        *,
+        limit: int | None,
+        group: str = "all",
+        group_id: str | None = None,
+    ) -> list[ActionTable]:
         """Live actions for a view: completed ones newest first, others in ID order.
 
         ``limit`` caps only the completed view here; the service sorts and caps the others.
         """
-        stmt = select(ActionTable).where(*self._in_view(view))
+        stmt = select(ActionTable).where(*self._in_view(view), *self._group(group, group_id))
         if view is ActionFilter.COMPLETED:
             stmt = stmt.order_by(ActionTable.completed_at_utc.desc(), ActionTable.id.desc())
             if limit is not None:
@@ -663,15 +698,29 @@ class ActionRepository:
             stmt = stmt.order_by(ActionTable.id)
         return list((await self._session.scalars(stmt)).all())
 
-    async def count_rows(self, view: ActionFilter) -> int:
+    async def count_rows(
+        self, view: ActionFilter, *, group: str = "all", group_id: str | None = None
+    ) -> int:
         count = await self._session.scalar(
-            select(func.count()).select_from(ActionTable).where(*self._in_view(view))
+            select(func.count())
+            .select_from(ActionTable)
+            .where(*self._in_view(view), *self._group(group, group_id))
         )
         return count or 0
 
     async def load(self, rows: Sequence[ActionTable]) -> list[Action]:
         """Domain actions for rows, reading steps, sources and pending proposals with one
         chunked query each, and thread activity with a fixed number more."""
+        projects = (
+            {
+                project.public_id: project
+                for project in await ProjectRepository(self._session).projects_by_ids(
+                    row.project_public_id for row in rows if row.project_public_id is not None
+                )
+            }
+            if any(row.project_public_id is not None for row in rows)
+            else {}
+        )
         ids = [row.id for row in rows]
         activity: dict[int, list[ActionActivity]] = {}
         for chunk in sorted_batches(ids):
@@ -708,6 +757,8 @@ class ActionRepository:
                         previous_completed_at_utc=record.previous_completed_at_utc,
                         undo_of_revision=record.undo_of_revision,
                         previous_source_count=record.previous_source_count,
+                        project_public_id=record.project_public_id,
+                        area_public_id=record.area_public_id,
                         legacy=record.legacy,
                     )
                 )
@@ -746,6 +797,7 @@ class ActionRepository:
                     for proposal in proposals.get(row.id, ())
                 ],
                 activity.get(row.id, ()),
+                projects.get(row.project_public_id or ""),
             )
             for row in rows
         ]

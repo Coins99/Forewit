@@ -229,6 +229,16 @@ class ActionDetailPane(QScrollArea):
         state = wrap_label(state_text(action, details), tone="secondary", px=TEXT_PX)
         state.setObjectName("actionState")
         top: list[QWidget | int] = [self.title, state, *self._dates(details)]
+        if action.project is not None:
+            project = action.project
+            organization = "Project: " + project.name
+            if project.area_name:
+                organization += " · " + project.area_name
+            if project.archived_at_utc:
+                organization += " · Archived"
+            label = wrap_label(organization, tone="secondary", px=TEXT_PX)
+            label.setObjectName("actionProject")
+            top.append(label)
         top += self._plan(action, details)
         if action.notes.strip():
             top += [_SECTION_GAP, _heading("Notes"), wrap_label(action.notes, px=TEXT_PX)]
