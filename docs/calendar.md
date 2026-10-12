@@ -10,6 +10,16 @@ Decisions and limits are in [ADR 0018](adr/0018-calendar.md).
 hides it, with Undo. Events are kept on this computer, in backups and in **Export all
 writing**. Deadlines and target dates come from your open actions and change only there.
 
+Pick a time from the list (every 15 minutes) or type one as `HH:mm`. Up and Down move it to
+the next quarter hour, later or earlier, as they move a date; Page Up and Page Down (Fn+Up
+and Fn+Down on a Mac laptop) move it an hour. The end's list says how long the event
+lasts, and runs past midnight into the next day. Moving the start moves the end with it.
+An end at or before the start, or more than 31 days after it, isn't taken: the editor
+puts the time back and says why. If that happens as you press Return or Save, nothing is
+saved yet: check the times, then save again. Scrolling changes a date or time only while
+you're in that field (click or Tab into it first), so scrolling across the editor never
+moves an event.
+
 ## Google Calendar, read-only
 
 MailBrief can show your Google calendars beside your own events. It only reads: nothing in
@@ -32,7 +42,7 @@ automatic run, as well as from the Calendar page.
 
 **What MailBrief reads and keeps.** For each calendar shown in Google Calendar's own list
 (and always your primary one), the events of a ten-week window around the week you're
-looking at: titles, times, locations and links. Descriptions, guests and meeting details
+looking at: titles, times and links. Descriptions, locations, guests and meeting details
 are never requested. Calendars shared with you as free/busy only, and working-location
 entries, are skipped. The window refreshes when you connect, when you choose **Refresh**,
 and when you open the page or move to a week the saved copy doesn't hold or that is more
