@@ -243,6 +243,14 @@ class FakeBackend(FakeDrafts):
     async def unaccept_action(self, public_id: str, revision: int) -> None:
         await self._act("unaccept_action", public_id, revision)
 
+    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
+        await self._act("create_action", edit, steps)
+        return make_action(title=edit.title, notes=edit.notes, target_date=edit.target_date)
+
+    async def undo_action_status(self, public_id: str, revision: int) -> Action:
+        await self._act("undo_action_status", public_id, revision)
+        return make_action(public_id=public_id, revision=revision + 1)
+
     async def save_action(
         self,
         public_id: str,

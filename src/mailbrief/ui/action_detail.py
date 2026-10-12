@@ -33,12 +33,12 @@ from mailbrief.ui.action_text import (
 )
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import NO_SUBJECT
-from mailbrief.ui.deadline_text import day_text
+from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.theme import SMALL_PX, TEXT_PX, TITLE_PX
 
 EMPTY_TEXT: Final = {
-    ActionFilter.OPEN: "No open actions. Accept a suggestion in a brief to start one.",
+    ActionFilter.OPEN: "No open actions. Create a task or accept a suggestion in a brief.",
     ActionFilter.WAITING: "Nothing you're waiting for.",
     ActionFilter.COMPLETED: "No completed actions yet.",
 }
@@ -236,6 +236,36 @@ class ActionDetailPane(QScrollArea):
         if activity:
             top += [_SECTION_GAP, _heading("Thread")]
             top += [wrap_label(_sentence(text), px=TEXT_PX) for text in activity]
+        if action.activity:
+            top += [_SECTION_GAP, _heading("Activity")]
+            for event in reversed(action.activity[-20:]):
+                at = moment_text(event.occurred_at_utc, zone, today=today)
+                name = event.kind.value.replace("_", " ").capitalize()
+                detail = ""
+                if event.undo_of_revision is not None:
+                    reversed_event = next(
+                        (
+                            item
+                            for item in action.activity
+                            if item.revision == event.undo_of_revision
+                        ),
+                        None,
+                    )
+                    if reversed_event is not None:
+                        reversed_name = {
+                            "created": "creation",
+                            "completed": "completion",
+                            "reopened": "reopening",
+                            "deleted": "deletion",
+                            "source_added": "email addition",
+                            "suggestion_accepted": "suggestion acceptance",
+                            "proposal_applied": "proposal",
+                        }.get(reversed_event.kind.value, "change")
+                        name = f"Undid {reversed_name}"
+                legacy = " · Migrated record" if event.legacy else ""
+                label = wrap_label(f"{name}{detail} · {at}{legacy}", tone="secondary", px=SMALL_PX)
+                label.setObjectName("actionActivityEntry")
+                top.append(label)
         self._top.set_widgets(top)
         self._seen_row.setVisible(bool(activity))
         count = len(details.proposals)

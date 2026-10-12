@@ -34,6 +34,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     ThreadLink,
 )
+from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.backup import BackupMetadata
 from mailbrief.domain.briefs import (
     AutoSendStatus,
@@ -229,6 +230,8 @@ class DesktopBackend(Protocol):
     async def dismiss_suggestion(self, suggestion_id: int) -> None: ...
     async def restore_suggestion(self, suggestion_id: int) -> None: ...
     async def unaccept_action(self, public_id: str, revision: int) -> None: ...
+    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action: ...
+    async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
         self,
         public_id: str,
@@ -544,6 +547,8 @@ class MainWindow(QMainWindow):
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_account: str | None = None  # The connected Google Calendar account.
         self._calendar_shown: CalendarRange | None = None
+
+        self.action_editor.create_requested.connect(self._request_create_action)
         self.draft_writes = DraftWrites()
         # The generation in progress: its plan, its cancel flag and its task.
         self._drafting_plan: DraftingPlan | None = None
@@ -736,6 +741,9 @@ class MainWindow(QMainWindow):
         workspace.detail.reply_requested.connect(self._request_reply)
         workspace.detail.source_requested.connect(self._open_source)
         self.actions_panel = ActionsPanel()
+        self.actions_panel.new_task_requested.connect(self._request_new_task)
+        self.new_task_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.new_task_shortcut.activated.connect(self._request_new_task)
         self.actions_panel.action_requested.connect(self._request_action)
         self.actions_panel.draft_requested.connect(self._request_action_draft)
         self.actions_panel.tabs.currentChanged.connect(self._actions_tab_changed)
@@ -1280,6 +1288,34 @@ class MainWindow(QMainWindow):
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
             self.proposals_dialog.open()
 
+    def _request_new_task(self) -> None:
+        if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
+            return
+        self._show_page("actions")
+        self.action_editor.new_task(self._local_today())
+        self.action_editor.open()
+
+    def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
+        started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
+        if not started and not self._closing:
+            self.action_editor.keep_open(_BUSY)
+
+    async def _create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
+        try:
+            created = await self.backend.create_action(edit, steps)
+        except Exception:
+            if not self._closing:
+                self.action_editor.keep_open(_EDITOR_FAILED)
+            raise
+        self.action_editor.finish_saved()
+        self._offer_undo()
+        self.status.setText(f"Created: {created.title}.")
+        self.actions_panel.show_view(
+            ActionFilter.OPEN if created.ownership is ActionOwnership.MINE else ActionFilter.WAITING
+        )
+        await self._refresh_views()
+        self.actions_panel.select_action(created.public_id)
+
     def _request_save_action(
         self, action: Action, edit: ActionEdit, steps: Sequence[StepEdit] | None
     ) -> None:
@@ -1295,7 +1331,7 @@ class MainWindow(QMainWindow):
             return
 
         async def undo() -> None:
-            await self.backend.reopen_action(done.public_id, done.revision)
+            await self.backend.undo_action_status(done.public_id, done.revision)
 
         self._offer_undo("Undo complete", undo)
         self.status.setText(f"Completed: {done.title}.")
@@ -1309,7 +1345,7 @@ class MainWindow(QMainWindow):
             return
 
         async def undo() -> None:
-            await self.backend.complete_action(opened.public_id, opened.revision)
+            await self.backend.undo_action_status(opened.public_id, opened.revision)
 
         self._offer_undo("Undo reopen", undo)
         self.status.setText(f"Reopened: {opened.title}.")

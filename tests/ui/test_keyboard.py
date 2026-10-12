@@ -287,6 +287,6 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
     detail = [button.objectName() for button in panel.detail.buttons()]
     assert detail == ["editButton", "completeButton", "deleteButton", "draftButton"]
 
-    chain = tab_chain(window, panel.tabs)
+    chain = tab_chain(window, panel.new_task_button)
 
-    assert chain == ["actionsTabs", "actionList", *detail, *HEADER_AND_SIDEBAR]
+    assert chain == ["newTaskButton", "actionsTabs", "actionList", *detail, *HEADER_AND_SIDEBAR]

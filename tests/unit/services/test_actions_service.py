@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import (
     Action,
+    ActionActivityKind,
     ActionEdit,
     ActionFilter,
     ActionStatus,
@@ -319,7 +320,11 @@ async def test_accepting_again_after_deleting_the_action_restores_that_same_acti
     restored = await service.accept(seeded.suggestion_ids[0])
 
     assert restored == first.model_copy(
-        update={"revision": 3, "updated_at_utc": START + timedelta(minutes=1)}
+        update={
+            "revision": 3,
+            "updated_at_utc": START + timedelta(minutes=1),
+            "activity": restored.activity,
+        }
     )
     assert await counts(session) == before == (1, 2, 1, 1)
     assert (await states(session, seeded))[0] == (SuggestionState.ACCEPTED, first.public_id)
@@ -618,7 +623,7 @@ async def test_a_second_save_from_the_same_revision_conflicts_and_keeps_the_firs
 # Undoing an acceptance
 
 
-async def test_unaccept_removes_an_unchanged_action_and_its_decision(
+async def test_unaccept_hides_an_unchanged_action_and_preserves_undo_history(
     session: AsyncSession, service: ActionService
 ) -> None:
     seeded = await seed(session)
@@ -626,7 +631,12 @@ async def test_unaccept_removes_an_unchanged_action_and_its_decision(
 
     await service.unaccept(action.public_id, 1)
 
-    assert await counts(session) == (0, 0, 0, 0)
+    assert await counts(session) == (1, 2, 1, 0)
+    assert (await session.scalar(select(ActionTable.deleted_at_utc))) is not None
+    assert [event.kind for event in await ActionRepository(session).activity_rows(1)] == [
+        "created",
+        "undo",
+    ]
     assert (await states(session, seeded))[0] == (SuggestionState.PENDING, None)
 
 
@@ -675,7 +685,7 @@ async def test_accepting_again_after_unaccept_makes_a_new_action_with_one_decisi
     second = await service.accept(seeded.suggestion_ids[0])
 
     assert second.public_id != first.public_id
-    assert await counts(session) == (1, 2, 1, 1)
+    assert await counts(session) == (2, 4, 2, 1)
     assert (await states(session, seeded))[0] == (SuggestionState.ACCEPTED, second.public_id)
     with pytest.raises(ActionNotFoundError):
         await service.get(first.public_id)
@@ -990,6 +1000,7 @@ async def test_accept_into_adds_no_source_for_an_email_already_linked(
     added = await service.accept_into(seeded.suggestion_ids[1], action.public_id, 1)
 
     assert not added.source_added
+    assert added.action.activity[-1].kind is ActionActivityKind.SUGGESTION_ACCEPTED
     assert [source.provider_message_id for source in added.action.sources] == ["msg-1"]
     assert added.action.revision == 2
     assert await states(session, seeded) == [
@@ -1115,6 +1126,9 @@ async def test_undo_add_never_removes_the_last_source(
 
     assert [source.provider_message_id for source in undone.sources] == ["msg-1"]
     assert undone.revision == 3
+    assert undone.activity[-1].kind is ActionActivityKind.UNDO
+    assert undone.activity[-1].undo_of_revision == 2
+    assert undone.activity[-2].kind is ActionActivityKind.SUGGESTION_ACCEPTED
     assert await states(session, seeded) == [
         (SuggestionState.ACCEPTED, action.public_id),
         (SuggestionState.PENDING, None),

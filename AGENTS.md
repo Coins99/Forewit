@@ -64,6 +64,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   backup/recovery/export/cleanup.
   See `docs/m9-durability.md` and `docs/m9-live-validation.md`. Do not claim M9 accepted
   until the owner completes real-record recovery and the 7–14-day release scenario.
+- P1 first slice implemented, awaiting owner desktop acceptance: manual tasks on Actions
+  (New task / Ctrl+N, Cmd+N on macOS) use the shared action editor and lifecycle without Gmail.
+  Revisioned activity is transactional and survives reopen, restart, backup/recovery and
+  writing export. Undo reopen restores the original completion timestamp. See
+  `docs/p1-manual-tasks.md`; projects/life areas and unified Today are the next slices.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
 
@@ -228,7 +233,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Only the owner adds an email to an existing action (`accept_into`), and only to a live,
   open one; the brief offers it only for actions with a source in the email's thread in the
   same account, it makes one revision, and its undo works only while the action is
-  unchanged and never removes an action's last source.
+  unchanged and never removes an email-derived action's last source; undoing the first email
+  addition to a manual task restores its original zero-source state.
 - Runs through a day are cumulative: the day's saved brief is carried forward ahead of the
   automatic selection, within messages per brief. A carried message drops out only when it is
   uncached, was an Inbox message since archived, is blocked or is declined; one the brief

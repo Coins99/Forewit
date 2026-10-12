@@ -14,7 +14,13 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import Action, ActionProposal, ActionStatus, ProposalState
+from mailbrief.domain.actions import (
+    Action,
+    ActionActivityKind,
+    ActionProposal,
+    ActionStatus,
+    ProposalState,
+)
 from mailbrief.domain.analysis import (
     DeadlinePrecision,
     FollowUpKind,
@@ -343,6 +349,7 @@ class ProposalService:
                 raise ActionConflictError(_NOT_OPEN)
             if action.revision != expected_revision:
                 raise ActionConflictError(_STALE)
+            previous_status, previous_completed = action.status, action.completed_at_utc
             row.previous_json = _previous(action)
             if row.kind == FollowUpKind.NEW_DEADLINE.value:
                 if action.target_date == action.suggested_target_date:
@@ -361,6 +368,17 @@ class ProposalService:
             row.state = ProposalState.APPLIED.value
             row.decided_at_utc = now
             touch(action, now)
+            self._actions.record_activity(
+                action,
+                (
+                    ActionActivityKind.COMPLETED
+                    if action.status == ActionStatus.COMPLETED.value
+                    else ActionActivityKind.PROPOSAL_APPLIED
+                ),
+                now,
+                previous_status=previous_status,
+                previous_completed_at_utc=previous_completed,
+            )
             row.applied_revision = action.revision
             return await self._load(action)
 
@@ -424,6 +442,9 @@ class ProposalService:
             row.applied_revision = None
             row.decided_at_utc = None
             touch(action, now)
+            self._actions.record_activity(
+                action, ActionActivityKind.UNDO, now, undo_of_revision=expected_revision
+            )
             return await self._load(action)
 
         return await self._write(run)
