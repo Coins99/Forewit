@@ -1243,8 +1243,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261011_0013"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261011_0013",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261012_0014"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0014",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1318,3 +1318,53 @@ def test_calendar_events_upgrade_keeps_rows_checks_shapes_and_downgrades(
 
     assert "calendar_events" not in table_names(path)
     assert _rows(path, _OLD_ROWS) == before
+
+
+def test_google_calendar_cache_upgrades_cascades_and_downgrades(tmp_path: Path) -> None:
+    """0014 adds the Google calendar cache beside the owner's events; deleting a calendar
+    takes its events, and downgrading drops only the cache."""
+    path = tmp_path / "google.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261011_0013")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(_TIMED_EVENT, ("5b1d7c2e-3f4a-4b6c-8d9e-0a1b2c3d4e01",))
+        connection.commit()
+    owned = _rows(path, ("calendar_events",))
+
+    command.upgrade(config, "20261012_0014")
+
+    assert {"google_calendars", "google_events"} <= table_names(path)
+    assert _rows(path, ("calendar_events",)) == owned
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        # Only what the page shows is kept: no location, free/busy flag or shown flag.
+        for table, absent in (
+            ("google_events", {"location", "busy"}),
+            ("google_calendars", {"shown"}),
+        ):
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            assert not absent & columns
+        connection.execute(
+            "INSERT INTO google_calendars(calendar_id,name,is_primary,updated_at_utc)"
+            " VALUES('owner@example.com','Owner',1,'2026-10-12 12:00:00.000000')"
+        )
+        insert = (
+            "INSERT INTO google_events(calendar_row_id,event_id,title,all_day,starts_at_utc,"
+            "ends_at_utc,fetched_at_utc) VALUES(1,?,'Standup',0,?,?,"
+            "'2026-10-12 12:00:00.000000')"
+        )
+        start = "2026-10-12 13:00:00.000000"
+        connection.execute(insert, ("e1", start, "2026-10-12 13:30:00.000000"))
+        connection.execute(insert, ("e2", start, start))  # Google allows zero-length events.
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(insert, ("e3", start, "2026-10-12 12:00:00.000000"))
+        with pytest.raises(sqlite3.IntegrityError):  # One event ID per calendar.
+            connection.execute(insert, ("e1", start, start))
+        connection.execute("DELETE FROM google_calendars")
+        assert connection.execute("SELECT count(*) FROM google_events").fetchone() == (0,)
+        connection.commit()
+
+    command.downgrade(config, "20261011_0013")
+
+    assert not {"google_calendars", "google_events"} & table_names(path)
+    assert _rows(path, ("calendar_events",)) == owned

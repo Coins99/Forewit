@@ -69,8 +69,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 
 - Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
-  as markers. Google read-only display, AI-proposed changes and MailBrief's own calendar
-  in Google are later phases.
+  as markers. Phase 2a: the read-only Google Calendar sign-in, sync and cache, not yet
+  shown in the desktop. Showing it (2b), AI-proposed changes and MailBrief's own
+  calendar in Google are later phases.
 
 ## Layout (ports and adapters)
 
@@ -78,11 +79,17 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `src/mailbrief/ports/`: `EmailProvider` / `AIProvider` / `DraftingProvider` protocols
   (`drafting.py`), `ThreadReader` (`threads.py`) and provider-neutral errors.
 - `src/mailbrief/providers/gmail/`: active adapter. `providers/microsoft/`: dormant adapter.
+  `providers/gcal/`: Google Calendar, read-only (ADR 0018): its own sign-in, the calendar
+  list and event reads, behind `ports/calendar.py`. `providers/google/`: what Gmail and
+  Google Calendar share: the bounded GET with retries (`requests.py`), the token endpoint
+  (`tokens.py`) and the vault-held refresh credential (`credentials.py`); each adapter
+  passes its own fixed messages.
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
-  (ADR 0018). `calendar.py` is day boundaries and time zones, not the calendar feature.
+  (ADR 0018), and `google_calendar` for reading Google Calendar into its cache. `calendar.py`
+  is day boundaries and time zones, not the calendar feature.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,
@@ -248,6 +255,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   owner applies. Deadlines and target dates are never stored as events or moved by them.
   Google writes go only to the calendar MailBrief creates: never to other calendars, never
   guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
+  The calendar grant holds only `calendar.events.readonly` and
+  `calendar.calendarlist.readonly` until phase 4, and every Calendar request names its
+  `fields`: descriptions, locations, guests and conference details are never fetched or
+  stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
+  with its events. The Google cache is excluded from exports and from the cleanup
+  fingerprint.
 
 ## AI analysis rules (M4)
 
