@@ -8,7 +8,7 @@ as events, so moving an event can never change a deadline.
 """
 
 import unicodedata
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from typing import Final, Self
 from zoneinfo import ZoneInfo
@@ -225,3 +225,53 @@ class CalendarRange(DomainModel):
     markers: tuple[ActionMarker, ...]
     google_events: tuple[GoogleEvent, ...] = ()
     google_coverage: GoogleCoverage | None = None
+
+
+def wall_clock(day: date, clock: time, zone: ZoneInfo) -> datetime:
+    """A wall-clock time in ``zone``. A time a DST change skips is read with the offset
+    before the change, as a clock would show it; a repeated time is its first."""
+    return datetime.combine(day, clock).replace(tzinfo=zone, fold=0)
+
+
+class ChangeKind(StrEnum):
+    """What one change in a batch does to the owner's events."""
+
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+
+
+class EventChange(DomainModel):
+    """One change to apply: a new event's fields, an event and its new fields, or an event
+    to delete. ``event`` is the event as it was read, so applying checks its revision."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    kind: ChangeKind
+    event: CalendarEvent | None = None
+    edit: EventEdit | None = None
+
+    @model_validator(mode="after")
+    def _fits_kind(self) -> Self:
+        wants_event = self.kind is not ChangeKind.CREATE
+        wants_edit = self.kind is not ChangeKind.DELETE
+        if (self.event is not None) != wants_event or (self.edit is not None) != wants_edit:
+            raise ValueError("the change's fields don't fit its kind")
+        return self
+
+
+class AppliedChange(DomainModel):
+    """What applying one change left, so that undoing it can check nothing changed since."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    kind: ChangeKind
+    public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    revision: int = Field(ge=1)
+    previous: EventEdit | None = None  # An update's fields before it.
+
+
+class AppliedBatch(DomainModel):
+    """The changes one apply made, all together; undo reverses all of them or none."""
+
+    changes: tuple[AppliedChange, ...] = Field(min_length=1)

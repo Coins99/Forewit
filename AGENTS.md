@@ -75,8 +75,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
   as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
-  live acceptance: Google Calendar read-only beside the owner's events. AI-proposed
-  changes and MailBrief's own calendar in Google are later phases. See `docs/calendar.md`.
+  live acceptance: Google Calendar read-only beside the owner's events. Phase 3a: the
+  AI planning service, the Groq call and all-or-nothing apply with Undo, not yet shown in
+  the desktop; 3b adds the panel. MailBrief's own calendar in Google is phase 4. See
+  `docs/calendar.md`.
 
 ## Layout (ports and adapters)
 
@@ -93,8 +95,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
-  (ADR 0018), and `google_calendar` for reading Google Calendar into its cache. `calendar.py`
-  is day boundaries and time zones, not the calendar feature.
+  (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
+  `calendar_planning` for AI-proposed calendar changes. `calendar.py` is day boundaries
+  and time zones, not the calendar feature.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,
@@ -267,6 +270,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
   with its events. The Google cache is excluded from exports and from the cleanup
   fingerprint.
+- Once any real database has run a migration, including the owner's from a source run
+  of an unmerged branch, never edit that migration; fix forward with a new revision.
 
 ## AI analysis rules (M4)
 
@@ -313,6 +318,20 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   text unchanged.
 - Groq's HTTP 400 `json_validate_failed` is an incomplete answer (retried once), not a
   rejected request, for briefs and drafting alike.
+
+## AI calendar rules (ADR 0018, phase 3)
+
+- The model only proposes changes to the owner's own events; `validate_plan` in
+  `services/calendar_planning.py` checks each one, and nothing changes until the owner
+  applies. Never let the model name Google events or actions, or change notes, deadlines
+  or target dates.
+- Send the instruction, the local date and zone, and the owner's events in the four-week
+  window (titles and times only). Google busy times, their titles and open actions go only
+  when the owner ticks them, and the preview shows each part's size.
+- Parse dates and times in Python in the owner's zone; never trust the model's arithmetic.
+  Overlap warnings are computed locally and never sent.
+- Apply all kept changes in one transaction (`EventService.apply_changes`), and undo them
+  together only while every event is as the apply left it (`undo_changes`).
 
 ## Dependencies
 

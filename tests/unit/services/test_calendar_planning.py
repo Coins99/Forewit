@@ -1,0 +1,463 @@
+"""AI calendar proposals: what is sent, consent, and the checks every change must pass."""
+
+import asyncio
+from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime, time
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from mailbrief.domain.calendar_planning import (
+    CalendarPlanningRequest,
+    ChangeCandidate,
+    PlanningCandidate,
+    PlanningOptions,
+    PlanningPart,
+    PlanningPreview,
+    PlanningResponse,
+    PlanningStatus,
+)
+from mailbrief.domain.drafting import DraftingProblem
+from mailbrief.domain.events import ChangeKind, EventEdit, wall_clock
+from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
+from mailbrief.ports.errors import ProviderRateLimitError
+from mailbrief.services.calendar_planning import (
+    CALENDAR_SCOPE,
+    CalendarPlanningService,
+    PreparedPlan,
+    validate_plan,
+)
+from mailbrief.services.events import EventConflictError, EventService
+from mailbrief.services.google_calendar import CalendarSyncService
+from mailbrief.storage.database import Database
+from mailbrief.storage.repositories import OwnerConsentRepository
+from mailbrief.storage.tables import ActionTable
+
+TORONTO = ZoneInfo("America/Toronto")
+NOW = datetime(2026, 10, 14, 18, 20, tzinfo=UTC)  # Wednesday 14:20 in Toronto.
+MONDAY = date(2026, 10, 12)
+WEDNESDAY = date(2026, 10, 14)
+FRIDAY = date(2026, 10, 16)
+
+
+def at(day: date, hour: int, minute: int = 0) -> datetime:
+    return wall_clock(day, time(hour, minute), TORONTO)
+
+
+def timed(title: str, day: date, start: int, end: int) -> EventEdit:
+    return EventEdit(
+        title=title,
+        all_day=False,
+        starts_at_utc=at(day, start),
+        ends_at_utc=at(day, end),
+        time_zone="America/Toronto",
+    )
+
+
+class Provider:
+    provider_name = "groq"
+    model_name = "test-model"
+    planning_prompt_version = "test-1"
+    privacy_notice = "Notice."
+    requests_sent = 0
+
+    def __init__(self) -> None:
+        self.script: list[PlanningResponse | Exception] = []
+        self.requests: list[CalendarPlanningRequest] = []
+        self.key = True
+
+    async def credentials_available(self) -> bool:
+        return self.key
+
+    async def plan_calendar(self, request: CalendarPlanningRequest) -> PlanningResponse:
+        self.requests.append(request)
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class Gate:
+    def __init__(self, answer: bool = True) -> None:
+        self.answer = answer
+        self.previews: list[PlanningPreview] = []
+
+    async def request_planning_consent(self, preview: PlanningPreview) -> bool:
+        self.previews.append(preview)
+        return self.answer
+
+
+@pytest.fixture
+async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
+    database = Database.from_path(tmp_path / "planning.sqlite3")
+    await database.create_schema_for_tests()
+    try:
+        async with database.session() as session:
+            yield session
+    finally:
+        await database.dispose()
+
+
+@pytest.fixture
+def provider() -> Provider:
+    return Provider()
+
+
+@pytest.fixture
+def service(session: AsyncSession, provider: Provider) -> CalendarPlanningService:
+    return CalendarPlanningService(session, provider, clock=lambda: NOW)
+
+
+def change(**fields: Any) -> ChangeCandidate:
+    return ChangeCandidate.model_validate({"op": "update", "event_key": "e1"} | fields)
+
+
+def answer(*changes: ChangeCandidate, message: str | None = None) -> PlanningResponse:
+    return PlanningResponse(candidate=PlanningCandidate(changes=changes, message=message))
+
+
+async def seeded(
+    session: AsyncSession,
+    service: CalendarPlanningService,
+    parts: frozenset[PlanningPart] = frozenset(),
+) -> PreparedPlan:
+    events = EventService(session, clock=lambda: NOW)
+    await events.create(timed("Dentist", WEDNESDAY, 11, 12))
+    await events.create(timed("Standup", FRIDAY, 9, 10))
+    await events.create(
+        EventEdit(
+            title="Trip",
+            all_day=True,
+            start_date=date(2026, 10, 20),
+            last_date=date(2026, 10, 21),
+            time_zone="America/Toronto",
+        )
+    )
+    session.add(
+        ActionTable(
+            public_id="11111111-0000-4000-8000-000000000001",
+            title="Send the deck",
+            ownership="mine",
+            status="open",
+            deadline_precision="date",
+            deadline_date=FRIDAY,
+            target_date=date(2026, 10, 15),
+            notes="",
+            created_at_utc=NOW,
+            updated_at_utc=NOW,
+            revision=1,
+        )
+    )
+    await session.commit()
+    return await service.prepare(
+        PlanningOptions(instruction="Move the dentist to Friday at 10", parts=parts),
+        MONDAY,
+        TORONTO,
+    )
+
+
+class Reader:
+    async def list_calendars(self) -> tuple[GoogleCalendarInfo, ...]:
+        return (
+            GoogleCalendarInfo(
+                calendar_id="owner@example.com", name="Owner", primary=True, shown=True
+            ),
+        )
+
+    async def list_events(self, calendar: GoogleCalendarInfo, *_: Any) -> tuple[GoogleEvent, ...]:
+        return (
+            GoogleEvent(
+                calendar_id=calendar.calendar_id,
+                calendar_name="Owner",
+                event_id="g",
+                title="Team sync",
+                all_day=False,
+                starts_at_utc=at(FRIDAY, 10, 30),
+                ends_at_utc=at(FRIDAY, 11, 30),
+            ),
+        )
+
+
+async def test_prepare_sends_own_events_and_only_the_chosen_parts(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    request = plan.request
+    assert (request.window_first, request.window_last) == (MONDAY, date(2026, 11, 8))
+    assert (
+        request.now_local == "2026-10-14 14:20 (Wednesday)"
+        and request.time_zone == "America/Toronto"
+    )
+    assert [(e.key, e.title, e.start, e.end) for e in request.events] == [
+        ("e1", "Trip", "2026-10-20", "2026-10-21"),
+        ("e2", "Dentist", "2026-10-14 11:00", "2026-10-14 12:00"),
+        ("e3", "Standup", "2026-10-16 09:00", "2026-10-16 10:00"),
+    ]
+    assert request.busy is None and request.actions is None
+    assert plan.preview.first_use and len(plan.preview.lines) == 2
+    assert "2026-10-12 to 2026-11-08" in plan.preview.lines[1].label
+
+    await CalendarSyncService(session, Reader(), clock=lambda: NOW).sync(WEDNESDAY, TORONTO)
+    times = await service.prepare(
+        PlanningOptions(instruction="x", parts=frozenset({PlanningPart.GOOGLE_BUSY})),
+        MONDAY,
+        TORONTO,
+    )
+    assert times.request.busy is not None and [b.title for b in times.request.busy] == [
+        None
+    ]  # Times only: titles are a separate choice.
+    full = await service.prepare(
+        PlanningOptions(instruction="x", parts=frozenset(PlanningPart)), MONDAY, TORONTO
+    )
+    assert full.request.busy is not None and [b.title for b in full.request.busy] == ["Team sync"]
+    assert full.request.actions is not None
+    assert [(a.title, a.deadline, a.target) for a in full.request.actions] == [
+        ("Send the deck", "2026-10-16", "2026-10-15")
+    ]
+    assert [line.label.split(" ")[1] for line in full.preview.lines[2:]] == ["Google", "open"]
+    with pytest.raises(ValueError):
+        PlanningOptions(instruction="x", parts=frozenset({PlanningPart.GOOGLE_TITLES}))
+
+
+async def test_generate_needs_a_key_and_approval_and_records_consent_once(
+    session: AsyncSession, service: CalendarPlanningService, provider: Provider
+) -> None:
+    plan = await seeded(session, service)
+    provider.key = False
+    assert (await service.generate(plan, Gate())).error_code == "AI_KEY_MISSING"
+    provider.key = True
+    declined = await service.generate(plan, Gate(answer=False))
+    assert declined.status is PlanningStatus.DECLINED and provider.requests == []
+    assert not await service.consent_active()
+
+    provider.script = [answer(change(start_date="2026-10-16", start_time="10:00"))]
+    gate = Gate()
+    outcome = await service.generate(plan, gate)
+    assert outcome.status is PlanningStatus.PROPOSED and gate.previews[0].first_use
+    assert await OwnerConsentRepository(session).get_active("groq", CALENDAR_SCOPE, "1") is not None
+    provider.script = [answer()]
+    later = Gate()
+    await service.generate(plan, later)
+    assert not later.previews[0].first_use
+
+
+async def test_generate_retries_once_and_reports_codes(
+    session: AsyncSession, service: CalendarPlanningService, provider: Provider
+) -> None:
+    plan = await seeded(session, service)
+    provider.script = [
+        PlanningResponse(problem=DraftingProblem.INVALID_OUTPUT),
+        answer(change(title="Dentist (Fri)")),
+    ]
+    outcome = await service.generate(plan, Gate())
+    assert outcome.status is PlanningStatus.PROPOSED and len(provider.requests) == 2
+    provider.script = [PlanningResponse(problem=DraftingProblem.REFUSED)] * 2
+    assert (await service.generate(plan, Gate())).error_code == "AI_REFUSED"
+    provider.script = [ProviderRateLimitError("slow down")]
+    assert (await service.generate(plan, Gate())).error_code == "AI_RATE_LIMITED"
+    cancel = asyncio.Event()
+    cancel.set()
+    assert (await service.generate(plan, Gate(), cancel)).status is PlanningStatus.CANCELLED
+
+
+async def test_checks_keep_good_changes_and_drop_bad_ones(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(
+                    event_key="e2",
+                    start_date="2026-10-16",
+                    start_time="09:30",
+                    reason="Moves it\x1b[31m to Friday.",
+                ),
+                change(event_key="e2", title="Again"),  # The same event twice.
+                change(event_key="e9", title="Unknown"),
+                change(op="explode"),
+                change(
+                    op="create",
+                    event_key=None,
+                    title="Deck work\n",
+                    all_day=False,
+                    start_date="2026-10-15",
+                    start_time="09:00",
+                    end_time="11:00",
+                ),
+                change(
+                    op="create",
+                    event_key=None,
+                    title="Holiday",
+                    all_day=True,
+                    start_date="2026-10-23",
+                    end_date="2026-10-23",
+                ),
+                change(
+                    op="create", event_key=None, title="Far", all_day=True, start_date="2026-12-01"
+                ),  # Outside the window.
+                change(
+                    op="create",
+                    event_key=None,
+                    title="Backwards",
+                    all_day=False,
+                    start_date="2026-10-15",
+                    start_time="11:00",
+                    end_time="10:00",
+                ),
+                change(
+                    op="create", event_key=None, title="  ", all_day=True, start_date="2026-10-15"
+                ),
+                change(
+                    op="create",
+                    event_key=None,
+                    title="No time",
+                    all_day=False,
+                    start_date="2026-10-15",
+                ),
+                change(
+                    op="create",
+                    event_key=None,
+                    title="Bad day",
+                    all_day=True,
+                    start_date="2026-02-30",
+                ),
+                change(event_key="e3", start_time="09:00"),  # Changes nothing.
+                change(op="delete", event_key="e1"),
+            ),
+            message="Done\u202e.",
+        ),
+        plan,
+    )
+    kinds = [
+        (
+            p.change.kind,
+            p.change.edit.title
+            if p.change.edit
+            else p.change.event.title
+            if p.change.event
+            else None,
+        )
+        for p in checked.proposals
+    ]
+    assert kinds == [
+        (ChangeKind.UPDATE, "Dentist"),
+        (ChangeKind.CREATE, "Deck work"),
+        (ChangeKind.CREATE, "Holiday"),
+        (ChangeKind.DELETE, "Trip"),
+    ]
+    moved = checked.proposals[0].change.edit
+    assert (
+        moved is not None
+        and moved.starts_at_utc == at(FRIDAY, 9, 30)
+        and moved.ends_at_utc == at(FRIDAY, 10, 30)
+    )
+    assert checked.proposals[0].reason == "Moves it[31m to Friday."
+    assert checked.proposals[0].overlaps == ("Standup",)  # 09:30-10:30 against 09:00-10:00.
+    assert checked.ignored == 9 and checked.message == "Done."
+
+
+async def test_overlaps_name_events_and_busy_google_times(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    await CalendarSyncService(session, Reader(), clock=lambda: NOW).sync(WEDNESDAY, TORONTO)
+    plan = await seeded(session, service)
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(event_key="e2", start_date="2026-10-16", start_time="10:00"),
+                change(op="delete", event_key="e3"),
+            )
+        ),
+        plan,
+    )
+    # Standup is being deleted, so it no longer counts.
+    assert checked.proposals[0].overlaps == ("Team sync (Owner)",)
+
+
+async def test_at_most_ten_changes_are_kept(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    many = tuple(
+        change(
+            op="create", event_key=None, title=f"Block {n}", all_day=True, start_date="2026-10-15"
+        )
+        for n in range(12)
+    )
+    checked = validate_plan(PlanningCandidate(changes=many), plan)
+    assert len(checked.proposals) == 10 and checked.ignored == 2
+
+
+async def test_applied_changes_undo_together_and_refuse_stale_ones(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(event_key="e2", start_date="2026-10-16", start_time="13:00"),
+                change(
+                    op="create",
+                    event_key=None,
+                    title="Deck work",
+                    all_day=False,
+                    start_date="2026-10-15",
+                    start_time="09:00",
+                    end_time="11:00",
+                ),
+                change(op="delete", event_key="e1"),
+            )
+        ),
+        plan,
+    )
+    events = EventService(session, clock=lambda: NOW)
+    batch = await events.apply_changes([p.change for p in checked.proposals])
+    titles = sorted(
+        e.title for e in (await events.list_range(MONDAY, date(2026, 11, 8), TORONTO)).events
+    )
+    assert titles == ["Deck work", "Dentist", "Standup"]
+    with pytest.raises(EventConflictError):  # The plan was read before these changes.
+        await events.apply_changes([p.change for p in checked.proposals[:1]])
+    await events.undo_changes(batch)
+    after = sorted(
+        e.title for e in (await events.list_range(MONDAY, date(2026, 11, 8), TORONTO)).events
+    )
+    assert after == ["Dentist", "Standup", "Trip"]
+    with pytest.raises(EventConflictError):
+        await events.undo_changes(batch)  # Already undone: the events moved on.
+    with pytest.raises(ValueError):
+        await events.apply_changes([])
+
+
+async def test_a_conflict_applies_nothing(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(
+                    op="create", event_key=None, title="New", all_day=True, start_date="2026-10-15"
+                ),
+                change(event_key="e2", title="Dentist, renamed"),
+            )
+        ),
+        plan,
+    )
+    events = EventService(session, clock=lambda: NOW)
+    dentist = plan.keys["e2"]
+    await events.save(
+        dentist.public_id,
+        dentist.revision,
+        dentist.edit().model_copy(update={"notes": "Changed elsewhere"}),
+    )
+    with pytest.raises(EventConflictError):
+        await events.apply_changes([p.change for p in checked.proposals])
+    titles = sorted(
+        e.title for e in (await events.list_range(MONDAY, date(2026, 11, 8), TORONTO)).events
+    )
+    assert "New" not in titles
