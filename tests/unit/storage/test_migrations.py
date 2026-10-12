@@ -58,6 +58,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "digests",
         "digest_items",
         "sync_runs",
+        "inbox_scan_messages",
         "alembic_version",
     }.issubset(table_names(database_path))
 
@@ -1243,8 +1244,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0016"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0016",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261012_0017"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1402,3 +1403,17 @@ def test_google_calendar_cache_upgrades_cascades_and_downgrades(tmp_path: Path) 
 
     assert not {"google_calendars", "google_events"} & table_names(path)
     assert _rows(path, ("calendar_events",)) == owned
+
+
+def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> None:
+    path = tmp_path / "checkpoint-upgrade.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261014_0016")
+    before = _schema(path)
+    command.upgrade(config, "head")
+    assert "inbox_scan_messages" in table_names(path)
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
+    assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
+    command.check(config)
+    command.downgrade(config, "20261014_0016")
+    assert _schema(path) == before

@@ -154,3 +154,36 @@ def test_inbox_gallery(qtbot: QtBot, themed: None, mode: ThemeMode) -> None:
         target = Path(directory)
         target.mkdir(parents=True, exist_ok=True)
         assert window.grab().save(str(target / f"inbox-{mode}-{window.devicePixelRatioF():g}x.png"))
+
+
+def test_inbox_zone_changes_keep_selection_and_page(qtbot: QtBot) -> None:
+    from zoneinfo import ZoneInfo
+
+    from mailbrief.domain.preferences import OwnerPreferences
+
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    panel = window.inbox_panel
+    window._apply_owner_preferences(OwnerPreferences(revision=0, time_zone="UTC"))
+    panel.show_page(
+        InboxPage(
+            account_email="owner@example.com",
+            offset=100,
+            has_more=True,
+            messages=(
+                make_message(provider_message_id="one"),
+                make_message(provider_message_id="two"),
+            ),
+        )
+    )
+    panel.messages.setCurrentRow(1)
+    before = panel.details.text()
+    window._apply_owner_preferences(OwnerPreferences(revision=0, time_zone="America/Toronto"))
+    assert panel.zone == ZoneInfo("America/Toronto")
+    assert panel.messages.currentRow() == 1
+    assert panel.details.text() != before
+    assert panel._page is not None and panel._page.offset == 100 and panel._page.has_more
+    panel.messages.setCurrentRow(0)
+    after = panel.details.text()
+    panel.set_zone(ZoneInfo("UTC"))
+    assert panel.details.text() != after

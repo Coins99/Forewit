@@ -2499,6 +2499,7 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        self.inbox_panel.set_zone(self.zone)
         self._set_dialog_zones()
         self._render_checked()  # In the new zone.
         self.draft_editor.ai_panel.set_defaults(preferences.draft_tone, preferences.draft_length)

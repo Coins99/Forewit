@@ -344,8 +344,21 @@ class SyncRunTable(Base):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     sanitized_error_code: Mapped[str | None] = mapped_column(String(128))
+    inbox_continuation: Mapped[str | None] = mapped_column(Text)
     failed_message_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+
+class InboxScanMessageTable(Base):
+    """Transient observations of one resumable Inbox scan."""
+
+    __tablename__ = "inbox_scan_messages"
+    sync_run_id: Mapped[int] = mapped_column(
+        ForeignKey("sync_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
     )
 
 

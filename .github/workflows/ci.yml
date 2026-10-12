@@ -9,6 +9,9 @@ on:
       release-tag:
         type: string
         default: ''
+    secrets:
+      MAILBRIEF_GOOGLE_OAUTH_JSON:
+        required: false
 
 # One run per pull request, or per commit pushed to main. A new push to a pull request
 # cancels that pull request's older run; runs on main always finish.

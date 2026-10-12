@@ -235,6 +235,12 @@ def archive(tmp_path: Path) -> Path:
             "auto_send_limit,auto_send_granted_at_utc) VALUES (1,'groq','1',?,5,?)",
             (STAMP, STAMP),
         )
+        connection.execute(
+            "INSERT INTO sync_runs(account_id,range_start_utc,range_end_utc,started_at_utc,"
+            "status,page_count,message_count,failed_message_count,inbox_continuation) "
+            "VALUES(1,?,?,?,'partial',1,0,0,'synthetic-cursor')",
+            (STAMP, "2026-10-05 12:00:00.000000", STAMP),
+        )
         connection.commit()
     backup = tmp_path / "backup.zip"
     create_backup(database, backup)
@@ -262,7 +268,7 @@ def rewrite_archive(
 
 def test_inspect_checks_supported_archive(archive: Path) -> None:
     metadata = inspect_backup(archive)
-    assert metadata.schema_revisions == ("20261014_0016",)
+    assert metadata.schema_revisions == ("20261012_0017",)
     assert metadata.credentials_included is False
 
 
@@ -423,7 +429,7 @@ def test_older_backup_is_upgraded_in_staging(tmp_path: Path, revision: str) -> N
     restored = tmp_path / "restored.sqlite3"
     restore_backup(backup, restored)
     assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]
-    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261014_0016",)]
+    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
     assert query(original, "SELECT version_num FROM alembic_version") == [(revision,)]
 
 
@@ -709,3 +715,11 @@ def test_restore_refuses_a_symlinked_database(archive: Path, tmp_path: Path) -> 
     assert hashlib.sha256(real.read_bytes()).hexdigest() == before
     assert link.is_symlink()
     assert not list(tmp_path.glob("*.pre-restore-*"))
+
+
+def test_restore_discards_transient_inbox_checkpoints(archive: Path, tmp_path: Path) -> None:
+    restored = tmp_path / "restored-checkpoint.sqlite3"
+    restore_backup(archive, restored)
+    assert query(restored, "SELECT inbox_continuation FROM sync_runs") == [(None,)]
+    assert query(restored, "SELECT count(*) FROM inbox_scan_messages") == [(0,)]
+    assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]

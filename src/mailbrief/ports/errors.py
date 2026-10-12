@@ -81,6 +81,10 @@ class ProviderResponseError(ProviderError):
     """The provider returned an invalid or unsupported response."""
 
 
+class ProviderContinuationError(ProviderResponseError):
+    """The provider rejected a pagination cursor; restart enumeration safely."""
+
+
 class MessageUnavailableError(ProviderResponseError):
     """The message no longer exists or can no longer be read, for example after deletion."""
 

@@ -99,6 +99,7 @@ from mailbrief.services.proposals import ProposalService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
+from mailbrief.storage.inbox_scan import InboxScanRepository
 from mailbrief.storage.migrate import upgrade_database
 from mailbrief.storage.repositories import (
     AccountRepository,
@@ -189,6 +190,7 @@ class DesktopRuntime:
         self._calendar_allowed = None
         if self._database is not None:
             async with self._storage().session() as session:
+                await InboxScanRepository(session).clear()
                 await forget_cache(session)
 
     async def ai_status(self) -> str:

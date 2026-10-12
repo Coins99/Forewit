@@ -248,6 +248,9 @@ def _prepare_restored_database(database: Path) -> None:
         connection.execute(
             "UPDATE ai_consents SET auto_send_limit=0, auto_send_granted_at_utc=NULL"
         )
+        # Pagination checkpoints belong to a live scan, never restored history.
+        connection.execute("UPDATE sync_runs SET inbox_continuation=NULL")
+        connection.execute("DELETE FROM inbox_scan_messages")
         connection.commit()
         # Publish a self-contained file; no staging WAL can be left behind.
         connection.execute("PRAGMA journal_mode=DELETE")

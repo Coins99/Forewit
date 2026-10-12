@@ -126,6 +126,11 @@ class InboxPanel(QWidget):
             self.details.setText("No messages in the cached Inbox.")
         self.set_busy(False)
 
+    def set_zone(self, zone: ZoneInfo) -> None:
+        """Redraw the current detail without changing the selected row or page."""
+        self.zone = zone
+        self._select(self.messages.currentRow())
+
     def _select(self, index: int) -> None:
         self.source.setEnabled(False)
         if self._page is None or not 0 <= index < len(self._page.messages):

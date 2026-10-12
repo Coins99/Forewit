@@ -14,7 +14,11 @@ Daily briefs still cover one local day and retain their existing consent rules.
 
 Only a complete scan reconciles cached Inbox membership. Failed, partial or cancelled
 scans retain unobserved cached entries and show an incomplete-sync message. The existing
-active-work and rate-limit budgets apply, so very large or slow Inbox scans may be partial.
+active-work and rate-limit budgets apply. Partial scans retain an account-scoped pagination
+checkpoint and observed message IDs in SQLite, so the next refresh continues across restarts.
+Only the final, error-free scan reconciles membership; invalid cursors restart safely on the
+next refresh. Disconnect and backup restore discard these transient checkpoints.
+Migration 0017 follows the unchanged project migration 0016 (PR #53 must merge first).
 Gmail changes during enumeration may require another refresh. This is a snapshot,
 not push delivery, and periodic refresh runs only while the app is open according
 to the owner's refresh preference. Disconnect clears the live Inbox view; saved local
