@@ -263,6 +263,7 @@ class Action(DomainModel):
     thread_seen_until_utc: datetime | None = None  # The owner's "seen" watermark.
     thread: ThreadActivity | None = None  # None when no source has a thread snapshot.
     proposals: tuple[ActionProposal, ...] = ()  # Pending follow-up proposals only.
+    # Recent display history; the complete audit trail stays in storage and exports.
     activity: tuple[ActionActivity, ...] = ()
 
     @field_validator(

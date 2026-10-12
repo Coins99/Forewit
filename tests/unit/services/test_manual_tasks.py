@@ -2,21 +2,24 @@
 
 import asyncio
 import json
+import sqlite3
 from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from alembic import command
 from sqlalchemy import func, select
 
 from mailbrief.domain.actions import ActionActivityKind as Kind
-from mailbrief.domain.actions import ActionEdit, ActionStatus, StepEdit
+from mailbrief.domain.actions import ActionEdit, ActionFilter, ActionStatus, StepEdit
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
+from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
-from mailbrief.storage.migrate import upgrade_database
+from mailbrief.storage.migrate import migration_config, upgrade_database
 from mailbrief.storage.recovery import restore_backup
 from mailbrief.storage.tables import ActionActivityTable, ActionTable
 from tests.unit.services.test_actions_service import Clock, seed
@@ -182,4 +185,102 @@ async def test_failed_completion_commit_preserves_original_state(
         with pytest.raises(RuntimeError):
             await service.complete(created.public_id, 1)
         assert await service.get(created.public_id) == created
+    await database.dispose()
+
+
+@pytest.mark.parametrize("completed", [False, True])
+async def test_legacy_deleted_task_restores_without_undoing_completion(
+    tmp_path: Path, completed: bool
+) -> None:
+    path = tmp_path / "legacy.sqlite3"
+    await asyncio.to_thread(command.upgrade, migration_config(path), "20261011_0013")
+    public_id = "11111111-1111-4111-8111-111111111111"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO actions(public_id,title,ownership,status,revision,created_at_utc,"
+            "updated_at_utc,completed_at_utc,deleted_at_utc) VALUES(?,?,?,?,3,?,?,?,?)",
+            (
+                public_id,
+                "Legacy task",
+                "mine",
+                "completed" if completed else "open",
+                "2026-10-01 12:00:00",
+                "2026-10-03 12:00:00",
+                "2026-10-02 12:00:00" if completed else None,
+                "2026-10-03 12:00:00",
+            ),
+        )
+    await asyncio.to_thread(upgrade_database, path)
+    database = Database.from_path(path)
+    async with database.session() as session:
+        restored = await ActionService(session).restore(public_id)
+        assert restored.activity[-1].kind is Kind.RESTORED
+        assert restored.activity[-1].undo_of_revision is None
+        assert (restored.completed_at_utc is not None) == completed
+        assert sum(event.kind is Kind.COMPLETED for event in restored.activity) == int(completed)
+    await database.dispose()
+
+
+@pytest.mark.parametrize("suggestion_restore", [False, True])
+async def test_restore_only_undoes_a_known_deletion(
+    tmp_path: Path, suggestion_restore: bool
+) -> None:
+    database = Database.from_path(tmp_path / "restore.sqlite3")
+    await database.create_schema_for_tests()
+    async with database.session() as session:
+        seeded = await seed(session)
+        service = ActionService(session)
+        action = await service.accept(seeded.suggestion_ids[0])
+        await service.delete(action.public_id, 1)
+        if suggestion_restore:
+            await service.restore_suggestion(seeded.suggestion_ids[0])
+            restored = await service.get(action.public_id)
+        else:
+            restored = await service.restore(action.public_id)
+        assert restored.activity[-1].kind is Kind.UNDO
+        assert restored.activity[-1].undo_of_revision == 2
+        await service.delete(action.public_id, 3)
+        # A migration-era deletion has no reliable event to undo.
+        row = await session.scalar(select(ActionTable))
+        assert row is not None
+        latest = await ActionRepository(session).latest_activity(row.id)
+        assert latest is not None
+        latest.legacy = True
+        await session.commit()
+        if suggestion_restore:
+            await service.restore_suggestion(seeded.suggestion_ids[0])
+            restored = await service.get(action.public_id)
+        else:
+            restored = await service.restore(action.public_id)
+        assert restored.activity[-1].kind is Kind.RESTORED
+        assert restored.activity[-1].undo_of_revision is None
+    await database.dispose()
+
+
+async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path: Path) -> None:
+    database = Database.from_path(tmp_path / "history.sqlite3")
+    await database.create_schema_for_tests()
+    async with database.session() as session:
+        service = ActionService(session)
+        action = await service.create(EDIT)
+        for _ in range(25):
+            action = await service.save(action.public_id, action.revision, EDIT)
+        action = await service.complete(action.public_id, action.revision)
+        undone = await service.undo_status(action.public_id, action.revision)
+        assert len(undone.activity) == 20
+        assert [event.revision for event in undone.activity] == list(range(9, 29))
+        assert undone.activity[-1].undo_of_revision == 27
+        row = await session.scalar(select(ActionTable))
+        assert row is not None
+        assert len(await ActionRepository(session).activity_rows(row.id)) == 28
+        short = await service.create(EDIT)
+        for _ in range(4):
+            short = await service.save(short.public_id, short.revision, EDIT)
+        listed = {item.public_id: item for item in await service.list_actions(ActionFilter.OPEN)}
+        assert listed[undone.public_id].activity == undone.activity
+        assert len(listed[short.public_id].activity) == 5
+    exported = tmp_path / "history.json"
+    await export_writing(database, exported)
+    payload = json.loads(exported.read_text(encoding="utf-8"))
+    assert len(payload["records"]["action_activity"]) == 33
     await database.dispose()

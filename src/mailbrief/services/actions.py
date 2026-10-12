@@ -247,8 +247,7 @@ class ActionService:
 
         async def run(now: datetime) -> Action:
             row = await self._live(public_id, expected_revision)
-            records = await self._repository.activity_rows(row.id)
-            latest = records[-1] if records else None
+            latest = await self._repository.latest_activity(row.id)
             if (
                 latest is None
                 or latest.revision != expected_revision
@@ -429,11 +428,11 @@ class ActionService:
                     action_id=previous.action_id,
                     decided_at_utc=previous.decided_at_utc,
                 )
-            records = await self._repository.activity_rows(row.id)
+            latest = await self._repository.latest_activity(row.id)
             manual_add = bool(
-                records
-                and records[-1].revision == expected_revision
-                and records[-1].previous_source_count == 0
+                latest is not None
+                and latest.revision == expected_revision
+                and latest.previous_source_count == 0
             )
             if remove_source and (manual_add or await self._repository.source_count(row.id) > 1):
                 await self._repository.remove_source(row.id, message.provider_message_id)
@@ -485,11 +484,7 @@ class ActionService:
             if action is None:
                 await self._repository.delete_decision(key)
             elif action.deleted_at_utc is not None:
-                action.deleted_at_utc = None
-                touch(action, now)
-                self._repository.record_activity(
-                    action, ActionActivityKind.UNDO, now, undo_of_revision=action.revision - 1
-                )
+                await self._restore_deleted(action, now)
 
         await self._write(run)
 
@@ -589,6 +584,24 @@ class ActionService:
 
         await self._write(run)
 
+    async def _restore_deleted(self, row: ActionTable, now: datetime) -> None:
+        latest = await self._repository.latest_activity(row.id)
+        deletion = (
+            latest is not None
+            and latest.revision == row.revision
+            and latest.kind == ActionActivityKind.DELETED.value
+            and not latest.legacy
+        )
+        previous_revision = row.revision
+        row.deleted_at_utc = None
+        touch(row, now)
+        self._repository.record_activity(
+            row,
+            ActionActivityKind.UNDO if deletion else ActionActivityKind.RESTORED,
+            now,
+            undo_of_revision=previous_revision if deletion else None,
+        )
+
     async def restore(self, public_id: str) -> Action:
         """Bring back a deleted action; an action that isn't deleted is returned as it is."""
 
@@ -597,11 +610,7 @@ class ActionService:
             if row is None:
                 raise ActionNotFoundError(_NOT_FOUND)
             if row.deleted_at_utc is not None:
-                row.deleted_at_utc = None
-                touch(row, now)
-                self._repository.record_activity(
-                    row, ActionActivityKind.UNDO, now, undo_of_revision=row.revision - 1
-                )
+                await self._restore_deleted(row, now)
             return await self._load(row)
 
         return await self._write(run)

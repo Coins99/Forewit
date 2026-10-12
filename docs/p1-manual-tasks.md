@@ -29,8 +29,9 @@ to the reversed revision. Undo reopen restores the original completion time rath
 creating another completion. A stale undo is refused. Future charts must treat undo
 references explicitly and query uncapped history, rather than count completed UI rows.
 
-The detail pane shows the latest 20 activity entries in the owner's time zone. All entries
-remain stored and are included in the writing export's `action_activity` records (an
+The detail pane shows the latest 20 activity entries in the owner's time zone. Task reads
+fetch only those entries with an indexed query. All entries remain stored and are included
+in the writing export's `action_activity` records (an
 additive extension of format version 1) and consistent database backups. Recovery validates
 and restores the new table alongside actions. Acceptance undo now hides the unchanged
 action and removes its decision, preserving creation/undo history until explicit deleted
@@ -39,7 +40,9 @@ cascades to its activity, just as it does to its steps and sources.
 
 For existing databases, migration records known creation and the currently preserved
 completion as **Migrated record**. It does not invent old edits, reopenings, undos or
-completion timestamps that earlier versions erased.
+completion timestamps that earlier versions erased. Restoring a legacy deleted task records
+restoration, without claiming to undo a migration-era completion. Only a known deletion
+event at the previous revision can be referenced as an undo of deletion.
 
 ## Acceptance
 

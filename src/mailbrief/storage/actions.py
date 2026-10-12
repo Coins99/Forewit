@@ -50,6 +50,8 @@ from mailbrief.storage.tables import (
 
 logger = logging.getLogger(__name__)
 
+DISPLAY_ACTIVITY_LIMIT = 20
+
 
 @dataclass(frozen=True, slots=True)
 class DecisionKey:
@@ -394,6 +396,16 @@ class ActionRepository:
         )
         return list(rows)
 
+    async def latest_activity(self, action_id: int) -> ActionActivityTable | None:
+        """Read the latest event directly, without hydrating the full audit trail."""
+        result = await self._session.scalars(
+            select(ActionActivityTable)
+            .where(ActionActivityTable.action_id == action_id)
+            .order_by(ActionActivityTable.revision.desc())
+            .limit(1)
+        )
+        return result.first()
+
     async def get_suggestion(
         self, suggestion_id: int
     ) -> tuple[ActionSuggestionTable, MessageTable, AccountTable] | None:
@@ -663,9 +675,23 @@ class ActionRepository:
         ids = [row.id for row in rows]
         activity: dict[int, list[ActionActivity]] = {}
         for chunk in sorted_batches(ids):
+            # The indexed threshold keeps both ORM hydration and returned rows bounded.
+            older = aliased(ActionActivityTable)
+            threshold = (
+                select(older.revision)
+                .where(older.action_id == ActionActivityTable.action_id)
+                .order_by(older.revision.desc())
+                .offset(DISPLAY_ACTIVITY_LIMIT - 1)
+                .limit(1)
+                .correlate(ActionActivityTable)
+                .scalar_subquery()
+            )
             records = await self._session.scalars(
                 select(ActionActivityTable)
-                .where(ActionActivityTable.action_id.in_(chunk))
+                .where(
+                    ActionActivityTable.action_id.in_(chunk),
+                    ActionActivityTable.revision >= func.coalesce(threshold, 0),
+                )
                 .order_by(ActionActivityTable.action_id, ActionActivityTable.revision)
             )
             for record in records:
