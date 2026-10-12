@@ -814,10 +814,12 @@ class CalendarEventTable(Base):
 
 
 class GoogleCalendarTable(Base):
-    """A calendar in the owner's Google calendar list, cached to show its events (ADR 0018).
+    """A calendar shown in the owner's Google Calendar, cached to show its events (ADR 0018).
 
-    Provider data, not the owner's: replaced by every sync and removed on disconnect. The
-    synced days are the window its events were last read for, in the owner's zone then.
+    Provider data, not the owner's: replaced by every sync and removed on disconnect; one the
+    owner unticks in Google goes with its events. The synced days and time are when a sync
+    last dealt with it, in the owner's zone then: its events were read, or the read failed
+    and it kept what it had.
     """
 
     __tablename__ = "google_calendars"
@@ -827,7 +829,6 @@ class GoogleCalendarTable(Base):
     calendar_id: Mapped[str] = mapped_column(String(1024), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    shown: Mapped[bool] = mapped_column(Boolean, nullable=False)
     synced_from: Mapped[date | None] = mapped_column(Date)
     synced_until: Mapped[date | None] = mapped_column(Date)
     synced_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
@@ -837,7 +838,8 @@ class GoogleCalendarTable(Base):
 class GoogleEventTable(Base):
     """One cached Google event (ADR 0018): what the Calendar page shows, nothing more.
 
-    Descriptions, guests and conference details are never requested, so never stored.
+    Descriptions, locations, guests and conference details are never requested, so never
+    stored.
     """
 
     __tablename__ = "google_events"
@@ -859,7 +861,5 @@ class GoogleEventTable(Base):
     ends_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     start_date: Mapped[date | None] = mapped_column(Date)
     last_date: Mapped[date | None] = mapped_column(Date)
-    location: Mapped[str | None] = mapped_column(Text)
     web_link: Mapped[str | None] = mapped_column(Text)
-    busy: Mapped[bool] = mapped_column(Boolean, nullable=False)
     fetched_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

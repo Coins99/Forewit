@@ -56,12 +56,14 @@ def test_calendars_keep_only_readable_ones_and_follow_googles_list() -> None:
         assert map_calendar(item) is None
 
 
-def test_timed_event_is_kept_in_utc() -> None:
+def test_timed_event_is_kept_in_utc_without_what_the_page_never_shows() -> None:
     mapped = map_event(event(location="Room 4", transparency="transparent"), CALENDAR)
     assert mapped is not None and not mapped.all_day
     assert mapped.starts_at_utc == datetime(2026, 10, 12, 13, 0, tzinfo=UTC)
     assert mapped.ends_at_utc == datetime(2026, 10, 12, 13, 30, tzinfo=UTC)
-    assert (mapped.calendar_name, mapped.location, mapped.busy) == ("Owner", "Room 4", False)
+    assert mapped.calendar_name == "Owner"
+    assert "Room 4" not in mapped.model_dump_json()
+    assert {"location", "busy"}.isdisjoint(type(mapped).model_fields)
 
 
 def test_all_day_end_is_exclusive_in_google() -> None:
@@ -73,12 +75,9 @@ def test_all_day_end_is_exclusive_in_google() -> None:
 
 
 def test_untrusted_text_is_cleaned_and_bounded() -> None:
-    mapped = map_event(
-        event(summary="\x1b[31mPay\u202e now\n" + "x" * 300, location="\u200bHall"), CALENDAR
-    )
+    mapped = map_event(event(summary="\x1b[31mPay\u202e now\n" + "x" * 300), CALENDAR)
     assert mapped is not None
     assert mapped.title.startswith("[31mPay now x") and len(mapped.title) == 200
-    assert mapped.location == "Hall"
     untitled = map_event(event(summary="  "), CALENDAR)
     assert untitled is not None and untitled.title == UNTITLED
 
@@ -87,14 +86,30 @@ def test_only_google_calendar_links_are_kept() -> None:
     good = map_event(event(htmlLink="https://www.google.com/calendar/event?eid=abc"), CALENDAR)
     assert good is not None and str(good.web_link).startswith("https://www.google.com/calendar/")
     for link in (
+        "https://www.google.com/calendar",
+        "https://calendar.google.com/calendar/event?eid=abc",
+    ):
+        assert is_calendar_link(link)
+    for link in (
         "http://www.google.com/calendar/event?eid=abc",
         "https://evil.example/calendar",
         "https://user@calendar.google.com/x",
+        "https://:secret@calendar.google.com/x",
+        "https://www.google.com/url?q=https://evil.example/",
+        "https://www.google.com/calendarx",
+        "https://www.google.com:8443/calendar/event",
+        "https://calendar.google.com:bad/x",
         "javascript:alert(1)",
     ):
         assert not is_calendar_link(link)
         mapped = map_event(event(htmlLink=link), CALENDAR)
         assert mapped is not None and mapped.web_link is None
+
+
+def test_an_unusable_link_drops_only_the_link() -> None:
+    long = "https://www.google.com/calendar/event?eid=" + "a" * 2_100  # Over HttpUrl's limit.
+    mapped = map_event(event(htmlLink=long), CALENDAR)
+    assert mapped is not None and mapped.title == "Standup" and mapped.web_link is None
 
 
 @pytest.mark.parametrize(

@@ -1,15 +1,15 @@
 """The Google Calendar sign-in: its own grant and vault entry, separate from Gmail's.
 
 The grant holds read-only calendar scopes only, so this credential can't read mail and
-the Gmail credential can't read or change calendars (ADR 0018).
+the Gmail credential can't read or change calendars (ADR 0018). The vault and token
+endpoint handling is shared with Gmail (providers/google/).
 """
 
 import asyncio
-import json
 import time
 
 import httpx
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr
 
 from mailbrief.infra import vault
 from mailbrief.infra.vault import VaultBackend, VaultUnavailableError
@@ -23,9 +23,14 @@ from mailbrief.providers.gcal.errors import (
     calendar_permission_guidance,
     calendar_response_error,
 )
-from mailbrief.providers.gmail.auth import Authorizer, TokenResponse
-from mailbrief.providers.gmail.cache import RefreshCredential
-from mailbrief.providers.gmail.oauth import TOKEN_URL, DesktopClient
+from mailbrief.providers.gmail.auth import Authorizer
+from mailbrief.providers.gmail.oauth import DesktopClient
+from mailbrief.providers.google.credentials import (
+    RefreshCredential,
+    VaultCredentialStore,
+    VaultMessages,
+)
+from mailbrief.providers.google.tokens import TokenMessages, TokenResponse, exchange_tokens
 
 EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
 CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
@@ -33,53 +38,42 @@ CALENDAR_SCOPES = (EVENTS_SCOPE, CALENDAR_LIST_SCOPE)
 CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
 SERVICE = "MailBrief.GoogleCalendar"
 ENTRY = "calendar-account-v1"
+_VAULT_MESSAGES = VaultMessages(
+    unreadable="Unable to read the calendar sign-in from the OS vault.",
+    invalid="The saved calendar sign-in is invalid; disconnect Google Calendar and reconnect.",
+    unsaved="Unable to save the calendar sign-in in the OS vault.",
+    unremoved="Unable to remove the calendar sign-in from the OS vault.",
+)
+_TOKEN_MESSAGES = TokenMessages(
+    unreachable="Unable to contact Google sign-in; check your connection and retry.",
+    expired="Google Calendar access expired or was revoked; reconnect.",
+    bad_client="Google rejected the OAuth client. Check the Desktop app client JSON.",
+    unauthorized_client="Google does not authorize this OAuth client for desktop sign-in. "
+    "Check that the client type is Desktop app.",
+    invalid="Google returned an invalid sign-in response.",
+    token_type="Google returned an unsupported token type.",
+    missing_scope="Google didn't grant both calendar permissions; reconnect and allow both.",
+)
 
 
-class CalendarCredentialStore:
+def _os_vault() -> VaultBackend:
+    try:
+        return vault.os_vault()
+    except VaultUnavailableError as exc:
+        raise CalendarSetupError(str(exc)) from None
+
+
+class CalendarCredentialStore(VaultCredentialStore):
     """The calendar grant's refresh credential, only in the OS vault; fails closed."""
 
     def __init__(self, backend: VaultBackend | None = None) -> None:
-        if backend is None:
-            try:
-                backend = vault.os_vault()
-            except VaultUnavailableError as exc:
-                raise CalendarSetupError(str(exc)) from None
-        self._backend = backend
-
-    def load(self) -> RefreshCredential | None:
-        try:
-            value = self._backend.get_password(SERVICE, ENTRY)
-        except Exception:
-            raise CalendarSetupError(
-                "Unable to read the calendar sign-in from the OS vault."
-            ) from None
-        if value is None:
-            return None
-        try:
-            return RefreshCredential.model_validate_json(value)
-        except ValidationError:
-            raise CalendarSetupError(
-                "The saved calendar sign-in is invalid; disconnect Google Calendar and reconnect."
-            ) from None
-
-    def save(self, credential: RefreshCredential) -> None:
-        payload = credential.model_dump(mode="json")
-        payload["refresh_token"] = credential.refresh_token.get_secret_value()
-        try:
-            self._backend.set_password(SERVICE, ENTRY, json.dumps(payload))
-        except Exception:
-            raise CalendarSetupError(
-                "Unable to save the calendar sign-in in the OS vault."
-            ) from None
-
-    def clear(self) -> None:
-        try:
-            if self._backend.get_password(SERVICE, ENTRY) is not None:
-                self._backend.delete_password(SERVICE, ENTRY)
-        except Exception:
-            raise CalendarSetupError(
-                "Unable to remove the calendar sign-in from the OS vault."
-            ) from None
+        super().__init__(
+            backend if backend is not None else _os_vault(),
+            service=SERVICE,
+            entry=ENTRY,
+            messages=_VAULT_MESSAGES,
+            error=CalendarSetupError,
+        )
 
 
 class CalendarAuth:
@@ -140,6 +134,7 @@ class CalendarAuth:
                 "The OAuth client changed; disconnect Google Calendar before reconnecting."
             )
         tokens: TokenResponse | None = None
+        restored = False
         if cached is not None:
             try:
                 tokens = await self._exchange(
@@ -148,6 +143,7 @@ class CalendarAuth:
                         "refresh_token": cached.refresh_token.get_secret_value(),
                     }
                 )
+                restored = True
             except AuthenticationRequiredError:
                 if silent_only:
                     raise
@@ -168,7 +164,8 @@ class CalendarAuth:
             raise AuthenticationRequiredError(
                 "Google returned a different calendar account; disconnect before switching."
             )
-        refresh = tokens.refresh_token or (cached.refresh_token if cached else None)
+        # A saved refresh token is kept only when it just worked, never after it was refused.
+        refresh = tokens.refresh_token or (cached.refresh_token if restored and cached else None)
         if refresh is None:
             raise AuthenticationRequiredError("Google did not grant offline access; reconnect.")
         await asyncio.to_thread(
@@ -183,43 +180,17 @@ class CalendarAuth:
         return account
 
     async def _exchange(self, fields: dict[str, str]) -> TokenResponse:
-        fields = {
-            **fields,
-            "client_id": self._client.client_id,
-            "client_secret": self._client.client_secret,
-        }
-        try:
-            response = await self._http.post(TOKEN_URL, data=fields, follow_redirects=False)
-        except httpx.HTTPError:
-            raise calendar_response_error(
-                "Unable to contact Google sign-in; check your connection and retry."
-            ) from None
-        if response.status_code in {400, 401}:
-            try:
-                error = response.json()
-            except ValueError:
-                error = None
-            reason = error.get("error") if isinstance(error, dict) else None
-            if reason == "invalid_grant":
-                raise AuthenticationRequiredError(
-                    "Google Calendar access expired or was revoked; reconnect."
-                )
-            if reason in ("invalid_client", "deleted_client", "unauthorized_client"):
-                raise CalendarSetupError(
-                    "Google rejected the OAuth client. Check the Desktop app client JSON."
-                )
-        _check_status(response)
-        try:
-            tokens = TokenResponse.model_validate_json(response.content)
-        except ValidationError:
-            raise calendar_response_error("Google returned an invalid sign-in response.") from None
-        if tokens.token_type.casefold() != "bearer":
-            raise calendar_response_error("Google returned an unsupported token type.")
-        if tokens.scope is not None and not set(CALENDAR_SCOPES) <= set(tokens.scope.split()):
-            raise ProviderPermissionError(
-                "Google didn't grant both calendar permissions; reconnect and allow both."
-            )
-        return tokens
+        return await exchange_tokens(
+            self._http,
+            self._client.client_id,
+            self._client.client_secret,
+            fields,
+            scopes=CALENDAR_SCOPES,
+            messages=_TOKEN_MESSAGES,
+            response_error=calendar_response_error,
+            setup_error=CalendarSetupError,
+            check_status=_check_status,
+        )
 
     async def _primary(self, token: SecretStr) -> str:
         """The account's address: the ID of its primary calendar."""

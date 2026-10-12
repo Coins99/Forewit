@@ -1337,13 +1337,20 @@ def test_google_calendar_cache_upgrades_cascades_and_downgrades(tmp_path: Path) 
     assert _rows(path, ("calendar_events",)) == owned
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
+        # Only what the page shows is kept: no location, free/busy flag or shown flag.
+        for table, absent in (
+            ("google_events", {"location", "busy"}),
+            ("google_calendars", {"shown"}),
+        ):
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            assert not absent & columns
         connection.execute(
-            "INSERT INTO google_calendars(calendar_id,name,is_primary,shown,updated_at_utc)"
-            " VALUES('owner@example.com','Owner',1,1,'2026-10-12 12:00:00.000000')"
+            "INSERT INTO google_calendars(calendar_id,name,is_primary,updated_at_utc)"
+            " VALUES('owner@example.com','Owner',1,'2026-10-12 12:00:00.000000')"
         )
         insert = (
             "INSERT INTO google_events(calendar_row_id,event_id,title,all_day,starts_at_utc,"
-            "ends_at_utc,busy,fetched_at_utc) VALUES(1,?,'Standup',0,?,?,1,"
+            "ends_at_utc,fetched_at_utc) VALUES(1,?,'Standup',0,?,?,"
             "'2026-10-12 12:00:00.000000')"
         )
         start = "2026-10-12 13:00:00.000000"

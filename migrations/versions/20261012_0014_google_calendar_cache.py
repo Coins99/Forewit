@@ -5,9 +5,9 @@ Revises: 20261011_0013
 Create Date: 2026-10-12
 
 Two new tables, so existing rows are untouched (ADR 0018, phase 2). They hold Google's data,
-not the owner's: every sync replaces a calendar's events and disconnecting removes them.
-Only what the page shows is kept; descriptions, guests and conference details are never
-stored. Downgrading drops both tables.
+not the owner's: only calendars shown in Google Calendar, every sync replaces a calendar's
+events and disconnecting removes them. Only what the page shows is kept; descriptions,
+locations, guests and conference details are never stored. Downgrading drops both tables.
 """
 
 from collections.abc import Sequence
@@ -35,7 +35,6 @@ def upgrade() -> None:
         sa.Column("calendar_id", sa.String(length=1024), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("is_primary", sa.Boolean(), nullable=False),
-        sa.Column("shown", sa.Boolean(), nullable=False),
         sa.Column("synced_from", sa.Date(), nullable=True),
         sa.Column("synced_until", sa.Date(), nullable=True),
         sa.Column("synced_at_utc", sa.DateTime(timezone=True), nullable=True),
@@ -54,9 +53,7 @@ def upgrade() -> None:
         sa.Column("ends_at_utc", sa.DateTime(timezone=True), nullable=True),
         sa.Column("start_date", sa.Date(), nullable=True),
         sa.Column("last_date", sa.Date(), nullable=True),
-        sa.Column("location", sa.Text(), nullable=True),
         sa.Column("web_link", sa.Text(), nullable=True),
-        sa.Column("busy", sa.Boolean(), nullable=False),
         sa.Column("fetched_at_utc", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint(_TIMING_CHECK, name=op.f("ck_google_events_timing_shape")),
         sa.ForeignKeyConstraint(

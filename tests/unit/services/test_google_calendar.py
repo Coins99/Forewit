@@ -14,6 +14,7 @@ from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     MessageUnavailableError,
     ProviderError,
+    ProviderPermissionError,
     ProviderRateLimitError,
 )
 from mailbrief.services.events import EventService
@@ -24,7 +25,7 @@ from mailbrief.services.google_calendar import (
     sync_window,
 )
 from mailbrief.storage.database import Database
-from mailbrief.storage.tables import GoogleEventTable
+from mailbrief.storage.tables import GoogleCalendarTable, GoogleEventTable
 
 TORONTO = ZoneInfo("America/Toronto")
 NOW = datetime(2026, 10, 14, 16, 0, tzinfo=UTC)  # Wednesday.
@@ -127,7 +128,7 @@ async def test_sync_reads_shown_calendars_for_the_window(
         HIDDEN.calendar_id: (google(HIDDEN, "c", standup),),
     }
     result = await service.sync(TODAY, TORONTO)
-    assert (result.calendars, result.synced, result.failed, result.events) == (2, 2, 0, 3)
+    assert (result.calendars, result.synced, result.failed, result.events) == (2, 2, 0, 2)
     assert result.stopped_code is None
     assert {call[0] for call in reader.read} == {PRIMARY.calendar_id, TEAM.calendar_id}
     # The window is local days in the owner's zone: Monday 5 Oct 00:00 in Toronto onwards.
@@ -194,12 +195,94 @@ async def test_dropped_calendars_and_clear_forget_events(
     assert (await EventService(session).list_range(TODAY, TODAY, TORONTO)).google_coverage is None
 
 
-async def test_coverage_needs_every_shown_calendar(
+async def test_a_calendar_that_keeps_failing_waits_for_the_window_to_go_stale(
     service: CalendarSyncService, reader: FakeReader, session: AsyncSession
 ) -> None:
-    reader.events = {TEAM.calendar_id: ProviderError("temporary")}
-    await service.sync(TODAY, TORONTO)
+    start = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)
+    reader.events = {
+        PRIMARY.calendar_id: (google(PRIMARY, "a", start),),
+        TEAM.calendar_id: ProviderError("too many pages"),
+    }
+    result = await service.sync(TODAY, TORONTO)
+    assert (result.synced, result.failed, result.stopped_code) == (1, 1, None)
+    shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
+    assert [event.event_id for event in shown.google_events] == ["a"]
+    week = (date(2026, 10, 12), date(2026, 10, 18))
+    # Team counts as checked, so it is tried again only once the window goes stale.
+    assert not needs_sync(shown.google_coverage, *week, NOW)
+    assert needs_sync(shown.google_coverage, *week, NOW + STALE_AFTER)
+
+
+async def test_a_calendar_google_refuses_does_not_stop_the_others(
+    service: CalendarSyncService, reader: FakeReader
+) -> None:
+    start = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)
+    reader.events = {
+        PRIMARY.calendar_id: ProviderPermissionError("refused"),
+        TEAM.calendar_id: (google(TEAM, "b", start),),
+    }
+    result = await service.sync(TODAY, TORONTO)
+    assert (result.synced, result.failed, result.events, result.stopped_code) == (1, 1, 1, None)
+
+
+async def test_a_rate_limit_counts_the_unread_calendars_as_checked(
+    session: AsyncSession, reader: FakeReader
+) -> None:
+    others = tuple(
+        GoogleCalendarInfo(
+            calendar_id=f"c{number}@group.calendar.google.com",
+            name=f"Calendar {number}",
+            primary=False,
+            shown=True,
+        )
+        for number in range(6)
+    )
+    reader.calendars = (PRIMARY, *others)
+    reader.events = {PRIMARY.calendar_id: ProviderRateLimitError("slow down")}
+    result = await CalendarSyncService(session, reader, clock=lambda: NOW).sync(TODAY, TORONTO)
+    assert result.stopped_code == "RATE_LIMITED" and result.synced < len(others)
+    shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
+    assert not needs_sync(shown.google_coverage, TODAY, TODAY, NOW)
+
+
+async def test_a_sign_in_stop_leaves_unread_calendars_unchecked(
+    service: CalendarSyncService, reader: FakeReader, session: AsyncSession
+) -> None:
+    reader.events = {
+        PRIMARY.calendar_id: AuthenticationRequiredError("reconnect"),
+        TEAM.calendar_id: AuthenticationRequiredError("reconnect"),
+    }
+    result = await service.sync(TODAY, TORONTO)
+    assert result.stopped_code == "AUTH_REQUIRED"
     assert (await EventService(session).list_range(TODAY, TODAY, TORONTO)).google_coverage is None
+
+
+async def test_unticked_calendars_go_with_their_events(
+    service: CalendarSyncService, reader: FakeReader, session: AsyncSession
+) -> None:
+    start = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)
+    reader.events = {TEAM.calendar_id: (google(TEAM, "b", start),)}
+    await service.sync(TODAY, TORONTO)
+    assert await cached(session) == 1
+    unticked = TEAM.model_copy(update={"shown": False})
+    reader.calendars = (PRIMARY, unticked)
+    result = await service.sync(TODAY, TORONTO)
+    assert result.calendars == 1 and await cached(session) == 0
+    assert {row.calendar_id for row in await session.scalars(select(GoogleCalendarTable))} == {
+        PRIMARY.calendar_id
+    }
+
+
+async def test_a_repeated_calendar_is_read_once(
+    service: CalendarSyncService, reader: FakeReader, session: AsyncSession
+) -> None:
+    start = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)
+    reader.calendars = (PRIMARY, TEAM, TEAM)
+    reader.events = {TEAM.calendar_id: (google(TEAM, "b", start),)}
+    result = await service.sync(TODAY, TORONTO)
+    assert (result.calendars, result.synced, result.events) == (2, 2, 1)
+    assert [call[0] for call in reader.read].count(TEAM.calendar_id) == 1
+    assert len(list(await session.scalars(select(GoogleCalendarTable)))) == 2
 
 
 async def test_zero_length_and_all_day_events_show_on_their_days(
