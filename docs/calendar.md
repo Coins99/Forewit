@@ -53,7 +53,8 @@ the dentist to Friday at 10" or "block two hours tomorrow morning for the deck".
    sent, as titles and times; notes never are. You can also send Google Calendar times
    (without titles, or with them) and your open actions' deadlines and target dates.
 2. **Preview what is sent** lists each part and its size. The first time, tick the consent
-   box; then choose **Ask Groq**. Cancel request stops it.
+   box; then choose **Ask Groq**. Cancel request stops it, and so does closing the dialog
+   (Close or Esc). If something goes wrong, the dialog says so at the top.
 3. Groq's changes come back checked: each says what it does, why, and which events it would
    overlap. Untick any you don't want and choose **Apply ticked changes**.
 4. **Undo AI changes** reverses the whole set, as long as none of those events has changed

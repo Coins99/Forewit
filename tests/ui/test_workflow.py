@@ -159,6 +159,7 @@ class FakeBackend(FakeDrafts):
             status=PlanningStatus.PROPOSED, plan=CalendarPlan(proposals=())
         )
         self.planning_fail: Exception | None = None
+        self.planning_hold: asyncio.Event | None = None  # Asking waits on it when set.
         self.apply_fail: Exception | None = None
         self.undone: list[AppliedBatch] = []
         # Automatic runs: what each returns (or raises), how many ran, and an optional hold.
@@ -609,6 +610,12 @@ class FakeBackend(FakeDrafts):
         self.planning_calls.append(("generate",))
         if not await gate.request_planning_consent(plan.preview):
             return PlanningOutcome(status=PlanningStatus.DECLINED)
+        if self.planning_hold is not None:
+            try:
+                await self.planning_hold.wait()
+            except asyncio.CancelledError:
+                self.planning_calls.append(("cancelled",))
+                raise
         return self.planning_outcome
 
     async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:

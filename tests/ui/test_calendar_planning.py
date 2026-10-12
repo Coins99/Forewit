@@ -1,6 +1,7 @@
 """Plan with AI on the Calendar page (ADR 0018, phase 3b): preview and consent, review,
 apply and Undo, all in the calendar's own words."""
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -115,6 +116,15 @@ async def ask(window: MainWindow, instruction: str = "Move the dentist to Friday
         dialog.consent.setChecked(True)
     dialog.ask_button.click()
     await finish(window)
+
+
+async def asking(window: MainWindow, backend: FakeBackend) -> None:
+    """Let the request start, until Groq is being asked."""
+    for _ in range(50):
+        if calls(backend, "generate") and window.planning_dialog.pages.currentIndex() == 2:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("the request never started")
 
 
 async def test_preview_consent_review_apply_and_undo(
@@ -251,3 +261,75 @@ async def test_declining_and_failing_to_prepare(window: MainWindow, backend: Fak
     assert window.planning_dialog.status.text() == (
         "Planning with AI failed. Your calendar is unchanged; try again."
     )
+
+
+async def test_a_problem_shows_above_the_step_and_close_leaves(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.planning_first_use = False
+    backend.planning_outcome = PlanningOutcome(
+        status=PlanningStatus.FAILED, error_code="AI_NETWORK_BLOCKED"
+    )
+    await window.initialize()
+    dialog = window.planning_dialog
+    window.calendar_panel.plan_button.click()
+    assert not dialog.status.isVisibleTo(dialog)  # Nothing to say yet.
+    assert dialog.close_button.isVisibleTo(dialog)
+    await ask(window)
+    assert dialog.pages.currentIndex() == 0
+    assert dialog.status.isVisibleTo(dialog)
+    assert dialog.status.text() == error_guidance("AI_NETWORK_BLOCKED")
+    assert dialog.status.property("tone") == "warning"
+    layout = dialog.layout()
+    assert layout is not None
+    assert layout.indexOf(dialog.status) < layout.indexOf(dialog.pages)  # Above the step.
+    dialog.close_button.click()
+    assert not dialog.isVisible()
+
+
+async def test_close_shows_on_the_first_two_steps_only(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.planning_outcome = PlanningOutcome(status=PlanningStatus.PROPOSED, plan=proposals())
+    backend.planning_hold = asyncio.Event()
+    await window.initialize()
+    dialog = window.planning_dialog
+    window.calendar_panel.plan_button.click()
+    dialog.instruction.setPlainText("Move the dentist to Friday at 10")
+    dialog.preview_button.click()
+    await finish(window)
+    assert dialog.pages.currentIndex() == 1 and dialog.close_button.isVisibleTo(dialog)
+    dialog.consent.setChecked(True)
+    dialog.ask_button.click()
+    await asking(window, backend)
+    assert not dialog.close_button.isVisibleTo(dialog)  # Cancel request is there instead.
+    backend.planning_hold.set()
+    await finish(window)
+    assert dialog.pages.currentIndex() == 3 and not dialog.close_button.isVisibleTo(dialog)
+
+
+async def test_closing_while_asking_stops_the_request(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.planning_first_use = False
+    backend.planning_outcome = PlanningOutcome(status=PlanningStatus.PROPOSED, plan=proposals())
+    backend.planning_hold = asyncio.Event()
+    await window.initialize()
+    dialog = window.planning_dialog
+    window.calendar_panel.plan_button.click()
+    dialog.instruction.setPlainText("Move the dentist to Friday at 10")
+    dialog.preview_button.click()
+    await finish(window)
+    dialog.ask_button.click()
+    await asking(window, backend)
+    dialog.reject()  # Esc, as well as Close and Discard.
+    try:
+        for _ in range(50):
+            if calls(backend, "cancelled"):
+                break
+            await asyncio.sleep(0)
+        assert calls(backend, "cancelled") and not dialog.isVisible()
+    finally:
+        backend.planning_hold.set()  # A request that wasn't stopped mustn't hang the test.
+    await finish(window)
+    assert not calls(backend, "apply")

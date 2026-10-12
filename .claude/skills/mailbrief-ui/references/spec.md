@@ -350,7 +350,9 @@ The brief list's chips keep their shorter forms (see Brief list).
   Plan with AI (A) opens `PlanningDialog` (`ui/planning_dialog.py`): a stack of four steps
   (instruction and part boxes; preview lines, privacy notice and first-use consent box;
   waiting with Cancel request; checkable proposal rows of plain item text, Groq's reason
-  and overlaps on their own lines) with a muted `planningStatus` under it.
+  and overlaps on their own lines). `planningStatus` (warning tone) sits above the stack and
+  shows only with a message; outline Close (C) shows on the first two steps, and closing
+  while Groq is being asked cancels the request.
 - Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+6 (Cmd on macOS), call
   `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.

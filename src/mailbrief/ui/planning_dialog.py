@@ -104,14 +104,24 @@ class PlanningDialog(QDialog):
         self._proposals: tuple[ProposedChange, ...] = ()
         self._first_use = False
         layout = QVBoxLayout(self)
+        # What went wrong or what is needed, above the step so it can't be missed.
+        self.status = plain_label("", tone="warning")
+        self.status.setObjectName("planningStatus")
+        self.status.setAccessibleName("Plan with AI message")
+        self.status.hide()
+        layout.addWidget(self.status)
         self.pages = QStackedWidget()
         layout.addWidget(self.pages, 1)
-        self.status = plain_label("", tone="muted")
-        self.status.setObjectName("planningStatus")
-        layout.addWidget(self.status)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.close_button = outline_button("&Close", "planningCloseButton", mnemonic=True)
+        self.close_button.clicked.connect(self.reject)
+        row.addWidget(self.close_button)
+        layout.addLayout(row)
 
         compose = QWidget()
         column = QVBoxLayout(compose)
+        column.setContentsMargins(0, 0, 0, 0)  # Steps line up with the message and Close.
         column.addWidget(plain_label("What should change in your calendar?"))
         self.instruction = QPlainTextEdit()
         self.instruction.setObjectName("planningInstruction")
@@ -136,6 +146,7 @@ class PlanningDialog(QDialog):
 
         confirm = QWidget()
         column = QVBoxLayout(confirm)
+        column.setContentsMargins(0, 0, 0, 0)
         self.preview_heading = plain_label("")
         self.preview_lines = wrap_label("")
         self.privacy = wrap_label("", tone="muted")
@@ -157,6 +168,7 @@ class PlanningDialog(QDialog):
 
         working = QWidget()
         column = QVBoxLayout(working)
+        column.setContentsMargins(0, 0, 0, 0)
         column.addWidget(plain_label(ASKING))
         column.addStretch(1)
         self.stop_button = outline_button("Cancel request", "planningCancelButton")
@@ -166,6 +178,7 @@ class PlanningDialog(QDialog):
 
         review = QWidget()
         column = QVBoxLayout(review)
+        column.setContentsMargins(0, 0, 0, 0)
         self.message = wrap_label("")
         self.message.setObjectName("planningMessage")
         column.addWidget(self.message)
@@ -199,7 +212,7 @@ class PlanningDialog(QDialog):
         self._proposals = ()
         self.list.clear()
         self._show(0)
-        self.status.setText("")
+        self._say("")
         self.instruction.setFocus()
 
     def _times_toggled(self, on: bool) -> None:
@@ -226,9 +239,9 @@ class PlanningDialog(QDialog):
     def _request_preview(self) -> None:
         options = self.options()
         if isinstance(options, str):
-            self.status.setText(options)
+            self._say(options)
             return
-        self.status.setText("")
+        self._say("")
         self.preview_requested.emit(options)
 
     def show_preview(self, preview: PlanningPreview) -> None:
@@ -241,7 +254,7 @@ class PlanningDialog(QDialog):
         self.privacy.setText(preview.privacy_notice)
         self.consent.setVisible(preview.first_use)
         self.consent.setChecked(False)
-        self.status.setText("")
+        self._say("")
         self._show(1)
         self._update_ask()
 
@@ -253,7 +266,7 @@ class PlanningDialog(QDialog):
             self.ask_requested.emit(self.consent.isChecked())
 
     def show_working(self) -> None:
-        self.status.setText("")
+        self._say("")
         self._show(2)
 
     def show_proposals(self, plan: CalendarPlan, zone: ZoneInfo, today: date) -> None:
@@ -280,7 +293,7 @@ class PlanningDialog(QDialog):
             )
             notes.append(f"{dropped} left out because MailBrief couldn't use it.")
         self.message.setText(" ".join(notes))
-        self.status.setText("")
+        self._say("")
         self._show(3)
         self._update_apply()
 
@@ -298,18 +311,31 @@ class PlanningDialog(QDialog):
     def _request_apply(self) -> None:
         changes = self.kept()
         if not changes:
-            self.status.setText(NOTHING_KEPT)
+            self._say(NOTHING_KEPT)
             return
         self.apply_requested.emit(changes)
 
     def show_problem(self, message: str) -> None:
         """Back to the instruction, with what went wrong in fixed words."""
         self._show(0)
-        self.status.setText(message)
+        self._say(message)
 
     def keep_reviewing(self, message: str) -> None:
         """Applying failed: stay on the proposals and say why."""
+        self._say(message)
+
+    def reject(self) -> None:
+        """Close, Esc or Discard; closing while Groq is being asked stops the request too."""
+        if self.pages.currentIndex() == 2:
+            self.cancel_requested.emit()
+        super().reject()
+
+    def _say(self, message: str) -> None:
+        """Show what needs attention above the step, or hide the line when there's nothing."""
         self.status.setText(message)
+        self.status.setVisible(bool(message))
 
     def _show(self, page: int) -> None:
         self.pages.setCurrentIndex(page)
+        # Close on the first two steps; asking has Cancel request and the review has Discard.
+        self.close_button.setVisible(page in (0, 1))
