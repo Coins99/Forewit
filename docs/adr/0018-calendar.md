@@ -117,10 +117,16 @@ proposes, code checks, the owner applies.
 - **Checks in Python.** An event is named by a key that exists only in that request, and
   at most once. Dates and times are parsed here, in the owner's zone (a time a DST change
   skips reads as the clock shows it), must fall inside the window and meet the event
-  bounds. A change that changes nothing is dropped. Titles and reasons lose control and
-  format characters and are capped. Dropped changes are counted for the owner.
-- **Overlaps.** Worked out locally, never sent: the owner's other timed events and the
-  timed Google events a change would overlap are shown as warnings; they never block.
+  bounds; an event that already reaches past the window may keep those days. A date or
+  time that is given but isn't real refuses the change. On update a missing field keeps
+  the event's own: moving only the start keeps the length (elapsed time, for timed
+  events), and an end time without a date keeps its day relative to the start. A change
+  that changes nothing, or only the event's zone, is dropped. Titles and reasons lose
+  control and format characters and are capped. Dropped changes are counted for the
+  owner.
+- **Overlaps.** Worked out locally, never sent: the owner's other timed events, as the
+  other changes leave them and with the new ones, and the timed Google events a change
+  would overlap are shown as warnings; they never block.
   Every Google event counts as busy, since phase 2 keeps no free/busy flag.
 - **Apply and Undo.** The owner keeps the changes they want. Applying is one transaction,
   one revision per event; if any event changed since the request, nothing is applied and

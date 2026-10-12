@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -360,6 +360,83 @@ async def test_checks_keep_good_changes_and_drop_bad_ones(
     assert checked.ignored == 9 and checked.message == "Done."
 
 
+async def test_missing_fields_come_from_the_event_and_bad_ones_refuse_the_change(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    await seeded(session, service)
+    events = EventService(session, clock=lambda: NOW)
+    await events.create(
+        EventEdit(
+            title="Late shift",
+            all_day=False,
+            starts_at_utc=at(date(2026, 10, 15), 22),
+            ends_at_utc=at(FRIDAY, 1),
+            time_zone="America/Toronto",
+        )
+    )
+    await events.create(
+        EventEdit(
+            title="Call",
+            all_day=False,
+            starts_at_utc=at(date(2026, 10, 15), 13),
+            ends_at_utc=at(date(2026, 10, 15), 14),
+            time_zone="America/Vancouver",
+        )
+    )
+    await events.create(
+        EventEdit(
+            title="Conference",
+            all_day=True,
+            start_date=date(2026, 11, 7),
+            last_date=date(2026, 11, 10),  # Past the window's last day, November 8.
+            time_zone="America/Toronto",
+        )
+    )
+    plan = await service.prepare(PlanningOptions(instruction="x"), MONDAY, TORONTO)
+    key = {event.title: k for k, event in plan.keys.items()}
+
+    def edit(**fields: Any) -> EventEdit | None:
+        checked = validate_plan(PlanningCandidate(changes=(change(**fields),)), plan)
+        return checked.proposals[0].change.edit if checked.proposals else None
+
+    trip = edit(event_key=key["Trip"], start_date="2026-10-27")  # The length is kept.
+    assert trip is not None and (trip.start_date, trip.last_date) == (
+        date(2026, 10, 27),
+        date(2026, 10, 28),
+    )
+    shift = edit(event_key=key["Late shift"], end_time="02:00")  # It still ends the next day.
+    assert shift is not None and shift.ends_at_utc == at(FRIDAY, 2)
+    early = edit(event_key=key["Dentist"], start_date="2026-11-01", start_time="01:30")
+    assert early is not None and early.starts_at_utc and early.ends_at_utc
+    assert early.ends_at_utc - early.starts_at_utc == timedelta(hours=1)  # Across fall-back.
+    renamed = edit(event_key=key["Conference"], title="Summit")  # It keeps its later days.
+    assert renamed is not None and renamed.last_date == date(2026, 11, 10)
+    assert edit(event_key=key["Conference"], start_date="2026-11-08") is None  # Moves out.
+    assert edit(event_key=key["Call"], start_time="13:00") is None  # Only its zone differs.
+    blank = edit(event_key=key["Dentist"], title="Dentist (moved)", start_time="")
+    assert blank is not None and blank.starts_at_utc == at(WEDNESDAY, 11)
+    friday = edit(event_key=key["Dentist"], start_date="2026-10-16")  # It keeps its time.
+    assert friday is not None and (friday.starts_at_utc, friday.ends_at_utc) == (
+        at(FRIDAY, 11),
+        at(FRIDAY, 12),
+    )
+    for bad in (
+        {"event_key": key["Dentist"], "start_date": "2026-10-16", "start_time": "9:30"},
+        {"event_key": key["Dentist"], "start_date": "2026-10-32", "start_time": "15:00"},
+        {"event_key": key["Dentist"], "start_date": "Oct 16", "start_time": "15:00"},
+        {"event_key": key["Dentist"], "end_time": "24:00"},
+        {
+            "op": "create",
+            "event_key": None,
+            "title": "Far",
+            "all_day": False,
+            "start_date": "9999-12-31",
+            "start_time": "23:30",
+        },
+    ):
+        assert edit(**bad) is None  # Refused, never read as "keep the current value".
+
+
 async def test_overlaps_name_events_and_busy_google_times(
     session: AsyncSession, service: CalendarPlanningService
 ) -> None:
@@ -376,6 +453,31 @@ async def test_overlaps_name_events_and_busy_google_times(
     )
     # Standup is being deleted, so it no longer counts.
     assert checked.proposals[0].overlaps == ("Team sync (Owner)",)
+
+
+async def test_new_events_in_one_plan_overlap_each_other(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    blocks = (("Deck work", "09:00", "10:00"), ("Email", "09:30", "10:30"))
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=tuple(
+                change(
+                    op="create",
+                    event_key=None,
+                    title=title,
+                    all_day=False,
+                    start_date="2026-10-15",
+                    start_time=start,
+                    end_time=end,
+                )
+                for title, start, end in blocks
+            )
+        ),
+        plan,
+    )
+    assert [p.overlaps for p in checked.proposals] == [("Email",), ("Deck work",)]
 
 
 async def test_at_most_ten_changes_are_kept(
@@ -461,3 +563,11 @@ async def test_a_conflict_applies_nothing(
         e.title for e in (await events.list_range(MONDAY, date(2026, 11, 8), TORONTO)).events
     )
     assert "New" not in titles
+
+    standup = plan.keys["e3"]
+    await events.delete(standup.public_id, standup.revision)
+    renamed = validate_plan(
+        PlanningCandidate(changes=(change(event_key="e3", title="Sync"),)), plan
+    )
+    with pytest.raises(EventConflictError):  # Deleted since the plan was read.
+        await events.apply_changes([p.change for p in renamed.proposals])

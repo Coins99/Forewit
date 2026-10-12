@@ -150,8 +150,12 @@ def preview_lines(request: CalendarPlanningRequest) -> tuple[PreviewLine, ...]:
     window = f"{request.window_first.isoformat()} to {request.window_last.isoformat()}"
     lines = [
         PreviewLine(
-            label="Your instruction, today's date and your time zone",
-            characters=len(request.instruction) + len(request.now_local) + len(request.time_zone),
+            label="Your instruction, today's date and time zone, and the dates to plan",
+            characters=len(request.instruction)
+            + len(request.now_local)
+            + len(request.time_zone)
+            + len(request.window_first.isoformat())
+            + len(request.window_last.isoformat()),
         ),
         PreviewLine(
             label=f"Your {len(request.events)} events from {window}: titles and times",
@@ -164,7 +168,8 @@ def preview_lines(request: CalendarPlanningRequest) -> tuple[PreviewLine, ...]:
             PreviewLine(
                 label=f"{len(request.busy)} Google Calendar times"
                 + (" with their titles" if titled else ", without titles"),
-                characters=_size([b.model_dump() for b in request.busy]),
+                # As sent: a time sent without its title has no title key.
+                characters=_size([b.model_dump(exclude_none=True) for b in request.busy]),
             )
         )
     if request.actions is not None:
@@ -178,17 +183,27 @@ def preview_lines(request: CalendarPlanningRequest) -> tuple[PreviewLine, ...]:
 
 
 def _day(value: str | None) -> date | None:
-    if value is None or not _DAY.fullmatch(value.strip()):
+    """A YYYY-MM-DD day, or None when it's missing. Anything else raises ValueError, so a
+    bad date refuses the change instead of reading as "keep the current one"."""
+    if value is None or not value.strip():
         return None
-    try:
-        return date.fromisoformat(value.strip())
-    except ValueError:
-        return None
+    if not _DAY.fullmatch(value.strip()):
+        raise ValueError("not a YYYY-MM-DD day")
+    return date.fromisoformat(value.strip())  # A day that doesn't exist raises ValueError.
 
 
 def _clock(value: str | None) -> time | None:
-    match = None if value is None else _CLOCK.fullmatch(value.strip())
-    return None if match is None else time(int(match[1]), int(match[2]))
+    """A 24-hour HH:MM time, or None when it's missing; anything else raises ValueError."""
+    if value is None or not value.strip():
+        return None
+    match = _CLOCK.fullmatch(value.strip())
+    if match is None:
+        raise ValueError("not a 24-hour HH:MM time")
+    return time(int(match[1]), int(match[2]))
+
+
+def _minute(moment: datetime) -> time:
+    return moment.time().replace(second=0, microsecond=0)
 
 
 def _text(value: str | None, limit: int) -> str | None:
@@ -199,8 +214,10 @@ def _text(value: str | None, limit: int) -> str | None:
 def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: PreparedPlan) -> EventEdit:
     """The new fields for a create or an update; raises ValueError when they don't work.
 
-    On update a missing field keeps the current value, and moving only the start keeps
-    the event's length.
+    On update a missing field keeps the current value: moving only the start keeps the
+    event's length (in elapsed time, so a DST change can't stretch it), and an end time
+    without a date keeps its day relative to the start, so an overnight event still ends
+    the next day. A day or time that is given but isn't real refuses the change.
     """
     zone = plan.zone
     title = _text(change.title, EVENT_TITLE_MAX_CHARS) or (
@@ -213,15 +230,18 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
     )
     if title is None or all_day is None:
         raise ValueError("a title and a shape are needed")
-    if current is not None:
-        first_now, last_now = current.days(zone)
+    kept = None if current is None else current.days(zone)
     start_day, end_day = _day(change.start_date), _day(change.end_date)
     if all_day:
-        first = start_day or (None if current is None else first_now)
+        first = start_day or (None if kept is None else kept[0])
         if first is None:
             raise ValueError("an all-day event needs its first day")
-        last = end_day or (first if current is None or start_day is not None else last_now)
-        edit = EventEdit(
+        if end_day is not None:
+            last = end_day
+        else:
+            last = first if kept is None else first + (kept[1] - kept[0])
+        _inside(first, last, plan, kept)
+        return EventEdit(
             title=title,
             notes="" if current is None else current.notes,
             all_day=True,
@@ -229,49 +249,42 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
             last_date=last,
             time_zone=zone.key,
         )
-        _inside(first, last, plan)
-        return edit
     start_clock, end_clock = _clock(change.start_time), _clock(change.end_time)
-    timed_now = current is not None and not current.all_day
-    if start_day is None and start_clock is None and timed_now:
-        assert current is not None and current.starts_at_utc is not None
-        starts = current.starts_at_utc
+    timed: tuple[datetime, datetime] | None = None  # The current start and end, in UTC.
+    if current is not None and not current.all_day:
+        assert current.starts_at_utc is not None and current.ends_at_utc is not None
+        timed = (current.starts_at_utc, current.ends_at_utc)
+    if timed is not None and start_day is None and start_clock is None:
+        starts = timed[0]
     else:
-        local_start = (
-            None
-            if not timed_now or current is None or current.starts_at_utc is None
-            else current.starts_at_utc.astimezone(zone)
+        local_start = None if timed is None else timed[0].astimezone(zone)
+        day = start_day or (
+            local_start.date() if local_start is not None else (None if kept is None else kept[0])
         )
-        day = (
-            start_day
-            or (None if local_start is None else local_start.date())
-            or (first_now if current is not None else None)
-        )
-        clock = start_clock or (
-            None if local_start is None else local_start.time().replace(second=0, microsecond=0)
-        )
+        clock = start_clock or (None if local_start is None else _minute(local_start))
         if day is None or clock is None:
             raise ValueError("a timed event needs its start")
-        starts = wall_clock(day, clock, zone)
+        starts = normalize_utc(wall_clock(day, clock, zone))
     if end_day is None and end_clock is None:
-        if timed_now and current is not None and current.starts_at_utc and current.ends_at_utc:
-            ends = starts + (current.ends_at_utc - current.starts_at_utc)
-        else:
-            ends = starts + _DEFAULT_LENGTH
+        ends = starts + (_DEFAULT_LENGTH if timed is None else timed[1] - timed[0])
     else:
-        local_end = (
-            None
-            if not timed_now or current is None or current.ends_at_utc is None
-            else current.ends_at_utc.astimezone(zone)
-        )
-        day = end_day or starts.astimezone(zone).date()
-        clock = end_clock or (
-            None if local_end is None else local_end.time().replace(second=0, microsecond=0)
-        )
+        if timed is None:
+            local_end, offset = None, timedelta()
+        else:
+            local_end = timed[1].astimezone(zone)
+            offset = local_end.date() - timed[0].astimezone(zone).date()
+        day = end_day or starts.astimezone(zone).date() + offset
+        clock = end_clock or (None if local_end is None else _minute(local_end))
         if clock is None:
             raise ValueError("a timed event needs its end")
-        ends = wall_clock(day, clock, zone)
-    edit = EventEdit(
+        ends = normalize_utc(wall_clock(day, clock, zone))
+    _inside(
+        starts.astimezone(zone).date(),
+        (ends - timedelta(microseconds=1)).astimezone(zone).date(),
+        plan,
+        kept,
+    )
+    return EventEdit(
         title=title,
         notes="" if current is None else current.notes,
         all_day=False,
@@ -279,16 +292,14 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
         ends_at_utc=ends,
         time_zone=zone.key,
     )
-    first, last = (
-        starts.astimezone(zone).date(),
-        (ends - timedelta(microseconds=1)).astimezone(zone).date(),
-    )
-    _inside(first, last, plan)
-    return edit
 
 
-def _inside(first: date, last: date, plan: PreparedPlan) -> None:
-    if first < plan.request.window_first or last > plan.request.window_last:
+def _inside(first: date, last: date, plan: PreparedPlan, kept: tuple[date, date] | None) -> None:
+    """Refuse a change that reaches outside the planning window. An event that already
+    starts before it or ends after it may keep that day, so it can still be changed."""
+    before = first < plan.request.window_first and (kept is None or first != kept[0])
+    after = last > plan.request.window_last and (kept is None or last != kept[1])
+    if before or after:
         raise ValueError("the change falls outside the planning window")
 
 
@@ -297,8 +308,10 @@ def _overlaps(
     plan: PreparedPlan,
     deleted: set[str],
     moved: dict[str, EventEdit],
+    created: Sequence[EventChange],
 ) -> tuple[str, ...]:
-    """Titles of the timed events this change would overlap, the owner's then Google's.
+    """Titles of the timed events this change would overlap: the owner's, as the other
+    changes leave them and with the new ones, then Google's.
 
     Every timed Google event counts, since its free/busy flag isn't kept.
     """
@@ -307,11 +320,14 @@ def _overlaps(
         return ()
     start, end = edit.starts_at_utc, edit.ends_at_utc
     own = None if proposal.event is None else proposal.event.public_id
+    mine = [
+        moved.get(event.public_id) or event.edit()
+        for event in plan.events
+        if event.public_id not in deleted and event.public_id != own
+    ]
+    mine += [c.edit for c in created if c is not proposal and c.edit is not None]
     found: list[str] = []
-    for event in plan.events:
-        if event.public_id in deleted or event.public_id == own:
-            continue
-        other = moved.get(event.public_id) or event.edit()
+    for other in mine:
         if other.all_day or other.starts_at_utc is None or other.ends_at_utc is None:
             continue
         if other.starts_at_utc < end and other.ends_at_utc > start:
@@ -341,7 +357,7 @@ def validate_plan(candidate: PlanningCandidate, plan: PreparedPlan) -> CalendarP
             continue
         try:
             checked = _change(change, plan, seen)
-        except ValueError:
+        except (ValueError, OverflowError):  # Overflow: a date near either end of time.
             checked = None
         if checked is None:
             ignored += 1
@@ -353,8 +369,11 @@ def validate_plan(candidate: PlanningCandidate, plan: PreparedPlan) -> CalendarP
         for c, _ in kept
         if c.kind is ChangeKind.UPDATE and c.event and c.edit
     }
+    created = [c for c, _ in kept if c.kind is ChangeKind.CREATE]
     proposals = tuple(
-        ProposedChange(change=c, reason=reason, overlaps=_overlaps(c, plan, deleted, moved))
+        ProposedChange(
+            change=c, reason=reason, overlaps=_overlaps(c, plan, deleted, moved, created)
+        )
         for c, reason in kept
     )
     return CalendarPlan(
@@ -376,8 +395,8 @@ def _change(change: ChangeCandidate, plan: PreparedPlan, seen: set[str]) -> Even
     if op == ChangeKind.DELETE.value:
         return EventChange(kind=ChangeKind.DELETE, event=event)
     edit = _edit(change, event, plan)
-    if edit == event.edit():
-        return None  # It changes nothing.
+    if edit.model_copy(update={"time_zone": event.time_zone}) == event.edit():
+        return None  # It changes nothing; a zone alone isn't a change the owner would see.
     return EventChange(kind=ChangeKind.UPDATE, event=event, edit=edit)
 
 

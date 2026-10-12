@@ -230,8 +230,9 @@ class EventService:
     async def apply_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:
         """Apply every change as one transaction, each event one revision.
 
-        An update or delete names the event as it was read; when any of them has changed
-        since, EventConflictError is raised and nothing is applied. Returns what undo needs.
+        An update or delete names the event as it was read; when any of them has changed or
+        been deleted since, EventConflictError is raised and nothing is applied. Returns
+        what undo needs.
         """
         if not changes:
             raise ValueError(_NO_CHANGES)
@@ -255,7 +256,10 @@ class EventService:
                     )
                     continue
                 assert change.event is not None
-                row = await self._live(change.event.public_id, change.event.revision)
+                live = await self._repository.get(change.event.public_id)
+                if live is None or live.revision != change.event.revision:
+                    raise EventConflictError(_STALE)
+                row = live
                 previous = event_from_row(row).edit()
                 if change.kind is ChangeKind.UPDATE:
                     assert change.edit is not None

@@ -25,6 +25,7 @@ from mailbrief.providers.groq.provider import (
     PLANNING_PROMPT_VERSION,
     GroqProvider,
 )
+from mailbrief.services.calendar_planning import preview_lines
 from tests.unit.providers.groq.groq_fixtures import (
     CHAT_URL,
     TEST_KEY,
@@ -129,6 +130,10 @@ async def test_only_the_chosen_parts_are_sent(
     }
     assert sent["busy"][1]["title"] == "Trip"
     assert sent["actions"] == [{"title": "Send the deck", "deadline": None, "target": "2026-10-15"}]
+    sizes = [line.characters for line in preview_lines(with_parts)[1:]]
+    assert sizes == [
+        len(json.dumps(sent[part], ensure_ascii=False)) for part in ("events", "busy", "actions")
+    ]  # The preview counts exactly what is sent.
 
 
 @pytest.mark.parametrize(
@@ -156,7 +161,7 @@ async def test_cut_off_answers_are_incomplete(
         )
     )
     response = await provider.plan_calendar(REQUEST)
-    assert response.problem in (DraftingProblem.INCOMPLETE, DraftingProblem.INVALID_OUTPUT)
+    assert response.problem is DraftingProblem.INCOMPLETE
 
 
 async def test_json_validate_failed_is_incomplete(
