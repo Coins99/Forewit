@@ -23,9 +23,11 @@ NEW: Final = "new"
 OPEN: Final = "open"
 DELETE: Final = "delete"
 OPEN_GOOGLE: Final = "open-google"
-CONNECT: Final = "connect"
+ALLOW: Final = "allow"
 REFRESH: Final = "refresh"
-DISCONNECT: Final = "disconnect"
+GOOGLE_OFF: Final = "off"  # Gmail isn't connected.
+GOOGLE_ASK: Final = "ask"  # Connected; the sign-in lacks the calendar permissions.
+GOOGLE_ON: Final = "on"
 WEEK_DAYS: Final = 7
 EMPTY: Final = "Nothing this week. Add an event with New event."
 MARKER_NOTE: Final = "Deadlines and targets come from your open actions; change them there."
@@ -140,19 +142,11 @@ class CalendarPanel(QWidget):
         self.google_status = plain_label("", tone="muted")
         self.google_status.setObjectName("googleStatus")
         google.addWidget(self.google_status, 1)
-        # Connect and Disconnect never show together, so they share a mnemonic.
-        self.connect_button = outline_button(
-            "Connect &Google Calendar", "connectCalendarButton", mnemonic=True
+        self.allow_button = outline_button(
+            "Allow &Google Calendar", "allowCalendarButton", mnemonic=True
         )
         self.refresh_button = outline_button("Re&fresh", "refreshCalendarButton", mnemonic=True)
-        self.disconnect_button = outline_button(
-            "Disconnect &Google Calendar", "disconnectCalendarButton", mnemonic=True
-        )
-        for button, kind in (
-            (self.connect_button, CONNECT),
-            (self.refresh_button, REFRESH),
-            (self.disconnect_button, DISCONNECT),
-        ):
+        for button, kind in ((self.allow_button, ALLOW), (self.refresh_button, REFRESH)):
             google.addWidget(button)
             button.clicked.connect(lambda _checked=False, chosen=kind: self._request_google(chosen))
         layout.addLayout(google)
@@ -191,8 +185,8 @@ class CalendarPanel(QWidget):
         self.open_button.clicked.connect(lambda: self._request(OPEN))
         self.delete_button.clicked.connect(lambda: self._request(DELETE))
         self.open_google_button.clicked.connect(self._request_open_google)
-        self._account: str | None = None
-        self.set_google(None, "")
+        self._google_mode = GOOGLE_OFF
+        self.set_google(GOOGLE_OFF, "")
         self.empty.hide()
         self.note.hide()
         self._update_buttons()
@@ -215,13 +209,13 @@ class CalendarPanel(QWidget):
         row = self.list.currentRow()
         return self._rows[row][1] if 0 <= row < len(self._rows) else None
 
-    def set_google(self, account: str | None, note: str) -> None:
-        """Whether Google Calendar is connected, and what the cache holds, in one line."""
-        self._account = account
+    def set_google(self, mode: str, note: str) -> None:
+        """What the one Google sign-in allows, and what the cache holds, in one line:
+        GOOGLE_OFF shows no button, GOOGLE_ASK offers Allow and GOOGLE_ON offers Refresh."""
+        self._google_mode = mode
         self.google_status.setText(note)
-        self.connect_button.setVisible(account is None)
-        self.refresh_button.setVisible(account is not None)
-        self.disconnect_button.setVisible(account is not None)
+        self.allow_button.setVisible(mode == GOOGLE_ASK)
+        self.refresh_button.setVisible(mode == GOOGLE_ON)
         self._update_buttons()
 
     def show_range(self, shown: CalendarRange, zone: ZoneInfo, today: date) -> None:
@@ -273,7 +267,7 @@ class CalendarPanel(QWidget):
         self.open_google_button.setEnabled(
             linked is not None and linked.web_link is not None and not self._busy
         )
-        for button in (self.connect_button, self.refresh_button, self.disconnect_button):
+        for button in (self.allow_button, self.refresh_button):
             button.setEnabled(not self._busy)
 
     def _request_week(self, offset: int) -> None:

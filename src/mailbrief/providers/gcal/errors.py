@@ -16,6 +16,11 @@ class CalendarSetupError(ConfigurationError):
     """Use only static guidance: never include paths, payloads or backend exceptions."""
 
 
+NOT_ALLOWED: Final = (
+    "Google Calendar isn't allowed yet; choose Allow Google Calendar on the Calendar page."
+)
+
+
 def calendar_response_error(message: str) -> ProviderResponseError:
     """An unusable answer from Google Calendar; ``message`` must be static."""
     return ProviderResponseError(message)
@@ -40,11 +45,11 @@ def calendar_permission_guidance(payload: object) -> str:
         )
     if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
         return (
-            "Google did not grant calendar read access. Disconnect Google Calendar, "
-            "reconnect and allow both calendar permissions."
+            "Google did not grant calendar read access. Choose Allow Google Calendar and tick "
+            "both calendar boxes."
         )
     if reasons & {"domainPolicy", "ORG_RESTRICTION_VIOLATION"}:
         return "Your Google administrator does not allow this app to read calendars."
     if reasons & (QUOTA_REASONS | {"rateLimitExceeded", "userRateLimitExceeded"}):
         return QUOTA_GUIDANCE
-    return "Google Calendar denied access; reconnect Google Calendar and retry."
+    return "Google Calendar denied access; choose Allow Google Calendar and retry."

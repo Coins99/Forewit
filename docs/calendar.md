@@ -22,12 +22,13 @@ Gmail:
 2. On the OAuth consent screen's **Data Access** page, add
    `https://www.googleapis.com/auth/calendar.events.readonly` and
    `https://www.googleapis.com/auth/calendar.calendarlist.readonly`.
-3. On the Calendar page, choose **Connect Google Calendar**. Google asks in your browser,
-   with the same unverified-app warning as Gmail; allow both permissions.
+3. Connect Gmail. Google asks once, in your browser, for Gmail and the two calendar
+   permissions; tick them all. If you connected Gmail before this, or left the calendar
+   boxes unticked, the Calendar page offers **Allow Google Calendar**: choose it once.
 
-This is a separate sign-in from Gmail's, kept in its own entry in the OS credential vault.
-It can't read mail, and the Gmail sign-in can't read calendars. Disconnecting one never
-disconnects the other.
+There is one Google sign-in for Gmail and Calendar (ADR 0019), kept in Gmail's entry in the
+OS credential vault. Google Calendar refreshes after every Sync and review and every
+automatic run, as well as from the Calendar page.
 
 **What MailBrief reads and keeps.** For each calendar shown in Google Calendar's own list
 (and always your primary one), the events of a ten-week window around the week you're
@@ -37,18 +38,21 @@ entries, are skipped. The window refreshes when you connect, when you choose **R
 and when you open the page or move to a week the saved copy doesn't hold or that is more
 than 15 minutes old.
 
-**Disconnect Google Calendar** forgets the sign-in and the saved Google events. It does not
-revoke MailBrief's access in your Google account; do that at
+**Disconnect** in the sidebar forgets the one sign-in and the saved Google events. It does
+not revoke MailBrief's access in your Google account; do that at
 myaccount.google.com/permissions if you want to.
 
 **Open in Google Calendar** opens the selected Google event in your browser.
 
 ## Messages
 
-- "Google Calendar needs you to connect it again": the sign-in expired or was revoked;
-  choose **Connect Google Calendar**.
+- "Gmail: session expired…": the one Google sign-in expired or was revoked; connect Gmail
+  again.
+- "Google Calendar isn't allowed yet…": choose **Allow Google Calendar** and tick both
+  calendar boxes.
 - "Google Calendar API is disabled…": enable the API (step 1 above).
-- "Google didn't grant both calendar permissions…": reconnect and allow both.
+- "Google didn't grant calendar access…": choose **Allow Google Calendar** and tick both
+  calendar boxes.
 - "Couldn't reach Google Calendar…": the page shows the copy saved at the last refresh.
 
 ## Live check

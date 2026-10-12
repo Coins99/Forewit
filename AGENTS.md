@@ -263,9 +263,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
   owner applies. Deadlines and target dates are never stored as events or moved by them.
   Google writes go only to the calendar MailBrief creates: never to other calendars, never
-  guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
-  The calendar grant holds only `calendar.events.readonly` and
-  `calendar.calendarlist.readonly` until phase 4, and every Calendar request names its
+  guests or invitations. One Google sign-in serves Gmail and Calendar (ADR 0019): it asks
+  for `gmail.readonly`, `calendar.events.readonly` and `calendar.calendarlist.readonly`,
+  requires only the first, and adds nothing else until phase 4. Every Calendar request names its
   `fields`: descriptions, locations, guests and conference details are never fetched or
   stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
   with its events. The Google cache is excluded from exports and from the cleanup

@@ -42,6 +42,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage,
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
+from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
 from mailbrief.services.actions import AcceptedInto, DecisionSnapshot
 from mailbrief.services.brief import ConsentGate, ShortlistGate
@@ -123,8 +124,8 @@ class FakeBackend(FakeDrafts):
         self.event_fail: Exception | None = None
         # Google Calendar (ADR 0018, phase 2): the saved account, the cache a sync fills,
         # and each call. calendar_fail makes every calendar call raise.
-        self.calendar_saved: str | None = None
-        self.calendar_connects_as = "owner@example.com"
+        self.calendar_permission: bool | None = None  # What calendar_allowed answers.
+        self.calendar_grants = True  # What Allow Google Calendar gets from Google.
         self.calendar_fail: Exception | None = None
         self.calendar_calls: list[tuple[object, ...]] = []
         self.google_events: list[GoogleEvent] = []
@@ -336,7 +337,10 @@ class FakeBackend(FakeDrafts):
         return "AI: configured"
 
     async def disconnect(self) -> None:
-        pass
+        # The one Google sign-in (ADR 0019): Calendar and its saved events go with Gmail.
+        self.calendar_permission = None
+        self.google_events = []
+        self.google_coverage = None
 
     async def generate(
         self,
@@ -529,27 +533,23 @@ class FakeBackend(FakeDrafts):
         if self.calendar_fail is not None:
             raise self.calendar_fail
 
-    async def calendar_account(self) -> str | None:
-        return self.calendar_saved
+    async def calendar_allowed(self) -> bool | None:
+        return self.calendar_permission
 
-    async def connect_calendar(self) -> str:
-        self._calendar_call("connect_calendar")
-        self.calendar_saved = self.calendar_connects_as
-        return self.calendar_saved
+    async def allow_calendar(self) -> bool:
+        self._calendar_call("allow_calendar")
+        self.calendar_permission = self.calendar_grants
+        return self.calendar_permission
 
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
         self._calendar_call("sync_calendar", around)
+        if self.calendar_permission is False:
+            raise CalendarNotAllowedError("Google Calendar isn't allowed yet.")
         first, last = sync_window(around)
         self.google_coverage = GoogleCoverage(
             first_day=first, last_day=last, synced_at_utc=self.calendar_now
         )
         return self.calendar_result
-
-    async def disconnect_calendar(self) -> None:
-        self._calendar_call("disconnect_calendar")
-        self.calendar_saved = None
-        self.google_events = []
-        self.google_coverage = None
 
     async def close(self) -> None:
         self.closed = True

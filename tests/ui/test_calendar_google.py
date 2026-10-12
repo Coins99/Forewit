@@ -1,5 +1,7 @@
-"""Google Calendar on the Calendar page: read-only rows, connect, sync and disconnect."""
+"""Google Calendar on the Calendar page over the one Google sign-in (ADR 0019): read-only
+rows, Allow Google Calendar, and syncing with Gmail."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -10,6 +12,7 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
 from mailbrief.errors import ConfigurationError
+from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     ProviderError,
@@ -17,7 +20,15 @@ from mailbrief.ports.errors import (
     ProviderRateLimitError,
 )
 from mailbrief.services.google_calendar import STALE_AFTER, sync_window
-from mailbrief.ui.calendar_view import CONNECT, DISCONNECT, OPEN_GOOGLE, REFRESH, CalendarPanel
+from mailbrief.ui.calendar_view import (
+    ALLOW,
+    GOOGLE_ASK,
+    GOOGLE_OFF,
+    GOOGLE_ON,
+    OPEN_GOOGLE,
+    REFRESH,
+    CalendarPanel,
+)
 from mailbrief.ui.main_window import MainWindow, calendar_sync_text
 from tests.ui.test_calendar import MONDAY, NOW, TODAY, TORONTO, rows, stored, timed, week
 from tests.ui.test_workflow import FakeBackend
@@ -70,39 +81,38 @@ def test_google_rows_name_their_calendar_and_are_read_only(panel: CalendarPanel)
     assert not panel.open_google_button.isEnabled()
 
 
-def test_google_controls_follow_the_connection(panel: CalendarPanel) -> None:
+def test_google_controls_follow_the_sign_in(panel: CalendarPanel) -> None:
     panel.show_range(week(), TORONTO, TODAY)
     kinds: list[str] = []
     panel.google_requested.connect(kinds.append)
-    panel.set_google(None, "Google Calendar isn't connected.")
-    assert panel.google_status.text() == "Google Calendar isn't connected."
-    assert panel.connect_button.isVisibleTo(panel)
+    panel.set_google(GOOGLE_OFF, "Connect Gmail to see your Google Calendar here.")
+    assert panel.google_status.text() == "Connect Gmail to see your Google Calendar here."
+    assert not panel.allow_button.isVisibleTo(panel)
     assert not panel.refresh_button.isVisibleTo(panel)
-    panel.connect_button.click()
-    panel.set_google("owner@example.com", "Google Calendar: owner@example.com · updated 09:14")
-    assert not panel.connect_button.isVisibleTo(panel)
+    panel.set_google(GOOGLE_ASK, "Allow it.")
+    assert panel.allow_button.isVisibleTo(panel) and not panel.refresh_button.isVisibleTo(panel)
+    panel.allow_button.click()
+    panel.set_google(GOOGLE_ON, "Updated.")
+    assert panel.refresh_button.isVisibleTo(panel) and not panel.allow_button.isVisibleTo(panel)
     panel.refresh_button.click()
-    panel.disconnect_button.click()
-    assert kinds == [CONNECT, REFRESH, DISCONNECT]
+    assert kinds == [ALLOW, REFRESH]
     panel.set_busy(True)
     assert not panel.refresh_button.isEnabled()
     panel.refresh_button.click()
-    assert kinds == [CONNECT, REFRESH, DISCONNECT]
+    assert kinds == [ALLOW, REFRESH]
 
 
-@pytest.mark.parametrize("account", [None, "owner@example.com"])
-def test_visible_mnemonics_stay_unique(panel: CalendarPanel, account: str | None) -> None:
-    """Connect and Disconnect share G because only one of them ever shows."""
-    panel.set_google(account, "")
+@pytest.mark.parametrize("mode", [GOOGLE_OFF, GOOGLE_ASK, GOOGLE_ON])
+def test_visible_mnemonics_stay_unique(panel: CalendarPanel, mode: str) -> None:
+    panel.set_google(mode, "")
     buttons = [
         button
         for button in (
             panel.previous_button,
             panel.this_week_button,
             panel.next_button,
-            panel.connect_button,
+            panel.allow_button,
             panel.refresh_button,
-            panel.disconnect_button,
             panel.new_button,
             panel.open_button,
             panel.delete_button,
@@ -135,42 +145,127 @@ async def finish(window: MainWindow) -> None:
     await window.task
 
 
-def connected(backend: FakeBackend, *, synced: datetime = NOW) -> None:
-    backend.calendar_saved = "owner@example.com"
+def synced(backend: FakeBackend, *, at: datetime = NOW) -> None:
+    backend.calendar_permission = True
     first, last = sync_window(TODAY)
-    backend.google_coverage = GoogleCoverage(first_day=first, last_day=last, synced_at_utc=synced)
+    backend.google_coverage = GoogleCoverage(first_day=first, last_day=last, synced_at_utc=at)
     backend.google_events = [google()]
 
 
-async def test_not_connected_offers_connect(window: MainWindow, backend: FakeBackend) -> None:
+def google_rows(window: MainWindow) -> list[str]:
+    return [text for text in rows(window.calendar_panel) if text.endswith("· Work")]
+
+
+async def test_without_gmail_the_page_says_connect_gmail(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.connect_fail = AuthenticationRequiredError("none saved")
     await window.initialize()
     panel = window.calendar_panel
-    assert panel.google_status.text() == "Google Calendar isn't connected."
-    assert panel.connect_button.isVisibleTo(panel)
+    assert panel.google_status.text() == "Connect Gmail to see your Google Calendar here."
+    assert not panel.allow_button.isVisibleTo(panel)
+    assert not panel.refresh_button.isVisibleTo(panel)
     assert backend.calendar_calls == []
 
 
-async def test_connect_reads_google_and_shows_its_events(
+async def test_an_older_sign_in_offers_allow_then_syncs(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    await window.initialize()
+    backend.calendar_permission = False  # Gmail connected before Calendar was asked for.
     backend.google_events = [google()]
-    window.calendar_panel.connect_button.click()
-    await finish(window)
-    monday = MONDAY  # The week shown follows today.
-    assert backend.calendar_calls == [("connect_calendar",), ("sync_calendar", monday)]
-    assert window.status.text() == "Google Calendar updated: 0 events from 1 calendar."
-    assert window.calendar_panel.google_status.text().startswith(
-        "Google Calendar: owner@example.com · updated "
+    await window.initialize()
+    panel = window.calendar_panel
+    assert panel.google_status.text() == (
+        "Google Calendar isn't allowed yet. Choose Allow Google Calendar."
     )
-    # Times show in the window's zone, which follows the machine running the tests.
-    assert any(text.endswith("· Team sync · Work") for text in rows(window.calendar_panel))
+    assert panel.allow_button.isVisibleTo(panel)
+    panel.allow_button.click()
+    await finish(window)
+    assert backend.calendar_calls == [("allow_calendar",), ("sync_calendar", MONDAY)]
+    assert window.status.text() == "Google Calendar updated: 0 events from 1 calendar."
+    assert panel.refresh_button.isVisibleTo(panel) and not panel.allow_button.isVisibleTo(panel)
+    assert google_rows(window)
+
+
+async def test_unticked_calendar_boxes_keep_allow(window: MainWindow, backend: FakeBackend) -> None:
+    backend.calendar_permission = False
+    backend.calendar_grants = False
+    await window.initialize()
+    window.calendar_panel.allow_button.click()
+    await finish(window)
+    assert "tick both calendar boxes" in window.status.text()
+    assert backend.calendar_calls == [("allow_calendar",)]
+    assert window.calendar_panel.allow_button.isVisibleTo(window.calendar_panel)
+
+
+async def test_connecting_gmail_brings_calendar_along(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.connect_fail = AuthenticationRequiredError("none saved")
+    await window.initialize()
+    backend.connect_fail = None
+    backend.calendar_permission = True
+    backend.google_events = [google()]
+    window.start(window._connect)
+    await finish(window)
+    assert ("sync_calendar", MONDAY) in backend.calendar_calls
+    assert google_rows(window)
+
+
+async def test_disconnecting_gmail_forgets_google_events(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    synced(backend)
+    await window.initialize()
+    assert google_rows(window)
+    window.start(window._disconnect)
+    await finish(window)
+    assert not google_rows(window)
+    assert window.calendar_panel.google_status.text() == (
+        "Connect Gmail to see your Google Calendar here."
+    )
+
+
+async def test_sync_and_review_also_refreshes_google_calendar(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    synced(backend)
+    window.start(window.initialize)
+    await finish(window)
+    window.generate_button.click()
+    await asyncio.sleep(0)
+    window.review_button.click()
+    await asyncio.sleep(0)
+    window.approve_button.click()
+    await finish(window)
+    assert "Brief saved" in window.status.text()
+    assert backend.calendar_calls == [("sync_calendar", MONDAY)]
+
+
+async def test_a_calendar_problem_after_a_brief_only_adds_to_the_status(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    synced(backend)
+    window.start(window.initialize)
+    await finish(window)
+    backend.calendar_fail = ProviderError("private")
+    window.generate_button.click()
+    await asyncio.sleep(0)
+    window.review_button.click()
+    await asyncio.sleep(0)
+    window.approve_button.click()
+    await finish(window)
+    text = window.status.text()
+    assert text.startswith("Brief saved") and text.endswith(
+        "Couldn't reach Google Calendar; the Calendar page shows what was saved."
+    )
+    assert "private" not in text
 
 
 async def test_fresh_cache_needs_no_sync_and_a_stale_one_refreshes_on_opening(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    connected(backend)
+    synced(backend)
     await window.initialize()
     window.page_shortcuts["calendar"].activated.emit()
     assert window.task is None or window.task.done()
@@ -191,7 +286,7 @@ async def test_fresh_cache_needs_no_sync_and_a_stale_one_refreshes_on_opening(
 async def test_moving_past_the_cache_reads_that_week(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    connected(backend)
+    synced(backend)
     await window.initialize()
     later = MONDAY + timedelta(weeks=9)
     window.calendar_panel.week_requested.emit(later)
@@ -199,26 +294,38 @@ async def test_moving_past_the_cache_reads_that_week(
     assert backend.calendar_calls == [("sync_calendar", later)]
 
 
-async def test_sign_in_failure_offers_connect_and_leaves_gmail_alone(
+async def test_a_rejected_sign_in_is_reported_as_gmails(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    connected(backend)
+    synced(backend)
     await window.initialize()
-    gmail = window.connection.text()
     backend.calendar_fail = AuthenticationRequiredError("private detail")
     window.calendar_panel.refresh_button.click()
     await finish(window)
-    assert window.status.text() == "Google Calendar needs you to connect it again."
-    assert window.connection.text() == gmail
-    assert window.calendar_panel.connect_button.isVisibleTo(window.calendar_panel)
+    assert window.connection.text().startswith("Gmail: session expired")
+    assert "private" not in window.status.text()
+
+
+async def test_losing_calendar_access_offers_allow_again(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    synced(backend)
+    await window.initialize()
+    backend.calendar_fail = CalendarNotAllowedError("not allowed")
+    window.calendar_panel.refresh_button.click()
+    await finish(window)
+    assert (
+        window.status.text() == "Google Calendar isn't allowed yet. Choose Allow Google Calendar."
+    )
+    assert window.calendar_panel.allow_button.isVisibleTo(window.calendar_panel)
 
 
 @pytest.mark.parametrize(
     ("error", "message"),
     [
         (
-            ProviderPermissionError("Google Calendar denied access; reconnect."),
-            "Google Calendar denied access; reconnect.",
+            ProviderPermissionError("Google Calendar denied access; retry."),
+            "Google Calendar denied access; retry.",
         ),
         (ProviderRateLimitError("private"), "Google Calendar is busy; try again in a minute."),
         (
@@ -238,34 +345,12 @@ async def test_sign_in_failure_offers_connect_and_leaves_gmail_alone(
 async def test_failures_are_told_in_fixed_words(
     window: MainWindow, backend: FakeBackend, error: Exception, message: str
 ) -> None:
+    synced(backend)
     await window.initialize()
     backend.calendar_fail = error
-    window.calendar_panel.connect_button.click()
+    window.calendar_panel.refresh_button.click()
     await finish(window)
     assert window.status.text() == message
-
-
-async def test_disconnect_forgets_google_events(window: MainWindow, backend: FakeBackend) -> None:
-    connected(backend)
-    await window.initialize()
-    assert any(text.endswith("· Work") for text in rows(window.calendar_panel))
-    window.calendar_panel.disconnect_button.click()
-    await finish(window)
-    assert backend.calendar_calls == [("disconnect_calendar",)]
-    assert window.status.text().startswith("Google Calendar disconnected")
-    assert not any(text.endswith("· Work") for text in rows(window.calendar_panel))
-    assert window.calendar_panel.google_status.text() == "Google Calendar isn't connected."
-
-
-async def test_a_failed_disconnect_keeps_the_connection(
-    window: MainWindow, backend: FakeBackend
-) -> None:
-    connected(backend)
-    await window.initialize()
-    backend.calendar_fail = ProviderError("private")
-    window.calendar_panel.disconnect_button.click()
-    await finish(window)
-    assert window.calendar_panel.refresh_button.isVisibleTo(window.calendar_panel)
 
 
 def test_only_google_calendar_links_open(

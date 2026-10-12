@@ -16,6 +16,7 @@ from mailbrief.ports.errors import (
 from mailbrief.providers.gmail.cache import CredentialStore, RefreshCredential
 from mailbrief.providers.gmail.errors import GmailSetupError, permission_guidance, response_error
 from mailbrief.providers.gmail.oauth import (
+    CALENDAR_SCOPES,
     GMAIL_SCOPE,
     AuthorizationGrant,
     DesktopClient,
@@ -62,12 +63,25 @@ class GmailAuth:
         self._expires_at = 0.0
         self._account: AccountIdentity | None = None
         self._expected_email: str | None = None
+        self._granted: frozenset[str] = frozenset()  # What Google's last token answer granted.
         self._lock = asyncio.Lock()
 
-    async def connect(self, *, silent_only: bool = False) -> AccountIdentity:
-        """Restore first; only an explicitly interactive call may open a browser."""
+    async def connect(
+        self, *, silent_only: bool = False, ask_again: bool = False
+    ) -> AccountIdentity:
+        """Restore first; only an explicitly interactive call may open a browser.
+
+        ``ask_again`` opens the browser even when the saved sign-in still works, so the owner
+        can add a permission it lacks, such as Google Calendar's; it is always interactive.
+        """
         async with self._lock:
-            return await self._connect(silent_only=silent_only)
+            silent = silent_only and not ask_again
+            return await self._connect(silent_only=silent, ask_again=ask_again)
+
+    @property
+    def calendar_allowed(self) -> bool:
+        """Whether the current sign-in grants both read-only calendar permissions."""
+        return set(CALENDAR_SCOPES) <= self._granted
 
     async def access_token(self) -> str:
         """Return a current token for the Gmail adapter, without opening a browser."""
@@ -92,8 +106,13 @@ class GmailAuth:
             if self._token is not None and self._token.get_secret_value() == rejected_token:
                 self._expires_at = 0
 
-    async def _connect(self, *, silent_only: bool) -> AccountIdentity:
-        if self._account is not None and self._token and time.monotonic() < self._expires_at:
+    async def _connect(self, *, silent_only: bool, ask_again: bool = False) -> AccountIdentity:
+        if (
+            not ask_again
+            and self._account is not None
+            and self._token
+            and time.monotonic() < self._expires_at
+        ):
             return self._account
         self._token = None
         self._account = None
@@ -110,7 +129,7 @@ class GmailAuth:
             raise GmailSetupError("Gmail OAuth client changed; disconnect before reconnecting.")
         tokens: TokenResponse | None = None
         restored = False
-        if cached is not None:
+        if cached is not None and not ask_again:
             try:
                 tokens = await self._exchange(
                     {
@@ -160,6 +179,7 @@ class GmailAuth:
             refresh_token=refresh,
         )
         await asyncio.to_thread(self._store.save, credential)
+        self._granted = frozenset((tokens.scope or "").split())
         self._token = tokens.access_token
         self._expires_at = time.monotonic() + max(0, tokens.expires_in - 60)
         self._account = account

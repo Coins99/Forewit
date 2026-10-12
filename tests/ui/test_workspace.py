@@ -22,7 +22,7 @@ from mailbrief.domain.messages import EmailContact
 from mailbrief.ui.actions_view import ActionRow, ActionsPanel
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import ELIDE_MARGIN, ROW_ROLE, elided
-from mailbrief.ui.calendar_view import CalendarPanel
+from mailbrief.ui.calendar_view import GOOGLE_ON, CalendarPanel
 from mailbrief.ui.theme import TEXT_PX, ThemeMode, apply_theme, current_tokens, ui_metrics
 from mailbrief.ui.workspace import (
     EMPTY_BRIEF,
@@ -98,7 +98,7 @@ def build_calendar(qtbot: QtBot) -> ThreePaneWorkspace:
     # The week arrives once the page is in the window, as it does in the app: rows laid
     # out before then would miss the stylesheet's item padding.
     panel.show_range(mockup_week(), OWNER_ZONE, TODAY)
-    panel.set_google(ACCOUNT, f"Google Calendar: {ACCOUNT} · updated 09:14")
+    panel.set_google(GOOGLE_ON, f"Google Calendar: {ACCOUNT} · updated 09:14")
     workspace.show_page("calendar")
     workspace.sidebar.set_current("calendar")
     return workspace
