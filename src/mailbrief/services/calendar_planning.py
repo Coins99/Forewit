@@ -144,8 +144,13 @@ def _size(value: object) -> int:
     return len(json.dumps(value, ensure_ascii=False, default=str))
 
 
-def preview_lines(request: CalendarPlanningRequest) -> tuple[PreviewLine, ...]:
-    """What each part sends, in characters, computed from the request itself."""
+def preview_lines(
+    request: CalendarPlanningRequest, *, events_held: int | None = None
+) -> tuple[PreviewLine, ...]:
+    """What each part sends, in characters, computed from the request itself.
+
+    ``events_held`` is how many events the window holds, when more than were sent.
+    """
     # ISO dates: month names would follow the system language.
     window = f"{request.window_first.isoformat()} to {request.window_last.isoformat()}"
     lines = [
@@ -158,7 +163,12 @@ def preview_lines(request: CalendarPlanningRequest) -> tuple[PreviewLine, ...]:
             + len(request.window_last.isoformat()),
         ),
         PreviewLine(
-            label=f"Your {len(request.events)} events from {window}: titles and times",
+            label=(
+                f"Your first {len(request.events)} of {events_held} events from {window}: "
+                "titles and times"
+                if events_held is not None and events_held > len(request.events)
+                else f"Your {len(request.events)} events from {window}: titles and times"
+            ),
             characters=_size([e.model_dump() for e in request.events]),
         ),
     ]
@@ -488,7 +498,7 @@ class CalendarPlanningService:
             model=self._provider.model_name,
             privacy_notice=self._provider.privacy_notice,
             first_use=not await self.consent_active(),
-            lines=preview_lines(request),
+            lines=preview_lines(request, events_held=len(shown.events)),
         )
         return PreparedPlan(request, preview, zone, keys, shown.events, shown.google_events)
 

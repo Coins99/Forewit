@@ -135,3 +135,10 @@ proposes, code checks, the owner applies.
   the apply left it.
 - **Not yet.** Work blocks linked to actions and deterministic scheduling are the planner
   roadmap's P3; events made here are ordinary events.
+- **3b, the panel (2026-10-12).** Plan with AI is a dialog: instruction and parts, the
+  preview with the first-use consent box, waiting (cancellable), then the checked changes
+  with their reasons and overlaps, all ticked; the owner applies the ticked ones and gets
+  one Undo. Failures say the calendar is unchanged. The preview also says when the
+  200-event limit left events out; the other phase 3a review fixes shipped with 3a (see
+  Checks in Python). A record of applied AI changes needs a migration and waits until the
+  planner migrations settle.

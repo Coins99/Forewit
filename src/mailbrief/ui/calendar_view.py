@@ -117,6 +117,7 @@ class CalendarPanel(QWidget):
     event_requested = Signal(str, object)
     week_requested = Signal(object)
     google_requested = Signal(str)
+    plan_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -169,11 +170,13 @@ class CalendarPanel(QWidget):
         self.open_google_button = outline_button(
             "Open &in Google Calendar", "openGoogleEventButton", mnemonic=True
         )
+        self.plan_button = outline_button("Plan with &AI", "planCalendarButton", mnemonic=True)
         for button in (
             self.new_button,
             self.open_button,
             self.delete_button,
             self.open_google_button,
+            self.plan_button,
         ):
             buttons.addWidget(button)
         buttons.addStretch(1)  # Buttons keep their own width.
@@ -185,6 +188,7 @@ class CalendarPanel(QWidget):
         self.open_button.clicked.connect(lambda: self._request(OPEN))
         self.delete_button.clicked.connect(lambda: self._request(DELETE))
         self.open_google_button.clicked.connect(self._request_open_google)
+        self.plan_button.clicked.connect(self._request_plan)
         self._google_mode = GOOGLE_OFF
         self.set_google(GOOGLE_OFF, "")
         self.empty.hide()
@@ -261,6 +265,7 @@ class CalendarPanel(QWidget):
         for button in (self.previous_button, self.this_week_button, self.next_button):
             button.setEnabled(shown)
         self.new_button.setEnabled(shown)
+        self.plan_button.setEnabled(shown)
         self.open_button.setEnabled(chosen)
         self.delete_button.setEnabled(chosen)
         linked = self.selected_google()
@@ -292,6 +297,10 @@ class CalendarPanel(QWidget):
         else:
             day = self._shown.first_day
         self.event_requested.emit(NEW, day)
+
+    def _request_plan(self) -> None:
+        if self._shown is not None and not self._busy:
+            self.plan_requested.emit()
 
     def _request_google(self, kind: str) -> None:
         if not self._busy:

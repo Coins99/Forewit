@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import Protocol, assert_never
+from typing import Final, Protocol, assert_never
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
@@ -43,6 +43,12 @@ from mailbrief.domain.briefs import (
     TransmissionPreview,
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.calendar_planning import (
+    PlanningOptions,
+    PlanningOutcome,
+    PlanningPreview,
+    PlanningStatus,
+)
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -69,7 +75,13 @@ from mailbrief.domain.drafts import (
     placeholders,
     still_to_fill,
 )
-from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.events import (
+    AppliedBatch,
+    CalendarEvent,
+    CalendarRange,
+    EventChange,
+    EventEdit,
+)
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
@@ -97,6 +109,7 @@ from mailbrief.services.brief import (
     needs_review_sentence,
 )
 from mailbrief.services.calendar import resolve_timezone
+from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.drafting import (
     DraftingContextError,
@@ -163,6 +176,7 @@ from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
 from mailbrief.ui.proposals_view import ProposalsDialog
@@ -283,6 +297,15 @@ class DesktopBackend(Protocol):
     async def calendar_allowed(self) -> bool | None: ...
     async def allow_calendar(self) -> bool: ...
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult: ...
+    # Plan with AI (ADR 0018, phase 3b).
+    async def prepare_planning(
+        self, options: PlanningOptions, first_day: date, zone: ZoneInfo
+    ) -> PreparedPlan: ...
+    async def generate_planning(
+        self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event
+    ) -> PlanningOutcome: ...
+    async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch: ...
+    async def undo_calendar_changes(self, batch: AppliedBatch) -> None: ...
 
 
 # Raised when the brief, an action or a draft changed since it was shown; the window reloads.
@@ -436,6 +459,34 @@ class _ApprovedGate:
         return self._agreed or not preview.first_use
 
 
+class _ApprovedPlanning:
+    """The dialog's preview already asked; first use also needs the ticked consent box."""
+
+    def __init__(self, agreed: bool) -> None:
+        self._agreed = agreed
+
+    async def request_planning_consent(self, preview: PlanningPreview) -> bool:
+        return self._agreed or not preview.first_use
+
+
+_PLAN_PROBLEMS: Final = {
+    "AI_OUTPUT_INCOMPLETE": "Groq's answer was cut off. Your calendar is unchanged; try again.",
+    "AI_INVALID_OUTPUT": "Groq's answer couldn't be used. Your calendar is unchanged; try again.",
+    "AI_REFUSED": "Groq declined this request. Your calendar is unchanged.",
+}
+_PLAN_FAILED: Final = "Planning with AI failed. Your calendar is unchanged; try again."
+_PLAN_DECLINED: Final = "Nothing was sent. Your calendar is unchanged."
+_PLAN_CANCELLED: Final = "Cancelled. Nothing was changed."
+_PLAN_STALE: Final = (
+    "Your calendar changed since you asked, so nothing was applied. Discard and ask again."
+)
+
+
+def planning_problem_text(code: str | None) -> str:
+    """What a failed request means, in the calendar's words; other codes keep their own."""
+    return _PLAN_PROBLEMS.get(code or "") or error_guidance(code or "AI_PROVIDER_ERROR")
+
+
 class DraftWrites:
     """One serialized, coalescing queue for the open draft's writes.
 
@@ -558,6 +609,14 @@ class MainWindow(QMainWindow):
         self.action_editor.save_requested.connect(self._request_save_action)
         self.event_editor = EventEditor(self)
         self.event_editor.save_requested.connect(self._request_save_event)
+        self.planning_dialog = PlanningDialog(self)
+        self.planning_dialog.preview_requested.connect(self._request_planning_preview)
+        self.planning_dialog.ask_requested.connect(self._request_planning_ask)
+        self.planning_dialog.apply_requested.connect(self._request_apply_planning)
+        self.planning_dialog.cancel_requested.connect(self._cancel_planning)
+        self._planning_plan: PreparedPlan | None = None
+        self._planning_cancel: asyncio.Event | None = None
+        self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
@@ -773,6 +832,7 @@ class MainWindow(QMainWindow):
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
+        self.calendar_panel.plan_requested.connect(self._request_planning)
         workspace.add_page("calendar", _page(self.calendar_panel, "calendarPage", "Calendar"))
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
@@ -1001,6 +1061,7 @@ class MainWindow(QMainWindow):
             self.action_editor.isVisible()
             or self.draft_editor.isVisible()
             or self.event_editor.isVisible()
+            or self.planning_dialog.isVisible()
             or not self.draft_writes.idle
         ):
             self.status.setText(
@@ -1611,6 +1672,107 @@ class MainWindow(QMainWindow):
             elif result.failed or result.stopped_code:
                 self.status.setText(f"{self.status.text()} {calendar_sync_text(result)}")
         await self._refresh_calendar()
+
+    # Plan with AI (ADR 0018, phase 3b). Preparing and asking use start(); the dialog's
+    # Cancel stops the request itself, like AI drafting's.
+
+    def _request_planning(self) -> None:
+        """Open the dialog; preparing and asking wait their turn through start()."""
+        self._planning_plan = None
+        self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
+        self.planning_dialog.open()
+
+    def _request_planning_preview(self, options: object) -> None:
+        if isinstance(options, PlanningOptions):
+            chosen = options
+            if not self.start(lambda: self._prepare_planning(chosen), cancellable=False):
+                self.planning_dialog.show_problem(_BUSY)
+
+    async def _prepare_planning(self, options: PlanningOptions) -> None:
+        first = self._calendar_week or week_start(self._local_today())
+        try:
+            plan = await self.backend.prepare_planning(options, first, self.zone)
+        except ConfigurationError as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(configuration_guidance(exc))
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        self._planning_plan = plan
+        self.planning_dialog.show_preview(plan.preview)
+
+    def _request_planning_ask(self, agreed: bool) -> None:
+        if not self.start(lambda: self._ask_planning(agreed), cancellable=False):
+            self.planning_dialog.show_problem(_BUSY)
+
+    async def _ask_planning(self, agreed: bool) -> None:
+        plan, self._planning_plan = self._planning_plan, None
+        if plan is None:
+            return
+        self.planning_dialog.show_working()
+        cancel = asyncio.Event()
+        task = asyncio.create_task(
+            self.backend.generate_planning(plan, _ApprovedPlanning(agreed), cancel)
+        )
+        self._planning_cancel, self._planning_task = cancel, task
+        try:
+            outcome = await task
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise  # This operation itself was cancelled.
+            self.planning_dialog.show_problem(_PLAN_CANCELLED)
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        finally:
+            self._planning_cancel = self._planning_task = None
+        if outcome.status is PlanningStatus.PROPOSED:
+            assert outcome.plan is not None
+            self.planning_dialog.show_proposals(outcome.plan, self.zone, self._local_today())
+        elif outcome.status is PlanningStatus.DECLINED:
+            self.planning_dialog.show_problem(_PLAN_DECLINED)
+        elif outcome.status is PlanningStatus.CANCELLED:
+            self.planning_dialog.show_problem(_PLAN_CANCELLED)
+        else:
+            self.planning_dialog.show_problem(planning_problem_text(outcome.error_code))
+
+    def _cancel_planning(self) -> None:
+        if self._planning_cancel is not None:
+            self._planning_cancel.set()
+        if self._planning_task is not None:
+            self._planning_task.cancel()
+
+    def _request_apply_planning(self, changes: object) -> None:
+        if isinstance(changes, tuple) and changes:
+            kept: tuple[EventChange, ...] = changes
+            if not self.start(lambda: self._apply_planning(kept), cancellable=False):
+                self.planning_dialog.keep_reviewing(_BUSY)
+
+    async def _apply_planning(self, changes: tuple[EventChange, ...]) -> None:
+        try:
+            batch = await self.backend.apply_calendar_changes(changes)
+        except _STALE as exc:
+            log_failure(exc)
+            self.planning_dialog.keep_reviewing(_PLAN_STALE)
+            await self._refresh_calendar()
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.keep_reviewing(_PLAN_FAILED)
+            return
+        self.planning_dialog.accept()
+
+        async def undo() -> None:
+            await self.backend.undo_calendar_changes(batch)
+
+        self._offer_undo("Undo AI changes", undo)
+        count = len(batch.changes)
+        self.status.setText(f"Applied {count} change{'s' if count != 1 else ''} from Groq.")
+        await self._refresh_views()
 
     def _open_calendar_link(self, event: GoogleEvent) -> None:
         link = None if event.web_link is None else str(event.web_link)
@@ -2420,6 +2582,7 @@ class MainWindow(QMainWindow):
                 self.action_editor,
                 self.draft_editor,
                 self.event_editor,
+                self.planning_dialog,
             )
         )
 
@@ -2733,6 +2896,8 @@ class MainWindow(QMainWindow):
             self.data_dialog.reject()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
+        self._cancel_planning()
+        self.planning_dialog.reject()
         self._cancel_drafting()
         final = self.draft_editor.final_edit() if self.draft_editor.isVisible() else None
         if final is not None:

@@ -76,8 +76,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
   as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
   live acceptance: Google Calendar read-only beside the owner's events. Phase 3a: the
-  AI planning service, the Groq call and all-or-nothing apply with Undo, not yet shown in
-  the desktop; 3b adds the panel. MailBrief's own calendar in Google is phase 4. See
+  AI planning service, the Groq call and all-or-nothing apply with Undo; 3b, the Plan
+  with AI dialog on the Calendar page. MailBrief's own calendar in Google is phase 4. See
   `docs/calendar.md`.
 
 ## Layout (ports and adapters)

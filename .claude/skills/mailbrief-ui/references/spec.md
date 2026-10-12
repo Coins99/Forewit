@@ -346,7 +346,13 @@ The brief list's chips keep their shorter forms (see Brief list).
   (muted) says whether Gmail is connected, whether Calendar is allowed and when the saved
   copy was read, beside outline Allow Google Calendar (only when the sign-in lacks it) or
   Refresh. Google rows end with their calendar's name, can't be opened or deleted, and
-  enable outline Open in Google Calendar when they have a Google Calendar link.
+  enable outline Open in Google Calendar when they have a Google Calendar link. Outline
+  Plan with AI (A) opens `PlanningDialog` (`ui/planning_dialog.py`): a stack of four steps
+  (instruction and part boxes; preview lines, privacy notice and first-use consent box;
+  waiting with Cancel request; checkable proposal rows of plain item text, Groq's reason
+  and overlaps on their own lines). `planningStatus` (warning tone) sits above the stack and
+  shows only with a message; outline Close (C) shows on the first two steps, and closing
+  while Groq is being asked cancels the request.
 - Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+6 (Cmd on macOS), call
   `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.
