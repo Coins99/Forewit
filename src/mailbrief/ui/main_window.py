@@ -326,6 +326,7 @@ _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
 _PICK_ONE = "Select at least one message to analyze, or Cancel."
 _NOT_REFRESHED = "The view could not be refreshed; restart MailBrief to see the latest."
 _BUSY = "MailBrief is busy; try again in a moment."
+_CANCELLED = "Cancelled. The displayed saved brief is unchanged."
 _BRIEFS_UNAVAILABLE = "Saved briefs open once local storage loads. Choose Retry loading saved data."
 _EDITOR_STALE = (
     "This action changed since you opened it. Your edits are still here — copy what you "
@@ -344,6 +345,10 @@ _CALENDAR_ALLOW_STOPPED = (
     "and pick your Gmail account."
 )
 _CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
+_CALENDAR_CANCELLED = "Cancelled. The Calendar page shows what was saved."
+_CALENDAR_ALLOW_CANCELLED = (
+    "Cancelled. Gmail is still connected; choose Allow Google Calendar to try again."
+)
 _CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
 _CALENDAR_STOPPED = {
     "AUTH_REQUIRED": "Google Calendar stopped: connect Gmail again.",
@@ -622,6 +627,10 @@ class MainWindow(QMainWindow):
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
+        # Reads of the week shown run beside start()'s operations: they change nothing. The
+        # newest read wins, and shutdown waits for them before closing the database.
+        self._calendar_reads: set[asyncio.Task[None]] = set()
+        self._calendar_read = 0
 
         self.action_editor.create_requested.connect(self._request_create_action)
         self.draft_writes = DraftWrites()
@@ -1000,7 +1009,7 @@ class MainWindow(QMainWindow):
             return
         self._show_page(key)
         if key == "calendar" and self._calendar_sync_due():
-            self.start(lambda: self._sync_calendar(quiet=True), cancellable=False)
+            self._start_calendar_sync()
 
     def _leave_run_page(self) -> None:
         """Back to Today once neither the review nor the consent is waiting."""
@@ -1052,6 +1061,8 @@ class MainWindow(QMainWindow):
         what it showed if it can't be read."""
         await self._refresh_actions()
         await self._reload_history()
+        if self._calendar_week is not None:
+            self._show_calendar_week(self._calendar_week)  # Now this week: follow today.
         await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
@@ -1478,29 +1489,76 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
 
-    # Calendar (ADR 0018). Loading a week, saving and deleting use start(); the page shows
-    # local data only, so it never needs Gmail or an AI provider.
+    # Calendar (ADR 0018). Saving and deleting use start(); reading a week doesn't, so the
+    # page can move between weeks and open the editor while another operation runs. The
+    # page shows local data only, so it never needs Gmail or an AI provider.
 
     async def _refresh_calendar(self) -> None:
+        self._calendar_read += 1
+        read = self._calendar_read
         first = self._calendar_week or week_start(self._local_today())
         try:
             shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
-            self.calendar_panel.show_range(shown, self.zone, self._local_today())
-            self._calendar_shown = shown
-            self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
         except Exception as exc:
-            self._note_not_refreshed(exc)
+            if read == self._calendar_read:
+                self._note_not_refreshed(exc)
+            return
+        if read != self._calendar_read:
+            return  # A newer read, perhaps of another week, shows the page.
+        self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        self._calendar_shown = shown
+        self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
+
+    def _show_calendar_week(self, monday: date) -> None:
+        """Show the week of ``monday`` from now on; this week's follows today, so the page
+        moves on by itself when a new week starts."""
+        self._calendar_week = None if monday == week_start(self._local_today()) else monday
 
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
-            monday = first_day
-            self.start(lambda: self._show_calendar_week(monday), cancellable=False)
+            self._show_calendar_week(first_day)
+            self._read_calendar(sync=True)
 
-    async def _show_calendar_week(self, first_day: date) -> None:
-        self._calendar_week = first_day
-        await self._refresh_calendar()
-        if self._calendar_sync_due():
+    def _read_calendar(self, *, sync: bool = False) -> None:
+        """Read the week shown beside any running operation; then, with ``sync``, read
+        Google Calendar for it when that is due and nothing else is running."""
+        if self._closing:
+            return
+
+        async def read() -> None:
+            await self._refresh_calendar()
+            if sync and self._calendar_sync_due():
+                self._start_calendar_sync()
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    async def drain_calendar_reads(self) -> None:
+        """Wait for the reads of the week in progress."""
+        while pending := [task for task in self._calendar_reads if not task.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def _start_calendar_sync(self) -> bool:
+        async def sync() -> None:
             await self._sync_calendar(quiet=True)
+
+        return self.start(self._calendar_work(sync), cancelled=_CALENDAR_CANCELLED)
+
+    def _calendar_work(
+        self, operation: Callable[[], Awaitable[None]]
+    ) -> Callable[[], Awaitable[None]]:
+        """``operation``, which Cancel and quitting can stop: the cache keeps each calendar
+        a stopped sync finished, so the page is read again to show them."""
+
+        async def work() -> None:
+            try:
+                await operation()
+            except asyncio.CancelledError:
+                self._read_calendar()
+                raise
+
+        return work
 
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
@@ -1514,7 +1572,9 @@ class MainWindow(QMainWindow):
                 self.event_editor.edit_event(event, self.zone)
                 self.dialog_guard.show_dialog(self.event_editor)
             elif kind == DELETE_EVENT:
-                self.start(lambda: self._delete_event(event), cancellable=False)
+                started = self.start(lambda: self._delete_event(event), cancellable=False)
+                if not started and not self._closing:
+                    self.status.setText(_BUSY)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -1543,9 +1603,10 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.event_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
-        self._calendar_week = week_start(saved.days(self.zone)[0])  # Show where it went.
+        self._show_calendar_week(week_start(saved.days(self.zone)[0]))  # Show where it went.
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
+        self.calendar_panel.select_event(saved.public_id)
 
     async def _delete_event(self, event: CalendarEvent) -> None:
         try:
@@ -1612,11 +1673,13 @@ class MainWindow(QMainWindow):
 
         if kind == ALLOW_CALENDAR:
             operation: Callable[[], Awaitable[None]] = self._allow_calendar
+            cancelled = _CALENDAR_ALLOW_CANCELLED
         elif kind == REFRESH_CALENDAR:
-            operation = refresh
+            operation, cancelled = refresh, _CALENDAR_CANCELLED
         else:
             return
-        if not self.start(operation, cancellable=False) and not self._closing:
+        started = self.start(self._calendar_work(operation), cancelled=cancelled)
+        if not started and not self._closing:
             self.status.setText(_BUSY)
 
     def _calendar_failed(self, exc: Exception, *, quiet: bool = False) -> None:
@@ -2160,27 +2223,34 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Saved: {draft.display_title}.")
             await self._refresh_drafts()
 
-    def start(self, operation: Callable[[], Awaitable[None]], *, cancellable: bool = True) -> bool:
+    def start(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        cancellable: bool = True,
+        cancelled: str = _CANCELLED,
+    ) -> bool:
         """Only one operation may own the providers and workflow at a time.
 
         Returns whether this operation started; it does not while closing or busy.
+        ``cancelled`` is what the status line says when Cancel or quitting stops it.
         """
         if self._closing or (self.task is not None and not self.task.done()):
             return False
         self._cancel = asyncio.Event()
         self._cancellable = cancellable
         self._set_busy(True)
-        self.task = asyncio.create_task(self._run(operation))
+        self.task = asyncio.create_task(self._run(operation, cancelled))
         return True
 
-    async def _run(self, operation: Callable[[], Awaitable[None]]) -> None:
+    async def _run(self, operation: Callable[[], Awaitable[None]], cancelled: str) -> None:
         failed = True
         try:
             await operation()
             failed = False
         except asyncio.CancelledError:
             failed = False
-            self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+            self.status.setText(cancelled)
         except AuthenticationRequiredError as exc:
             log_failure(exc)
             self._set_account(None)
@@ -2537,7 +2607,7 @@ class MainWindow(QMainWindow):
                             "No analyzed messages in this selection. Empty brief saved."
                         )
             case BriefStatus.CANCELLED:
-                self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+                self.status.setText(_CANCELLED)
             case BriefStatus.CONSENT_DECLINED:
                 self.status.setText("Transmission declined. No messages sent to AI in this run.")
             case BriefStatus.SYNC_FAILED:
@@ -2969,6 +3039,9 @@ class MainWindow(QMainWindow):
             if self.task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.task
+            for read in self._calendar_reads:
+                read.cancel()
+            await self.drain_calendar_reads()
             await self.draft_writes.drain()
         finally:
             try:
