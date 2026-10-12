@@ -2,12 +2,13 @@
 an end could land at or before the start refused (ADR 0018)."""
 
 from collections.abc import Callable, Iterator
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialogButtonBox, QWidget
+from PySide6.QtWidgets import QApplication, QDateTimeEdit, QDialogButtonBox, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.events import EventEdit
@@ -21,8 +22,10 @@ from mailbrief.ui.event_editor import (
     length_text,
     local_instant,
     parse_clock,
+    stepped_wall,
 )
-from tests.ui.test_calendar import NOW, TODAY, TORONTO
+from tests.ui.test_calendar import NOW, TODAY, TORONTO, stored
+from tests.ui.window_wait import show
 
 
 @pytest.fixture
@@ -65,6 +68,45 @@ def press_save(editor: EventEditor) -> None:
 
 def items(box: TimeBox) -> list[str]:
     return [box.itemText(index) for index in range(box.count())]
+
+
+def at(day: date, hour: int, minute: int = 0) -> datetime:
+    return local_instant(day, time(hour, minute), TORONTO)
+
+
+def load(editor: EventEditor, start: datetime, end: datetime) -> None:
+    """Open a saved timed event, as Open on the Calendar page does."""
+    edit = EventEdit(
+        title="Dentist",
+        all_day=False,
+        starts_at_utc=start.astimezone(UTC),
+        ends_at_utc=end.astimezone(UTC),
+        time_zone="America/Toronto",
+    )
+    editor.edit_event(stored(edit), TORONTO)
+
+
+def press(box: QWidget, key: Qt.Key, times: int = 1) -> None:
+    for _ in range(times):
+        QTest.keyClick(box, key)
+
+
+def turn(box: QWidget, delta: int, phase: Qt.ScrollPhase = Qt.ScrollPhase.NoScrollPhase) -> None:
+    """Turn the mouse wheel over ``box`` by ``delta`` eighths of a degree: a notch is 120,
+    and away from the owner is positive. Sent to the box itself, since Qt passes a
+    synthesized wheel event to no other widget and gives no focus for it."""
+    middle = QPointF(box.rect().center())
+    wheel = QWheelEvent(
+        middle,
+        box.mapToGlobal(middle),
+        QPoint(),
+        QPoint(0, delta),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        phase,
+        False,
+    )
+    QApplication.sendEvent(box, wheel)
 
 
 def shown(editor: EventEditor) -> tuple[str, str, str, str]:
@@ -247,3 +289,184 @@ def test_save_takes_a_time_still_being_typed(editor: EventEditor) -> None:
     press_save(editor)
     assert len(asked) == 1
     assert asked[0].ends_at_utc == local_instant(TODAY, time(17, 30), TORONTO)
+
+
+def test_arrow_keys_step_from_the_time_shown(editor: EventEditor) -> None:
+    load(editor, at(TODAY, 10, 7), at(TODAY, 11, 7))  # A time the lists don't hold.
+    assert editor.start_time.currentIndex() == -1
+    press(editor.start_time, Qt.Key.Key_Up)  # The next quarter hour, not the list's top.
+    assert shown(editor) == ("2026-10-14", "10:15", "2026-10-14", "11:15")
+    press(editor.start_time, Qt.Key.Key_Down)
+    assert shown(editor) == ("2026-10-14", "10:00", "2026-10-14", "11:00")
+    press(editor.start_time, Qt.Key.Key_PageUp)  # An hour later.
+    assert shown(editor) == ("2026-10-14", "11:00", "2026-10-14", "12:00")
+    press(editor.start_time, Qt.Key.Key_PageDown)
+    press(editor.end_time, Qt.Key.Key_Up)
+    assert shown(editor) == ("2026-10-14", "10:00", "2026-10-14", "11:15")
+    press(editor.end_time, Qt.Key.Key_Down, times=4)  # 11:00, 10:45, 10:30, 10:15.
+    assert shown(editor)[3] == "10:15" and editor.status.text() == ""
+    press(editor.end_time, Qt.Key.Key_Down)  # The start itself: refused.
+    assert shown(editor)[3] == "10:15" and editor.status.text() == ENDS_FIRST
+
+
+def test_up_moves_a_time_later_as_it_moves_the_date_beside_it(editor: EventEditor) -> None:
+    editor.start_date.setCurrentSection(QDateTimeEdit.Section.DaySection)
+    press(editor.start_date, Qt.Key.Key_Up)
+    press(editor.start_time, Qt.Key.Key_Up)
+    assert shown(editor) == ("2026-10-15", "15:15", "2026-10-15", "16:15")
+
+
+def test_the_start_steps_within_its_day(editor: EventEditor) -> None:
+    type_time(editor.start_time, "23:45")
+    press(editor.start_time, Qt.Key.Key_Up)
+    press(editor.start_time, Qt.Key.Key_PageUp)
+    assert shown(editor) == ("2026-10-14", "23:45", "2026-10-15", "00:45")
+    type_time(editor.start_time, "00:30")
+    press(editor.start_time, Qt.Key.Key_PageDown)  # As far as the day goes: midnight.
+    assert shown(editor) == ("2026-10-14", "00:00", "2026-10-14", "01:00")
+    press(editor.start_time, Qt.Key.Key_Down)
+    assert shown(editor)[:2] == ("2026-10-14", "00:00")
+
+
+def test_a_multi_day_end_steps_on_its_own_day(editor: EventEditor) -> None:
+    monday, wednesday = date(2026, 10, 12), date(2026, 10, 14)
+    load(editor, at(monday, 10), at(wednesday, 12))  # 50 hours: beyond the end's list.
+    assert editor.end_time.currentIndex() == -1  # Not Monday's "12:00 (2 hrs)".
+    press(editor.end_time, Qt.Key.Key_Up)
+    assert shown(editor) == ("2026-10-12", "10:00", "2026-10-14", "12:15")
+    press(editor.end_time, Qt.Key.Key_Down, times=2)
+    edit = editor.built_edit()
+    assert isinstance(edit, EventEdit) and edit.ends_at_utc == at(wednesday, 11, 45)
+    load(editor, at(TODAY, 15), at(TODAY, 16))
+    assert editor.end_time.itemText(editor.end_time.currentIndex()) == "16:00 (1 hr)"
+
+
+def test_steps_pass_over_times_a_clock_change_skips(editor: EventEditor) -> None:
+    spring = date(2027, 3, 14)  # In Toronto, 02:00 to 02:59 never happens.
+    editor.edit_new(spring, NOW, TORONTO)
+    type_time(editor.start_time, "01:45")
+    press(editor.start_time, Qt.Key.Key_Up)
+    assert shown(editor)[:2] == ("2027-03-14", "03:00")
+    press(editor.start_time, Qt.Key.Key_Down)
+    assert shown(editor)[:2] == ("2027-03-14", "01:45")
+    clock = datetime(2027, 3, 14, 1, 52)  # A reading on the clock, as the editor steps it.
+    assert stepped_wall(clock, 1, TORONTO) == datetime(2027, 3, 14, 3, 0)
+    assert stepped_wall(clock, -1, TORONTO) == datetime(2027, 3, 14, 1, 45)
+    assert stepped_wall(clock, 0, TORONTO) == clock
+
+
+def test_a_step_takes_what_was_typed_first(editor: EventEditor) -> None:
+    editor.start_time.setEditText("11:00")  # Typed; the field hasn't been left yet.
+    press(editor.start_time, Qt.Key.Key_Up)
+    assert shown(editor) == ("2026-10-14", "11:15", "2026-10-14", "12:15")
+    editor.end_time.setEditText("17:00")
+    press(editor.end_time, Qt.Key.Key_Down)
+    assert shown(editor)[3] == "16:45"
+    editor.start_time.setEditText("noon")  # Not a time: refused, and nothing steps.
+    press(editor.start_time, Qt.Key.Key_Up)
+    assert shown(editor)[:2] == ("2026-10-14", "11:15") and editor.status.text() == BAD_TIME
+    editor.end_time.setEditText("4pm")
+    press(editor.end_time, Qt.Key.Key_Up)
+    assert shown(editor)[3] == "16:45" and editor.status.text() == BAD_TIME
+
+
+def test_the_wheel_moves_a_date_or_time_only_once_it_has_focus(
+    qtbot: QtBot, editor: EventEditor
+) -> None:
+    boxes = (editor.start_date, editor.start_time, editor.end_date, editor.end_time)
+    names = [box.objectName() for box in boxes]
+    assert names == ["eventStartDate", "eventStartTime", "eventEndDate", "eventEndTime"]
+    # Qt gives focus to a widget under a turning wheel only when its policy says so.
+    assert all(box.focusPolicy() == Qt.FocusPolicy.StrongFocus for box in boxes)
+    with qtbot.waitActive(editor, timeout=5000):
+        show(qtbot, editor)
+        editor.raise_()
+        editor.activateWindow()
+    editor.title.setFocus()
+    for box in boxes:
+        turn(box, 120)
+    assert shown(editor) == ("2026-10-14", "15:00", "2026-10-14", "16:00")
+    editor.end_time.setFocus()
+    turn(editor.end_time, 120)  # One notch away from you: later, as in a date.
+    assert shown(editor)[3] == "16:15"
+    turn(editor.end_time, -60)  # Half a notch back waits for the other half.
+    assert shown(editor)[3] == "16:15"
+    turn(editor.end_time, -60)
+    assert shown(editor)[3] == "16:00"
+    turn(editor.end_time, 240, Qt.ScrollPhase.ScrollMomentum)  # Coasting moves nothing.
+    assert shown(editor)[3] == "16:00"
+    editor.start_date.setFocus()
+    editor.start_date.setCurrentSection(QDateTimeEdit.Section.DaySection)
+    turn(editor.start_date, 120)
+    turn(editor.start_date, 240, Qt.ScrollPhase.ScrollMomentum)
+    assert shown(editor) == ("2026-10-15", "15:00", "2026-10-15", "16:00")
+
+
+def test_a_date_or_time_typed_but_not_yet_taken_counts_as_unsaved(editor: EventEditor) -> None:
+    load(editor, at(TODAY, 15), at(TODAY, 16))
+    assert not editor.has_unsaved_input()
+    editor.start_time.setEditText("11:15")  # Typed; the field hasn't been left yet.
+    assert editor.has_unsaved_input()
+    load(editor, at(TODAY, 15), at(TODAY, 16))
+    editor.start_date.selectAll()
+    QTest.keyClicks(editor.start_date, "2026-10-1")  # A date counts once it's finished.
+    assert editor.start_date.date() == QDate(2026, 10, 14) and editor.has_unsaved_input()
+
+
+def test_choosing_the_end_already_shown_leaves_the_time_alone(editor: EventEditor) -> None:
+    load(editor, at(TODAY, 15), at(TODAY, 16))
+    index = editor.end_time.currentIndex()
+    line = editor.end_time.lineEdit()
+    assert line is not None
+    # What Qt does when the owner picks the item that is already current: it puts the item's
+    # label in the field, then says the item was activated.
+    line.setText(editor.end_time.itemText(index))
+    editor.end_time.activated.emit(index)
+    line.editingFinished.emit()  # Leaving the field.
+    assert shown(editor)[3] == "16:00" and editor.status.text() == ""
+    assert not editor.has_unsaved_input()
+
+
+def test_the_second_of_a_repeated_hour_stays_the_second(editor: EventEditor) -> None:
+    # In Toronto on 2026-11-01, 01:00 to 01:59 happens twice: 06:30 UTC is the second 01:30.
+    start = datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
+    load(editor, start, start + timedelta(hours=1))
+    assert shown(editor) == ("2026-11-01", "01:30", "2026-11-01", "02:30")
+    assert editor.end_time.itemText(editor.end_time.currentIndex()) == "02:30 (1 hr)"
+    choose(editor.start_time, "01:30")  # The time already shown: it stays the second.
+    editor.title.setText("Dentist, moved")
+    edit = editor.built_edit()
+    assert isinstance(edit, EventEdit)
+    assert (edit.starts_at_utc, edit.ends_at_utc) == (start, start + timedelta(hours=1))
+    type_time(editor.start_time, "01:45")  # The first 01:45; the end keeps the hour.
+    edit = editor.built_edit()
+    assert isinstance(edit, EventEdit)
+    assert edit.starts_at_utc == datetime(2026, 11, 1, 5, 45, tzinfo=UTC)
+    assert edit.ends_at_utc == datetime(2026, 11, 1, 6, 45, tzinfo=UTC)
+
+
+def test_a_new_hour_at_one_thirty_on_the_fall_back_night_saves(editor: EventEditor) -> None:
+    editor.edit_new(date(2026, 11, 1), NOW, TORONTO)  # 01:00 to 01:59 happens twice.
+    editor.title.setText("Dentist")
+    type_time(editor.start_time, "01:30")  # The first 01:30; an hour on is the second.
+    assert shown(editor) == ("2026-11-01", "01:30", "2026-11-01", "01:30")
+    edit = editor.built_edit()
+    assert isinstance(edit, EventEdit)
+    assert edit.starts_at_utc == datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
+    assert edit.ends_at_utc == datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
+
+
+def test_other_keys_still_type_and_alt_down_still_opens_the_list(editor: EventEditor) -> None:
+    line = editor.start_time.lineEdit()
+    assert line is not None
+    line.selectAll()
+    QTest.keyClicks(editor.start_time, "9:30")  # Only the four step keys are taken over.
+    assert editor.start_time.currentText() == "9:30"
+    line.editingFinished.emit()
+    assert shown(editor) == ("2026-10-14", "09:30", "2026-10-14", "10:30")
+    try:
+        QTest.keyClick(editor.end_time, Qt.Key.Key_Down, Qt.KeyboardModifier.AltModifier)
+        assert editor.end_time.view().isVisible()  # The list opened; nothing moved.
+    finally:
+        editor.end_time.hidePopup()  # An open list would swallow later tests' wheel events.
+    assert shown(editor)[3] == "10:30"
