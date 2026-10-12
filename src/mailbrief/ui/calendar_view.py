@@ -23,9 +23,11 @@ NEW: Final = "new"
 OPEN: Final = "open"
 DELETE: Final = "delete"
 OPEN_GOOGLE: Final = "open-google"
-CONNECT: Final = "connect"
+ALLOW: Final = "allow"
 REFRESH: Final = "refresh"
-DISCONNECT: Final = "disconnect"
+GOOGLE_OFF: Final = "off"  # Gmail isn't connected.
+GOOGLE_ASK: Final = "ask"  # Connected; the sign-in lacks the calendar permissions.
+GOOGLE_ON: Final = "on"
 WEEK_DAYS: Final = 7
 EMPTY: Final = "Nothing this week. Add an event with New event."
 MARKER_NOTE: Final = "Deadlines and targets come from your open actions; change them there."
@@ -58,7 +60,9 @@ def _clock(moment: datetime, zone: ZoneInfo) -> str:
 
 def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, today: date) -> str:
     """When the event happens, as seen from ``day``: "All day", "09:00–10:00", or with the
-    other day for one that crosses midnight: "22:00–Oct 13 01:00"."""
+    other day for one that crosses midnight: "22:00–Oct 13 01:00". An end at midnight
+    belongs to the day before it ("22:00–00:00"), but when that isn't ``day`` the end is
+    dated as the clock says: Monday 22:00 to Wednesday 00:00 is "22:00–Oct 14 00:00"."""
     if event.all_day:
         return "All day"
     assert event.starts_at_utc is not None and event.ends_at_utc is not None
@@ -67,7 +71,7 @@ def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, to
     if first != day:
         start = f"{month_day(first, today=today)} {start}"
     if last != day:
-        end = f"{month_day(last, today=today)} {end}"
+        end = f"{month_day(event.ends_at_utc.astimezone(zone).date(), today=today)} {end}"
     return f"{start}–{end}"
 
 
@@ -90,6 +94,15 @@ def marker_text(marker: ActionMarker, zone: ZoneInfo) -> str:
     return f"{label} · {marker.action_title}{waiting}"
 
 
+def entry_key(entry: Entry) -> tuple[str, ...]:
+    """What stays the same about an entry from one read of the week to the next."""
+    if isinstance(entry, CalendarEvent):
+        return ("event", entry.public_id)
+    if isinstance(entry, GoogleEvent):
+        return ("google", entry.calendar_id, entry.event_id)
+    return ("marker", entry.kind.value, entry.action_public_id, entry.day.isoformat())
+
+
 def day_rows(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Entry]:
     """One day's entries: all-day events, then action dates, then timed events by start.
 
@@ -110,11 +123,15 @@ class CalendarPanel(QWidget):
 
     ``event_requested(kind, value)`` carries NEW with the day to start on, or OPEN or DELETE
     with the selected CalendarEvent. ``week_requested(first_day)`` asks for another week.
+    While another operation runs (``set_busy``), reading weeks, New event, Open, Open in
+    Google Calendar and Plan with AI still work, since they change nothing; Delete event,
+    Allow and Refresh wait.
     """
 
     event_requested = Signal(str, object)
     week_requested = Signal(object)
     google_requested = Signal(str)
+    plan_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -140,19 +157,11 @@ class CalendarPanel(QWidget):
         self.google_status = plain_label("", tone="muted")
         self.google_status.setObjectName("googleStatus")
         google.addWidget(self.google_status, 1)
-        # Connect and Disconnect never show together, so they share a mnemonic.
-        self.connect_button = outline_button(
-            "Connect &Google Calendar", "connectCalendarButton", mnemonic=True
+        self.allow_button = outline_button(
+            "Allow &Google Calendar", "allowCalendarButton", mnemonic=True
         )
         self.refresh_button = outline_button("Re&fresh", "refreshCalendarButton", mnemonic=True)
-        self.disconnect_button = outline_button(
-            "Disconnect &Google Calendar", "disconnectCalendarButton", mnemonic=True
-        )
-        for button, kind in (
-            (self.connect_button, CONNECT),
-            (self.refresh_button, REFRESH),
-            (self.disconnect_button, DISCONNECT),
-        ):
+        for button, kind in ((self.allow_button, ALLOW), (self.refresh_button, REFRESH)):
             google.addWidget(button)
             button.clicked.connect(lambda _checked=False, chosen=kind: self._request_google(chosen))
         layout.addLayout(google)
@@ -175,11 +184,13 @@ class CalendarPanel(QWidget):
         self.open_google_button = outline_button(
             "Open &in Google Calendar", "openGoogleEventButton", mnemonic=True
         )
+        self.plan_button = outline_button("Plan with &AI", "planCalendarButton", mnemonic=True)
         for button in (
             self.new_button,
             self.open_button,
             self.delete_button,
             self.open_google_button,
+            self.plan_button,
         ):
             buttons.addWidget(button)
         buttons.addStretch(1)  # Buttons keep their own width.
@@ -191,8 +202,9 @@ class CalendarPanel(QWidget):
         self.open_button.clicked.connect(lambda: self._request(OPEN))
         self.delete_button.clicked.connect(lambda: self._request(DELETE))
         self.open_google_button.clicked.connect(self._request_open_google)
-        self._account: str | None = None
-        self.set_google(None, "")
+        self.plan_button.clicked.connect(self._request_plan)
+        self._google_mode = GOOGLE_OFF
+        self.set_google(GOOGLE_OFF, "")
         self.empty.hide()
         self.note.hide()
         self._update_buttons()
@@ -215,18 +227,20 @@ class CalendarPanel(QWidget):
         row = self.list.currentRow()
         return self._rows[row][1] if 0 <= row < len(self._rows) else None
 
-    def set_google(self, account: str | None, note: str) -> None:
-        """Whether Google Calendar is connected, and what the cache holds, in one line."""
-        self._account = account
+    def set_google(self, mode: str, note: str) -> None:
+        """What the one Google sign-in allows, and what the cache holds, in one line:
+        GOOGLE_OFF shows no button, GOOGLE_ASK offers Allow and GOOGLE_ON offers Refresh."""
+        self._google_mode = mode
         self.google_status.setText(note)
-        self.connect_button.setVisible(account is None)
-        self.refresh_button.setVisible(account is not None)
-        self.disconnect_button.setVisible(account is not None)
+        self.allow_button.setVisible(mode == GOOGLE_ASK)
+        self.refresh_button.setVisible(mode == GOOGLE_ON)
         self._update_buttons()
 
     def show_range(self, shown: CalendarRange, zone: ZoneInfo, today: date) -> None:
-        """Replace the week, keeping the selection on the same event when it remains."""
-        previous = self.selected()
+        """Replace the week, keeping the selection on the same entry when it remains: on the
+        same day's row when the entry is still there, else on its first."""
+        row = self.list.currentRow()
+        previous = self._rows[row] if 0 <= row < len(self._rows) else None
         self._shown = shown
         self._today = today
         self._rows = []
@@ -248,45 +262,55 @@ class CalendarPanel(QWidget):
                 )
                 self.list.addItem(QListWidgetItem(text))
             day += timedelta(days=1)
-        if previous is not None:
-            for number, (_day, kept) in enumerate(self._rows):
-                if isinstance(kept, CalendarEvent) and kept.public_id == previous.public_id:
-                    self.list.setCurrentRow(number)
-                    break
+        if previous is not None and previous[1] is not None:
+            self._select(entry_key(previous[1]), previous[0])
         self.empty.setVisible(not shown.events and not shown.markers and not shown.google_events)
         self.note.setVisible(bool(shown.markers))
         self._update_buttons()
+
+    def select_event(self, public_id: str) -> None:
+        """Select the owner's event on the first day it shows, when it's in the week."""
+        self._select(("event", public_id), None)
+
+    def _select(self, key: tuple[str, ...], day: date | None) -> None:
+        found = [
+            number
+            for number, (_day, entry) in enumerate(self._rows)
+            if entry is not None and entry_key(entry) == key
+        ]
+        same_day = [number for number in found if self._rows[number][0] == day]
+        if found:
+            self.list.setCurrentRow((same_day or found)[0])
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        shown = self._shown is not None and not self._busy
-        chosen = self.selected() is not None and not self._busy
+        shown = self._shown is not None
+        chosen = self.selected() is not None
         for button in (self.previous_button, self.this_week_button, self.next_button):
             button.setEnabled(shown)
         self.new_button.setEnabled(shown)
+        self.plan_button.setEnabled(shown)
         self.open_button.setEnabled(chosen)
-        self.delete_button.setEnabled(chosen)
+        self.delete_button.setEnabled(chosen and not self._busy)  # A change waits its turn.
         linked = self.selected_google()
-        self.open_google_button.setEnabled(
-            linked is not None and linked.web_link is not None and not self._busy
-        )
-        for button in (self.connect_button, self.refresh_button, self.disconnect_button):
+        self.open_google_button.setEnabled(linked is not None and linked.web_link is not None)
+        for button in (self.allow_button, self.refresh_button):
             button.setEnabled(not self._busy)
 
     def _request_week(self, offset: int) -> None:
-        if self._shown is not None and not self._busy:
+        if self._shown is not None:
             self.week_requested.emit(self._shown.first_day + timedelta(days=offset))
 
     def _request_this_week(self) -> None:
-        if self._today is not None and not self._busy:
+        if self._today is not None:
             self.week_requested.emit(week_start(self._today))
 
     def _request_new(self) -> None:
         """A new event starts on the day selected, else today when shown, else Monday."""
-        if self._shown is None or self._busy:
+        if self._shown is None:
             return
         row = self.list.currentRow()
         if 0 <= row < len(self._rows):
@@ -299,16 +323,20 @@ class CalendarPanel(QWidget):
             day = self._shown.first_day
         self.event_requested.emit(NEW, day)
 
+    def _request_plan(self) -> None:
+        if self._shown is not None:
+            self.plan_requested.emit()
+
     def _request_google(self, kind: str) -> None:
         if not self._busy:
             self.google_requested.emit(kind)
 
     def _request_open_google(self) -> None:
         event = self.selected_google()
-        if event is not None and event.web_link is not None and not self._busy:
+        if event is not None and event.web_link is not None:
             self.event_requested.emit(OPEN_GOOGLE, event)
 
     def _request(self, kind: str) -> None:
         event = self.selected()
-        if event is not None and not self._busy:
+        if event is not None and not (kind == DELETE and self._busy):
             self.event_requested.emit(kind, event)

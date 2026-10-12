@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
@@ -30,6 +30,14 @@ from mailbrief.domain.briefs import (
     TransmissionPreview,
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.calendar_planning import (
+    CalendarPlan,
+    CalendarPlanningRequest,
+    PlanningOptions,
+    PlanningOutcome,
+    PlanningPreview,
+    PlanningStatus,
+)
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -38,15 +46,27 @@ from mailbrief.domain.digests import (
     SyncResult,
     SyncStatus,
 )
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.drafting import PreviewLine
+from mailbrief.domain.events import (
+    ActionMarker,
+    AppliedBatch,
+    AppliedChange,
+    CalendarEvent,
+    CalendarRange,
+    ChangeKind,
+    EventChange,
+    EventEdit,
+)
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.errors import ConfigurationError
+from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
 from mailbrief.services.actions import AcceptedInto, DecisionSnapshot
 from mailbrief.services.brief import ConsentGate, ShortlistGate
+from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import sync_window
@@ -127,14 +147,25 @@ class FakeBackend(FakeDrafts):
         self.event_fail: Exception | None = None
         # Google Calendar (ADR 0018, phase 2): the saved account, the cache a sync fills,
         # and each call. calendar_fail makes every calendar call raise.
-        self.calendar_saved: str | None = None
-        self.calendar_connects_as = "owner@example.com"
+        self.calendar_permission: bool | None = None  # What calendar_allowed answers.
+        self.calendar_grants = True  # What Allow Google Calendar gets from Google.
         self.calendar_fail: Exception | None = None
         self.calendar_calls: list[tuple[object, ...]] = []
         self.google_events: list[GoogleEvent] = []
         self.google_coverage: GoogleCoverage | None = None
         self.calendar_result = CalendarSyncResult(calendars=1, synced=1, failed=0, events=0)
         self.calendar_now = datetime(2026, 9, 4, 12, tzinfo=UTC)
+        # Plan with AI (ADR 0018, phase 3b): each call, what preparing and asking answer,
+        # and what applying fails with.
+        self.planning_calls: list[tuple[object, ...]] = []
+        self.planning_first_use = True
+        self.planning_outcome = PlanningOutcome(
+            status=PlanningStatus.PROPOSED, plan=CalendarPlan(proposals=())
+        )
+        self.planning_fail: Exception | None = None
+        self.planning_hold: asyncio.Event | None = None  # Asking waits on it when set.
+        self.apply_fail: Exception | None = None
+        self.undone: list[AppliedBatch] = []
         # Automatic runs: what each returns (or raises), how many ran, and an optional hold.
         self.automatic_calls = 0
         self.window: MainWindow | None = None  # Set by a test that watches the window's panels.
@@ -413,7 +444,10 @@ class FakeBackend(FakeDrafts):
         return "AI: configured"
 
     async def disconnect(self) -> None:
-        pass
+        # The one Google sign-in (ADR 0019): Calendar and its saved events go with Gmail.
+        self.calendar_permission = None
+        self.google_events = []
+        self.google_coverage = None
 
     async def generate(
         self,
@@ -606,27 +640,90 @@ class FakeBackend(FakeDrafts):
         if self.calendar_fail is not None:
             raise self.calendar_fail
 
-    async def calendar_account(self) -> str | None:
-        return self.calendar_saved
+    async def calendar_allowed(self) -> bool | None:
+        return self.calendar_permission
 
-    async def connect_calendar(self) -> str:
-        self._calendar_call("connect_calendar")
-        self.calendar_saved = self.calendar_connects_as
-        return self.calendar_saved
+    async def allow_calendar(self) -> bool:
+        self._calendar_call("allow_calendar")
+        self.calendar_permission = self.calendar_grants
+        return self.calendar_permission
 
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
         self._calendar_call("sync_calendar", around)
+        if self.calendar_permission is False:
+            raise CalendarNotAllowedError("Google Calendar isn't allowed yet.")
         first, last = sync_window(around)
         self.google_coverage = GoogleCoverage(
             first_day=first, last_day=last, synced_at_utc=self.calendar_now
         )
         return self.calendar_result
 
-    async def disconnect_calendar(self) -> None:
-        self._calendar_call("disconnect_calendar")
-        self.calendar_saved = None
-        self.google_events = []
-        self.google_coverage = None
+    async def prepare_planning(
+        self, options: PlanningOptions, first_day: date, zone: ZoneInfo
+    ) -> PreparedPlan:
+        self.planning_calls.append(("prepare", options, first_day))
+        if self.planning_fail is not None:
+            raise self.planning_fail
+        request = CalendarPlanningRequest(
+            instruction=options.instruction,
+            now_local="2026-09-04 08:00 (Friday)",
+            time_zone=zone.key,
+            window_first=first_day,
+            window_last=first_day + timedelta(days=27),
+            events=(),
+        )
+        preview = PlanningPreview(
+            provider="groq",
+            model="test-model",
+            privacy_notice="Groq processes the request under its terms.",
+            first_use=self.planning_first_use,
+            lines=(PreviewLine(label="Your 0 events: titles and times", characters=2),),
+        )
+        return PreparedPlan(request, preview, zone, {}, (), ())
+
+    async def generate_planning(
+        self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event
+    ) -> PlanningOutcome:
+        self.planning_calls.append(("generate",))
+        if not await gate.request_planning_consent(plan.preview):
+            return PlanningOutcome(status=PlanningStatus.DECLINED)
+        if self.planning_hold is not None:
+            try:
+                await self.planning_hold.wait()
+            except asyncio.CancelledError:
+                self.planning_calls.append(("cancelled",))
+                raise
+        return self.planning_outcome
+
+    async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:
+        self.planning_calls.append(("apply", tuple(changes)))
+        if self.apply_fail is not None:
+            raise self.apply_fail
+        applied = []
+        for number, change in enumerate(changes, start=1):
+            if change.kind is ChangeKind.CREATE:
+                applied.append(
+                    AppliedChange(
+                        kind=change.kind,
+                        public_id=f"00000000-0000-4000-8000-{900 + number:012d}",
+                        revision=1,
+                    )
+                )
+            else:
+                assert change.event is not None
+                applied.append(
+                    AppliedChange(
+                        kind=change.kind,
+                        public_id=change.event.public_id,
+                        revision=change.event.revision + 1,
+                        previous=change.event.edit() if change.kind is ChangeKind.UPDATE else None,
+                    )
+                )
+        return AppliedBatch(changes=tuple(applied))
+
+    async def undo_calendar_changes(self, batch: AppliedBatch) -> None:
+        self.planning_calls.append(("undo",))
+        self.undone.append(batch)
 
     async def close(self) -> None:
         self.closed = True

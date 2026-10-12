@@ -81,8 +81,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
   as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
   live acceptance: Google Calendar read-only beside the owner's events. Phase 3a: the
-  AI planning service, the Groq call and all-or-nothing apply with Undo, not yet shown in
-  the desktop; 3b adds the panel. MailBrief's own calendar in Google is phase 4. See
+  AI planning service, the Groq call and all-or-nothing apply with Undo; 3b, the Plan
+  with AI dialog on the Calendar page. MailBrief's own calendar in Google is phase 4. See
   `docs/calendar.md`.
 
 ## Layout (ports and adapters)
@@ -136,7 +136,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Preferences tab (`preferences_view.py`) and the Briefs page for saved briefs and missed
   days (`history_view.py`), the Proposals dialog for one action and the wording of a
   proposal's effect (`proposals_view.py`); `lists.py` holds `ActivatingList`, where
-  Return or Enter activates a row once on every platform.
+  Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
+  non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
@@ -149,7 +150,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (Saved mail, Data, Settings, the Gmail and AI lines, Connect and Disconnect), the Today,
   run (review and consent), Actions, Drafts and Briefs pages, and a status strip with
   Undo.
-- `src/mailbrief/app.py` owns the qasync loop.
+- `src/mailbrief/app.py` owns the qasync loop, and `MailBriefApplication`, which lets the
+  window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
@@ -274,9 +276,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
   owner applies. Deadlines and target dates are never stored as events or moved by them.
   Google writes go only to the calendar MailBrief creates: never to other calendars, never
-  guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
-  The calendar grant holds only `calendar.events.readonly` and
-  `calendar.calendarlist.readonly` until phase 4, and every Calendar request names its
+  guests or invitations. One Google sign-in serves Gmail and Calendar (ADR 0019): it asks
+  for `gmail.readonly`, `calendar.events.readonly` and `calendar.calendarlist.readonly`,
+  requires only the first, and adds nothing else until phase 4. Every Calendar request names its
   `fields`: descriptions, locations, guests and conference details are never fetched or
   stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
   with its events. The Google cache is excluded from exports and from the cleanup

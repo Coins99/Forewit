@@ -1,6 +1,7 @@
 # ADR 0018: A calendar, with MailBrief's own calendar in Google
 
-Date: 2026-10-11. Status: accepted.
+Date: 2026-10-11. Status: accepted. Its separate calendar sign-in is replaced by ADR 0019
+(one Google sign-in for Gmail and Calendar).
 
 Builds on ADR 0005 (SQLite local storage), ADR 0007 (Gmail first), ADR 0011 (actions),
 ADR 0013 (AI drafting) and ADR 0016 (follow-up proposals).
@@ -134,3 +135,10 @@ proposes, code checks, the owner applies.
   the apply left it.
 - **Not yet.** Work blocks linked to actions and deterministic scheduling are the planner
   roadmap's P3; events made here are ordinary events.
+- **3b, the panel (2026-10-12).** Plan with AI is a dialog: instruction and parts, the
+  preview with the first-use consent box, waiting (cancellable), then the checked changes
+  with their reasons and overlaps, all ticked; the owner applies the ticked ones and gets
+  one Undo. Failures say the calendar is unchanged. The preview also says when the
+  200-event limit left events out; the other phase 3a review fixes shipped with 3a (see
+  Checks in Python). A record of applied AI changes needs a migration and waits until the
+  planner migrations settle.

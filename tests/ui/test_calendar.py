@@ -1,5 +1,6 @@
 """The Calendar page and event editor: a week's rows, navigation, saving and undo."""
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -33,6 +34,7 @@ from mailbrief.ui.event_editor import (
     ENDS_FIRST,
     NO_TITLE,
     TOO_LONG,
+    WAITING,
     EventEditor,
     local_instant,
     suggested_start,
@@ -63,6 +65,16 @@ def timed(day: date, start: int, end: int, title: str = "Dentist") -> EventEdit:
         all_day=False,
         starts_at_utc=local_instant(day, time(start), TORONTO),
         ends_at_utc=local_instant(day, time(end), TORONTO),
+        time_zone="America/Toronto",
+    )
+
+
+def at_times(first: date, start: int, last: date, end: int, title: str = "Party") -> EventEdit:
+    return EventEdit(
+        title=title,
+        all_day=False,
+        starts_at_utc=local_instant(first, time(start), TORONTO),
+        ends_at_utc=local_instant(last, time(end), TORONTO),
         time_zone="America/Toronto",
     )
 
@@ -119,6 +131,12 @@ def test_text_helpers() -> None:
     assert event_when(overnight, MONDAY, TORONTO, TODAY) == "22:00–Oct 13 01:00"
     assert event_when(overnight, MONDAY + timedelta(days=1), TORONTO, TODAY) == "Oct 12 22:00–01:00"
     assert event_when(stored(whole_days(MONDAY, MONDAY)), MONDAY, TORONTO, TODAY) == "All day"
+    tuesday, wednesday = MONDAY + timedelta(days=1), MONDAY + timedelta(days=2)
+    evening = stored(at_times(MONDAY, 22, tuesday, 0))  # Ends at Monday's midnight.
+    assert event_when(evening, MONDAY, TORONTO, TODAY) == "22:00–00:00"
+    two_nights = stored(at_times(MONDAY, 22, wednesday, 0))  # Ends at Tuesday's midnight.
+    assert event_when(two_nights, MONDAY, TORONTO, TODAY) == "22:00–Oct 14 00:00"
+    assert event_when(two_nights, tuesday, TORONTO, TODAY) == "Oct 12 22:00–00:00"
     assert marker_text(marker(MarkerKind.TARGET, TODAY), TORONTO) == "Target · Pay the invoice"
     assert marker_text(marker(MarkerKind.DEADLINE, TODAY), TORONTO) == "Deadline · Pay the invoice"
     due = marker(
@@ -236,13 +254,22 @@ def test_buttons_ask_the_window(panel: CalendarPanel, qtbot: QtBot) -> None:
     panel.this_week_button.click()
     assert weeks == [MONDAY - timedelta(days=7), MONDAY + timedelta(days=7), MONDAY]
 
-    panel.set_busy(True)
-    assert not any(
+    panel.set_busy(True)  # Another operation runs: what changes nothing still works.
+    assert all(
         button.isEnabled()
-        for button in (panel.new_button, panel.open_button, panel.previous_button)
+        for button in (
+            panel.new_button,
+            panel.open_button,
+            panel.previous_button,
+            panel.this_week_button,
+            panel.plan_button,
+        )
     )
+    assert not panel.delete_button.isEnabled()
     panel.new_button.click()
-    assert len(asked) == 5
+    panel.delete_button.click()
+    panel.next_button.click()
+    assert asked[5:] == [(NEW, TODAY)] and weeks[3:] == [MONDAY + timedelta(days=7)]
 
 
 def test_refresh_keeps_the_selected_event(panel: CalendarPanel) -> None:
@@ -253,6 +280,22 @@ def test_refresh_keeps_the_selected_event(panel: CalendarPanel) -> None:
     moved = stored(timed(TODAY, 8, 9, "Call"), 2, revision=2)
     panel.show_range(week(first, moved), TORONTO, TODAY)
     assert panel.selected() == moved
+
+
+def test_refresh_keeps_the_selected_row_of_any_entry(panel: CalendarPanel) -> None:
+    trip = stored(whole_days(MONDAY, TODAY, "Trip"), 1)  # Monday to Wednesday.
+    due = marker(MarkerKind.DEADLINE, TODAY)
+    panel.show_range(week(trip, markers=(due,)), TORONTO, TODAY)
+    tuesday = rows(panel).index("Tue Oct 13") + 1
+    panel.list.setCurrentRow(tuesday)  # The trip, on Tuesday.
+    panel.show_range(week(trip, markers=(due,)), TORONTO, TODAY)
+    assert panel.list.currentRow() == tuesday  # Still Tuesday's row, not Monday's.
+    target = rows(panel).index("Deadline · Pay the invoice")
+    panel.list.setCurrentRow(target)
+    panel.show_range(week(trip, markers=(due,)), TORONTO, TODAY)
+    assert panel.list.currentRow() == target
+    panel.select_event(trip.public_id)  # The first day it shows.
+    assert panel.list.currentRow() == rows(panel).index("Mon Oct 12") + 1
 
 
 @pytest.fixture
@@ -281,16 +324,21 @@ def test_editor_checks_before_asking(editor: EventEditor) -> None:
     assert edit.title == "Dentist" and edit.time_zone == "America/Toronto"
     assert edit.starts_at_utc == local_instant(TODAY, time(15), TORONTO)
 
+    # Save still checks what the fields hold, even when they are set around the editor's
+    # own checks (test_event_editor.py covers those).
     editor.end_time.setTime(QTime(14, 0))
     assert editor.built_edit() == ENDS_FIRST
-    editor.end_date.setDate(QDate(2026, 11, 20))
+    editor.end_date.blockSignals(True)
+    editor.end_date.setDate(QDate(2026, 11, 14))  # The last day the field allows.
+    editor.end_date.blockSignals(False)
+    editor.end_time.setTime(QTime(16, 0))  # Past 31 days by an hour.
     assert editor.built_edit() == TOO_LONG
 
     editor.all_day.setChecked(True)
     assert editor.start_time.isHidden() and editor.end_time.isHidden()
-    assert editor.built_edit() == TOO_LONG
-    editor.end_date.setDate(QDate(2026, 10, 13))
-    assert editor.built_edit() == ENDS_FIRST
+    assert editor.end_date.maximumDate() == QDate(2026, 11, 13)  # All day: 31 days at most.
+    editor.end_date.setDate(QDate(2026, 10, 13))  # Before the start: it stops at the start.
+    assert editor.end_date.date() == QDate(2026, 10, 14)
     editor.end_date.setDate(QDate(2026, 10, 15))
     edit = editor.built_edit()
     assert isinstance(edit, EventEdit)
@@ -354,7 +402,7 @@ async def test_calendar_page_loads_this_week_and_has_a_shortcut(
     assert window.workspace.current_page() == "calendar"
 
     window.calendar_panel.next_button.click()
-    await finish(window)
+    await window.drain_calendar_reads()
     later = first + timedelta(days=7)
     assert calls(backend, "calendar_range")[-1] == (
         "calendar_range",
@@ -437,8 +485,110 @@ async def test_a_new_day_moves_today_and_the_default_week(
     assert window.calendar_panel.first_day == later
 
 
+async def test_this_week_follows_today(window: MainWindow, backend: FakeBackend) -> None:
+    await window.initialize()
+    panel = window.calendar_panel
+    panel.next_button.click()
+    await window.drain_calendar_reads()
+    assert panel.first_day == MONDAY + timedelta(days=7)
+    panel.previous_button.click()  # Back to this week: from now on it follows today.
+    await window.drain_calendar_reads()
+    window.now = lambda: NOW + timedelta(days=7)
+    await window._refresh_for_new_day()
+    assert panel.first_day == MONDAY + timedelta(days=7)
+    assert "· Today" in "".join(rows(panel))
+
+    panel.next_button.click()  # A week ahead, the page stays there.
+    await window.drain_calendar_reads()
+    window.now = lambda: NOW + timedelta(days=21)
+    await window._refresh_for_new_day()
+    assert panel.first_day == MONDAY + timedelta(days=14)
+    panel.this_week_button.click()
+    await window.drain_calendar_reads()
+    assert panel.first_day == MONDAY + timedelta(days=21)
+
+
+async def test_a_saved_event_is_selected(window: MainWindow, backend: FakeBackend) -> None:
+    backend.events["x"] = stored(timed(TODAY, 8, 9, "Standup"), 9)
+    await window.initialize()
+    window.calendar_panel.new_button.click()
+    window.event_editor.title.setText("Dentist")
+    save = window.event_editor.buttons.button(QDialogButtonBox.StandardButton.Save)
+    assert save is not None
+    save.click()
+    await finish(window)
+    selected = window.calendar_panel.selected()
+    assert selected is not None and selected.title == "Dentist"
+
+
+async def test_the_page_works_while_another_operation_runs(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    event = stored(timed(TODAY, 9, 10))
+    backend.events[event.public_id] = event
+    await window.initialize()
+    gate = asyncio.Event()
+
+    async def hold() -> None:
+        await gate.wait()
+
+    assert window.start(hold)  # Say, Sync and review waiting at its review.
+    panel = window.calendar_panel
+    panel.next_button.click()
+    await window.drain_calendar_reads()
+    assert panel.first_day == MONDAY + timedelta(days=7)
+    panel.this_week_button.click()
+    await window.drain_calendar_reads()
+    row = next(n for n, text in enumerate(rows(panel)) if text.endswith("· Dentist"))
+    panel.list.setCurrentRow(row)
+    assert not panel.delete_button.isEnabled()  # A change waits its turn.
+    panel.open_button.click()
+    editor = window.event_editor
+    save = editor.buttons.button(QDialogButtonBox.StandardButton.Save)
+    assert save is not None
+    assert editor.isVisible() and editor.status.text() == WAITING and not save.isEnabled()
+
+    gate.set()
+    await finish(window)
+    assert editor.status.text() == "" and save.isEnabled()
+    assert panel.delete_button.isEnabled()
+
+
+async def test_the_newest_read_of_the_week_wins(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await window.initialize()
+    slow, read = asyncio.Event(), backend.calendar_range
+
+    async def calendar_range(first: date, last: date, zone: ZoneInfo) -> CalendarRange:
+        shown = await read(first, last, zone)
+        if first == MONDAY + timedelta(days=7):
+            await slow.wait()  # Next week's answer comes back last.
+        return shown
+
+    monkeypatch.setattr(backend, "calendar_range", calendar_range)
+    panel = window.calendar_panel
+    panel.next_button.click()
+    await asyncio.sleep(0)
+    window._request_calendar_week(MONDAY + timedelta(days=14))  # Asked for while it reads.
+    await asyncio.sleep(0)
+    slow.set()
+    await window.drain_calendar_reads()
+    assert panel.first_day == MONDAY + timedelta(days=14)
+
+
 async def test_unreadable_calendar_keeps_the_page(window: MainWindow, backend: FakeBackend) -> None:
     backend.event_fail = RuntimeError("private")
     await window.initialize()
     assert "could not be refreshed" in window.status.text()
     assert "private" not in window.status.text()
+
+
+def test_event_editor_notices_unsaved_input(editor: EventEditor) -> None:
+    editor.edit_new(TODAY, NOW, TORONTO)
+    assert not editor.has_unsaved_input()  # What was loaded counts as saved.
+    editor.title.setText("Dentist")
+    assert editor.has_unsaved_input()
+    editor.edit_new(TODAY, NOW, TORONTO)
+    editor.end_time.setTime(QTime(17, 0))
+    assert editor.has_unsaved_input()

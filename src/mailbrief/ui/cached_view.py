@@ -29,7 +29,6 @@ class CachedMailDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Saved mail metadata")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(850, 620)
         self._page: CachedMailPage | None = None
         # The owner's zone, for today's date and the last sync time; the window sets it.

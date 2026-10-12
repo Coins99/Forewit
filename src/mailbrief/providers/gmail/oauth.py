@@ -18,6 +18,12 @@ from mailbrief.providers.google.tokens import TOKEN_URL as TOKEN_URL
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+CALENDAR_SCOPES = (CALENDAR_EVENTS_SCOPE, CALENDAR_LIST_SCOPE)
+# One Google sign-in for Gmail and Google Calendar (ADR 0019): Gmail is required, and the
+# two read-only calendar permissions are asked for with it but may be left unticked.
+SIGN_IN_SCOPES = (GMAIL_SCOPE, *CALENDAR_SCOPES)
 BrowserOpener = Callable[[str], Awaitable[bool]]
 
 
@@ -96,10 +102,11 @@ class LoopbackAuthorization:
         *,
         browser: BrowserOpener = open_browser,
         timeout_seconds: float = 180,
-        scopes: tuple[str, ...] = (GMAIL_SCOPE,),
+        scopes: tuple[str, ...] = SIGN_IN_SCOPES,
     ) -> None:
-        """``scopes`` are what Google is asked for: Gmail read-only unless a separate grant,
-        such as Google Calendar's (ADR 0018), asks for its own."""
+        """``scopes`` are what Google is asked for: the one Google sign-in's, Gmail and the
+        read-only calendar permissions (ADR 0019). Google is told to keep what was granted
+        before, so asking again only adds permissions."""
         if not scopes:
             raise ValueError("at least one scope is required")
         self._browser = browser
@@ -195,6 +202,7 @@ class LoopbackAuthorization:
                     "code_challenge": challenge.rstrip(b"=").decode("ascii"),
                     "code_challenge_method": "S256",
                     "access_type": "offline",
+                    "include_granted_scopes": "true",
                     "prompt": "consent select_account",
                 }
             )

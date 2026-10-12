@@ -49,7 +49,8 @@ later use after Microsoft Entra access is resolved.
 - Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
   own events (timed or all-day, with Undo) and your open actions' deadlines and target
   dates. Google Calendar, read-only (phase 2), implemented, awaiting live acceptance:
-  connect it on the Calendar page to see your Google events there. AI-proposed changes
+  with one Google sign-in shared with Gmail (ADR 0019), Google events show on the Calendar
+  page and refresh with every Sync and review. AI-proposed changes
   are a later phase. See [Calendar](calendar.md) and [ADR 0018](adr/0018-calendar.md).
 
 ## The desktop window

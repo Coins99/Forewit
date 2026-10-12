@@ -82,3 +82,23 @@ async def test_close_waits_for_settings_write(qtbot: QtBot) -> None:
     await shutdown
     assert backend.preferences.groq_model == "new-model"
     assert backend.closed
+
+
+async def test_unsaved_settings_are_noticed(qtbot: QtBot) -> None:
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    window.settings_button.click()
+    await finish(window)
+    dialog = window.settings_dialog
+    assert not dialog.has_unsaved_input()  # What was loaded counts as saved.
+    dialog.model.setText("another-model")
+    assert dialog.has_unsaved_input()
+    dialog.save_button.click()  # Asked to save: no longer unsaved.
+    await finish(window)
+    assert not dialog.has_unsaved_input()
+    dialog.key.setText("synthetic-key-not-a-real-credential")  # A typed, unsaved key.
+    assert dialog.has_unsaved_input()
+    dialog.key.clear()
+    panel = dialog.preferences_panel
+    panel.refresh_on_launch.setChecked(not panel.refresh_on_launch.isChecked())
+    assert dialog.has_unsaved_input()

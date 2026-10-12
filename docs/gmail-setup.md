@@ -13,8 +13,11 @@ Daily summaries and UI wiring follow in later milestones.
 3. In Google Auth Platform, configure the application branding and consent
    audience. For a personal Gmail account use External; while publishing status
    is Testing, add your own Gmail address as a test user.
-4. Configure the read-only Gmail scope:
-   `https://www.googleapis.com/auth/gmail.readonly`.
+4. Configure the read-only scopes of the one Google sign-in (ADR 0019):
+   `https://www.googleapis.com/auth/gmail.readonly`, and for Google Calendar
+   `https://www.googleapis.com/auth/calendar.events.readonly` and
+   `https://www.googleapis.com/auth/calendar.calendarlist.readonly`. Only Gmail's is
+   required; without the calendar ones, Gmail still works.
 5. On the Audience page, select **Publish app** so the publishing status becomes
    **In production**. A personal app can stay unverified: Google then shows an
    unverified-app warning on the consent screen at each interactive sign-in, which you

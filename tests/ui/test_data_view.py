@@ -157,6 +157,10 @@ async def test_native_confirmation_defaults_cancel_and_closes_cleanly(
     box = dialog._confirmation
     assert box is not None
     assert box.defaultButton() == box.button(QMessageBox.StandardButton.Cancel)
+    # Behind the dialog's own cover, not modal, so quitting still works while it's up.
+    assert box.windowModality() == Qt.WindowModality.NonModal
+    assert QApplication.activeModalWidget() is not box
+    assert dialog.dialog_guard.isVisibleTo(dialog)
     # On macOS, Escape uses animateClick, which clicks Cancel from a Qt timer; this test's
     # asyncio loop never runs it, so wait for the result in a Qt event loop. Elsewhere it
     # clicks at once, which the context manager also catches.

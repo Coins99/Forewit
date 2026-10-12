@@ -164,6 +164,24 @@ class ActionEditor(QDialog):
         self.steps.currentRowChanged.connect(lambda _row: self._update_step_buttons())
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
+        self._loaded_input = self._input()
+
+    def _input(self) -> tuple[object, ...]:
+        """Everything the owner can change here, to tell whether any of it is unsaved."""
+        picked = self.target.date()
+        return (
+            self.title.text(),
+            self.owner.currentIndex(),
+            self.effort.currentIndex(),
+            (picked.year(), picked.month(), picked.day()) if self.has_target.isChecked() else None,
+            self.notes.toPlainText(),
+            tuple(self._current_steps()),
+        )
+
+    def has_unsaved_input(self) -> bool:
+        """Whether closing now would lose something the owner typed or chose. Not while
+        it is being saved: quitting lets that save finish."""
+        return not self._saving and self._input() != self._loaded_input
 
     def edit(self, action: Action, today: date, zone: ZoneInfo | None = None) -> None:
         """Show one action's current values; nothing is kept from an earlier edit.
@@ -206,6 +224,7 @@ class ActionEditor(QDialog):
         self._original = self._current_steps()
         self.status.clear()
         self._update_step_buttons()
+        self._loaded_input = self._input()
 
     def new_task(self, today: date) -> None:
         """Open an empty editor; cancelling creates no record."""
@@ -228,6 +247,7 @@ class ActionEditor(QDialog):
         self._original = []
         self.status.clear()
         self._update_step_buttons()
+        self._loaded_input = self._input()
         self.title.setFocus()
 
     def set_projects(self, projects: tuple[Project, ...]) -> None:

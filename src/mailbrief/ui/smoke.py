@@ -286,7 +286,7 @@ async def check_package(directory: Path) -> None:
             if len(page.messages) != 1:
                 raise RuntimeError("Offline metadata restoration failed.")
             window.cached_dialog.show_page(page)
-            window.cached_dialog.open()
+            window.dialog_guard.show_dialog(window.cached_dialog)
             QApplication.processEvents()
             if "Synthetic metadata preview." not in window.cached_dialog.details.toPlainText():
                 raise RuntimeError("Cached metadata display failed.")

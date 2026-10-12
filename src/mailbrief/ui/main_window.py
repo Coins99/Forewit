@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import Protocol, assert_never
+from typing import Final, Protocol, assert_never
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -43,6 +44,12 @@ from mailbrief.domain.briefs import (
     TransmissionPreview,
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.calendar_planning import (
+    PlanningOptions,
+    PlanningOutcome,
+    PlanningPreview,
+    PlanningStatus,
+)
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -69,13 +76,20 @@ from mailbrief.domain.drafts import (
     placeholders,
     still_to_fill,
 )
-from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.events import (
+    AppliedBatch,
+    CalendarEvent,
+    CalendarRange,
+    EventChange,
+    EventEdit,
+)
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
+from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     ProviderError,
@@ -97,6 +111,7 @@ from mailbrief.services.brief import (
     needs_review_sentence,
 )
 from mailbrief.services.calendar import resolve_timezone
+from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.drafting import (
     DraftingContextError,
@@ -134,12 +149,18 @@ from mailbrief.ui.actions_view import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
-from mailbrief.ui.calendar_view import CONNECT as CONNECT_CALENDAR
+from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
-from mailbrief.ui.calendar_view import DISCONNECT as DISCONNECT_CALENDAR
+from mailbrief.ui.calendar_view import (
+    GOOGLE_ASK,
+    GOOGLE_OFF,
+    GOOGLE_ON,
+    OPEN_GOOGLE,
+    CalendarPanel,
+    week_start,
+)
 from mailbrief.ui.calendar_view import NEW as NEW_EVENT
 from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
-from mailbrief.ui.calendar_view import OPEN_GOOGLE, CalendarPanel, week_start
 from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
 from mailbrief.ui.data_view import DataDialog
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
@@ -149,6 +170,7 @@ from mailbrief.ui.diagnostics import (
     log_automatic_run,
     log_failure,
 )
+from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.draft_editor import DraftEditor
 from mailbrief.ui.drafts_view import DELETE as DELETE_DRAFT
 from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
@@ -157,7 +179,8 @@ from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
-from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
+from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
 from mailbrief.ui.projects_view import ProjectsDialog
@@ -288,11 +311,19 @@ class DesktopBackend(Protocol):
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
     async def restore_event(self, public_id: str) -> CalendarEvent: ...
-    # Google Calendar, read-only (ADR 0018, phase 2). calendar_account reads the vault only.
-    async def calendar_account(self) -> str | None: ...
-    async def connect_calendar(self) -> str: ...
-    async def disconnect_calendar(self) -> None: ...
+    # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
+    async def calendar_allowed(self) -> bool | None: ...
+    async def allow_calendar(self) -> bool: ...
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult: ...
+    # Plan with AI (ADR 0018, phase 3b).
+    async def prepare_planning(
+        self, options: PlanningOptions, first_day: date, zone: ZoneInfo
+    ) -> PreparedPlan: ...
+    async def generate_planning(
+        self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event
+    ) -> PlanningOutcome: ...
+    async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch: ...
+    async def undo_calendar_changes(self, batch: AppliedBatch) -> None: ...
 
 
 # Raised when the brief, an action or a draft changed since it was shown; the window reloads.
@@ -311,19 +342,32 @@ _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
 _PICK_ONE = "Select at least one message to analyze, or Cancel."
 _NOT_REFRESHED = "The view could not be refreshed; restart MailBrief to see the latest."
 _BUSY = "MailBrief is busy; try again in a moment."
+_CANCELLED = "Cancelled. The displayed saved brief is unchanged."
 _BRIEFS_UNAVAILABLE = "Saved briefs open once local storage loads. Choose Retry loading saved data."
 _EDITOR_STALE = (
     "This action changed since you opened it. Your edits are still here — copy what you "
     "need, then Cancel and reopen the action."
 )
 _EDITOR_FAILED = "Couldn't save. Your edits are still here; try again."
-_CALENDAR_NOT_CONNECTED = "Google Calendar isn't connected."
-_CALENDAR_SIGN_IN = "Google Calendar needs you to connect it again."
+_CALENDAR_NOT_CONNECTED = "Connect Gmail to see your Google Calendar here."
+_CALENDAR_ASK = "Google Calendar isn't allowed yet. Choose Allow Google Calendar."
+_CALENDAR_ALLOWING = "Allow Google Calendar in your browser."
+_CALENDAR_NOT_GRANTED = (
+    "Google didn't grant calendar access. Choose Allow Google Calendar and tick both calendar "
+    "boxes."
+)
+_CALENDAR_ALLOW_STOPPED = (
+    "Google Calendar wasn't allowed; Gmail is still connected. Choose Allow Google Calendar "
+    "and pick your Gmail account."
+)
 _CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
+_CALENDAR_CANCELLED = "Cancelled. The Calendar page shows what was saved."
+_CALENDAR_ALLOW_CANCELLED = (
+    "Cancelled. Gmail is still connected; choose Allow Google Calendar to try again."
+)
 _CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
-_CALENDAR_DISCONNECTED = "Google Calendar disconnected; its events are no longer kept in MailBrief."
 _CALENDAR_STOPPED = {
-    "AUTH_REQUIRED": "Google Calendar stopped: connect it again.",
+    "AUTH_REQUIRED": "Google Calendar stopped: connect Gmail again.",
     "PERMISSION_DENIED": "Google Calendar stopped: access was denied.",
     "RATE_LIMITED": "Google Calendar stopped: it is busy; try again in a minute.",
 }
@@ -436,6 +480,34 @@ class _ApprovedGate:
 
     async def request_drafting_consent(self, preview: DraftingPreview) -> bool:
         return self._agreed or not preview.first_use
+
+
+class _ApprovedPlanning:
+    """The dialog's preview already asked; first use also needs the ticked consent box."""
+
+    def __init__(self, agreed: bool) -> None:
+        self._agreed = agreed
+
+    async def request_planning_consent(self, preview: PlanningPreview) -> bool:
+        return self._agreed or not preview.first_use
+
+
+_PLAN_PROBLEMS: Final = {
+    "AI_OUTPUT_INCOMPLETE": "Groq's answer was cut off. Your calendar is unchanged; try again.",
+    "AI_INVALID_OUTPUT": "Groq's answer couldn't be used. Your calendar is unchanged; try again.",
+    "AI_REFUSED": "Groq declined this request. Your calendar is unchanged.",
+}
+_PLAN_FAILED: Final = "Planning with AI failed. Your calendar is unchanged; try again."
+_PLAN_DECLINED: Final = "Nothing was sent. Your calendar is unchanged."
+_PLAN_CANCELLED: Final = "Cancelled. Nothing was changed."
+_PLAN_STALE: Final = (
+    "Your calendar changed since you asked, so nothing was applied. Discard and ask again."
+)
+
+
+def planning_problem_text(code: str | None) -> str:
+    """What a failed request means, in the calendar's words; other codes keep their own."""
+    return _PLAN_PROBLEMS.get(code or "") or error_guidance(code or "AI_PROVIDER_ERROR")
 
 
 class DraftWrites:
@@ -566,9 +638,21 @@ class MainWindow(QMainWindow):
         self.action_editor.save_requested.connect(self._request_save_action)
         self.event_editor = EventEditor(self)
         self.event_editor.save_requested.connect(self._request_save_event)
+        self.planning_dialog = PlanningDialog(self)
+        self.planning_dialog.preview_requested.connect(self._request_planning_preview)
+        self.planning_dialog.ask_requested.connect(self._request_planning_ask)
+        self.planning_dialog.apply_requested.connect(self._request_apply_planning)
+        self.planning_dialog.cancel_requested.connect(self._cancel_planning)
+        self._planning_plan: PreparedPlan | None = None
+        self._planning_cancel: asyncio.Event | None = None
+        self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
-        self._calendar_account: str | None = None  # The connected Google Calendar account.
+        self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
+        # Reads of the week shown run beside start()'s operations: they change nothing. The
+        # newest read wins, and shutdown waits for them before closing the database.
+        self._calendar_reads: set[asyncio.Task[None]] = set()
+        self._calendar_read = 0
 
         self.action_editor.create_requested.connect(self._request_create_action)
         self.draft_writes = DraftWrites()
@@ -785,6 +869,7 @@ class MainWindow(QMainWindow):
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
+        self.calendar_panel.plan_requested.connect(self._request_planning)
         workspace.add_page("calendar", _page(self.calendar_panel, "calendarPage", "Calendar"))
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
@@ -813,6 +898,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
         layout.addWidget(strip)
         self.setCentralWidget(central)
+        # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
+        # closeEvent on macOS (a modal dialog's AppKit session drops them).
+        self.dialog_guard = DialogGuard(self)
+        self._quit_confirmed = False  # The owner chose to discard unsaved input and quit.
+        self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
         sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
@@ -946,7 +1036,7 @@ class MainWindow(QMainWindow):
             return
         self._show_page(key)
         if key == "calendar" and self._calendar_sync_due():
-            self.start(lambda: self._sync_calendar(quiet=True), cancellable=False)
+            self._start_calendar_sync()
 
     def _leave_run_page(self) -> None:
         """Back to Today once neither the review nor the consent is waiting."""
@@ -998,6 +1088,8 @@ class MainWindow(QMainWindow):
         what it showed if it can't be read."""
         await self._refresh_actions()
         await self._reload_history()
+        if self._calendar_week is not None:
+            self._show_calendar_week(self._calendar_week)  # Now this week: follow today.
         await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
@@ -1014,6 +1106,7 @@ class MainWindow(QMainWindow):
             self.action_editor.isVisible()
             or self.draft_editor.isVisible()
             or self.event_editor.isVisible()
+            or self.planning_dialog.isVisible()
             or not self.draft_writes.idle
         ):
             self.status.setText(
@@ -1024,7 +1117,7 @@ class MainWindow(QMainWindow):
             accounts = await self.backend.cached_accounts() if self._ready else ()
             if not self._closing:
                 self.data_dialog.configure(accounts, available=self._ready)
-                self.data_dialog.open()
+                self.dialog_guard.show_dialog(self.data_dialog)
 
     def _run_data(self, operation: Callable[[], Awaitable[None]]) -> bool:
         if self.data_dialog is None:
@@ -1324,7 +1417,7 @@ class MainWindow(QMainWindow):
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
-            self.action_editor.open()
+            self.dialog_guard.show_dialog(self.action_editor)
         elif kind == COMPLETE:
             self.start(lambda: self._complete_action(action), cancellable=False)
         elif kind == REOPEN:
@@ -1335,7 +1428,7 @@ class MainWindow(QMainWindow):
             self.start(lambda: self._mark_seen(action), cancellable=False)
         elif kind == PROPOSALS:
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
-            self.proposals_dialog.open()
+            self.dialog_guard.show_dialog(self.proposals_dialog)
 
     def _open_organization(self) -> None:
         if self._closing or self._dialog_open() or (self.task is not None and not self.task.done()):
@@ -1440,7 +1533,7 @@ class MainWindow(QMainWindow):
             return
         self._show_page("actions")
         self.action_editor.new_task(self._local_today())
-        self.action_editor.open()
+        self.dialog_guard.show_dialog(self.action_editor)
 
     def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
         started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
@@ -1544,43 +1637,92 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
 
-    # Calendar (ADR 0018). Loading a week, saving and deleting use start(); the page shows
-    # local data only, so it never needs Gmail or an AI provider.
+    # Calendar (ADR 0018). Saving and deleting use start(); reading a week doesn't, so the
+    # page can move between weeks and open the editor while another operation runs. The
+    # page shows local data only, so it never needs Gmail or an AI provider.
 
     async def _refresh_calendar(self) -> None:
+        self._calendar_read += 1
+        read = self._calendar_read
         first = self._calendar_week or week_start(self._local_today())
         try:
             shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
-            self.calendar_panel.show_range(shown, self.zone, self._local_today())
-            self._calendar_shown = shown
-            self.calendar_panel.set_google(self._calendar_account, self._google_note(shown))
         except Exception as exc:
-            self._note_not_refreshed(exc)
+            if read == self._calendar_read:
+                self._note_not_refreshed(exc)
+            return
+        if read != self._calendar_read:
+            return  # A newer read, perhaps of another week, shows the page.
+        self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        self._calendar_shown = shown
+        self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
+
+    def _show_calendar_week(self, monday: date) -> None:
+        """Show the week of ``monday`` from now on; this week's follows today, so the page
+        moves on by itself when a new week starts."""
+        self._calendar_week = None if monday == week_start(self._local_today()) else monday
 
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
-            monday = first_day
-            self.start(lambda: self._show_calendar_week(monday), cancellable=False)
+            self._show_calendar_week(first_day)
+            self._read_calendar(sync=True)
 
-    async def _show_calendar_week(self, first_day: date) -> None:
-        self._calendar_week = first_day
-        await self._refresh_calendar()
-        if self._calendar_sync_due():
+    def _read_calendar(self, *, sync: bool = False) -> None:
+        """Read the week shown beside any running operation; then, with ``sync``, read
+        Google Calendar for it when that is due and nothing else is running."""
+        if self._closing:
+            return
+
+        async def read() -> None:
+            await self._refresh_calendar()
+            if sync and self._calendar_sync_due():
+                self._start_calendar_sync()
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    async def drain_calendar_reads(self) -> None:
+        """Wait for the reads of the week in progress."""
+        while pending := [task for task in self._calendar_reads if not task.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def _start_calendar_sync(self) -> bool:
+        async def sync() -> None:
             await self._sync_calendar(quiet=True)
+
+        return self.start(self._calendar_work(sync), cancelled=_CALENDAR_CANCELLED)
+
+    def _calendar_work(
+        self, operation: Callable[[], Awaitable[None]]
+    ) -> Callable[[], Awaitable[None]]:
+        """``operation``, which Cancel and quitting can stop: the cache keeps each calendar
+        a stopped sync finished, so the page is read again to show them."""
+
+        async def work() -> None:
+            try:
+                await operation()
+            except asyncio.CancelledError:
+                self._read_calendar()
+                raise
+
+        return work
 
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
             self.event_editor.edit_new(value, self.now(), self.zone)
-            self.event_editor.open()
+            self.dialog_guard.show_dialog(self.event_editor)
         elif kind == OPEN_GOOGLE and isinstance(value, GoogleEvent):
             self._open_calendar_link(value)
         elif isinstance(value, CalendarEvent):
             event = value
             if kind == OPEN_EVENT:
                 self.event_editor.edit_event(event, self.zone)
-                self.event_editor.open()
+                self.dialog_guard.show_dialog(self.event_editor)
             elif kind == DELETE_EVENT:
-                self.start(lambda: self._delete_event(event), cancellable=False)
+                started = self.start(lambda: self._delete_event(event), cancellable=False)
+                if not started and not self._closing:
+                    self.status.setText(_BUSY)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -1609,9 +1751,10 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.event_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
-        self._calendar_week = week_start(saved.days(self.zone)[0])  # Show where it went.
+        self._show_calendar_week(week_start(saved.days(self.zone)[0]))  # Show where it went.
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
+        self.calendar_panel.select_event(saved.public_id)
 
     async def _delete_event(self, event: CalendarEvent) -> None:
         try:
@@ -1632,17 +1775,24 @@ class MainWindow(QMainWindow):
     # by _run, whose sign-in handling belongs to Gmail: a calendar problem must never show
     # Gmail as disconnected.
 
-    async def _load_calendar_account(self) -> None:
+    async def _load_calendar_access(self) -> None:
         try:
-            self._calendar_account = await self.backend.calendar_account()
+            self._calendar_allowed = await self.backend.calendar_allowed()
         except Exception as exc:
             log_failure(exc)
-            self._calendar_account = None
+            self._calendar_allowed = None
+
+    def _google_mode(self) -> str:
+        if self._account_email is None:
+            return GOOGLE_OFF
+        return GOOGLE_ASK if self._calendar_allowed is False else GOOGLE_ON
 
     def _google_note(self, shown: CalendarRange) -> str:
-        account = self._calendar_account
+        account = self._account_email
         if account is None:
             return _CALENDAR_NOT_CONNECTED
+        if self._calendar_allowed is False:
+            return _CALENDAR_ASK
         coverage = shown.google_coverage
         if coverage is None:
             return f"Google Calendar: {account} · not loaded yet"
@@ -1660,7 +1810,7 @@ class MainWindow(QMainWindow):
     def _calendar_sync_due(self) -> bool:
         shown = self._calendar_shown
         return (
-            self._calendar_account is not None
+            self._calendar_allowed is True
             and shown is not None
             and needs_sync(shown.google_coverage, shown.first_day, shown.last_day, self.now())
         )
@@ -1669,39 +1819,54 @@ class MainWindow(QMainWindow):
         async def refresh() -> None:
             await self._sync_calendar(quiet=False)
 
-        if kind == CONNECT_CALENDAR:
-            operation: Callable[[], Awaitable[None]] = self._connect_calendar
+        if kind == ALLOW_CALENDAR:
+            operation: Callable[[], Awaitable[None]] = self._allow_calendar
+            cancelled = _CALENDAR_ALLOW_CANCELLED
         elif kind == REFRESH_CALENDAR:
-            operation = refresh
-        elif kind == DISCONNECT_CALENDAR:
-            operation = self._disconnect_calendar
+            operation, cancelled = refresh, _CALENDAR_CANCELLED
         else:
             return
-        if not self.start(operation, cancellable=False) and not self._closing:
+        started = self.start(self._calendar_work(operation), cancelled=cancelled)
+        if not started and not self._closing:
             self.status.setText(_BUSY)
 
-    def _calendar_failed(self, exc: Exception) -> None:
-        """Say what went wrong in fixed words; a sign-in problem shows Connect again."""
+    def _calendar_failed(self, exc: Exception, *, quiet: bool = False) -> None:
+        """Say what went wrong in fixed words; a quiet sync adds it to what the line says."""
         log_failure(exc)
-        if isinstance(exc, AuthenticationRequiredError):
-            self._calendar_account = None
-            self.status.setText(_CALENDAR_SIGN_IN)
+        if isinstance(exc, CalendarNotAllowedError):
+            self._calendar_allowed = False
+            message = _CALENDAR_ASK
         elif isinstance(exc, ProviderPermissionError):
-            self.status.setText(str(exc))  # Static guidance by contract.
+            message = str(exc)  # Static guidance by contract.
         elif isinstance(exc, ConfigurationError):
-            self.status.setText(configuration_guidance(exc))
+            message = configuration_guidance(exc)
         elif isinstance(exc, ProviderRateLimitError):
-            self.status.setText(_CALENDAR_BUSY)
+            message = _CALENDAR_BUSY
         else:
-            self.status.setText(_CALENDAR_UNREACHABLE)
+            message = _CALENDAR_UNREACHABLE
+        self.status.setText(f"{self.status.text()} {message}" if quiet else message)
 
-    async def _connect_calendar(self) -> None:
+    async def _allow_calendar(self) -> None:
+        """Ask Google, in the browser, to add Calendar to the one Google sign-in."""
+        self.status.setText(_CALENDAR_ALLOWING)
         try:
-            self._calendar_account = await self.backend.connect_calendar()
+            allowed = await self.backend.allow_calendar()
         except asyncio.CancelledError:
             raise
+        except AuthenticationRequiredError as exc:
+            # Cancelled, timed out or another account in the browser. Asking again never
+            # touches the saved sign-in, so Gmail stays connected.
+            log_failure(exc)
+            self.status.setText(_CALENDAR_ALLOW_STOPPED)
+            await self._refresh_calendar()
+            return
         except Exception as exc:
             self._calendar_failed(exc)
+            await self._refresh_calendar()
+            return
+        self._calendar_allowed = allowed
+        if not allowed:
+            self.status.setText(_CALENDAR_NOT_GRANTED)
             await self._refresh_calendar()
             return
         await self._sync_calendar(quiet=False)
@@ -1711,26 +1876,121 @@ class MainWindow(QMainWindow):
         around = self._calendar_week or week_start(self._local_today())
         try:
             result = await self.backend.sync_calendar(around, self.zone)
-        except asyncio.CancelledError:
-            raise
+        except (asyncio.CancelledError, AuthenticationRequiredError):
+            raise  # A sign-in problem is the one Google sign-in's: _run reports it.
         except Exception as exc:
-            self._calendar_failed(exc)
+            self._calendar_failed(exc, quiet=quiet)
         else:
-            if not quiet or result.failed or result.stopped_code:
+            if result.stopped_code == "AUTH_REQUIRED":
+                # Google rejected the one sign-in partway through: _run reports it as Gmail's.
+                await self._refresh_calendar()
+                raise AuthenticationRequiredError("Google rejected the sign-in.")
+            if not quiet:
                 self.status.setText(calendar_sync_text(result))
+            elif result.failed or result.stopped_code:
+                self.status.setText(f"{self.status.text()} {calendar_sync_text(result)}")
         await self._refresh_calendar()
 
-    async def _disconnect_calendar(self) -> None:
+    # Plan with AI (ADR 0018, phase 3b). Preparing and asking use start(); the dialog's
+    # Cancel stops the request itself, like AI drafting's.
+
+    def _request_planning(self) -> None:
+        """Open the dialog; preparing and asking wait their turn through start()."""
+        self._planning_plan = None
+        self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
+        self.dialog_guard.show_dialog(self.planning_dialog)
+
+    def _request_planning_preview(self, options: object) -> None:
+        if isinstance(options, PlanningOptions):
+            chosen = options
+            if not self.start(lambda: self._prepare_planning(chosen), cancellable=False):
+                self.planning_dialog.show_problem(_BUSY)
+
+    async def _prepare_planning(self, options: PlanningOptions) -> None:
+        first = self._calendar_week or week_start(self._local_today())
         try:
-            await self.backend.disconnect_calendar()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self._calendar_failed(exc)
+            plan = await self.backend.prepare_planning(options, first, self.zone)
+        except ConfigurationError as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(configuration_guidance(exc))
             return
-        self._calendar_account = None
-        self.status.setText(_CALENDAR_DISCONNECTED)
-        await self._refresh_calendar()
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        self._planning_plan = plan
+        self.planning_dialog.show_preview(plan.preview)
+
+    def _request_planning_ask(self, agreed: bool) -> None:
+        if not self.start(lambda: self._ask_planning(agreed), cancellable=False):
+            self.planning_dialog.show_problem(_BUSY)
+
+    async def _ask_planning(self, agreed: bool) -> None:
+        plan, self._planning_plan = self._planning_plan, None
+        if plan is None:
+            return
+        self.planning_dialog.show_working()
+        cancel = asyncio.Event()
+        task = asyncio.create_task(
+            self.backend.generate_planning(plan, _ApprovedPlanning(agreed), cancel)
+        )
+        self._planning_cancel, self._planning_task = cancel, task
+        try:
+            outcome = await task
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise  # This operation itself was cancelled.
+            self.planning_dialog.show_problem(_PLAN_CANCELLED)
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        finally:
+            self._planning_cancel = self._planning_task = None
+        if outcome.status is PlanningStatus.PROPOSED:
+            assert outcome.plan is not None
+            self.planning_dialog.show_proposals(outcome.plan, self.zone, self._local_today())
+        elif outcome.status is PlanningStatus.DECLINED:
+            self.planning_dialog.show_problem(_PLAN_DECLINED)
+        elif outcome.status is PlanningStatus.CANCELLED:
+            self.planning_dialog.show_problem(_PLAN_CANCELLED)
+        else:
+            self.planning_dialog.show_problem(planning_problem_text(outcome.error_code))
+
+    def _cancel_planning(self) -> None:
+        if self._planning_cancel is not None:
+            self._planning_cancel.set()
+        if self._planning_task is not None:
+            self._planning_task.cancel()
+
+    def _request_apply_planning(self, changes: object) -> None:
+        if isinstance(changes, tuple) and changes:
+            kept: tuple[EventChange, ...] = changes
+            if not self.start(lambda: self._apply_planning(kept), cancellable=False):
+                self.planning_dialog.keep_reviewing(_BUSY)
+
+    async def _apply_planning(self, changes: tuple[EventChange, ...]) -> None:
+        try:
+            batch = await self.backend.apply_calendar_changes(changes)
+        except _STALE as exc:
+            log_failure(exc)
+            self.planning_dialog.keep_reviewing(_PLAN_STALE)
+            await self._refresh_calendar()
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.planning_dialog.keep_reviewing(_PLAN_FAILED)
+            return
+        self.planning_dialog.accept()
+
+        async def undo() -> None:
+            await self.backend.undo_calendar_changes(batch)
+
+        self._offer_undo("Undo AI changes", undo)
+        count = len(batch.changes)
+        self.status.setText(f"Applied {count} change{'s' if count != 1 else ''} from Groq.")
+        await self._refresh_views()
 
     def _open_calendar_link(self, event: GoogleEvent) -> None:
         link = None if event.web_link is None else str(event.web_link)
@@ -1794,7 +2054,7 @@ class MainWindow(QMainWindow):
 
     def _edit_draft(self, draft: Draft) -> None:
         self.draft_editor.load(draft, self.zone)
-        self.draft_editor.open()
+        self.dialog_guard.show_dialog(self.draft_editor)
 
     # Writing with AI. Every step runs in draft_writes after pending autosaves; the
     # generation itself is a task of its own, so Cancel and quitting can stop it.
@@ -2111,27 +2371,34 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Saved: {draft.display_title}.")
             await self._refresh_drafts()
 
-    def start(self, operation: Callable[[], Awaitable[None]], *, cancellable: bool = True) -> bool:
+    def start(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        cancellable: bool = True,
+        cancelled: str = _CANCELLED,
+    ) -> bool:
         """Only one operation may own the providers and workflow at a time.
 
         Returns whether this operation started; it does not while closing or busy.
+        ``cancelled`` is what the status line says when Cancel or quitting stops it.
         """
         if self._closing or (self.task is not None and not self.task.done()):
             return False
         self._cancel = asyncio.Event()
         self._cancellable = cancellable
         self._set_busy(True)
-        self.task = asyncio.create_task(self._run(operation))
+        self.task = asyncio.create_task(self._run(operation, cancelled))
         return True
 
-    async def _run(self, operation: Callable[[], Awaitable[None]]) -> None:
+    async def _run(self, operation: Callable[[], Awaitable[None]], cancelled: str) -> None:
         failed = True
         try:
             await operation()
             failed = False
         except asyncio.CancelledError:
             failed = False
-            self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+            self.status.setText(cancelled)
         except AuthenticationRequiredError as exc:
             log_failure(exc)
             self._set_account(None)
@@ -2171,7 +2438,7 @@ class MainWindow(QMainWindow):
     async def _open_cached(self) -> None:
         self.cached_dialog.show_today()  # Today in the owner's zone, each time it opens.
         self.cached_dialog.configure(await self.backend.cached_accounts())
-        self.cached_dialog.open()
+        self.dialog_guard.show_dialog(self.cached_dialog)
         selected = self.cached_dialog.selection()
         if selected is not None:
             await self._load_cached_page(*selected, 0)
@@ -2205,7 +2472,7 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             panel.set_unavailable()
             self.status.setText(str(exc))
-        self.settings_dialog.open()
+        self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
         self.cached_dialog.zone = self.zone
@@ -2325,7 +2592,6 @@ class MainWindow(QMainWindow):
             )
         await self._refresh_actions()
         await self._refresh_drafts()
-        await self._load_calendar_account()
         await self._refresh_calendar()
         await self._refresh_ai_status()
         try:
@@ -2342,6 +2608,8 @@ class MainWindow(QMainWindow):
         else:
             self._set_account(email)
             self.connection.setText(f"Gmail: connected as {email}")
+            await self._load_calendar_access()
+            await self._refresh_calendar()
             self._launch_soon()
 
     def _launch_soon(self) -> None:
@@ -2356,6 +2624,10 @@ class MainWindow(QMainWindow):
         self._set_account(email)
         self.connection.setText(f"Gmail: connected as {email}")
         self.status.setText("Connected. Sync to review today's messages.")
+        await self._load_calendar_access()
+        await self._refresh_calendar()
+        if self._calendar_allowed:
+            await self._sync_calendar(quiet=True)
         await self._show_auto_send()  # The permission shown is the connected account's.
         await self._reload_history()  # The new account's missed days.
         self._launch_soon()  # Only the first connection of a start counts as the launch.
@@ -2365,6 +2637,8 @@ class MainWindow(QMainWindow):
         self._set_account(None)
         self.connection.setText("Gmail: disconnected")
         self.status.setText("Local credentials removed. Saved briefs remain on this device.")
+        self._calendar_allowed = None
+        await self._refresh_calendar()  # Its Google events went with the sign-in.
         await self._show_auto_send()
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
@@ -2481,7 +2755,7 @@ class MainWindow(QMainWindow):
                             "No analyzed messages in this selection. Empty brief saved."
                         )
             case BriefStatus.CANCELLED:
-                self.status.setText("Cancelled. The displayed saved brief is unchanged.")
+                self.status.setText(_CANCELLED)
             case BriefStatus.CONSENT_DECLINED:
                 self.status.setText("Transmission declined. No messages sent to AI in this run.")
             case BriefStatus.SYNC_FAILED:
@@ -2509,6 +2783,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(self.status.text() + " " + guidance)
                 if code.startswith("AI_"):
                     self.ai.setText("AI: " + guidance)
+        if result.status is not BriefStatus.CANCELLED and self._calendar_allowed:
+            await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
 
     # Automatic refresh (ADR 0017): while MailBrief is open, on the owner's schedule. It has
     # no review, no consent question and no dialog; everything it says goes to the status line.
@@ -2532,6 +2808,7 @@ class MainWindow(QMainWindow):
                 self.projects_dialog,
                 self.draft_editor,
                 self.event_editor,
+                self.planning_dialog,
             )
         )
 
@@ -2627,6 +2904,12 @@ class MainWindow(QMainWindow):
         if result.status is not BriefStatus.CANCELLED:
             await self._refresh_actions()  # Thread activity and proposals may have changed.
         await self._reload_history()  # Today's brief may be new or changed.
+        if (
+            result.status is not BriefStatus.CANCELLED
+            and self._calendar_allowed
+            and self._account_email is not None
+        ):
+            await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
 
     async def _show_auto_send(self) -> None:
         """The automatic-analysis line in Settings, from the connected account's active
@@ -2660,7 +2943,7 @@ class MainWindow(QMainWindow):
             self.status.setText(NO_CONSENT)
             return
         self.auto_send_dialog.configure(status)
-        self.auto_send_dialog.open()
+        self.dialog_guard.show_dialog(self.auto_send_dialog)
 
     def _request_set_auto_send(self, limit: int) -> None:
         if not self.start(lambda: self._set_auto_send(limit), cancellable=False):
@@ -2821,12 +3104,59 @@ class MainWindow(QMainWindow):
         if self.task is not None and not self.task.done() and not self.task.cancelling():
             self.task.cancel()
 
+    def _unsaved_input(self) -> str | None:
+        """What quitting now would throw away: the open dialog holding unsaved input. The
+        draft editor isn't asked: closing saves its text."""
+        for dialog, what in (
+            (self.action_editor, "this action"),
+            (self.event_editor, "this event"),
+            (self.settings_dialog, "Settings"),
+        ):
+            if dialog.isVisible() and dialog.has_unsaved_input():
+                return what
+        return None
+
+    def ask_before_quitting(self) -> bool:
+        """When quitting would lose unsaved input, ask first and return True: the quit
+        waits for the answer. MailBriefApplication calls this for Cmd+Q and the Dock's
+        Quit, and closeEvent for the window's own close button."""
+        if self._closing or self._quit_confirmed:
+            return False
+        unsaved = self._unsaved_input()
+        if unsaved is None:
+            return False
+        box = self._quit_box
+        if box is None:
+            box = QMessageBox(self)
+            box.setObjectName("quitConfirmation")
+            box.setWindowTitle("Quit MailBrief")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.addButton(
+                button_label("Discard changes and quit"), QMessageBox.ButtonRole.DestructiveRole
+            )
+            box.setDefaultButton(box.addButton(QMessageBox.StandardButton.Cancel))
+            box.buttonClicked.connect(
+                lambda button: self._quit_answered(
+                    box.buttonRole(button) == QMessageBox.ButtonRole.DestructiveRole
+                )
+            )
+            self._quit_box = box
+        box.setText(f"Quit and discard your unsaved changes to {unsaved}?")
+        self.dialog_guard.show_dialog(box)  # Not modal: another quit only brings it back.
+        return True
+
+    def _quit_answered(self, discard: bool) -> None:
+        if discard:
+            self._quit_confirmed = True
+            self.close()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._shutdown_complete:
             event.accept()
             return
         event.ignore()  # Also defers QApplication.quit(), including Cmd+Q and Dock Quit.
-        if self._closing:
+        if self._closing or self.ask_before_quitting():
             return
         self._closing = True
         self.scheduler.stop()
@@ -2840,6 +3170,8 @@ class MainWindow(QMainWindow):
         self.projects_dialog.force_close()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
+        self._cancel_planning()
+        self.planning_dialog.reject()
         self._cancel_drafting()
         final = self.draft_editor.final_edit() if self.draft_editor.isVisible() else None
         if final is not None:
@@ -2857,6 +3189,9 @@ class MainWindow(QMainWindow):
             if self.task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.task
+            for read in self._calendar_reads:
+                read.cancel()
+            await self.drain_calendar_reads()
             await self.draft_writes.drain()
         finally:
             try:

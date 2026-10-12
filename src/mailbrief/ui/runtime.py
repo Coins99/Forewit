@@ -1,6 +1,7 @@
 """Desktop composition; every operation owns and closes its provider/session resources."""
 
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from mailbrief.domain.briefs import (
     TransmissionPreview,
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
 from mailbrief.domain.drafts import (
@@ -35,15 +37,23 @@ from mailbrief.domain.drafts import (
     DraftVersion,
     DraftVersionInfo,
 )
-from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.events import (
+    AppliedBatch,
+    CalendarEvent,
+    CalendarRange,
+    EventChange,
+    EventEdit,
+)
 from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
-from mailbrief.providers.gcal.auth import CalendarCredentialStore
+from mailbrief.ports.calendar import CalendarNotAllowedError
+from mailbrief.providers.gcal.auth import forget_legacy_sign_in
+from mailbrief.providers.gcal.errors import NOT_ALLOWED
 from mailbrief.providers.gcal.factory import google_calendar
 from mailbrief.providers.gmail.cache import GmailCredentialStore
-from mailbrief.providers.gmail.factory import gmail_provider
+from mailbrief.providers.gmail.factory import gmail_auth, gmail_provider
 from mailbrief.providers.gmail.oauth import DesktopClient
 from mailbrief.providers.groq.credentials import GroqKeyStore
 from mailbrief.providers.groq.factory import groq_provider
@@ -60,6 +70,11 @@ from mailbrief.services.brief import (
     permission_preview,
 )
 from mailbrief.services.calendar import day_window, resolve_timezone
+from mailbrief.services.calendar_planning import (
+    CalendarPlanningService,
+    PlanningGate,
+    PreparedPlan,
+)
 from mailbrief.services.consent import auto_send_permission, set_auto_send
 from mailbrief.services.digest import DigestService
 from mailbrief.services.drafting import (
@@ -93,6 +108,8 @@ from mailbrief.storage.repositories import (
     SyncRunRepository,
 )
 from mailbrief.ui.preferences import DesktopPreferences, PreferencesStore
+
+logger = logging.getLogger(__name__)
 
 
 class _NeverAsks:
@@ -129,6 +146,8 @@ class DesktopRuntime:
     def __init__(self, database_path: Path) -> None:
         self._path = database_path
         self._database: Database | None = None
+        self._calendar_allowed: bool | None = None  # From this start's Google sign-in.
+        self._legacy_checked = False
         self._preferences = PreferencesStore(database_path.parent / "desktop-settings.json")
 
     async def load_saved(self) -> DailyDigest | None:
@@ -154,13 +173,22 @@ class DesktopRuntime:
         settings = (await self.get_preferences()).settings()
         async with gmail_provider(settings, silent_only=silent_only) as provider:
             identity = await provider.connect()
-            return identity.email_address
+            self._calendar_allowed = provider.calendar_allowed
+        await self._forget_legacy_calendar_sign_in()
+        return identity.email_address
 
     async def disconnect(self) -> None:
+        """Forget the one Google sign-in, so Gmail and Google Calendar both disconnect, and
+        the saved Google events with it (ADR 0019)."""
+
         def clear() -> None:
             GmailCredentialStore().clear()
 
         await asyncio.to_thread(clear)
+        self._calendar_allowed = None
+        if self._database is not None:
+            async with self._storage().session() as session:
+                await forget_cache(session)
 
     async def ai_status(self) -> str:
         if not (await self.get_preferences()).groq_model:
@@ -738,34 +766,67 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await EventService(session).restore(public_id)
 
-    # Google Calendar, read-only (ADR 0018, phase 2). Each call owns its network resources.
+    # Plan with AI (ADR 0018, phase 3b): Groq is opened for each call and closed afterwards;
+    # applying and undoing are local.
 
-    async def calendar_account(self) -> str | None:
-        """The saved calendar sign-in's account, read from the vault; nothing is sent."""
+    async def prepare_planning(
+        self, options: PlanningOptions, first_day: date, zone: ZoneInfo
+    ) -> PreparedPlan:
+        """Build exactly what would be sent, and its preview; nothing is sent."""
+        settings = await self._settings(await self.get_owner_preferences())
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await CalendarPlanningService(session, ai).prepare(options, first_day, zone)
 
-        def read() -> str | None:
-            credential = CalendarCredentialStore().load()
-            return None if credential is None else credential.email_address
+    async def generate_planning(
+        self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event
+    ) -> PlanningOutcome:
+        settings = await self._settings(await self.get_owner_preferences())
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await CalendarPlanningService(session, ai).generate(plan, gate, cancel)
 
-        return await asyncio.to_thread(read)
+    async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:
+        async with self._storage().session() as session:
+            return await EventService(session).apply_changes(changes)
 
-    async def connect_calendar(self) -> str:
-        """Sign in to Google Calendar in the browser, unless the saved sign-in still works."""
+    async def undo_calendar_changes(self, batch: AppliedBatch) -> None:
+        async with self._storage().session() as session:
+            await EventService(session).undo_changes(batch)
+
+    # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
+
+    async def _forget_legacy_calendar_sign_in(self) -> None:
+        """Delete the separate calendar sign-in ADR 0019 replaced, once per start; a leftover
+        entry is harmless, so a failure here never fails a sign-in."""
+        if self._legacy_checked:
+            return
+        self._legacy_checked = True
+        try:
+            await asyncio.to_thread(forget_legacy_sign_in)
+        except Exception as exc:
+            logger.info("Old calendar sign-in not removed: %s", type(exc).__name__)
+
+    async def calendar_allowed(self) -> bool | None:
+        """Whether this start's Google sign-in allows Calendar: None before Gmail connects or
+        after Disconnect. Nothing is sent."""
+        return self._calendar_allowed
+
+    async def allow_calendar(self) -> bool:
+        """Ask Google in the browser to add the calendar permissions to the one sign-in."""
         settings = (await self.get_preferences()).settings()
-        async with google_calendar(settings) as reader:
-            return await reader.auth.connect()
+        async with gmail_auth(settings) as auth:
+            await auth.connect(ask_again=True)
+            self._calendar_allowed = auth.calendar_allowed
+        await self._forget_legacy_calendar_sign_in()
+        return self._calendar_allowed
 
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
         settings = (await self.get_preferences()).settings()
         async with google_calendar(settings) as reader, self._storage().session() as session:
             await reader.auth.connect(silent_only=True)
+            self._calendar_allowed = reader.auth.calendar_allowed
+            if not self._calendar_allowed:
+                raise CalendarNotAllowedError(NOT_ALLOWED)
             return await CalendarSyncService(session, reader).sync(around, zone)
-
-    async def disconnect_calendar(self) -> None:
-        """Forget the calendar sign-in and the cached Google events; Gmail is untouched."""
-        await asyncio.to_thread(lambda: CalendarCredentialStore().clear())
-        async with self._storage().session() as session:
-            await forget_cache(session)
 
     async def close(self) -> None:
         if self._database is not None:

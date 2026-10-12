@@ -4,10 +4,10 @@ import argparse
 import asyncio
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, QLockFile
+from PySide6.QtCore import QEvent, QLocale, QLockFile
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from qasync import QEventLoop
@@ -29,6 +29,23 @@ def use_english_locale() -> None:
     QLocale.setDefault(QLocale(QLocale.Language.English))
 
 
+class MailBriefApplication(QApplication):
+    """Lets the window answer a quit request (Cmd+Q, the Dock's Quit) before Qt closes any
+    window. Qt closes every window it can for a quit, so a dialog holding unsaved input
+    would otherwise be closed, and the input lost, before the main window could ask."""
+
+    def __init__(self, arguments: list[str]) -> None:
+        super().__init__(arguments)
+        # True means "not now": the window is asking the owner first.
+        self.quit_check: Callable[[], bool] | None = None
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Quit and self.quit_check is not None and self.quit_check():
+            event.ignore()  # On macOS, the quit is cancelled.
+            return True
+        return QApplication.event(self, event)
+
+
 def create_application(arguments: Sequence[str] | None = None) -> QApplication:
     """Create or return the process-wide Qt application."""
     configure_qt_identity()
@@ -36,7 +53,7 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
     if isinstance(existing, QApplication):
         return existing
 
-    application = QApplication(list(arguments) if arguments is not None else sys.argv)
+    application = MailBriefApplication(list(arguments) if arguments is not None else sys.argv)
     icon_path = Path(__file__).parent / "resources" / "MailBrief.ico"
     if icon_path.is_file():
         application.setWindowIcon(QIcon(str(icon_path)))
@@ -67,12 +84,17 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         window = MainWindow(DesktopRuntime(paths.database_path), database_path=paths.database_path)
         closed = asyncio.Event()
         window.closing.connect(closed.set)
+        application = QApplication.instance()
+        if isinstance(application, MailBriefApplication):
+            application.quit_check = window.ask_before_quitting
         window.show()
         window.start(window.initialize)
         try:
             await closed.wait()
         finally:
             await window.shutdown()
+            if isinstance(application, MailBriefApplication):
+                application.quit_check = None
         if window.pending_restore is not None:
             # The folder lock stays held across shutdown and publication. No editor,
             # autosave task or pooled connection can write to the restored database.
