@@ -87,10 +87,22 @@ def test_only_google_calendar_links_are_kept() -> None:
     good = map_event(event(htmlLink="https://www.google.com/calendar/event?eid=abc"), CALENDAR)
     assert good is not None and str(good.web_link).startswith("https://www.google.com/calendar/")
     for link in (
+        "https://calendar.google.com/calendar/event?eid=abc",
+        "https://calendar.google.com",
+        "https://www.google.com/calendar",
+    ):
+        assert is_calendar_link(link)
+    for link in (
         "http://www.google.com/calendar/event?eid=abc",
         "https://evil.example/calendar",
         "https://user@calendar.google.com/x",
+        "https://:secret@calendar.google.com/x",
         "javascript:alert(1)",
+        "https://www.google.com/url?q=https://evil.example",
+        "https://www.google.com/calendarx/event",
+        "https://www.google.com/calendar/../url?q=https://evil.example",
+        "https://www.google.com/calendar/%2e%2e/url",
+        "https://www.google.com/calendar\\..\\url",
     ):
         assert not is_calendar_link(link)
         mapped = map_event(event(htmlLink=link), CALENDAR)

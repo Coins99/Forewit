@@ -6,10 +6,9 @@ the Calendar page shows. Descriptions, guests and conference details are never r
 
 from datetime import UTC, date, datetime, timedelta
 from typing import Final, Self
-from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from pydantic import ConfigDict, Field, HttpUrl, field_validator, model_validator
+from pydantic import ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from mailbrief.domain.common import DomainModel, normalize_utc
 
@@ -20,13 +19,26 @@ CALENDAR_NAME_MAX_CHARS: Final = 120
 GOOGLE_EVENT_MAX_DAYS: Final = 366  # Longer events, such as all-year ones, are skipped.
 UNTITLED: Final = "(No title)"
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
-_LINK_HOSTS: Final = frozenset({"www.google.com", "calendar.google.com"})
+# Each host's allowed path prefix. Other paths on www.google.com include a redirector.
+_LINK_PREFIXES: Final = {"calendar.google.com": "/", "www.google.com": "/calendar/"}
 
 
 def is_calendar_link(url: str) -> bool:
-    """Only https links on Google Calendar's own hosts are kept and offered for opening."""
-    parts = urlsplit(url)
-    return parts.scheme == "https" and parts.hostname in _LINK_HOSTS and not parts.username
+    """Only https links on calendar.google.com, or under www.google.com/calendar, are kept
+    and offered for opening. The check reads the link as a browser would, with dot segments
+    already resolved, so "/calendar/../url" doesn't pass."""
+    try:
+        link = HttpUrl(url)
+    except ValidationError:
+        return False
+    prefix = _LINK_PREFIXES.get(link.host or "")
+    return (
+        link.scheme == "https"
+        and prefix is not None
+        and f"{link.path or ''}/".startswith(prefix)
+        and not link.username
+        and not link.password
+    )
 
 
 class GoogleCalendarInfo(DomainModel):
