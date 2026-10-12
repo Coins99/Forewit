@@ -103,7 +103,6 @@ class DataDialog(QDialog):
         self._confirmation: QMessageBox | None = None
         self._storage_available = False
         self.setWindowTitle("MailBrief — Data and recovery")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(640, 650)
         layout = QVBoxLayout(self)
         content = QWidget()

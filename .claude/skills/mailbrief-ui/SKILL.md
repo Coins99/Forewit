@@ -11,6 +11,10 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
 ## Rules
 - Colours come only from `ui/theme/tokens.py`. Widgets read `current_tokens()` at paint
   time; never hard-code a hex colour anywhere else under `src/mailbrief/ui`.
+- Open a window's dialogs with `MainWindow.dialog_guard.show_dialog(dialog)`, never
+  `QDialog.open()`, `exec()` or `setWindowModality()`. On macOS a modal dialog runs an
+  AppKit modal session, which drops Cmd+Q and the Dock's Quit, so MailBrief could only be
+  force quit. File pickers and message boxes opened from a dialog may stay modal.
 - Mail and AI text reaches the screen only through `plain_label()` (`ui/labels.py`, plain
   text, word wrap), `wrap_label()` (plain text that also wraps inside a long unbroken
   token) or a delegate's `drawText()`. Never put it in a tooltip, and never use rich text

@@ -167,6 +167,7 @@ from mailbrief.ui.diagnostics import (
     log_automatic_run,
     log_failure,
 )
+from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.draft_editor import DraftEditor
 from mailbrief.ui.drafts_view import DELETE as DELETE_DRAFT
 from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
@@ -861,6 +862,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
         layout.addWidget(strip)
         self.setCentralWidget(central)
+        # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
+        # closeEvent on macOS (a modal dialog's AppKit session drops them).
+        self.dialog_guard = DialogGuard(self)
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
         sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
@@ -1072,7 +1076,7 @@ class MainWindow(QMainWindow):
             accounts = await self.backend.cached_accounts() if self._ready else ()
             if not self._closing:
                 self.data_dialog.configure(accounts, available=self._ready)
-                self.data_dialog.open()
+                self.dialog_guard.show_dialog(self.data_dialog)
 
     def _run_data(self, operation: Callable[[], Awaitable[None]]) -> bool:
         if self.data_dialog is None:
@@ -1350,7 +1354,7 @@ class MainWindow(QMainWindow):
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
-            self.action_editor.open()
+            self.dialog_guard.show_dialog(self.action_editor)
         elif kind == COMPLETE:
             self.start(lambda: self._complete_action(action), cancellable=False)
         elif kind == REOPEN:
@@ -1361,14 +1365,14 @@ class MainWindow(QMainWindow):
             self.start(lambda: self._mark_seen(action), cancellable=False)
         elif kind == PROPOSALS:
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
-            self.proposals_dialog.open()
+            self.dialog_guard.show_dialog(self.proposals_dialog)
 
     def _request_new_task(self) -> None:
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
         self._show_page("actions")
         self.action_editor.new_task(self._local_today())
-        self.action_editor.open()
+        self.dialog_guard.show_dialog(self.action_editor)
 
     def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
         started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
@@ -1498,14 +1502,14 @@ class MainWindow(QMainWindow):
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
             self.event_editor.edit_new(value, self.now(), self.zone)
-            self.event_editor.open()
+            self.dialog_guard.show_dialog(self.event_editor)
         elif kind == OPEN_GOOGLE and isinstance(value, GoogleEvent):
             self._open_calendar_link(value)
         elif isinstance(value, CalendarEvent):
             event = value
             if kind == OPEN_EVENT:
                 self.event_editor.edit_event(event, self.zone)
-                self.event_editor.open()
+                self.dialog_guard.show_dialog(self.event_editor)
             elif kind == DELETE_EVENT:
                 self.start(lambda: self._delete_event(event), cancellable=False)
 
@@ -1680,7 +1684,7 @@ class MainWindow(QMainWindow):
         """Open the dialog; preparing and asking wait their turn through start()."""
         self._planning_plan = None
         self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
-        self.planning_dialog.open()
+        self.dialog_guard.show_dialog(self.planning_dialog)
 
     def _request_planning_preview(self, options: object) -> None:
         if isinstance(options, PlanningOptions):
@@ -1836,7 +1840,7 @@ class MainWindow(QMainWindow):
 
     def _edit_draft(self, draft: Draft) -> None:
         self.draft_editor.load(draft, self.zone)
-        self.draft_editor.open()
+        self.dialog_guard.show_dialog(self.draft_editor)
 
     # Writing with AI. Every step runs in draft_writes after pending autosaves; the
     # generation itself is a task of its own, so Cancel and quitting can stop it.
@@ -2213,7 +2217,7 @@ class MainWindow(QMainWindow):
     async def _open_cached(self) -> None:
         self.cached_dialog.show_today()  # Today in the owner's zone, each time it opens.
         self.cached_dialog.configure(await self.backend.cached_accounts())
-        self.cached_dialog.open()
+        self.dialog_guard.show_dialog(self.cached_dialog)
         selected = self.cached_dialog.selection()
         if selected is not None:
             await self._load_cached_page(*selected, 0)
@@ -2247,7 +2251,7 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             panel.set_unavailable()
             self.status.setText(str(exc))
-        self.settings_dialog.open()
+        self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
         self.cached_dialog.zone = self.zone
@@ -2717,7 +2721,7 @@ class MainWindow(QMainWindow):
             self.status.setText(NO_CONSENT)
             return
         self.auto_send_dialog.configure(status)
-        self.auto_send_dialog.open()
+        self.dialog_guard.show_dialog(self.auto_send_dialog)
 
     def _request_set_auto_send(self, limit: int) -> None:
         if not self.start(lambda: self._set_auto_send(limit), cancellable=False):

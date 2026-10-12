@@ -34,7 +34,6 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("MailBrief settings")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(640, 620)
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
