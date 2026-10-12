@@ -48,8 +48,9 @@ later use after Microsoft Entra access is resolved.
   [owner's live-validation checklist](m9-live-validation.md).
 - Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
   own events (timed or all-day, with Undo) and your open actions' deadlines and target
-  dates. Showing Google Calendar and AI-proposed changes are later phases; see
-  [ADR 0018](adr/0018-calendar.md).
+  dates. Google Calendar, read-only (phase 2), implemented, awaiting live acceptance:
+  connect it on the Calendar page to see your Google events there. AI-proposed changes
+  are a later phase. See [Calendar](calendar.md) and [ADR 0018](adr/0018-calendar.md).
 
 ## The desktop window
 

@@ -36,9 +36,12 @@ from mailbrief.domain.drafts import (
     DraftVersionInfo,
 )
 from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.providers.gcal.auth import CalendarCredentialStore
+from mailbrief.providers.gcal.factory import google_calendar
 from mailbrief.providers.gmail.cache import GmailCredentialStore
 from mailbrief.providers.gmail.factory import gmail_provider
 from mailbrief.providers.gmail.oauth import DesktopClient
@@ -68,6 +71,7 @@ from mailbrief.services.drafting import (
 )
 from mailbrief.services.drafts import DraftService
 from mailbrief.services.events import EventService
+from mailbrief.services.google_calendar import CalendarSyncService, forget_cache
 from mailbrief.services.history import BriefHistory, check_brief_date
 from mailbrief.services.preferences import (
     PreferencesService,
@@ -733,6 +737,35 @@ class DesktopRuntime:
     async def restore_event(self, public_id: str) -> CalendarEvent:
         async with self._storage().session() as session:
             return await EventService(session).restore(public_id)
+
+    # Google Calendar, read-only (ADR 0018, phase 2). Each call owns its network resources.
+
+    async def calendar_account(self) -> str | None:
+        """The saved calendar sign-in's account, read from the vault; nothing is sent."""
+
+        def read() -> str | None:
+            credential = CalendarCredentialStore().load()
+            return None if credential is None else credential.email_address
+
+        return await asyncio.to_thread(read)
+
+    async def connect_calendar(self) -> str:
+        """Sign in to Google Calendar in the browser, unless the saved sign-in still works."""
+        settings = (await self.get_preferences()).settings()
+        async with google_calendar(settings) as reader:
+            return await reader.auth.connect()
+
+    async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
+        settings = (await self.get_preferences()).settings()
+        async with google_calendar(settings) as reader, self._storage().session() as session:
+            await reader.auth.connect(silent_only=True)
+            return await CalendarSyncService(session, reader).sync(around, zone)
+
+    async def disconnect_calendar(self) -> None:
+        """Forget the calendar sign-in and the cached Google events; Gmail is untouched."""
+        await asyncio.to_thread(lambda: CalendarCredentialStore().clear())
+        async with self._storage().session() as session:
+            await forget_cache(session)
 
     async def close(self) -> None:
         if self._database is not None:

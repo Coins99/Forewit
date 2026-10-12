@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
-from mailbrief.ui.labels import outline_button, wrap_label
+from mailbrief.ui.labels import button_label, outline_button, wrap_label
 from mailbrief.ui.lists import ActivatingList
 
 
@@ -178,12 +178,13 @@ class ProjectsDialog(QDialog):
         project = self.kind.currentIndex() == 0
         self.archive.setVisible(project)
         self.delete_area.setVisible(not project)
-        self.archive.setText(
+        archive_label = (
             "Reopen project"
             if isinstance(self._selected, Project) and self._selected.archived_at_utc
             else "Archive project"
         )
-        self.archive.setAccessibleName(self.archive.text())
+        self.archive.setText(button_label(archive_label))
+        self.archive.setAccessibleName(archive_label)
         can_leave = not self._busy and not self.is_dirty()
         for widget in (self.kind, self.list, self.new):
             widget.setEnabled(can_leave)

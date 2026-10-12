@@ -57,8 +57,8 @@ remove project or area records. No Gmail or AI setup is needed for this workflow
 7. Quit and restart, then exercise backup, restore and writing export in a test profile.
    Confirm organization, links and historical grouping survive.
 
-Validation on Windows, 2026-10-11: 3,346 tests passed, three platform/gallery skips,
-96.80% overall coverage, and the 90% per-service gate passed. Ruff formatting/lint
+Validation on Windows, 2026-10-12: 3,365 tests passed, three platform/gallery skips,
+96.79% overall coverage, and the 90% per-service gate passed. Ruff formatting/lint
 and strict mypy for Windows and macOS passed. Dark/light layouts, the manager and task
 project selector were reviewed at 100% and 200% scale. macOS execution and owner
 acceptance remain pending.

@@ -7,10 +7,9 @@ guests and conference details are never requested.
 
 from datetime import UTC, date, datetime, timedelta
 from typing import Final, Self
-from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from pydantic import ConfigDict, Field, HttpUrl, field_validator, model_validator
+from pydantic import ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from mailbrief.domain.common import DomainModel, normalize_utc
 
@@ -20,22 +19,29 @@ CALENDAR_NAME_MAX_CHARS: Final = 120
 GOOGLE_EVENT_MAX_DAYS: Final = 366  # Longer events, such as all-year ones, are skipped.
 UNTITLED: Final = "(No title)"
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
+# Each host's allowed path prefix. Other paths on www.google.com include a redirector.
+_LINK_PREFIXES: Final = {"calendar.google.com": "/", "www.google.com": "/calendar/"}
 
 
 def is_calendar_link(url: str) -> bool:
     """Only https links to Google Calendar are kept and offered for opening: any page on
-    calendar.google.com, and /calendar on www.google.com, so never Google's redirector."""
+    calendar.google.com, and /calendar on www.google.com, so never Google's redirector.
+
+    The link is read as a browser reads it, with dot segments resolved, so
+    "/calendar/../url" doesn't pass; a user name or a port other than 443 is refused.
+    """
     try:
-        parts = urlsplit(url)
-        port = parts.port
-    except ValueError:
+        link = HttpUrl(url)
+    except ValidationError:
         return False
-    if parts.scheme != "https" or "@" in parts.netloc or port is not None:
-        return False
-    if parts.hostname == "calendar.google.com":
-        return True
-    return parts.hostname == "www.google.com" and (
-        parts.path == "/calendar" or parts.path.startswith("/calendar/")
+    prefix = _LINK_PREFIXES.get(link.host or "")
+    return (
+        link.scheme == "https"
+        and prefix is not None
+        and link.port == 443
+        and f"{link.path or ''}/".startswith(prefix)
+        and not link.username
+        and not link.password
     )
 
 
