@@ -304,6 +304,8 @@ class ActionsPanel(QWidget):
         grouping.setContentsMargins(12, 4, 12, 4)
         self.group = QComboBox()
         self.group.setObjectName("actionGroup")
+        # Keep the project filter in the Tab order on Cocoa as well as Windows.
+        self.group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.group.setAccessibleName("Filter tasks by project or life area")
         self.group.setMinimumContentsLength(8)
         self.group.setSizeAdjustPolicy(
