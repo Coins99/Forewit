@@ -314,10 +314,14 @@ _CALENDAR_NOT_GRANTED = (
     "Google didn't grant calendar access. Choose Allow Google Calendar and tick both calendar "
     "boxes."
 )
+_CALENDAR_ALLOW_STOPPED = (
+    "Google Calendar wasn't allowed; Gmail is still connected. Choose Allow Google Calendar "
+    "and pick your Gmail account."
+)
 _CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
 _CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
 _CALENDAR_STOPPED = {
-    "AUTH_REQUIRED": "Google Calendar stopped: connect it again.",
+    "AUTH_REQUIRED": "Google Calendar stopped: connect Gmail again.",
     "PERMISSION_DENIED": "Google Calendar stopped: access was denied.",
     "RATE_LIMITED": "Google Calendar stopped: it is busy; try again in a minute.",
 }
@@ -1568,8 +1572,15 @@ class MainWindow(QMainWindow):
         self.status.setText(_CALENDAR_ALLOWING)
         try:
             allowed = await self.backend.allow_calendar()
-        except (asyncio.CancelledError, AuthenticationRequiredError):
-            raise  # A sign-in problem is the one Google sign-in's: _run reports it.
+        except asyncio.CancelledError:
+            raise
+        except AuthenticationRequiredError as exc:
+            # Cancelled, timed out or another account in the browser. Asking again never
+            # touches the saved sign-in, so Gmail stays connected.
+            log_failure(exc)
+            self.status.setText(_CALENDAR_ALLOW_STOPPED)
+            await self._refresh_calendar()
+            return
         except Exception as exc:
             self._calendar_failed(exc)
             await self._refresh_calendar()
@@ -1591,6 +1602,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._calendar_failed(exc, quiet=quiet)
         else:
+            if result.stopped_code == "AUTH_REQUIRED":
+                # Google rejected the one sign-in partway through: _run reports it as Gmail's.
+                await self._refresh_calendar()
+                raise AuthenticationRequiredError("Google rejected the sign-in.")
             if not quiet:
                 self.status.setText(calendar_sync_text(result))
             elif result.failed or result.stopped_code:

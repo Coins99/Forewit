@@ -14,6 +14,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage,
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import (
+    AuthenticationCancelledError,
     AuthenticationRequiredError,
     ProviderError,
     ProviderPermissionError,
@@ -303,6 +304,35 @@ async def test_a_rejected_sign_in_is_reported_as_gmails(
     window.calendar_panel.refresh_button.click()
     await finish(window)
     assert window.connection.text().startswith("Gmail: session expired")
+
+
+async def test_a_sign_in_rejected_partway_through_is_reported_as_gmails(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    synced(backend)
+    await window.initialize()
+    backend.calendar_result = CalendarSyncResult(
+        calendars=2, synced=1, failed=0, events=3, stopped_code="AUTH_REQUIRED"
+    )
+    window.calendar_panel.refresh_button.click()
+    await finish(window)
+    assert window.connection.text().startswith("Gmail: session expired")
+
+
+async def test_a_cancelled_allow_keeps_gmail_connected(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.calendar_permission = False
+    await window.initialize()
+    backend.calendar_fail = AuthenticationCancelledError("private detail")
+    window.calendar_panel.allow_button.click()
+    await finish(window)
+    assert window.connection.text().startswith("Gmail: connected as")
+    assert window.status.text().startswith(
+        "Google Calendar wasn't allowed; Gmail is still connected."
+    )
+    assert "private" not in window.status.text()
+    assert window.calendar_panel.allow_button.isVisibleTo(window.calendar_panel)
     assert "private" not in window.status.text()
 
 
