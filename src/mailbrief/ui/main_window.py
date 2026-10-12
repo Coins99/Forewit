@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -176,7 +177,7 @@ from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
-from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
@@ -865,6 +866,8 @@ class MainWindow(QMainWindow):
         # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
         # closeEvent on macOS (a modal dialog's AppKit session drops them).
         self.dialog_guard = DialogGuard(self)
+        self._quit_confirmed = False  # The owner chose to discard unsaved input and quit.
+        self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
         sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
@@ -2882,12 +2885,59 @@ class MainWindow(QMainWindow):
         if self.task is not None and not self.task.done() and not self.task.cancelling():
             self.task.cancel()
 
+    def _unsaved_input(self) -> str | None:
+        """What quitting now would throw away: the open dialog holding unsaved input. The
+        draft editor isn't asked: closing saves its text."""
+        for dialog, what in (
+            (self.action_editor, "this action"),
+            (self.event_editor, "this event"),
+            (self.settings_dialog, "Settings"),
+        ):
+            if dialog.isVisible() and dialog.has_unsaved_input():
+                return what
+        return None
+
+    def ask_before_quitting(self) -> bool:
+        """When quitting would lose unsaved input, ask first and return True: the quit
+        waits for the answer. MailBriefApplication calls this for Cmd+Q and the Dock's
+        Quit, and closeEvent for the window's own close button."""
+        if self._closing or self._quit_confirmed:
+            return False
+        unsaved = self._unsaved_input()
+        if unsaved is None:
+            return False
+        box = self._quit_box
+        if box is None:
+            box = QMessageBox(self)
+            box.setObjectName("quitConfirmation")
+            box.setWindowTitle("Quit MailBrief")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.addButton(
+                button_label("Discard changes and quit"), QMessageBox.ButtonRole.DestructiveRole
+            )
+            box.setDefaultButton(box.addButton(QMessageBox.StandardButton.Cancel))
+            box.buttonClicked.connect(
+                lambda button: self._quit_answered(
+                    box.buttonRole(button) == QMessageBox.ButtonRole.DestructiveRole
+                )
+            )
+            self._quit_box = box
+        box.setText(f"Quit and discard your unsaved changes to {unsaved}?")
+        self.dialog_guard.show_dialog(box)  # Not modal: another quit only brings it back.
+        return True
+
+    def _quit_answered(self, discard: bool) -> None:
+        if discard:
+            self._quit_confirmed = True
+            self.close()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._shutdown_complete:
             event.accept()
             return
         event.ignore()  # Also defers QApplication.quit(), including Cmd+Q and Dock Quit.
-        if self._closing:
+        if self._closing or self.ask_before_quitting():
             return
         self._closing = True
         self.scheduler.stop()

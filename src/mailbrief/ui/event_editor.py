@@ -125,6 +125,24 @@ class EventEditor(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self._update_buttons()
+        self._loaded_input = self._input()
+
+    def _input(self) -> tuple[object, ...]:
+        """Everything the owner can change here, to tell whether any of it is unsaved."""
+        return (
+            self.title.text(),
+            self.notes.toPlainText(),
+            self.all_day.isChecked(),
+            self.start_date.date(),
+            self.start_time.time(),
+            self.end_date.date(),
+            self.end_time.time(),
+        )
+
+    def has_unsaved_input(self) -> bool:
+        """Whether closing now would lose something the owner typed or chose. Not while
+        it is being saved: quitting lets that save finish."""
+        return not self._saving and self._input() != self._loaded_input
 
     @staticmethod
     def _moment(name: str) -> tuple[QDateEdit, QTimeEdit]:
@@ -190,6 +208,7 @@ class EventEditor(QDialog):
         self._saving = False
         self._fields.setEnabled(True)
         self._update_buttons()
+        self._loaded_input = self._input()  # What was just loaded counts as saved.
         self.title.setFocus()
 
     def built_edit(self) -> EventEdit | str:

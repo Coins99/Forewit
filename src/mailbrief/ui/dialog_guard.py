@@ -23,7 +23,6 @@ class DialogGuard(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._window = window
         self._open: list[QDialog] = []  # The newest last: it is the one brought forward.
-        self._watched: set[QDialog] = set()
         self.hide()
         window.installEventFilter(self)
 
@@ -33,11 +32,12 @@ class DialogGuard(QWidget):
         Use this instead of QDialog.open() or exec(), which start a modal session.
         """
         dialog.setWindowModality(Qt.WindowModality.NonModal)
-        if dialog not in self._watched:
-            self._watched.add(dialog)
-            dialog.installEventFilter(self)  # Its Hide, however it closes, lifts the cover.
-        if dialog not in self._open:
-            self._open.append(dialog)
+        # Its Hide, however it closes, lifts the cover. Installing again only moves the
+        # filter, and a dialog's filters go with it when it is deleted.
+        dialog.installEventFilter(self)
+        if dialog in self._open:
+            self._open.remove(dialog)
+        self._open.append(dialog)
         self.setGeometry(self._window.rect())
         self.raise_()
         self.show()
@@ -52,7 +52,9 @@ class DialogGuard(QWidget):
                 self.setGeometry(self._window.rect())
             elif kind == QEvent.Type.WindowActivate and self._open:
                 QTimer.singleShot(0, self._front)  # After the activation settles.
-        elif kind == QEvent.Type.Hide and watched in self._open:
+        elif kind == QEvent.Type.Hide and not event.spontaneous() and watched in self._open:
+            # A spontaneous Hide is the window system's, such as Windows hiding a minimized
+            # window's dialogs: the dialog is still open, so the cover stays.
             self._open.remove(watched)
             if not self._open:
                 self.hide()

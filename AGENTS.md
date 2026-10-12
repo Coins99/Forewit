@@ -145,7 +145,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (Saved mail, Data, Settings, the Gmail and AI lines, Connect and Disconnect), the Today,
   run (review and consent), Actions, Drafts and Briefs pages, and a status strip with
   Undo.
-- `src/mailbrief/app.py` owns the qasync loop.
+- `src/mailbrief/app.py` owns the qasync loop, and `MailBriefApplication`, which lets the
+  window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
 - Windows single-file builds use `build_desktop.py --onefile` and produce

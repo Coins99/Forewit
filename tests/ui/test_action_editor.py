@@ -418,3 +418,17 @@ def test_without_a_target_the_picker_offers_the_owner_s_today(editor: ActionEdit
     assert not editor.has_target.isChecked()
     assert not editor.target.isEnabled()
     assert editor.target.date() == QDate(2031, 1, 2)
+
+
+def test_unsaved_input_is_noticed(editor: ActionEditor) -> None:
+    assert not editor.has_unsaved_input()  # What edit() loaded counts as saved.
+    editor.notes.setPlainText("Ring them first.")
+    assert editor.has_unsaved_input()
+    editor.edit(ACTION, TODAY)
+    assert not editor.has_unsaved_input()
+    editor.has_target.setChecked(not editor.has_target.isChecked())
+    assert editor.has_unsaved_input()
+    editor.new_task(TODAY)
+    assert not editor.has_unsaved_input()
+    editor.title.setText("Call the bank")
+    assert editor.has_unsaved_input()

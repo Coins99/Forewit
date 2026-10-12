@@ -14,7 +14,10 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
 - Open a window's dialogs with `MainWindow.dialog_guard.show_dialog(dialog)`, never
   `QDialog.open()`, `exec()` or `setWindowModality()`. On macOS a modal dialog runs an
   AppKit modal session, which drops Cmd+Q and the Dock's Quit, so MailBrief could only be
-  force quit. File pickers and message boxes opened from a dialog may stay modal.
+  force quit. A file picker or message box opened from a dialog goes through that
+  dialog's own `dialog_guard`. A dialog holding typed input implements
+  `has_unsaved_input()` and is listed in `MainWindow._unsaved_input()`, so quitting asks
+  before losing it.
 - Mail and AI text reaches the screen only through `plain_label()` (`ui/labels.py`, plain
   text, word wrap), `wrap_label()` (plain text that also wraps inside a long unbroken
   token) or a delegate's `drawText()`. Never put it in a tooltip, and never use rich text
