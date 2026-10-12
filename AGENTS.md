@@ -80,7 +80,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`drafting.py`), `ThreadReader` (`threads.py`) and provider-neutral errors.
 - `src/mailbrief/providers/gmail/`: active adapter. `providers/microsoft/`: dormant adapter.
   `providers/gcal/`: Google Calendar, read-only (ADR 0018): its own sign-in, the calendar
-  list and event reads, behind `ports/calendar.py`.
+  list and event reads, behind `ports/calendar.py`. `providers/google/`: what Gmail and
+  Google Calendar share: the bounded GET with retries (`requests.py`), the token endpoint
+  (`tokens.py`) and the vault-held refresh credential (`credentials.py`); each adapter
+  passes its own fixed messages.
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
@@ -254,7 +257,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   guests or invitations. Calendar access is a separate grant; Gmail stays `gmail.readonly`.
   The calendar grant holds only `calendar.events.readonly` and
   `calendar.calendarlist.readonly` until phase 4, and every Calendar request names its
-  `fields`: descriptions, guests and conference details are never fetched or stored.
+  `fields`: descriptions, locations, guests and conference details are never fetched or
+  stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
+  with its events. The Google cache is excluded from exports and from the cleanup
+  fingerprint.
 
 ## AI analysis rules (M4)
 

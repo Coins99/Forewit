@@ -1,10 +1,10 @@
-"""The cache of the owner's Google calendars and events (ADR 0018, phase 2).
+"""The cache of the owner's shown Google calendars and their events (ADR 0018, phase 2).
 
 It is provider data, like cached mail, so it is replaced with bulk statements; the owner's
 own events live in storage/events.py. The service owns commits and rollbacks.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 
 from pydantic import HttpUrl
@@ -31,9 +31,7 @@ def google_event_from_row(row: GoogleEventTable, calendar: GoogleCalendarTable) 
         ends_at_utc=row.ends_at_utc,
         start_date=row.start_date,
         last_date=row.last_date,
-        location=row.location,
         web_link=None if row.web_link is None else HttpUrl(row.web_link),
-        busy=row.busy,
     )
 
 
@@ -50,7 +48,8 @@ class GoogleCalendarRepository:
     async def replace_calendars(
         self, infos: Sequence[GoogleCalendarInfo], now: datetime
     ) -> dict[str, GoogleCalendarTable]:
-        """Keep exactly these calendars; one no longer listed goes with its events."""
+        """Keep exactly these calendars, the shown ones; any other goes with its events.
+        A repeated calendar ID is kept once."""
         existing = {row.calendar_id: row for row in await self.calendars()}
         wanted = {info.calendar_id for info in infos}
         gone = [row.id for key, row in existing.items() if key not in wanted]
@@ -63,13 +62,14 @@ class GoogleCalendarRepository:
             )
         rows: dict[str, GoogleCalendarTable] = {}
         for info in infos:
+            if info.calendar_id in rows:
+                continue
             row = existing.get(info.calendar_id)
             if row is None:
                 row = GoogleCalendarTable(calendar_id=info.calendar_id)
                 self._session.add(row)
             row.name = info.name
             row.is_primary = info.primary
-            row.shown = info.shown
             row.updated_at_utc = now
             rows[info.calendar_id] = row
         await self._session.flush()
@@ -82,8 +82,9 @@ class GoogleCalendarRepository:
         first_day: date,
         last_day: date,
         now: datetime,
-    ) -> None:
-        """The calendar's cache becomes exactly ``events``, read for these days."""
+    ) -> int:
+        """The calendar's cache becomes exactly ``events``, read for these days; returns how
+        many were stored."""
         await self._session.execute(
             delete(GoogleEventTable).where(GoogleEventTable.calendar_row_id == calendar.id)
         )
@@ -102,25 +103,35 @@ class GoogleCalendarRepository:
                     ends_at_utc=event.ends_at_utc,
                     start_date=event.start_date,
                     last_date=event.last_date,
-                    location=event.location,
                     web_link=None if event.web_link is None else str(event.web_link),
-                    busy=event.busy,
                     fetched_at_utc=now,
                 )
             )
-        calendar.synced_from = first_day
-        calendar.synced_until = last_day
-        calendar.synced_at_utc = now
+        await self.mark_checked((calendar,), first_day, last_day, now)
+        return len(seen)
+
+    async def mark_checked(
+        self,
+        calendars: Iterable[GoogleCalendarTable],
+        first_day: date,
+        last_day: date,
+        now: datetime,
+    ) -> None:
+        """A sync dealt with these calendars for these days: their events were read, or the
+        read failed and they keep what they had."""
+        for calendar in calendars:
+            calendar.synced_from = first_day
+            calendar.synced_until = last_day
+            calendar.synced_at_utc = now
 
     async def touching(
         self, start_utc: datetime, end_utc: datetime, first_day: date, last_day: date
     ) -> list[GoogleEvent]:
-        """Cached events of shown calendars touching the instants or, all-day, the days."""
+        """Cached events touching the instants or, all-day, the days."""
         result = await self._session.execute(
             select(GoogleEventTable, GoogleCalendarTable)
             .join(GoogleCalendarTable, GoogleEventTable.calendar_row_id == GoogleCalendarTable.id)
             .where(
-                GoogleCalendarTable.shown.is_(True),
                 or_(
                     and_(
                         GoogleEventTable.all_day.is_(False),
@@ -145,17 +156,17 @@ class GoogleCalendarRepository:
         return [google_event_from_row(event, calendar) for event, calendar in result.tuples()]
 
     async def coverage(self) -> GoogleCoverage | None:
-        """The days every shown calendar was last read for, and the oldest read; None
-        when a shown calendar has never been read."""
-        shown = [row for row in await self.calendars() if row.shown]
+        """The days every calendar was last checked for, and the oldest check; None when
+        a calendar has never been checked."""
+        rows = await self.calendars()
         windows = [
             (row.synced_from, row.synced_until, row.synced_at_utc)
-            for row in shown
+            for row in rows
             if row.synced_from is not None
             and row.synced_until is not None
             and row.synced_at_utc is not None
         ]
-        if not shown or len(windows) != len(shown):
+        if not rows or len(windows) != len(rows):
             return None
         first = max(window[0] for window in windows)
         last = min(window[1] for window in windows)

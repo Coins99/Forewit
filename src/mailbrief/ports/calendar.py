@@ -10,7 +10,9 @@ class CalendarReader(Protocol):
     """Read-only access to the owner's calendars; nothing here can change one."""
 
     async def list_calendars(self) -> tuple[GoogleCalendarInfo, ...]:
-        """Every calendar in the owner's list that MailBrief may read."""
+        """Every calendar in the owner's list that MailBrief may read, each once, the
+        primary one always among them. Raises ProviderError rather than return a list
+        without it, so a bad answer never empties the cache."""
         ...
 
     async def list_events(

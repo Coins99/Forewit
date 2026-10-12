@@ -191,9 +191,16 @@ async def _selections(
     return selections
 
 
+# The Google Calendar cache is rewritten by every calendar sync, and no cleanup reads or
+# deletes it (ADR 0018), so a sync between a preview and its cleanup must not void it.
+_NOT_FINGERPRINTED = frozenset({"google_calendars", "google_events"})
+
+
 async def _fingerprint(session: AsyncSession) -> str:
     digest = hashlib.sha256()
     for name, table in sorted(Base.metadata.tables.items()):
+        if name in _NOT_FINGERPRINTED:
+            continue
         digest.update(name.encode())
         rows = await session.stream(select(table).order_by(*table.primary_key.columns))
         try:

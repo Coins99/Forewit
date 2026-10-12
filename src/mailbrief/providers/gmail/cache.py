@@ -1,36 +1,20 @@
-"""Refresh credentials stored only in the operating-system credential vault."""
-
-from typing import Protocol
-
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+"""Gmail's refresh credential, stored only in the operating-system credential vault."""
 
 from mailbrief.infra import vault
 from mailbrief.infra.vault import VaultBackend, VaultUnavailableError
 from mailbrief.providers.gmail.errors import GmailSetupError
+from mailbrief.providers.google.credentials import CredentialStore as CredentialStore
+from mailbrief.providers.google.credentials import RefreshCredential as RefreshCredential
+from mailbrief.providers.google.credentials import VaultCredentialStore, VaultMessages
 
 SERVICE = "MailBrief.Gmail"
 ENTRY = "personal-account-v1"
-
-
-class RefreshCredential(BaseModel):
-    """Versioned single-account record; never contains access tokens or mail."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
-
-    version: int = Field(default=1, ge=1, le=1)
-    client_id: str = Field(min_length=1)
-    email_address: str = Field(min_length=3)
-    refresh_token: SecretStr = Field(min_length=1)
-
-
-class CredentialStore(Protocol):
-    """Synchronous secret-store boundary, called off the application thread."""
-
-    def load(self) -> RefreshCredential | None: ...
-
-    def save(self, credential: RefreshCredential) -> None: ...
-
-    def clear(self) -> None: ...
+_MESSAGES = VaultMessages(
+    unreadable="Unable to read Gmail credentials from the OS vault.",
+    invalid="Stored Gmail credentials are invalid; disconnect and reconnect.",
+    unsaved="Unable to save Gmail credentials in the OS vault.",
+    unremoved="Unable to remove Gmail credentials from the OS vault.",
+)
 
 
 def os_vault() -> VaultBackend:
@@ -42,40 +26,14 @@ def os_vault() -> VaultBackend:
         raise GmailSetupError(str(exc)) from None
 
 
-class GmailCredentialStore:
+class GmailCredentialStore(VaultCredentialStore):
     """Fail closed if the OS vault cannot load, save, or delete credentials."""
 
     def __init__(self, backend: VaultBackend | None = None) -> None:
-        self._backend = backend if backend is not None else os_vault()
-
-    def load(self) -> RefreshCredential | None:
-        try:
-            value = self._backend.get_password(SERVICE, ENTRY)
-        except Exception:
-            raise GmailSetupError("Unable to read Gmail credentials from the OS vault.") from None
-        if value is None:
-            return None
-        try:
-            return RefreshCredential.model_validate_json(value)
-        except ValidationError:
-            raise GmailSetupError(
-                "Stored Gmail credentials are invalid; disconnect and reconnect."
-            ) from None
-
-    def save(self, credential: RefreshCredential) -> None:
-        # SecretStr's default JSON output is redacted; unwrap only at the vault boundary.
-        import json
-
-        payload = credential.model_dump(mode="json")
-        payload["refresh_token"] = credential.refresh_token.get_secret_value()
-        try:
-            self._backend.set_password(SERVICE, ENTRY, json.dumps(payload))
-        except Exception:
-            raise GmailSetupError("Unable to save Gmail credentials in the OS vault.") from None
-
-    def clear(self) -> None:
-        try:
-            if self._backend.get_password(SERVICE, ENTRY) is not None:
-                self._backend.delete_password(SERVICE, ENTRY)
-        except Exception:
-            raise GmailSetupError("Unable to remove Gmail credentials from the OS vault.") from None
+        super().__init__(
+            backend if backend is not None else os_vault(),
+            service=SERVICE,
+            entry=ENTRY,
+            messages=_MESSAGES,
+            error=GmailSetupError,
+        )

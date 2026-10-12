@@ -1,47 +1,53 @@
 """Bounded, read-only Google Calendar requests to one fixed host, with retries.
 
-Every request names the fields it wants, so event descriptions, guests and conference
-details never reach MailBrief (ADR 0018).
+Every request names the fields it wants, so event descriptions, locations, guests and
+conference details never reach MailBrief (ADR 0018). Retries, size limits and rate limits
+are the shared Google rules (providers/google/requests.py).
 """
 
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Final, Protocol, cast
+from typing import Final
 from urllib.parse import quote
 
 import httpx
 
-from mailbrief.ports.errors import (
-    AuthenticationRequiredError,
-    MessageUnavailableError,
-    ProviderPermissionError,
-    ProviderRateLimitError,
-)
+from mailbrief.ports.errors import MessageUnavailableError, ProviderRateLimitError
 from mailbrief.providers.gcal.auth import CALENDAR_LIST_URL
-from mailbrief.providers.gcal.errors import calendar_permission_guidance, calendar_response_error
-from mailbrief.providers.gmail.client import retry_delay
+from mailbrief.providers.gcal.errors import (
+    QUOTA_GUIDANCE,
+    QUOTA_REASONS,
+    calendar_permission_guidance,
+    calendar_response_error,
+)
+from mailbrief.providers.google.requests import (
+    GetMessages,
+    TokenSource,
+    bounded_get,
+    error_reasons,
+)
 
 API_ROOT: Final = "https://www.googleapis.com/calendar/v3"
 CALENDAR_FIELDS: Final = (
     "items(id,summary,summaryOverride,accessRole,primary,selected,hidden,deleted),nextPageToken"
 )
-EVENT_FIELDS: Final = (
-    "items(id,status,summary,location,htmlLink,start,end,transparency,eventType),nextPageToken"
-)
+EVENT_FIELDS: Final = "items(id,status,summary,htmlLink,start,end),nextPageToken"
 # Working-location entries are not events; every other kind is shown.
 SHOWN_EVENT_TYPES: Final = ("default", "outOfOffice", "focusTime", "fromGmail", "birthday")
-MAX_RESPONSE_BYTES: Final = 2_000_000
 MAX_PAGES: Final = 20
 PAGE_SIZE: Final = 250
-_ATTEMPTS: Final = 4
-
-
-class TokenSource(Protocol):
-    async def access_token(self) -> str: ...
-
-    async def invalidate_access_token(self, rejected_token: str) -> None: ...
+_MESSAGES: Final = GetMessages(
+    too_large="Google Calendar response exceeded its size limit.",
+    timed_out="Could not reach Google Calendar; check your connection and retry.",
+    unreachable="Could not reach Google Calendar; check your connection and retry.",
+    rejected="Google Calendar sign-in was rejected; reconnect.",
+    rate_limited="Google Calendar rate limit reached; retry later.",
+    unavailable="Google Calendar is temporarily unavailable (HTTP {status}); retry later.",
+    failed="Google Calendar request failed (HTTP {status}); retry later.",
+    unreadable="Google Calendar request failed (HTTP {status}); retry later.",
+    retry_limit="Google Calendar retry limit reached.",
+)
 
 
 def rfc3339(moment: datetime) -> str:
@@ -54,6 +60,14 @@ def events_url(calendar_id: str) -> str:
     if not calendar_id or len(calendar_id) > 1024 or not calendar_id.isprintable():
         raise calendar_response_error("Google returned an invalid calendar ID.")
     return f"{API_ROOT}/calendars/{quote(calendar_id, safe='')}/events"
+
+
+def _special(status: int, _params: httpx.QueryParams, _attempt: int, payload: object) -> None:
+    """A calendar that is gone, and a quota a retry won't clear (Google sends both as 403)."""
+    if status in {404, 410}:
+        raise MessageUnavailableError("The Google calendar is no longer available.")
+    if status == 403 and error_reasons(payload) & QUOTA_REASONS:
+        raise ProviderRateLimitError(QUOTA_GUIDANCE)
 
 
 class CalendarClient:
@@ -118,75 +132,16 @@ class CalendarClient:
         raise calendar_response_error("Google Calendar returned too many pages for one range.")
 
     async def _get(self, url: str, params: httpx.QueryParams) -> dict[str, object]:
-        refreshed = False
-        for attempt in range(_ATTEMPTS):
-            token = await self._auth.access_token()
-            try:
-                async with self._http.stream(
-                    "GET",
-                    url,
-                    params=params,
-                    headers={"Authorization": f"Bearer {token}"},
-                    follow_redirects=False,
-                    timeout=30,
-                ) as response:
-                    body = bytearray()
-                    async for chunk in response.aiter_bytes(chunk_size=65_536):
-                        body.extend(chunk)
-                        if len(body) > MAX_RESPONSE_BYTES:
-                            raise calendar_response_error(
-                                "Google Calendar response exceeded its size limit."
-                            )
-                    status = response.status_code
-                    after = response.headers.get("Retry-After")
-            except httpx.HTTPError:
-                if attempt == _ATTEMPTS - 1:
-                    raise calendar_response_error(
-                        "Could not reach Google Calendar; check your connection and retry."
-                    ) from None
-                await self._sleep(retry_delay(None, attempt))
-                continue
-            if status == 401:
-                if refreshed or attempt == _ATTEMPTS - 1:
-                    raise AuthenticationRequiredError(
-                        "Google Calendar sign-in was rejected; reconnect."
-                    )
-                await self._auth.invalidate_access_token(token)
-                refreshed = True
-                continue
-            if status in {404, 410}:
-                raise MessageUnavailableError("The Google calendar is no longer available.")
-            try:
-                payload = json.loads(body)
-            except (ValueError, UnicodeError):
-                payload = None
-            rate_limited = status == 429
-            if status == 403 and isinstance(payload, dict):
-                error = payload.get("error")
-                errors = error.get("errors", []) if isinstance(error, dict) else []
-                rate_limited = isinstance(errors, list) and any(
-                    isinstance(item, dict)
-                    and item.get("reason") in {"rateLimitExceeded", "userRateLimitExceeded"}
-                    for item in errors
-                )
-            if rate_limited or status in {500, 502, 503, 504}:
-                delay = retry_delay(after, attempt)
-                if attempt == _ATTEMPTS - 1 or delay > 30:
-                    if rate_limited:
-                        raise ProviderRateLimitError(
-                            "Google Calendar rate limit reached; retry later.",
-                            retry_after_seconds=delay,
-                        )
-                    raise calendar_response_error(
-                        f"Google Calendar is temporarily unavailable (HTTP {status}); retry later."
-                    )
-                await self._sleep(delay)
-                continue
-            if status == 403:
-                raise ProviderPermissionError(calendar_permission_guidance(payload))
-            if status != 200 or not isinstance(payload, dict):
-                raise calendar_response_error(
-                    f"Google Calendar request failed (HTTP {status}); retry later."
-                )
-            return cast(dict[str, object], payload)
-        raise calendar_response_error("Google Calendar retry limit reached.")
+        payload = await bounded_get(
+            self._http,
+            self._auth,
+            self._sleep,
+            url,
+            params,
+            messages=_MESSAGES,
+            response_error=calendar_response_error,
+            permission=calendar_permission_guidance,
+            special=_special,
+        )
+        assert payload is not None  # Only MISSING returns None, and _special never does.
+        return payload

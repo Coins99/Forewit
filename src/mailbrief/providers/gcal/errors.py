@@ -1,7 +1,15 @@
 """Static Google Calendar errors; messages never include server text, IDs or tokens."""
 
+from typing import Final
+
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.errors import ProviderResponseError
+
+# Quota reasons a retry won't clear; the client reports them as a rate limit, not a refusal.
+QUOTA_REASONS: Final = frozenset({"dailyLimitExceeded", "quotaExceeded"})
+QUOTA_GUIDANCE: Final = (
+    "Google Calendar's API quota is used up for now; check the project's quotas and retry later."
+)
 
 
 class CalendarSetupError(ConfigurationError):
@@ -37,4 +45,6 @@ def calendar_permission_guidance(payload: object) -> str:
         )
     if reasons & {"domainPolicy", "ORG_RESTRICTION_VIOLATION"}:
         return "Your Google administrator does not allow this app to read calendars."
+    if reasons & (QUOTA_REASONS | {"rateLimitExceeded", "userRateLimitExceeded"}):
+        return QUOTA_GUIDANCE
     return "Google Calendar denied access; reconnect Google Calendar and retry."

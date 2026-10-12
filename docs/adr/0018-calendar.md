@@ -75,16 +75,24 @@ Calendar page.
   nothing is saved. The account is the ID of its primary calendar, so no profile scope is
   needed, and it need not be the Gmail account. Phase 4 adds `calendar.app.created` then.
 - **What is read.** Every request names its `fields`, so descriptions, guests and conference
-  details never leave Google. Repeating events are expanded to instances; working-location
-  entries and calendars shared as free/busy only are skipped. Titles, locations and
-  calendar names are untrusted: control and format characters go and lengths are capped.
-  Only `https` links on `www.google.com/calendar` or `calendar.google.com` are kept.
-- **The cache.** Google's data, kept like cached mail: two tables, replaced per calendar
-  only by a complete read of it, excluded from exports, and removed when the owner
-  disconnects Google Calendar, since an out-of-date schedule misleads.
+  details never leave Google, and neither do locations or free/busy flags, which the page
+  doesn't show. Repeating events are expanded to instances; working-location entries and
+  calendars shared as free/busy only are skipped. Titles and calendar names are untrusted:
+  control and format characters go and lengths are capped. Only `https` links on
+  `www.google.com/calendar` or `calendar.google.com` are kept (never Google's `/url`
+  redirector), and a link that can't be used drops only the link, not its event.
+- **The cache.** Google's data, kept like cached mail: two tables holding only the
+  calendars shown in Google Calendar (one the owner unticks goes with its events), replaced
+  per calendar only by a complete read of it, excluded from exports and from the cleanup
+  fingerprint (every sync rewrites it), and removed when the owner disconnects Google
+  Calendar, since an out-of-date schedule misleads.
 - **When it syncs.** A window of ten weeks around the week shown (the week before through
-  eight weeks after), stale after 15 minutes. At most 20 calendars, read three at a time;
-  sign-in, permission and rate-limit errors stop a sync, other failures keep that
-  calendar's cache. The calendars shown are those Google Calendar's own list shows, and the
-  primary one always.
+  eight weeks after), stale after 15 minutes. At most 20 calendars, the primary first, then
+  the shown ones, read three at a time. Sign-in and rate-limit errors stop a sync; any other
+  failure, a calendar Google refuses included, is that calendar's alone: it keeps its
+  events but counts as checked for the window, as do the calendars a rate limit left
+  unread, so a calendar that keeps failing is tried again when the window goes stale, not
+  on every look. A calendar list without exactly one primary calendar is refused before
+  the cache changes. The calendars shown are those Google Calendar's own list shows, and
+  the primary one always.
 - **Isolation.** A calendar sign-in failure never changes the Gmail connection.

@@ -14,9 +14,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from mailbrief.ports.errors import AuthenticationCancelledError, AuthenticationRequiredError
 from mailbrief.providers.gmail.errors import GmailSetupError
+from mailbrief.providers.google.tokens import TOKEN_URL as TOKEN_URL
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 BrowserOpener = Callable[[str], Awaitable[bool]]
 

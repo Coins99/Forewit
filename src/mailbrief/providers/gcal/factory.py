@@ -24,7 +24,14 @@ async def google_calendar(settings: Settings) -> AsyncIterator[GoogleCalendarRea
         raise CalendarSetupError(
             "Choose the Google Desktop OAuth client JSON in Settings first."
         ) from None
-    client = await asyncio.to_thread(DesktopClient.load, path)
+    try:
+        client = await asyncio.to_thread(DesktopClient.load, path)
+    except ConfigurationError:
+        # Its own message names Gmail's setup; say what the calendar needs instead.
+        raise CalendarSetupError(
+            "The Google Desktop OAuth client JSON chosen in Settings can't be used; choose a "
+            "valid Desktop app client file in Settings."
+        ) from None
     store = await asyncio.to_thread(CalendarCredentialStore)
     async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as http:
         auth = CalendarAuth(client, store, http, LoopbackAuthorization(scopes=CALENDAR_SCOPES))

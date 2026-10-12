@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
 from mailbrief.services import data
 from mailbrief.services.data import (
     CleanupChangedError,
@@ -19,6 +20,7 @@ from mailbrief.services.data import (
     preview_cleanup,
 )
 from mailbrief.storage.database import Database
+from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import (
     AccountTable,
     ActionTable,
@@ -26,6 +28,7 @@ from mailbrief.storage.tables import (
     DigestTable,
     DraftTable,
     DraftVersionTable,
+    GoogleEventTable,
     MessageTable,
     SuggestionDecisionTable,
 )
@@ -210,6 +213,35 @@ async def test_preview_refuses_changes_and_rolls_back(owner_database: Database) 
     async with owner_database.session() as session:
         assert await session.get(AccountTable, 1) is not None
         assert len(list(await session.scalars(select(MessageTable)))) == 2
+
+
+async def test_a_calendar_sync_between_preview_and_cleanup_keeps_the_preview(
+    owner_database: Database,
+) -> None:
+    """Every sync rewrites the Google Calendar cache, which no cleanup touches (ADR 0018)."""
+    preview = await preview_cleanup(owner_database, CleanupRequest(CleanupKind.ACCOUNT, 1))
+    primary = GoogleCalendarInfo(
+        calendar_id="owner@example.com", name="Owner", primary=True, shown=True
+    )
+    async with owner_database.transaction() as session:
+        repository = GoogleCalendarRepository(session)
+        rows = await repository.replace_calendars([primary], NOW)
+        event = GoogleEvent(
+            calendar_id=primary.calendar_id,
+            calendar_name=primary.name,
+            event_id="standup",
+            title="Standup",
+            all_day=False,
+            starts_at_utc=NOW,
+            ends_at_utc=NOW + timedelta(minutes=30),
+        )
+        await repository.replace_events(
+            rows[primary.calendar_id], [event], NOW.date(), NOW.date(), NOW
+        )
+    await apply_cleanup(owner_database, preview)
+    async with owner_database.session() as session:
+        assert await session.get(AccountTable, 1) is None
+        assert len(list(await session.scalars(select(GoogleEventTable)))) == 1
 
 
 async def test_failed_deletion_rolls_back(

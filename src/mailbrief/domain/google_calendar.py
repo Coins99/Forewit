@@ -1,7 +1,8 @@
 """Events from the owner's Google calendars, cached only to show them (ADR 0018, phase 2).
 
 They are Google's data, not the owner's: MailBrief never changes them and keeps only what
-the Calendar page shows. Descriptions, guests and conference details are never requested.
+the Calendar page shows: titles, times, links and calendar names. Descriptions, locations,
+guests and conference details are never requested.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -14,7 +15,6 @@ from mailbrief.domain.common import DomainModel, normalize_utc
 
 GOOGLE_ID_MAX_CHARS: Final = 1024
 GOOGLE_TITLE_MAX_CHARS: Final = 200
-GOOGLE_LOCATION_MAX_CHARS: Final = 300
 CALENDAR_NAME_MAX_CHARS: Final = 120
 GOOGLE_EVENT_MAX_DAYS: Final = 366  # Longer events, such as all-year ones, are skipped.
 UNTITLED: Final = "(No title)"
@@ -24,9 +24,12 @@ _LINK_PREFIXES: Final = {"calendar.google.com": "/", "www.google.com": "/calenda
 
 
 def is_calendar_link(url: str) -> bool:
-    """Only https links on calendar.google.com, or under www.google.com/calendar, are kept
-    and offered for opening. The check reads the link as a browser would, with dot segments
-    already resolved, so "/calendar/../url" doesn't pass."""
+    """Only https links to Google Calendar are kept and offered for opening: any page on
+    calendar.google.com, and /calendar on www.google.com, so never Google's redirector.
+
+    The link is read as a browser reads it, with dot segments resolved, so
+    "/calendar/../url" doesn't pass; a user name or a port other than 443 is refused.
+    """
     try:
         link = HttpUrl(url)
     except ValidationError:
@@ -35,6 +38,7 @@ def is_calendar_link(url: str) -> bool:
     return (
         link.scheme == "https"
         and prefix is not None
+        and link.port == 443
         and f"{link.path or ''}/".startswith(prefix)
         and not link.username
         and not link.password
@@ -66,9 +70,7 @@ class GoogleEvent(DomainModel):
     ends_at_utc: datetime | None = None
     start_date: date | None = None
     last_date: date | None = None
-    location: str | None = Field(default=None, max_length=GOOGLE_LOCATION_MAX_CHARS, repr=False)
     web_link: HttpUrl | None = None
-    busy: bool = True
 
     @field_validator("starts_at_utc", "ends_at_utc")
     @classmethod

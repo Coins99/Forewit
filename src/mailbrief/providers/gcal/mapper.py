@@ -1,8 +1,8 @@
 """Map Google's calendar list and events to MailBrief's models, defensively.
 
-Titles, locations and names come from whoever made the event, so they are untrusted: they
-lose control and format characters and are cut to fixed lengths. A malformed item is
-skipped, never fatal.
+Titles and calendar names come from whoever made them, so they are untrusted: they lose
+control and format characters and are cut to fixed lengths. A malformed item is skipped,
+never fatal, and a link that can't be used is dropped without its event.
 """
 
 from datetime import date, datetime, timedelta
@@ -12,7 +12,6 @@ from pydantic import HttpUrl, ValidationError
 from mailbrief.domain.google_calendar import (
     CALENDAR_NAME_MAX_CHARS,
     GOOGLE_ID_MAX_CHARS,
-    GOOGLE_LOCATION_MAX_CHARS,
     GOOGLE_TITLE_MAX_CHARS,
     UNTITLED,
     GoogleCalendarInfo,
@@ -76,6 +75,16 @@ def _day(value: object) -> date | None:
         return None
 
 
+def _link(value: object) -> HttpUrl | None:
+    """Google Calendar's own link to the event, or None when there is no usable one."""
+    if not isinstance(value, str) or not is_calendar_link(value):
+        return None
+    try:
+        return HttpUrl(value)
+    except ValidationError:
+        return None
+
+
 def map_event(item: dict[str, object], calendar: GoogleCalendarInfo) -> GoogleEvent | None:
     """An event to show, or None when it is cancelled, malformed or longer than a year.
 
@@ -102,17 +111,13 @@ def map_event(item: dict[str, object], calendar: GoogleCalendarInfo) -> GoogleEv
             "start_date": first,
             "last_date": max(first, after - timedelta(days=1)),
         }
-    link = item.get("htmlLink")
-    location = _text(item.get("location"), GOOGLE_LOCATION_MAX_CHARS)
     try:
         return GoogleEvent(
             calendar_id=calendar.calendar_id,
             calendar_name=calendar.name,
             event_id=event_id,
             title=_text(item.get("summary"), GOOGLE_TITLE_MAX_CHARS) or UNTITLED,
-            location=location or None,
-            web_link=HttpUrl(link) if isinstance(link, str) and is_calendar_link(link) else None,
-            busy=item.get("transparency") != "transparent",
+            web_link=_link(item.get("htmlLink")),
             **fields,
         )
     except (ValidationError, ValueError):

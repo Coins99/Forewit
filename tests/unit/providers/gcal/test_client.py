@@ -26,14 +26,14 @@ from mailbrief.providers.gcal.auth import (
 )
 from mailbrief.providers.gcal.client import CalendarClient, events_url, rfc3339
 from mailbrief.providers.gcal.errors import CalendarSetupError
-from mailbrief.providers.gcal.reader import GoogleCalendarReader
-from mailbrief.providers.gmail.cache import RefreshCredential
+from mailbrief.providers.gcal.reader import MAX_CALENDARS, GoogleCalendarReader
 from mailbrief.providers.gmail.oauth import (
     TOKEN_URL,
     AuthorizationGrant,
     DesktopClient,
     LoopbackAuthorization,
 )
+from mailbrief.providers.google.credentials import RefreshCredential
 
 CLIENT = DesktopClient(client_id="client.apps.googleusercontent.com", client_secret="secret")
 PRIMARY = GoogleCalendarInfo(
@@ -234,7 +234,8 @@ async def test_events_request_names_its_fields_and_follows_pages() -> None:
     assert first["timeMin"] == ["2026-10-05T04:00:00Z"] and first["timeMax"] == [
         "2026-12-14T05:00:00Z"
     ]
-    assert "description" not in first["fields"][0] and "attendees" not in first["fields"][0]
+    for field in ("description", "attendees", "location", "transparency", "conferenceData"):
+        assert field not in first["fields"][0]
     assert "workingLocation" not in first["eventTypes"] and "default" in first["eventTypes"]
     assert parse_qs(urlsplit(str(route.calls[1].request.url)).query)["pageToken"] == ["next"]
 
@@ -259,6 +260,10 @@ def test_calendar_ids_are_escaped_into_one_path_segment() -> None:
             ProviderPermissionError,
         ),
         ([httpx.Response(429)] * 4, ProviderRateLimitError),
+        (  # A quota a retry won't clear is a rate limit at once, not a refusal.
+            [httpx.Response(403, json={"error": {"errors": [{"reason": "dailyLimitExceeded"}]}})],
+            ProviderRateLimitError,
+        ),
         ([httpx.Response(503)] * 4, ProviderResponseError),
         ([httpx.Response(401), httpx.Response(401)], AuthenticationRequiredError),
         ([httpx.Response(200, content=b"[]")], ProviderResponseError),
@@ -343,6 +348,67 @@ async def test_reader_lists_primary_first_and_maps_events() -> None:
         assert [c.name for c in calendars] == ["Owner", "Alpha"]
         events = await reader.list_events(PRIMARY, START, END)
     assert [event.event_id for event in events] == ["e"] and reader.auth is not None
+
+
+def listing(*items: dict[str, Any]) -> httpx.Response:
+    return page(list(items))
+
+
+OWNER_ITEM: dict[str, object] = {
+    "id": "owner@example.com",
+    "summary": "Owner",
+    "accessRole": "owner",
+    "primary": True,
+}
+
+
+async def reader_calendars(response: httpx.Response) -> tuple[GoogleCalendarInfo, ...]:
+    respx.get(CALENDAR_LIST_URL).mock(return_value=response)
+    async with httpx.AsyncClient() as http:
+        reader = GoogleCalendarReader(
+            CalendarAuth(CLIENT, CalendarCredentialStore(MemoryVault()), http, Grants()),
+            CalendarClient(http, Tokens(), no_sleep),
+        )
+        return await reader.list_calendars()
+
+
+@respx.mock
+async def test_the_cap_never_drops_a_shown_calendar_for_an_unticked_one() -> None:
+    unticked = [
+        {"id": f"a{n}@group.calendar.google.com", "summary": f"A {n:02}", "accessRole": "reader"}
+        for n in range(22)
+    ]
+    work = {
+        "id": "work@group.calendar.google.com",
+        "summary": "Work",
+        "accessRole": "owner",
+        "selected": True,
+    }
+    calendars = await reader_calendars(listing(*unticked, work, OWNER_ITEM))
+    assert len(calendars) == MAX_CALENDARS
+    assert [c.name for c in calendars[:2]] == ["Owner", "Work"]
+    assert [c.name for c in calendars if c.shown] == ["Owner", "Work"]
+
+
+@respx.mock
+async def test_a_repeated_calendar_is_listed_once() -> None:
+    team = {"id": "team@group.calendar.google.com", "summary": "Team", "accessRole": "reader"}
+    calendars = await reader_calendars(listing(OWNER_ITEM, team, team | {"summary": "Again"}))
+    assert [c.name for c in calendars] == ["Owner", "Team"]
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        [{"id": "team@group.calendar.google.com", "accessRole": "reader", "selected": True}],
+        [OWNER_ITEM, {**OWNER_ITEM, "id": "second@example.com"}],
+    ],
+)
+@respx.mock
+async def test_a_list_without_one_primary_is_refused(items: list[dict[str, object]]) -> None:
+    with pytest.raises(ProviderResponseError, match="no primary"):
+        await reader_calendars(listing(*items))
 
 
 def test_google_models_refuse_mixed_shapes() -> None:
