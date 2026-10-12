@@ -258,6 +258,7 @@ class ActionDetailPane(QScrollArea):
                             "reopened": "reopening",
                             "deleted": "deletion",
                             "source_added": "email addition",
+                            "suggestion_accepted": "suggestion acceptance",
                             "proposal_applied": "proposal",
                         }.get(reversed_event.kind.value, "change")
                         name = f"Undid {reversed_name}"

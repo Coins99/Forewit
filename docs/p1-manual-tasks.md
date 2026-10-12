@@ -16,12 +16,14 @@ that first addition restores the manual task to zero sources.
 
 ## Durable activity
 
-Additive migration `20261011_0014` creates `action_activity`, keyed uniquely by action
-and revision. Each owner change and its activity record commit together, or both roll
+Additive migration `20261013_0015` follows the Google calendar cache migration
+`20261012_0014` and creates `action_activity`, keyed uniquely by action and revision. Each owner change and its activity record commit together, or both roll
 back. Creation, edits, completion, reopening, undo, deletion/restoration, source
-additions, seen watermarks and applied proposals are recorded. Repeating an idempotent
+additions, suggestion acceptances, seen watermarks and applied proposals are recorded. Repeating an idempotent
 operation records no extra event. Activity contains timestamps and transition metadata,
-not a copy of task notes or incoming email content.
+not a copy of task notes or incoming email content. Accepting another suggestion from
+an already-linked email records suggestion acceptance; only an actual new source records
+email addition, and undo uses the corresponding wording.
 
 Reopening still clears the action's current `completed_at_utc`, while the earlier
 completion event keeps its time. Undo completion/reopen creates an `undo` event referring
@@ -67,3 +69,9 @@ Validation on Windows, 2026-10-11: 3,234 tests passed, three platform/gallery sk
 and lint checks and strict mypy for Windows and macOS passed. Dark/light screenshots
 were reviewed at 100% and 200% scale. macOS execution and owner desktop acceptance
 remain pending.
+
+
+PR #51 integration validation: 3,328 tests passed across the full run and a recovery
+subprocess rerun with the worktree source path; three skips, 96.88% overall coverage,
+and the 90% per-service gate passed. Ruff and strict mypy for Windows and macOS passed,
+and the dark/light screenshot gallery was reviewed at 100% and 200% scale.

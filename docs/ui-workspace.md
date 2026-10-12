@@ -16,8 +16,8 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] Tab runs Sync and review → Cancel (while busy) → the sidebar's pages → Saved mail →
       Data → Settings → Connect or Disconnect → the brief list → the selected email's
       buttons in display order → Undo (when shown) → back to Sync and review.
-- [ ] Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on macOS) open Today, Actions, Waiting, Drafts
-      and Briefs; Briefs says MailBrief is busy while a run is in progress.
+- [ ] Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts,
+      Briefs and Calendar; Briefs says MailBrief is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.
 - [ ] In the brief list, Page Up and Page Down scroll the selected email while the whole
       list fits, and page the list when it scrolls.

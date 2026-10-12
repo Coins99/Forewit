@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import (
     Action,
+    ActionActivityKind,
     ActionEdit,
     ActionFilter,
     ActionStatus,
@@ -999,6 +1000,7 @@ async def test_accept_into_adds_no_source_for_an_email_already_linked(
     added = await service.accept_into(seeded.suggestion_ids[1], action.public_id, 1)
 
     assert not added.source_added
+    assert added.action.activity[-1].kind is ActionActivityKind.SUGGESTION_ACCEPTED
     assert [source.provider_message_id for source in added.action.sources] == ["msg-1"]
     assert added.action.revision == 2
     assert await states(session, seeded) == [
@@ -1124,6 +1126,9 @@ async def test_undo_add_never_removes_the_last_source(
 
     assert [source.provider_message_id for source in undone.sources] == ["msg-1"]
     assert undone.revision == 3
+    assert undone.activity[-1].kind is ActionActivityKind.UNDO
+    assert undone.activity[-1].undo_of_revision == 2
+    assert undone.activity[-2].kind is ActionActivityKind.SUGGESTION_ACCEPTED
     assert await states(session, seeded) == [
         (SuggestionState.ACCEPTED, action.public_id),
         (SuggestionState.PENDING, None),

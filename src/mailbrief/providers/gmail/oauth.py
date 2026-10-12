@@ -14,9 +14,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from mailbrief.ports.errors import AuthenticationCancelledError, AuthenticationRequiredError
 from mailbrief.providers.gmail.errors import GmailSetupError
+from mailbrief.providers.google.tokens import TOKEN_URL as TOKEN_URL
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 BrowserOpener = Callable[[str], Awaitable[bool]]
 
@@ -92,10 +92,19 @@ class LoopbackAuthorization:
     """Listen only on loopback; never log or reflect callback parameters."""
 
     def __init__(
-        self, *, browser: BrowserOpener = open_browser, timeout_seconds: float = 180
+        self,
+        *,
+        browser: BrowserOpener = open_browser,
+        timeout_seconds: float = 180,
+        scopes: tuple[str, ...] = (GMAIL_SCOPE,),
     ) -> None:
+        """``scopes`` are what Google is asked for: Gmail read-only unless a separate grant,
+        such as Google Calendar's (ADR 0018), asks for its own."""
+        if not scopes:
+            raise ValueError("at least one scope is required")
         self._browser = browser
         self._timeout = timeout_seconds
+        self._scopes = scopes
 
     async def authorize(self, client: DesktopClient) -> AuthorizationGrant:
         state = secrets.token_urlsafe(32)
@@ -181,7 +190,7 @@ class LoopbackAuthorization:
                     "client_id": client.client_id,
                     "redirect_uri": redirect,
                     "response_type": "code",
-                    "scope": GMAIL_SCOPE,
+                    "scope": " ".join(self._scopes),
                     "state": state,
                     "code_challenge": challenge.rstrip(b"=").decode("ascii"),
                     "code_challenge_method": "S256",

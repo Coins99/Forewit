@@ -50,6 +50,7 @@ class ActionActivityKind(StrEnum):
     DELETED = "deleted"
     RESTORED = "restored"
     SOURCE_ADDED = "source_added"
+    SUGGESTION_ACCEPTED = "suggestion_accepted"
     THREAD_SEEN = "thread_seen"
     PROPOSAL_APPLIED = "proposal_applied"
 

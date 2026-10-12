@@ -379,7 +379,9 @@ class ActionService:
             touch(target, now)
             self._repository.record_activity(
                 target,
-                ActionActivityKind.SOURCE_ADDED,
+                ActionActivityKind.SOURCE_ADDED
+                if added
+                else ActionActivityKind.SUGGESTION_ACCEPTED,
                 now,
                 previous_source_count=previous_source_count,
             )

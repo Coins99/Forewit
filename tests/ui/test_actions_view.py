@@ -21,6 +21,8 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import (
     Action,
+    ActionActivity,
+    ActionActivityKind,
     ActionFilter,
     ActionProposal,
     ActionSource,
@@ -853,3 +855,34 @@ def test_the_detail_shows_carried_over(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.OPEN, action(1, created_at_utc=datetime(2026, 10, 1, tzinfo=UTC)))
 
     assert detail_texts(panel)[:2] == ["Action 1", "Yours · open · carried over"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "label", "undo_label"),
+    [
+        (ActionActivityKind.SOURCE_ADDED, "Source added", "Undid email addition"),
+        (
+            ActionActivityKind.SUGGESTION_ACCEPTED,
+            "Suggestion accepted",
+            "Undid suggestion acceptance",
+        ),
+    ],
+)
+def test_activity_distinguishes_new_sources_from_suggestion_decisions(
+    qtbot: QtBot, kind: ActionActivityKind, label: str, undo_label: str
+) -> None:
+    panel = ActionsPanel()
+    qtbot.addWidget(panel)
+    action = make_action(
+        revision=3,
+        activity=(
+            ActionActivity(revision=2, kind=kind, occurred_at_utc=NOW),
+            ActionActivity(
+                revision=3, kind=ActionActivityKind.UNDO, occurred_at_utc=NOW, undo_of_revision=2
+            ),
+        ),
+    )
+    panel.show_actions(ActionFilter.OPEN, (action,), today=TODAY, zone=UTC_ZONE, now=NOW)
+    labels = panel.detail.findChildren(QLabel, "actionActivityEntry")
+    assert any(item.text().startswith(label) for item in labels)
+    assert any(item.text().startswith(undo_label) for item in labels)

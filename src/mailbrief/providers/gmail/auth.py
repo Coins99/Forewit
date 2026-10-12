@@ -5,7 +5,7 @@ import time
 from typing import Literal, Protocol
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import SecretStr
 
 from mailbrief.domain.messages import AccountIdentity, ProviderKind
 from mailbrief.ports.errors import (
@@ -17,10 +17,10 @@ from mailbrief.providers.gmail.cache import CredentialStore, RefreshCredential
 from mailbrief.providers.gmail.errors import GmailSetupError, permission_guidance, response_error
 from mailbrief.providers.gmail.oauth import (
     GMAIL_SCOPE,
-    TOKEN_URL,
     AuthorizationGrant,
     DesktopClient,
 )
+from mailbrief.providers.google.tokens import TokenMessages, TokenResponse, exchange_tokens
 
 PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 
@@ -31,16 +31,17 @@ class Authorizer(Protocol):
     async def authorize(self, client: DesktopClient) -> AuthorizationGrant: ...
 
 
-class TokenResponse(BaseModel):
-    """Validate token responses without putting sensitive input in errors/reprs."""
-
-    model_config = ConfigDict(hide_input_in_errors=True)
-
-    access_token: SecretStr = Field(min_length=1)
-    refresh_token: SecretStr | None = Field(default=None, min_length=1)
-    expires_in: int = Field(gt=0, le=86_400, strict=True)
-    token_type: str
-    scope: str | None = None
+_TOKEN_MESSAGES = TokenMessages(
+    unreachable="Unable to contact Google authentication; retry later.",
+    expired="Gmail authorization expired or was revoked; reconnect.",
+    bad_client="Google rejected the OAuth client. Download the current Desktop app "
+    "client JSON from Google Cloud and check MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH.",
+    unauthorized_client="Google does not authorize this OAuth client for desktop sign-in. "
+    "Check that the client type is Desktop app.",
+    invalid="Google returned an invalid token response.",
+    token_type="Google returned an unsupported token type.",
+    missing_scope="Gmail read-only access was not granted.",
+)
 
 
 class GmailAuth:
@@ -166,48 +167,20 @@ class GmailAuth:
         return account
 
     async def _exchange(self, fields: dict[str, str]) -> TokenResponse:
-        fields = {
-            **fields,
-            "client_id": self._client.client_id,
-            "client_secret": self._client.client_secret,
-        }
-        try:
-            response = await self._http.post(TOKEN_URL, data=fields, follow_redirects=False)
-        except httpx.HTTPError:
-            raise response_error("Unable to contact Google authentication; retry later.") from None
-        if response.status_code in {400, 401}:
-            try:
-                error = response.json()
-            except ValueError:
-                error = None
-            if isinstance(error, dict) and error.get("error") == "invalid_grant":
-                raise AuthenticationRequiredError(
-                    "Gmail authorization expired or was revoked; reconnect."
-                )
-            reason = error.get("error") if isinstance(error, dict) else None
-            if reason in ("invalid_client", "deleted_client"):
-                raise GmailSetupError(
-                    "Google rejected the OAuth client. Download the current Desktop app "
-                    "client JSON from Google Cloud and check MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH."
-                )
-            if reason == "unauthorized_client":
-                raise GmailSetupError(
-                    "Google does not authorize this OAuth client for desktop sign-in. "
-                    "Check that the client type is Desktop app."
-                )
         stage: Literal["token refresh", "token exchange"] = (
             "token refresh" if fields["grant_type"] == "refresh_token" else "token exchange"
         )
-        self._check_status(response, stage=stage)
-        try:
-            tokens = TokenResponse.model_validate_json(response.content)
-        except ValidationError:
-            raise response_error("Google returned an invalid token response.") from None
-        if tokens.token_type.casefold() != "bearer":
-            raise response_error("Google returned an unsupported token type.")
-        if tokens.scope is not None and GMAIL_SCOPE not in tokens.scope.split():
-            raise ProviderPermissionError("Gmail read-only access was not granted.")
-        return tokens
+        return await exchange_tokens(
+            self._http,
+            self._client.client_id,
+            self._client.client_secret,
+            fields,
+            scopes=(GMAIL_SCOPE,),
+            messages=_TOKEN_MESSAGES,
+            response_error=response_error,
+            setup_error=GmailSetupError,
+            check_status=lambda response: self._check_status(response, stage=stage),
+        )
 
     async def _profile(self, token: SecretStr) -> AccountIdentity:
         try:
