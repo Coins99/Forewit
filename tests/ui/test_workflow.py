@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
@@ -59,6 +60,7 @@ from mailbrief.domain.events import (
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -98,6 +100,8 @@ class FakeBackend(FakeDrafts):
         self.action_fail: Exception | None = None
         self.list_calls = 0
         self.list_fail: Exception | None = None
+        self.projects: tuple[Project, ...] = ()
+        self.areas: tuple[LifeArea, ...] = ()
         self.actions: dict[ActionFilter, tuple[Action, ...]] = {}
         self.action_counts: dict[ActionFilter, int] = {}
         self.count_calls: list[ActionFilter] = []
@@ -273,6 +277,79 @@ class FakeBackend(FakeDrafts):
 
     async def unaccept_action(self, public_id: str, revision: int) -> None:
         await self._act("unaccept_action", public_id, revision)
+
+    async def list_projects(self) -> tuple[Project, ...]:
+        return self.projects
+
+    async def list_areas(self) -> tuple[LifeArea, ...]:
+        return self.areas
+
+    async def save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> Project | LifeArea:
+        await self._act("save_organization", kind, public_id, revision, edit)
+        from uuid import uuid4
+
+        values: dict[str, Any] = {
+            "public_id": public_id or str(uuid4()),
+            "revision": (revision or 0) + 1,
+            "created_at_utc": datetime.now(UTC),
+            "updated_at_utc": datetime.now(UTC),
+        }
+        if kind == "project" and isinstance(edit, ProjectEdit):
+            result = Project(**edit.model_dump(), **values)
+            self.projects = tuple(
+                item for item in self.projects if item.public_id != result.public_id
+            ) + (result,)
+            return result
+        area = LifeArea(**edit.model_dump(), **values)
+        self.areas = tuple(item for item in self.areas if item.public_id != area.public_id) + (
+            area,
+        )
+        return area
+
+    async def archive_project(self, public_id: str, revision: int, archived: bool) -> Project:
+        await self._act("archive_project", public_id, revision, archived)
+        project = next(item for item in self.projects if item.public_id == public_id)
+        result = project.model_copy(
+            update={
+                "revision": revision + 1,
+                "archived_at_utc": datetime.now(UTC) if archived else None,
+            }
+        )
+        self.projects = tuple(
+            result if item.public_id == public_id else item for item in self.projects
+        )
+        return result
+
+    async def delete_area(self, public_id: str, revision: int) -> None:
+        await self._act("delete_area", public_id, revision)
+        self.areas = tuple(item for item in self.areas if item.public_id != public_id)
+
+    async def list_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> tuple[Action, ...]:
+        actions = await self.list_actions(view)
+        return tuple(
+            action
+            for action in actions
+            if (group == "unassigned" and action.project is None)
+            or (
+                group == "project"
+                and action.project is not None
+                and action.project.public_id == group_id
+            )
+            or (
+                group == "area"
+                and action.project is not None
+                and action.project.area_public_id == group_id
+            )
+        )
+
+    async def count_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> int:
+        return len(await self.list_grouped_actions(view, group, group_id))
 
     async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
         await self._act("create_action", edit, steps)

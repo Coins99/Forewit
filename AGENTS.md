@@ -68,7 +68,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (New task / Ctrl+N, Cmd+N on macOS) use the shared action editor and lifecycle without Gmail.
   Revisioned activity is transactional and survives reopen, restart, backup/recovery and
   writing export. Undo reopen restores the original completion timestamp. See
-  `docs/p1-manual-tasks.md`; projects/life areas and unified Today are the next slices.
+  `docs/p1-manual-tasks.md`; the organization slice below builds on this foundation.
+- P1 organization slice implemented, awaiting owner desktop acceptance: projects and
+  optional life areas in Actions (Projects & areas), task assignment and grouped filters.
+  Archived projects retain tasks; removing an area detaches projects and keeps work.
+  New activity snapshots retain project/area IDs. Migration 0016 follows task history 0015.
+  See `docs/p1-projects-life-areas.md`. Unified Today is the next slice.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
 
@@ -96,8 +101,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
   (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
-  `calendar_planning` for AI-proposed calendar changes. `calendar.py` is day boundaries
-  and time zones, not the calendar feature.
+  `projects` for owner projects and life areas, and `calendar_planning` for AI-proposed
+  calendar changes. `calendar.py` is day boundaries and time zones, not the calendar feature.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,
@@ -185,6 +190,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   the action's revision, and every change except restoring a deleted action needs the
   revision the caller saw. Change decisions and actions through ORM objects, never bulk
   UPDATE or DELETE statements, which leave loaded rows stale.
+- Projects and life areas are owner records with no account foreign key. Project/area
+  edits and lifecycle changes need their loaded revision. Archive keeps tasks and links;
+  area removal soft-deletes the area and detaches projects together, bumping project
+  revisions. Archived projects accept edits to already linked tasks, but no new links.
+  Task activity stores project/area IDs at the time of each change, with no foreign key
+  from those snapshots, so organization changes cannot rewrite completion history.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.

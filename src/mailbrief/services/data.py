@@ -28,6 +28,8 @@ from mailbrief.storage.tables import (
 )
 
 EXPORT_TABLES = (
+    "life_areas",
+    "projects",
     "actions",
     "action_activity",
     "action_steps",

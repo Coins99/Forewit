@@ -21,6 +21,7 @@ from mailbrief.domain.analysis import (
     deadline_due_at,
 )
 from mailbrief.domain.common import DomainModel, normalize_utc
+from mailbrief.domain.projects import Project
 
 ACTION_TITLE_MAX_CHARS: Final = 200
 ACTION_STEP_MAX_CHARS: Final = 500
@@ -65,6 +66,8 @@ class ActionActivity(DomainModel):
     previous_completed_at_utc: datetime | None = None
     undo_of_revision: int | None = Field(default=None, ge=1)
     previous_source_count: int | None = Field(default=None, ge=0)
+    project_public_id: str | None = None
+    area_public_id: str | None = None
     legacy: bool = False  # Migrated facts, not a reconstruction of missing past changes.
 
     @field_validator("occurred_at_utc", "previous_completed_at_utc")
@@ -237,6 +240,7 @@ class Action(DomainModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    project: Project | None = None
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     status: ActionStatus
@@ -331,6 +335,7 @@ class ActionEdit(DomainModel):
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
+    project_public_id: str | None = Field(default=None, min_length=36, max_length=36)
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     effort: ActionEffort | None
