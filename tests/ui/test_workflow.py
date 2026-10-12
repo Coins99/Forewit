@@ -909,6 +909,8 @@ async def test_missing_ai_model_explains_why_suggestions_did_not_update(
     await finish(window)
     assert "No new task suggestions were generated" in window.status.text()
     assert "saved brief is unchanged" in window.status.text()
+    assert "The brief's Inbox check did not run" in window.status.text()
+    assert "Then retry Sync and review" in window.status.text()
     assert "Choose a Groq model" in window.status.text()
     assert "Choose a Groq model" in window.ai.text()
     assert window.backend.saved == saved and shown_text(window) == before

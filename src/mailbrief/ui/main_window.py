@@ -2596,8 +2596,10 @@ class MainWindow(QMainWindow):
             guidance = configuration_guidance(exc)
             self.ai.setText("AI: " + guidance)
             self.status.setText(
-                "No new task suggestions were generated. The displayed saved brief is unchanged. "
+                "No new task suggestions were generated. The brief's Inbox check did not run. "
+                "The displayed saved brief is unchanged. "
                 + guidance
+                + " Then retry Sync and review."
             )
             return
         if result.sync.status in (SyncStatus.COMPLETE, SyncStatus.PARTIAL):
