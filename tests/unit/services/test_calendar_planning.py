@@ -571,3 +571,56 @@ async def test_a_conflict_applies_nothing(
     )
     with pytest.raises(EventConflictError):  # Deleted since the plan was read.
         await events.apply_changes([p.change for p in renamed.proposals])
+
+
+async def test_moving_only_an_all_day_start_keeps_its_length(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)  # e1 is the two-day Trip, Oct 20 to 21.
+    checked = validate_plan(
+        PlanningCandidate(changes=(change(event_key="e1", start_date="2026-10-27"),)), plan
+    )
+    edit = checked.proposals[0].change.edit
+    assert edit is not None and (edit.start_date, edit.last_date) == (
+        date(2026, 10, 27),
+        date(2026, 10, 28),
+    )
+    one_day = validate_plan(
+        PlanningCandidate(
+            changes=(change(event_key="e1", start_date="2026-10-27", end_date="2026-10-27"),)
+        ),
+        plan,
+    )
+    edit = one_day.proposals[0].change.edit
+    assert edit is not None and edit.last_date == date(2026, 10, 27)
+
+
+async def test_a_change_only_to_the_stored_zone_is_no_change(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    await EventService(session, clock=lambda: NOW).create(
+        EventEdit(
+            title="Tokyo holiday",
+            all_day=True,
+            start_date=date(2026, 10, 22),
+            last_date=date(2026, 10, 22),
+            time_zone="Asia/Tokyo",
+        )
+    )
+    plan = await service.prepare(PlanningOptions(instruction="x"), MONDAY, TORONTO)
+    key = next(k for k, e in plan.keys.items() if e.title == "Tokyo holiday")
+    checked = validate_plan(
+        PlanningCandidate(changes=(change(event_key=key, title="Tokyo holiday"),)), plan
+    )
+    assert checked.proposals == () and checked.ignored == 1
+
+
+async def test_the_preview_says_when_the_event_cap_left_some_out(
+    session: AsyncSession, service: CalendarPlanningService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mailbrief.services import calendar_planning
+
+    monkeypatch.setattr(calendar_planning, "MAX_SENT_EVENTS", 2)
+    plan = await seeded(session, service)
+    assert len(plan.request.events) == 2
+    assert plan.preview.lines[1].label.startswith("Your first 2 of 3 events from 2026-10-12")

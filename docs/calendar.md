@@ -44,6 +44,26 @@ myaccount.google.com/permissions if you want to.
 
 **Open in Google Calendar** opens the selected Google event in your browser.
 
+## Plan with AI
+
+**Plan with AI** on the Calendar page asks Groq to change your own events, for example "move
+the dentist to Friday at 10" or "block two hours tomorrow morning for the deck".
+
+1. Type what should change. Your events in the four weeks from the Monday shown are always
+   sent, as titles and times; notes never are. You can also send Google Calendar times
+   (without titles, or with them) and your open actions' deadlines and target dates.
+2. **Preview what is sent** lists each part and its size. The first time, tick the consent
+   box; then choose **Ask Groq**. Cancel request stops it.
+3. Groq's changes come back checked: each says what it does, why, and which events it would
+   overlap. Untick any you don't want and choose **Apply ticked changes**.
+4. **Undo AI changes** reverses the whole set, as long as none of those events has changed
+   since.
+
+Groq can only add, change or delete your own events, at most 10 per request; it can't touch
+Google events, actions, deadlines or target dates. If your calendar changed while you were
+reviewing, nothing is applied: discard and ask again. Revoking AI consent in Settings covers
+this too.
+
 ## Messages
 
 - "Gmail: session expired…": the one Google sign-in expired or was revoked; connect Gmail

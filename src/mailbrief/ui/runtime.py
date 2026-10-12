@@ -26,6 +26,7 @@ from mailbrief.domain.briefs import (
     TransmissionPreview,
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
 from mailbrief.domain.drafts import (
@@ -36,7 +37,13 @@ from mailbrief.domain.drafts import (
     DraftVersion,
     DraftVersionInfo,
 )
-from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.events import (
+    AppliedBatch,
+    CalendarEvent,
+    CalendarRange,
+    EventChange,
+    EventEdit,
+)
 from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
@@ -62,6 +69,11 @@ from mailbrief.services.brief import (
     permission_preview,
 )
 from mailbrief.services.calendar import day_window, resolve_timezone
+from mailbrief.services.calendar_planning import (
+    CalendarPlanningService,
+    PlanningGate,
+    PreparedPlan,
+)
 from mailbrief.services.consent import auto_send_permission, set_auto_send
 from mailbrief.services.digest import DigestService
 from mailbrief.services.drafting import (
@@ -706,6 +718,32 @@ class DesktopRuntime:
     async def restore_event(self, public_id: str) -> CalendarEvent:
         async with self._storage().session() as session:
             return await EventService(session).restore(public_id)
+
+    # Plan with AI (ADR 0018, phase 3b): Groq is opened for each call and closed afterwards;
+    # applying and undoing are local.
+
+    async def prepare_planning(
+        self, options: PlanningOptions, first_day: date, zone: ZoneInfo
+    ) -> PreparedPlan:
+        """Build exactly what would be sent, and its preview; nothing is sent."""
+        settings = await self._settings(await self.get_owner_preferences())
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await CalendarPlanningService(session, ai).prepare(options, first_day, zone)
+
+    async def generate_planning(
+        self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event
+    ) -> PlanningOutcome:
+        settings = await self._settings(await self.get_owner_preferences())
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await CalendarPlanningService(session, ai).generate(plan, gate, cancel)
+
+    async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:
+        async with self._storage().session() as session:
+            return await EventService(session).apply_changes(changes)
+
+    async def undo_calendar_changes(self, batch: AppliedBatch) -> None:
+        async with self._storage().session() as session:
+            await EventService(session).undo_changes(batch)
 
     # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
 

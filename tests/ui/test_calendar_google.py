@@ -118,6 +118,7 @@ def test_visible_mnemonics_stay_unique(panel: CalendarPanel, mode: str) -> None:
             panel.open_button,
             panel.delete_button,
             panel.open_google_button,
+            panel.plan_button,
         )
         if button.isVisibleTo(panel)
     ]
