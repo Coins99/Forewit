@@ -72,6 +72,7 @@ from mailbrief.domain.drafts import (
 from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -105,6 +106,7 @@ from mailbrief.services.preferences import (
     PreferencesUnavailableError,
     owner_zone,
 )
+from mailbrief.services.projects import ProjectConflictError
 from mailbrief.services.proposals import ProposalNotFoundError
 from mailbrief.services.ranking import (
     DECLINED_TEXT,
@@ -148,6 +150,7 @@ from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
+from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
@@ -220,6 +223,19 @@ class DesktopBackend(Protocol):
     async def dismiss_suggestion(self, suggestion_id: int) -> None: ...
     async def restore_suggestion(self, suggestion_id: int) -> None: ...
     async def unaccept_action(self, public_id: str, revision: int) -> None: ...
+    async def list_projects(self) -> tuple[Project, ...]: ...
+    async def list_areas(self) -> tuple[LifeArea, ...]: ...
+    async def save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> Project | LifeArea: ...
+    async def archive_project(self, public_id: str, revision: int, archived: bool) -> Project: ...
+    async def delete_area(self, public_id: str, revision: int) -> None: ...
+    async def list_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> tuple[Action, ...]: ...
+    async def count_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> int: ...
     async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action: ...
     async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
@@ -501,6 +517,12 @@ class MainWindow(QMainWindow):
         self.zone = resolve_timezone(None)
         if self.data_dialog is not None:
             self.data_dialog.today = self._local_today
+        self._projects: tuple[Project, ...] = ()
+        self._areas: tuple[LifeArea, ...] = ()
+        self.projects_dialog = ProjectsDialog(self)
+        self.projects_dialog.save_requested.connect(self._request_save_organization)
+        self.projects_dialog.archive_requested.connect(self._request_archive_project)
+        self.projects_dialog.delete_area_requested.connect(self._request_delete_area)
         self.action_editor = ActionEditor(self)
         self.action_editor.save_requested.connect(self._request_save_action)
         self.event_editor = EventEditor(self)
@@ -700,6 +722,10 @@ class MainWindow(QMainWindow):
         workspace.detail.reply_requested.connect(self._request_reply)
         workspace.detail.source_requested.connect(self._open_source)
         self.actions_panel = ActionsPanel()
+        self.actions_panel.organize_requested.connect(self._open_organization)
+        self.actions_panel.group_changed.connect(
+            lambda: self.start(self._refresh_actions, cancellable=False)
+        )
         self.actions_panel.new_task_requested.connect(self._request_new_task)
         self.new_task_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
         self.new_task_shortcut.activated.connect(self._request_new_task)
@@ -828,6 +854,7 @@ class MainWindow(QMainWindow):
         self.undo_button.setEnabled(not busy)
         self.actions_panel.set_busy(busy)
         self.action_editor.set_busy(busy)
+        self.projects_dialog.set_busy(busy)
         self.drafts_panel.set_busy(busy)
         self.calendar_panel.set_busy(busy)
         self.event_editor.set_busy(busy)
@@ -1051,11 +1078,25 @@ class MainWindow(QMainWindow):
         now = self.now()
         today = now.astimezone(self.zone).date()
         try:
+            projects = await self.backend.list_projects()
+            areas = await self.backend.list_areas()
+            self._projects, self._areas = projects, areas
+            self.action_editor.set_projects(self._projects)
+            self.actions_panel.show_groups(self._projects, self._areas)
+            group, group_id = self.actions_panel.grouping()
             for view in ActionFilter:
-                actions = await self.backend.list_actions(view)
+                actions = (
+                    await self.backend.list_actions(view)
+                    if group == "all"
+                    else await self.backend.list_grouped_actions(view, group, group_id)
+                )
                 # Only the completed list is capped; say so when more exist.
                 total = (
-                    await self.backend.count_actions(view)
+                    (
+                        await self.backend.count_actions(view)
+                        if group == "all"
+                        else await self.backend.count_grouped_actions(view, group, group_id)
+                    )
                     if view is ActionFilter.COMPLETED and len(actions) >= COMPLETED_LIST_LIMIT
                     else None
                 )
@@ -1063,9 +1104,17 @@ class MainWindow(QMainWindow):
                     view, actions, today=today, zone=self.zone, now=now, total=total
                 )
                 if view is ActionFilter.OPEN:
-                    self._set_counts(actions=len(actions))
+                    self._set_counts(
+                        actions=len(actions)
+                        if group == "all"
+                        else await self.backend.count_actions(view)
+                    )
                 elif view is ActionFilter.WAITING:
-                    self._set_counts(waiting=len(actions))
+                    self._set_counts(
+                        waiting=len(actions)
+                        if group == "all"
+                        else await self.backend.count_actions(view)
+                    )
         except Exception as exc:
             self._note_not_refreshed(exc)
 
@@ -1244,6 +1293,104 @@ class MainWindow(QMainWindow):
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
             self.proposals_dialog.open()
 
+    def _open_organization(self) -> None:
+        if self._closing or self._dialog_open() or (self.task is not None and not self.task.done()):
+            return
+        self.projects_dialog.show_records(self._projects, self._areas)
+        self.projects_dialog.open()
+        self.start(self._load_organization, cancellable=False)
+
+    async def _load_organization(self) -> None:
+        try:
+            projects = await self.backend.list_projects()
+            areas = await self.backend.list_areas()
+        except Exception as exc:
+            log_failure(exc)
+            self.projects_dialog.status.setText("Could not reload. Close and reopen to retry.")
+            return
+        self._projects, self._areas = projects, areas
+        self.projects_dialog.show_records(projects, areas)
+
+    def _cache_organization(self, saved: Project | LifeArea) -> None:
+        if isinstance(saved, Project):
+            self._projects = tuple(
+                item for item in self._projects if item.public_id != saved.public_id
+            ) + (saved,)
+        else:
+            self._areas = tuple(
+                item for item in self._areas if item.public_id != saved.public_id
+            ) + (saved,)
+
+    def _request_save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> None:
+        self.start(
+            lambda: self._save_organization(kind, public_id, revision, edit), cancellable=False
+        )
+
+    async def _save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> None:
+        try:
+            saved = await self.backend.save_organization(kind, public_id, revision, edit)
+        except Exception as exc:
+            log_failure(exc)
+            self.projects_dialog.status.setText(
+                "Could not save. Your input is still here. "
+                "Retry, or discard edits and reopen to reload."
+            )
+            return
+        self._offer_undo()
+        self._cache_organization(saved)
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas, saved.public_id)
+        self.projects_dialog.status.setText("Saved.")
+        self.status.setText("Organization saved.")
+
+    def _request_archive_project(self, project: Project, archived: bool) -> None:
+        self.start(lambda: self._archive_project(project, archived), cancellable=False)
+
+    async def _archive_project(self, project: Project, archived: bool) -> None:
+        try:
+            saved = await self.backend.archive_project(
+                project.public_id, project.revision, archived
+            )
+        except ProjectConflictError:
+            self.projects_dialog.status.setText(
+                "That project changed. Close and reopen to reload it."
+            )
+            return
+        self._offer_undo()
+        self._cache_organization(saved)
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas, project.public_id)
+        self.status.setText(
+            "Project archived. Its tasks remain." if archived else "Project reopened."
+        )
+
+    def _request_delete_area(self, area: LifeArea) -> None:
+        self.start(lambda: self._delete_area(area), cancellable=False)
+
+    async def _delete_area(self, area: LifeArea) -> None:
+        try:
+            await self.backend.delete_area(area.public_id, area.revision)
+        except ProjectConflictError:
+            self.projects_dialog.status.setText("That area changed. Close and reopen to reload it.")
+            return
+        self._offer_undo()
+        self._areas = tuple(item for item in self._areas if item.public_id != area.public_id)
+        self._projects = tuple(
+            item.model_copy(
+                update={"area_public_id": None, "area_name": None, "revision": item.revision + 1}
+            )
+            if item.area_public_id == area.public_id
+            else item
+            for item in self._projects
+        )
+        await self._refresh_views()
+        self.projects_dialog.show_records(self._projects, self._areas)
+        self.status.setText("Life area removed. Its projects and tasks remain.")
+
     def _request_new_task(self) -> None:
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
@@ -1264,6 +1411,7 @@ class MainWindow(QMainWindow):
                 self.action_editor.keep_open(_EDITOR_FAILED)
             raise
         self.action_editor.finish_saved()
+        self.actions_panel.clear_group()
         self._offer_undo()
         self.status.setText(f"Created: {created.title}.")
         self.actions_panel.show_view(
@@ -2221,6 +2369,7 @@ class MainWindow(QMainWindow):
                 self.cached_dialog,
                 self.proposals_dialog,
                 self.action_editor,
+                self.projects_dialog,
                 self.draft_editor,
                 self.event_editor,
             )
@@ -2528,6 +2677,7 @@ class MainWindow(QMainWindow):
         self.proposals_dialog.reject()
         if self.data_dialog is not None:
             self.data_dialog.reject()
+        self.projects_dialog.force_close()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
         self._cancel_drafting()

@@ -751,3 +751,55 @@ def test_manual_task_activity_renders(
         Path(folder).mkdir(parents=True, exist_ok=True)
         dpr = image.devicePixelRatio()
         assert image.save(str(Path(folder) / f"page-manual-{mode.value}-{dpr:g}x.png"))
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_project_organization_renders(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    from mailbrief.ui.projects_view import ProjectsDialog
+    from tests.factories import make_action
+    from tests.ui.test_projects import AREA, PROJECT
+
+    apply_theme(qapp, mode)
+    workspace = build(qtbot)
+    panel = ActionsPanel()
+    panel.show_groups((PROJECT,), (AREA,))
+    panel.group.setCurrentIndex(panel.group.findData("project:" + PROJECT.public_id))
+    panel.show_actions(
+        ActionFilter.OPEN,
+        (make_action(project=PROJECT, sources=()),),
+        today=TODAY,
+        zone=OWNER_ZONE,
+        now=ACTIONS_NOW,
+    )
+    workspace.add_page("actions", panel)
+    workspace.show_page("actions")
+    workspace.sidebar.set_current("actions")
+    workspace.resize(*SIZES["desktop"])
+    show(qtbot, workspace)
+    images = {"page-project": workspace.grab()}
+    dialog = ProjectsDialog(workspace)
+    dialog.show_records((PROJECT,), (AREA,), PROJECT.public_id)
+    show(qtbot, dialog)
+    images["dialog-project"] = dialog.grab()
+    dialog.notes.setPlainText("Draft notes to save or discard before archiving.")
+    show(qtbot, dialog)
+    images["dialog-project-dirty"] = dialog.grab()
+    assert dialog.discard.isEnabled() and not dialog.archive.isEnabled()
+    dialog.hide()
+    from mailbrief.ui.action_editor import ActionEditor
+
+    editor = ActionEditor(workspace)
+    editor.set_projects((PROJECT,))
+    editor.edit(make_action(project=PROJECT, sources=()), TODAY, OWNER_ZONE)
+    show(qtbot, editor)
+    images["dialog-task-project"] = editor.grab()
+    assert editor.project.currentData() == PROJECT.public_id
+    assert dialog.name.text() == PROJECT.name
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        for name, image in images.items():
+            dpr = image.devicePixelRatio()
+            assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))

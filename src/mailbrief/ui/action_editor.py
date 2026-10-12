@@ -33,6 +33,7 @@ from mailbrief.domain.actions import (
     StepEdit,
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
+from mailbrief.domain.projects import Project
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
 _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
@@ -85,6 +86,7 @@ class ActionEditor(QDialog):
         self.setWindowTitle("Edit action")
         self.setObjectName("actionEditor")
         self.setAccessibleName("Task editor")
+        self._projects: tuple[Project, ...] = ()
         self._creating = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
@@ -99,6 +101,14 @@ class ActionEditor(QDialog):
         self.title = QLineEdit()
         self.title.setMaxLength(ACTION_TITLE_MAX_CHARS)
         form.addRow("&Title", self.title)
+        self.project = QComboBox()
+        self.project.setObjectName("taskProject")
+        self.project.setAccessibleName("Task project")
+        self.project.setMinimumContentsLength(18)
+        self.project.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        form.addRow("Pro&ject", self.project)
         self.owner = QComboBox()
         for _value, name in _OWNERS:
             self.owner.addItem(name)
@@ -166,6 +176,7 @@ class ActionEditor(QDialog):
         self._set_saving(False)
         self._action = action
         self.title.setText(action.title)
+        self._fill_projects(None if action.project is None else action.project.public_id)
         self.owner.setCurrentIndex([value for value, _ in _OWNERS].index(action.ownership))
         self.effort.setCurrentIndex([value for value, _ in _EFFORTS].index(action.effort))
         self.has_target.setChecked(action.target_date is not None)
@@ -203,6 +214,7 @@ class ActionEditor(QDialog):
         self._set_saving(False)
         self.setWindowTitle("New task")
         self.title.clear()
+        self._fill_projects(None)
         self.owner.setCurrentIndex(0)
         self.effort.setCurrentIndex(0)
         self.has_target.setChecked(False)
@@ -217,6 +229,23 @@ class ActionEditor(QDialog):
         self.status.clear()
         self._update_step_buttons()
         self.title.setFocus()
+
+    def set_projects(self, projects: tuple[Project, ...]) -> None:
+        self._projects = projects
+
+    def _fill_projects(self, chosen: str | None) -> None:
+        self.project.clear()
+        self.project.addItem("Unassigned", None)
+        for project in self._projects:
+            if project.archived_at_utc is None or project.public_id == chosen:
+                suffix = " (archived)" if project.archived_at_utc else ""
+                self.project.addItem(project.name + suffix, project.public_id)
+        # Retain a link if an editor was opened directly before the organization list loaded.
+        if chosen is not None and self.project.findData(chosen) < 0 and self._action is not None:
+            linked_project = self._action.project
+            if linked_project is not None:
+                self.project.addItem(linked_project.name, chosen)
+        self.project.setCurrentIndex(max(0, self.project.findData(chosen)))
 
     def set_busy(self, busy: bool) -> None:
         """Another operation is running: Save waits for it, but Cancel still works."""
@@ -327,7 +356,9 @@ class ActionEditor(QDialog):
             self.status.setText(f"A step can be at most {ACTION_STEP_MAX_CHARS} characters.")
             return
         picked = self.target.date()
+        project_id = self.project.currentData()
         edit = ActionEdit(
+            project_public_id=project_id if isinstance(project_id, str) else None,
             title=title,
             ownership=_OWNERS[self.owner.currentIndex()][0],
             effort=_EFFORTS[self.effort.currentIndex()][0],

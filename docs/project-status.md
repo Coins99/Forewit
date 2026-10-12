@@ -9,7 +9,8 @@ later use after Microsoft Entra access is resolved.
 - P1 first slice implemented, awaiting owner desktop acceptance: [manual tasks and activity
   history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
   lifecycle; completion/reopening/undo history survives recovery and export. Projects and
-  life areas come next, followed by unified Today.
+  life areas now have an implementation ([organization workflow](p1-projects-life-areas.md)),
+  awaiting owner desktop acceptance. Unified Today comes next.
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

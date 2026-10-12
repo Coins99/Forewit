@@ -368,7 +368,7 @@ class ProposalService:
             row.state = ProposalState.APPLIED.value
             row.decided_at_utc = now
             touch(action, now)
-            self._actions.record_activity(
+            await self._actions.record_activity(
                 action,
                 (
                     ActionActivityKind.COMPLETED
@@ -442,7 +442,7 @@ class ProposalService:
             row.applied_revision = None
             row.decided_at_utc = None
             touch(action, now)
-            self._actions.record_activity(
+            await self._actions.record_activity(
                 action, ActionActivityKind.UNDO, now, undo_of_revision=expected_revision
             )
             return await self._load(action)

@@ -16,6 +16,7 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt,
 from PySide6.QtGui import QDesktopServices, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QListWidget,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.actions import Action, ActionFilter
 from mailbrief.domain.drafts import DraftKind
+from mailbrief.domain.projects import LifeArea, Project
 from mailbrief.ui.action_detail import ActionDetailPane
 from mailbrief.ui.action_text import (
     ActionDetails,
@@ -159,6 +161,8 @@ def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
         )
         if text is not None
     ]
+    if action.project is not None:
+        meta.append(action.project.name)
     chips: list[Chip] = []
     if facts.overdue:
         chips.append(Chip("Overdue", ChipTone.WARNING))
@@ -263,6 +267,8 @@ class ActionsPanel(QWidget):
     the Action. Opening a source needs no backend, so the panel does it directly.
     """
 
+    organize_requested = Signal()
+    group_changed = Signal()
     new_task_requested = Signal()
     action_requested = Signal(str, object)
     draft_requested = Signal(object, object)
@@ -294,6 +300,23 @@ class ActionsPanel(QWidget):
         heading_row.addWidget(self.new_task_button)
         heading_row.setContentsMargins(0, 0, 12, 0)
         side.addLayout(heading_row)
+        grouping = QHBoxLayout()
+        grouping.setContentsMargins(12, 4, 12, 4)
+        self.group = QComboBox()
+        self.group.setObjectName("actionGroup")
+        self.group.setAccessibleName("Filter tasks by project or life area")
+        self.group.setMinimumContentsLength(8)
+        self.group.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.group.addItem("All tasks", "all")
+        self.group.currentIndexChanged.connect(lambda _index: self.group_changed.emit())
+        grouping.addWidget(self.group, 1)
+        self.organize_button = outline_button("Projects & areas", "organizeButton")
+        self.organize_button.setAccessibleName("Manage projects and life areas")
+        self.organize_button.clicked.connect(self.organize_requested.emit)
+        grouping.addWidget(self.organize_button)
+        side.addLayout(grouping)
         self.tabs = QTabBar()
         self.tabs.setObjectName("actionsTabs")
         self.tabs.setAccessibleName("Action views")
@@ -359,6 +382,8 @@ class ActionsPanel(QWidget):
         # Tab: the views, the list shown, then the detail's buttons in display order.
         chain: list[QWidget] = [
             self.new_task_button,
+            self.group,
+            self.organize_button,
             self.tabs,
             *self.lists.values(),
             *detail.all_buttons(),
@@ -367,6 +392,32 @@ class ActionsPanel(QWidget):
             QWidget.setTabOrder(first, second)
         self._busy = False
         self._refresh()
+
+    def grouping(self) -> tuple[str, str | None]:
+        value = self.group.currentData()
+        if isinstance(value, str):
+            kind, _, public_id = value.partition(":")
+            return kind, public_id or None
+        return "all", None
+
+    def show_groups(self, projects: tuple[Project, ...], areas: tuple[LifeArea, ...]) -> None:
+        selected = self.group.currentData()
+        self.group.blockSignals(True)
+        self.group.clear()
+        self.group.addItem("All tasks", "all")
+        self.group.addItem("Unassigned", "unassigned")
+        for area in areas:
+            self.group.addItem(f"Area: {area.name}", "area:" + area.public_id)
+        for project in projects:
+            suffix = " (archived)" if project.archived_at_utc else ""
+            self.group.addItem(f"Project: {project.name}{suffix}", "project:" + project.public_id)
+        self.group.setCurrentIndex(max(0, self.group.findData(selected)))
+        self.group.blockSignals(False)
+
+    def clear_group(self) -> None:
+        self.group.blockSignals(True)
+        self.group.setCurrentIndex(0)
+        self.group.blockSignals(False)
 
     def view(self) -> ActionFilter:
         return list(ActionFilter)[self.tabs.currentIndex()]
@@ -436,6 +487,8 @@ class ActionsPanel(QWidget):
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.new_task_button.setEnabled(not busy)
+        self.organize_button.setEnabled(not busy)
+        self.group.setEnabled(not busy)
         self._update_buttons()
 
     def _view_changed(self, index: int) -> None:

@@ -32,6 +32,7 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
+from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import (
     AccountTable,
     ActionStepTable,
@@ -124,6 +125,7 @@ def _check_step_list(steps: Sequence[StepEdit]) -> list[int]:
 
 
 def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
+    row.project_public_id = edit.project_public_id
     row.title = edit.title
     row.ownership = edit.ownership.value
     row.effort = None if edit.effort is None else edit.effort.value
@@ -217,6 +219,15 @@ class ActionService:
             if step_id not in listed:
                 await self._repository.delete_step(step)
 
+    async def _check_project(self, edit: ActionEdit, previous: str | None) -> None:
+        if edit.project_public_id is None:
+            return
+        project = await ProjectRepository(self._session).project(edit.project_public_id)
+        if project is None or (
+            project.archived_at_utc is not None and project.public_id != previous
+        ):
+            raise ActionConflictError("Choose an active project for this task.")
+
     async def create(self, edit: ActionEdit, steps: Sequence[StepEdit] = ()) -> Action:
         """Create a task with no account or email source, using the same plan and workflow."""
 
@@ -224,6 +235,7 @@ class ActionService:
             listed = _check_step_list(steps)
             if listed:
                 raise ActionConflictError("New tasks cannot reuse existing steps.")
+            await self._check_project(edit, None)
             row = ActionTable(
                 public_id=self._id_factory(),
                 title=edit.title,
@@ -237,7 +249,7 @@ class ActionService:
             _apply_edit(row, edit)
             await self._repository.add_action(row)
             await self._apply_steps(row, steps, listed, now)
-            self._repository.record_activity(row, ActionActivityKind.CREATED, now)
+            await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             return await self._load(row)
 
         return await self._write(run)
@@ -262,7 +274,7 @@ class ActionService:
             row.status = latest.previous_status
             row.completed_at_utc = latest.previous_completed_at_utc
             touch(row, now)
-            self._repository.record_activity(
+            await self._repository.record_activity(
                 row,
                 ActionActivityKind.UNDO,
                 now,
@@ -290,7 +302,9 @@ class ActionService:
                     if existing.deleted_at_utc is not None:
                         existing.deleted_at_utc = None
                         touch(existing, now)
-                        self._repository.record_activity(existing, ActionActivityKind.RESTORED, now)
+                        await self._repository.record_activity(
+                            existing, ActionActivityKind.RESTORED, now
+                        )
                     return await self._load(existing)
             row = await self._repository.add_action(
                 ActionTable(
@@ -316,7 +330,7 @@ class ActionService:
                     revision=1,
                 )
             )
-            self._repository.record_activity(row, ActionActivityKind.CREATED, now)
+            await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             for position, text in enumerate(suggestion.steps):
                 self._repository.add_step(row.id, position, text, None)
             await self._repository.add_source(row.id, message, account)
@@ -377,7 +391,7 @@ class ActionService:
                 key, decision=SuggestionState.ACCEPTED, action_id=target.id, decided_at_utc=now
             )
             touch(target, now)
-            self._repository.record_activity(
+            await self._repository.record_activity(
                 target,
                 ActionActivityKind.SOURCE_ADDED
                 if added
@@ -439,7 +453,7 @@ class ActionService:
             if remove_source and (manual_add or await self._repository.source_count(row.id) > 1):
                 await self._repository.remove_source(row.id, message.provider_message_id)
             touch(row, now)
-            self._repository.record_activity(
+            await self._repository.record_activity(
                 row, ActionActivityKind.UNDO, now, undo_of_revision=expected_revision
             )
             return await self._load(row)
@@ -506,7 +520,9 @@ class ActionService:
             await self._repository.delete_decisions_for(row.id)
             row.deleted_at_utc = now
             touch(row, now)
-            self._repository.record_activity(row, ActionActivityKind.UNDO, now, undo_of_revision=1)
+            await self._repository.record_activity(
+                row, ActionActivityKind.UNDO, now, undo_of_revision=1
+            )
 
         await self._write(run)
 
@@ -522,11 +538,12 @@ class ActionService:
         async def run(now: datetime) -> Action:
             listed = [] if steps is None else _check_step_list(steps)
             row = await self._live(public_id, expected_revision)
+            await self._check_project(edit, row.project_public_id)
             _apply_edit(row, edit)
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)
             touch(row, now)
-            self._repository.record_activity(row, ActionActivityKind.EDITED, now)
+            await self._repository.record_activity(row, ActionActivityKind.EDITED, now)
             return await self._load(row)
 
         return await self._write(run)
@@ -542,7 +559,7 @@ class ActionService:
             row.status = ActionStatus.COMPLETED.value
             row.completed_at_utc = now
             touch(row, now)
-            self._repository.record_activity(
+            await self._repository.record_activity(
                 row,
                 ActionActivityKind.COMPLETED,
                 now,
@@ -564,7 +581,7 @@ class ActionService:
             row.status = ActionStatus.OPEN.value
             row.completed_at_utc = None
             touch(row, now)
-            self._repository.record_activity(
+            await self._repository.record_activity(
                 row,
                 ActionActivityKind.REOPENED,
                 now,
@@ -582,7 +599,7 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             row.deleted_at_utc = now
             touch(row, now)
-            self._repository.record_activity(row, ActionActivityKind.DELETED, now)
+            await self._repository.record_activity(row, ActionActivityKind.DELETED, now)
 
         await self._write(run)
 
@@ -597,7 +614,7 @@ class ActionService:
         previous_revision = row.revision
         row.deleted_at_utc = None
         touch(row, now)
-        self._repository.record_activity(
+        await self._repository.record_activity(
             row,
             ActionActivityKind.UNDO if deletion else ActionActivityKind.RESTORED,
             now,
@@ -636,7 +653,7 @@ class ActionService:
             ]
             row.thread_seen_until_utc = max(seen)
             touch(row, now)
-            self._repository.record_activity(row, ActionActivityKind.THREAD_SEEN, now)
+            await self._repository.record_activity(row, ActionActivityKind.THREAD_SEEN, now)
             return await self._load(row)
 
         return await self._write(run)
@@ -686,7 +703,12 @@ class ActionService:
         return await self._load(await self._live(public_id, None))
 
     async def list_actions(
-        self, view: ActionFilter, *, limit: int | None = None
+        self,
+        view: ActionFilter,
+        *,
+        limit: int | None = None,
+        group: str = "all",
+        group_id: str | None = None,
     ) -> tuple[Action, ...]:
         """Live actions for a view.
 
@@ -699,7 +721,9 @@ class ActionService:
             raise ValueError("limit must be at least 1")
         if limit is None and view is ActionFilter.COMPLETED:
             limit = COMPLETED_LIST_LIMIT
-        actions = await self._repository.load(await self._repository.list_rows(view, limit=limit))
+        actions = await self._repository.load(
+            await self._repository.list_rows(view, limit=limit, group=group, group_id=group_id)
+        )
         if view is ActionFilter.COMPLETED:
             return tuple(actions)
         # The rows arrive in ID order and sorted() is stable, so equal keys keep that order.
@@ -711,6 +735,8 @@ class ActionService:
         )
         return tuple(ordered if limit is None else ordered[:limit])
 
-    async def count_actions(self, view: ActionFilter) -> int:
+    async def count_actions(
+        self, view: ActionFilter, *, group: str = "all", group_id: str | None = None
+    ) -> int:
         """How many live actions a view holds, however many list_actions() shows."""
-        return await self._repository.count_rows(view)
+        return await self._repository.count_rows(view, group=group, group_id=group_id)

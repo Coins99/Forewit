@@ -38,6 +38,7 @@ from mailbrief.domain.drafts import (
 from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.providers.gmail.cache import GmailCredentialStore
 from mailbrief.providers.gmail.factory import gmail_provider
 from mailbrief.providers.gmail.oauth import DesktopClient
@@ -74,6 +75,7 @@ from mailbrief.services.preferences import (
     effective_settings,
     owner_zone,
 )
+from mailbrief.services.projects import ProjectService
 from mailbrief.services.proposals import ProposalService
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
@@ -526,6 +528,51 @@ class DesktopRuntime:
     async def unaccept_action(self, public_id: str, revision: int) -> None:
         async with self._storage().session() as session:
             await ActionService(session).unaccept(public_id, revision)
+
+    async def list_projects(self) -> tuple[Project, ...]:
+        async with self._storage().session() as session:
+            return await ProjectService(session).list_projects()
+
+    async def list_areas(self) -> tuple[LifeArea, ...]:
+        async with self._storage().session() as session:
+            return await ProjectService(session).list_areas()
+
+    async def save_organization(
+        self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
+    ) -> Project | LifeArea:
+        async with self._storage().session() as session:
+            service = ProjectService(session)
+            if kind == "project" and isinstance(edit, ProjectEdit):
+                if public_id is None:
+                    return await service.create_project(edit)
+                if revision is not None:
+                    return await service.save_project(public_id, revision, edit)
+            elif kind == "area":
+                if public_id is None:
+                    return await service.create_area(edit)
+                if revision is not None:
+                    return await service.save_area(public_id, revision, edit)
+            raise ValueError("Choose a project or life area and reload its current revision.")
+
+    async def archive_project(self, public_id: str, revision: int, archived: bool) -> Project:
+        async with self._storage().session() as session:
+            return await ProjectService(session).archive_project(public_id, revision, archived)
+
+    async def delete_area(self, public_id: str, revision: int) -> None:
+        async with self._storage().session() as session:
+            await ProjectService(session).delete_area(public_id, revision)
+
+    async def list_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> tuple[Action, ...]:
+        async with self._storage().session() as session:
+            return await ActionService(session).list_actions(view, group=group, group_id=group_id)
+
+    async def count_grouped_actions(
+        self, view: ActionFilter, group: str, group_id: str | None
+    ) -> int:
+        async with self._storage().session() as session:
+            return await ActionService(session).count_actions(view, group=group, group_id=group_id)
 
     async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
         async with self._storage().session() as session:
