@@ -56,6 +56,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "digests",
         "digest_items",
         "sync_runs",
+        "inbox_scan_messages",
         "ai_consents",
         "actions",
         "projects",
