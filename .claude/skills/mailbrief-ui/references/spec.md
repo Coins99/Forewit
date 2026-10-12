@@ -342,6 +342,11 @@ The brief list's chips keep their shorter forms (see Brief list).
   are some. Outline New event, Open and Delete event below. Mnemonics avoid every
   window-level letter. `EventEditor` is a dialog (title, All day, Starts and Ends as
   `yyyy-MM-dd` and `HH:mm`, notes) that locks while saving, like the action editor.
+  Google Calendar (phase 2): under the heading, `googleStatus` (muted) says whether it is
+  connected and when the saved copy was read, beside outline Connect Google Calendar, or
+  Refresh and Disconnect Google Calendar (Connect and Disconnect never show together and
+  share G). Google rows end with their calendar's name, can't be opened or deleted, and
+  enable outline Open in Google Calendar when they have a Google Calendar link.
 - Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+6 (Cmd on macOS), call
   `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.

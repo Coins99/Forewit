@@ -29,6 +29,7 @@ from mailbrief.domain.digests import (
     DigestStatus,
 )
 from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
+from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 from mailbrief.domain.messages import EmailContact
 from tests.factories import (
     fingerprint_of,
@@ -332,8 +333,34 @@ def _event(number: int, **fields: object) -> CalendarEvent:
 
 def mockup_week() -> CalendarRange:
     """The mockup brief's week on the Calendar page (ADR 0018): events of each shape, one
-    crossing midnight, and the finance action's target and deadline as markers."""
+    crossing midnight, the finance action's target and deadline as markers, and two Google
+    events, one of them all-day."""
     return CalendarRange(
+        google_events=(
+            GoogleEvent(
+                calendar_id=ACCOUNT,
+                calendar_name="Owner",
+                event_id="g1",
+                title="1:1 with Priya",
+                all_day=False,
+                starts_at_utc=datetime(2026, 10, 6, 18, 0, tzinfo=UTC),
+                ends_at_utc=datetime(2026, 10, 6, 18, 30, tzinfo=UTC),
+            ),
+            GoogleEvent(
+                calendar_id="family@group.calendar.google.com",
+                calendar_name="Family",
+                event_id="g2",
+                title="School holiday",
+                all_day=True,
+                start_date=date(2026, 10, 9),
+                last_date=date(2026, 10, 9),
+            ),
+        ),
+        google_coverage=GoogleCoverage(
+            first_day=date(2026, 9, 28),
+            last_day=date(2026, 12, 6),
+            synced_at_utc=datetime(2026, 10, 6, 13, 14, tzinfo=UTC),
+        ),
         first_day=date(2026, 10, 5),
         last_day=date(2026, 10, 11),
         events=(

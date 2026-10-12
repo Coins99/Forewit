@@ -69,11 +69,17 @@ from mailbrief.domain.drafts import (
     still_to_fill,
 )
 from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
+from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
-from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
+from mailbrief.ports.errors import (
+    AuthenticationRequiredError,
+    ProviderError,
+    ProviderPermissionError,
+    ProviderRateLimitError,
+)
 from mailbrief.services.actions import (
     COMPLETED_LIST_LIMIT,
     AcceptedInto,
@@ -98,6 +104,7 @@ from mailbrief.services.drafting import (
 from mailbrief.services.drafting import disclosure_lines as drafting_disclosure_lines
 from mailbrief.services.drafts import DraftConflictError, DraftNotFoundError, SourceNotFoundError
 from mailbrief.services.events import EventConflictError, EventNotFoundError
+from mailbrief.services.google_calendar import needs_sync
 from mailbrief.services.history import BriefDateError
 from mailbrief.services.preferences import (
     PreferencesConflictError,
@@ -124,12 +131,15 @@ from mailbrief.ui.actions_view import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
+from mailbrief.ui.calendar_view import CONNECT as CONNECT_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
+from mailbrief.ui.calendar_view import DISCONNECT as DISCONNECT_CALENDAR
 from mailbrief.ui.calendar_view import NEW as NEW_EVENT
 from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
-from mailbrief.ui.calendar_view import CalendarPanel, week_start
+from mailbrief.ui.calendar_view import OPEN_GOOGLE, CalendarPanel, week_start
+from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
 from mailbrief.ui.data_view import DataDialog
-from mailbrief.ui.deadline_text import day_text, month_day
+from mailbrief.ui.deadline_text import day_text, moment_text, month_day
 from mailbrief.ui.diagnostics import (
     configuration_guidance,
     error_guidance,
@@ -259,6 +269,11 @@ class DesktopBackend(Protocol):
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
     async def restore_event(self, public_id: str) -> CalendarEvent: ...
+    # Google Calendar, read-only (ADR 0018, phase 2). calendar_account reads the vault only.
+    async def calendar_account(self) -> str | None: ...
+    async def connect_calendar(self) -> str: ...
+    async def disconnect_calendar(self) -> None: ...
+    async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult: ...
 
 
 # Raised when the brief, an action or a draft changed since it was shown; the window reloads.
@@ -283,6 +298,16 @@ _EDITOR_STALE = (
     "need, then Cancel and reopen the action."
 )
 _EDITOR_FAILED = "Couldn't save. Your edits are still here; try again."
+_CALENDAR_NOT_CONNECTED = "Google Calendar isn't connected."
+_CALENDAR_SIGN_IN = "Google Calendar needs you to connect it again."
+_CALENDAR_BUSY = "Google Calendar is busy; try again in a minute."
+_CALENDAR_UNREACHABLE = "Couldn't reach Google Calendar; the Calendar page shows what was saved."
+_CALENDAR_DISCONNECTED = "Google Calendar disconnected; its events are no longer kept in MailBrief."
+_CALENDAR_STOPPED = {
+    "AUTH_REQUIRED": "Google Calendar stopped: connect it again.",
+    "PERMISSION_DENIED": "Google Calendar stopped: access was denied.",
+    "RATE_LIMITED": "Google Calendar stopped: it is busy; try again in a minute.",
+}
 _EVENT_STALE = (
     "This event changed since you opened it. Your edits are still here — copy what you "
     "need, then Cancel and reopen the event."
@@ -296,6 +321,20 @@ _AI_FAILED = "Couldn't write with Groq. Your text is unchanged."
 _REFRESH_DISCONNECTED = "Automatic refresh skipped: connect Gmail first."
 _REFRESH_FAILED = "Refresh failed. The displayed saved brief is unchanged."
 _AUTOMATIC = "Automatic refresh: "
+
+
+def calendar_sync_text(result: CalendarSyncResult) -> str:
+    """What a Google Calendar sync did, in one sentence of fixed words and counts."""
+    if result.stopped_code is not None:
+        return _CALENDAR_STOPPED.get(result.stopped_code, _CALENDAR_UNREACHABLE)
+    if result.failed:
+        return (
+            f"Google Calendar updated {result.synced} of {result.calendars} calendars; "
+            "the others show what was saved."
+        )
+    events = "1 event" if result.events == 1 else f"{result.events} events"
+    calendars = "1 calendar" if result.calendars == 1 else f"{result.calendars} calendars"
+    return f"Google Calendar updated: {events} from {calendars}."
 
 
 def _review_hint(limit: int) -> str:
@@ -503,6 +542,8 @@ class MainWindow(QMainWindow):
         self.event_editor = EventEditor(self)
         self.event_editor.save_requested.connect(self._request_save_event)
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
+        self._calendar_account: str | None = None  # The connected Google Calendar account.
+        self._calendar_shown: CalendarRange | None = None
         self.draft_writes = DraftWrites()
         # The generation in progress: its plan, its cancel flag and its task.
         self._drafting_plan: DraftingPlan | None = None
@@ -709,6 +750,7 @@ class MainWindow(QMainWindow):
         self.calendar_panel = CalendarPanel()
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
+        self.calendar_panel.google_requested.connect(self._request_google)
         workspace.add_page("calendar", _page(self.calendar_panel, "calendarPage", "Calendar"))
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
@@ -868,6 +910,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(_BUSY)
             return
         self._show_page(key)
+        if key == "calendar" and self._calendar_sync_due():
+            self.start(lambda: self._sync_calendar(quiet=True), cancellable=False)
 
     def _leave_run_page(self) -> None:
         """Back to Today once neither the review nor the consent is waiting."""
@@ -1324,6 +1368,8 @@ class MainWindow(QMainWindow):
         try:
             shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
             self.calendar_panel.show_range(shown, self.zone, self._local_today())
+            self._calendar_shown = shown
+            self.calendar_panel.set_google(self._calendar_account, self._google_note(shown))
         except Exception as exc:
             self._note_not_refreshed(exc)
 
@@ -1335,11 +1381,15 @@ class MainWindow(QMainWindow):
     async def _show_calendar_week(self, first_day: date) -> None:
         self._calendar_week = first_day
         await self._refresh_calendar()
+        if self._calendar_sync_due():
+            await self._sync_calendar(quiet=True)
 
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
             self.event_editor.edit_new(value, self.now(), self.zone)
             self.event_editor.open()
+        elif kind == OPEN_GOOGLE and isinstance(value, GoogleEvent):
+            self._open_calendar_link(value)
         elif isinstance(value, CalendarEvent):
             event = value
             if kind == OPEN_EVENT:
@@ -1393,6 +1443,115 @@ class MainWindow(QMainWindow):
         self._offer_undo("Undo delete", undo)
         self.status.setText(f"Deleted: {event.title}.")
         await self._refresh_views()
+
+    # Google Calendar (ADR 0018, phase 2): read-only. Its failures are handled here, never
+    # by _run, whose sign-in handling belongs to Gmail: a calendar problem must never show
+    # Gmail as disconnected.
+
+    async def _load_calendar_account(self) -> None:
+        try:
+            self._calendar_account = await self.backend.calendar_account()
+        except Exception as exc:
+            log_failure(exc)
+            self._calendar_account = None
+
+    def _google_note(self, shown: CalendarRange) -> str:
+        account = self._calendar_account
+        if account is None:
+            return _CALENDAR_NOT_CONNECTED
+        coverage = shown.google_coverage
+        if coverage is None:
+            return f"Google Calendar: {account} · not loaded yet"
+        if not coverage.covers(shown.first_day, shown.last_day):
+            return f"Google Calendar: {account} · this week isn't loaded yet"
+        today = self._local_today()
+        synced = coverage.synced_at_utc.astimezone(self.zone)
+        when = (
+            f"{synced:%H:%M}"
+            if synced.date() == today
+            else moment_text(coverage.synced_at_utc, self.zone, today=today)
+        )
+        return f"Google Calendar: {account} · updated {when}"
+
+    def _calendar_sync_due(self) -> bool:
+        shown = self._calendar_shown
+        return (
+            self._calendar_account is not None
+            and shown is not None
+            and needs_sync(shown.google_coverage, shown.first_day, shown.last_day, self.now())
+        )
+
+    def _request_google(self, kind: str) -> None:
+        async def refresh() -> None:
+            await self._sync_calendar(quiet=False)
+
+        if kind == CONNECT_CALENDAR:
+            operation: Callable[[], Awaitable[None]] = self._connect_calendar
+        elif kind == REFRESH_CALENDAR:
+            operation = refresh
+        elif kind == DISCONNECT_CALENDAR:
+            operation = self._disconnect_calendar
+        else:
+            return
+        if not self.start(operation, cancellable=False) and not self._closing:
+            self.status.setText(_BUSY)
+
+    def _calendar_failed(self, exc: Exception) -> None:
+        """Say what went wrong in fixed words; a sign-in problem shows Connect again."""
+        log_failure(exc)
+        if isinstance(exc, AuthenticationRequiredError):
+            self._calendar_account = None
+            self.status.setText(_CALENDAR_SIGN_IN)
+        elif isinstance(exc, ProviderPermissionError):
+            self.status.setText(str(exc))  # Static guidance by contract.
+        elif isinstance(exc, ConfigurationError):
+            self.status.setText(configuration_guidance(exc))
+        elif isinstance(exc, ProviderRateLimitError):
+            self.status.setText(_CALENDAR_BUSY)
+        else:
+            self.status.setText(_CALENDAR_UNREACHABLE)
+
+    async def _connect_calendar(self) -> None:
+        try:
+            self._calendar_account = await self.backend.connect_calendar()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._calendar_failed(exc)
+            await self._refresh_calendar()
+            return
+        await self._sync_calendar(quiet=False)
+
+    async def _sync_calendar(self, *, quiet: bool) -> None:
+        """Read Google Calendar around the week shown; a quiet sync speaks only of trouble."""
+        around = self._calendar_week or week_start(self._local_today())
+        try:
+            result = await self.backend.sync_calendar(around, self.zone)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._calendar_failed(exc)
+        else:
+            if not quiet or result.failed or result.stopped_code:
+                self.status.setText(calendar_sync_text(result))
+        await self._refresh_calendar()
+
+    async def _disconnect_calendar(self) -> None:
+        try:
+            await self.backend.disconnect_calendar()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._calendar_failed(exc)
+            return
+        self._calendar_account = None
+        self.status.setText(_CALENDAR_DISCONNECTED)
+        await self._refresh_calendar()
+
+    def _open_calendar_link(self, event: GoogleEvent) -> None:
+        link = None if event.web_link is None else str(event.web_link)
+        if link is not None and is_calendar_link(link):
+            QDesktopServices.openUrl(QUrl(link))
 
     # Drafts. Creating, opening and deleting use start(); the open draft's writes go
     # through draft_writes, so typing never makes the window busy.
@@ -1982,6 +2141,7 @@ class MainWindow(QMainWindow):
             )
         await self._refresh_actions()
         await self._refresh_drafts()
+        await self._load_calendar_account()
         await self._refresh_calendar()
         await self._refresh_ai_status()
         try:

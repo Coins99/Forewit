@@ -16,7 +16,8 @@ GitHub sign-in is required. [Download and launch instructions](#windows-download
 
 - Review ranked Inbox messages and open the originals in Gmail.
 - Keep track of actions, plans, target dates and follow-up replies.
-- Keep your own calendar events beside your open actions' deadlines and target dates.
+- Keep your own calendar events beside your open actions' deadlines and target dates,
+  and see your Google Calendar there too, read-only ([Calendar](docs/calendar.md)).
 - Write local drafts and notes, with optional AI drafting from context you choose.
 - Browse saved briefs and cached mail metadata offline.
 - Set your time zone, sender exclusions and refresh preferences.

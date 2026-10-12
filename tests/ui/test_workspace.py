@@ -35,6 +35,7 @@ from mailbrief.ui.workspace import (
 from tests.factories import make_digest_item
 from tests.ui.window_wait import show
 from tests.ui.workspace_fixtures import (
+    ACCOUNT,
     ACTIONS_NOW,
     ZONE,
     mockup_actions,
@@ -97,6 +98,7 @@ def build_calendar(qtbot: QtBot) -> ThreePaneWorkspace:
     # The week arrives once the page is in the window, as it does in the app: rows laid
     # out before then would miss the stylesheet's item padding.
     panel.show_range(mockup_week(), OWNER_ZONE, TODAY)
+    panel.set_google(ACCOUNT, f"Google Calendar: {ACCOUNT} · updated 09:14")
     workspace.show_page("calendar")
     workspace.sidebar.set_current("calendar")
     return workspace
