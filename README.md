@@ -60,6 +60,12 @@ To run from source or build your own package, see the [contributor guide](CONTRI
 
 ### Connect Gmail and set up AI
 
+Configured builds let you choose **Sign in with Google** directly and automatically
+sync your full current Inbox. The **Inbox** page shows metadata across all received dates;
+daily briefs still cover today's mail. Custom OAuth files are optional in these builds.
+See [Google sign-in and Inbox](docs/google-signin-inbox.md) for developer configuration
+and details. The manual setup below applies to development builds without bundled sign-in.
+
 1. Follow [Gmail setup](docs/gmail-setup.md) to enable the Gmail API and download
    a Google **Desktop app** OAuth client JSON file. Keep that file outside the
    repository in a stable location; MailBrief saves its path.

@@ -29,7 +29,7 @@ from mailbrief.domain.briefs import (
     BriefStatus,
     TransmissionPreview,
 )
-from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
+from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage, InboxPage
 from mailbrief.domain.calendar_planning import (
     CalendarPlan,
     CalendarPlanningRequest,
@@ -79,6 +79,21 @@ from tests.ui.fake_drafts import FakeDrafts
 
 
 class FakeBackend(FakeDrafts):
+    async def sync_inbox(
+        self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
+    ) -> SyncResult:
+        return SyncResult(
+            account_id="me@example.com",
+            range_start_utc=datetime(2026, 9, 1, tzinfo=UTC),
+            range_end_utc=datetime(2026, 10, 1, tzinfo=UTC),
+            status=SyncStatus.COMPLETE,
+            page_count=1,
+            message_count=0,
+        )
+
+    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        return InboxPage(account_email=account_email, offset=offset)
+
     def __init__(self) -> None:
         super().__init__()
         self.saved = DailyDigest(

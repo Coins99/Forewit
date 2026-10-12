@@ -265,6 +265,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `--exclude`) is never auto-selected.
 - Credentials live only in the OS credential store (Gmail: Windows Credential Manager or
   the macOS Keychain, chosen explicitly, with no plaintext or automatic fallback).
+- Configured packages may bundle the developer's registered Desktop OAuth client ID and
+  native-app client secret (never user tokens or API keys). Custom client files remain an
+  explicit override. See `docs/google-signin-inbox.md`. The full Inbox sync reads metadata
+  across all dates, reconciles only after complete enumeration, and never advances the
+  daily-brief watermark or downloads bodies. The Inbox page is distinct from daily briefs.
 - The Groq API key lives only in that OS vault, under `MailBrief.Groq`.
 - Provider JSON stays inside its adapter; services and storage use domain models only.
 - Timestamps are timezone-aware UTC. Never use naive datetimes or `datetime.utcnow()`.

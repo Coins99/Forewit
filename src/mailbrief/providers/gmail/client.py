@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
+from mailbrief.ports.errors import ProviderContinuationError
 from mailbrief.providers.gmail.errors import permission_guidance, response_error
 from mailbrief.providers.google.requests import MAX_RESPONSE_BYTES as MAX_RESPONSE_BYTES
 from mailbrief.providers.google.requests import (
@@ -131,6 +132,8 @@ class GmailClient:
         def special(
             status: int, current: httpx.QueryParams, attempt: int, _payload: object
         ) -> Retry | Missing | None:
+            if status == 400 and url == MESSAGES_URL and "pageToken" in current:
+                raise ProviderContinuationError("Gmail rejected the Inbox pagination cursor.")
             if status == 404 and missing_ok:
                 return MISSING
             if status == 204 and url == MESSAGES_URL and "fields" in current and attempt < 3:

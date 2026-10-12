@@ -70,6 +70,7 @@ PAGES: Final = (
     ("drafts", "Drafts", "pencil"),
     ("briefs", "Briefs", "calendar"),
     ("calendar", "Calendar", "calendar-week"),
+    ("inbox", "Inbox", "mail"),
 )
 EMPTY_BRIEF: Final = "No analyzed messages in this brief."
 

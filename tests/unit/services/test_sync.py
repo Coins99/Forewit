@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -45,6 +46,60 @@ TEST_WINDOW = DayWindow(
     start_utc=datetime(2026, 8, 31, 0, 0, 0, tzinfo=UTC),
     end_utc=datetime(2026, 9, 1, 0, 0, 0, tzinfo=UTC),
 )
+
+
+@pytest.mark.parametrize("outcome", ["complete", "failed", "cancelled", "malformed"])
+async def test_full_inbox_reconciles_only_complete_scan(
+    async_session: AsyncSession, test_account: int, outcome: str
+) -> None:
+    from datetime import timedelta
+
+    old = make_message(
+        provider_message_id="old", received_at_utc=TEST_WINDOW.start_utc - timedelta(days=400)
+    )
+    missing = make_message(
+        provider_message_id="missing", received_at_utc=TEST_WINDOW.start_utc - timedelta(days=200)
+    )
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [missing])
+    await async_session.commit()
+    cancel = asyncio.Event()
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            yield MessagePage(page_number=1, messages=(old,), continuation="next")
+            if outcome == "failed":
+                raise ProviderResponseError("synthetic failure")
+            if outcome == "cancelled":
+                cancel.set()
+            yield MessagePage(
+                page_number=2, messages=(), failed_message_count=int(outcome == "malformed")
+            )
+
+    provider = FakeEmailProvider()
+    result = await SyncService(
+        provider=provider,
+        message_repo=repo,
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+    ).sync_inbox(
+        reader=Reader(),
+        account_id=test_account,
+        account_identity="user@example.com",
+        cancel=cancel,
+    )
+    rows, _ = await repo.get_inbox_page(test_account)
+    ids = {r.provider_message_id for r in rows}
+    assert "old" in ids
+    assert ("missing" not in ids) == (outcome == "complete")
+    assert (result.status is SyncStatus.COMPLETE) == (outcome == "complete")
+    account = await AccountRepository(async_session).get_by_id(test_account)
+    assert account is not None and account.last_sync_at_utc is None
+    assert not provider.body_fetch_called
+    with pytest.raises(ValueError):
+        await repo.get_inbox_page(test_account, offset=-1)
 
 
 class FakeEmailProvider(EmailProvider):
@@ -560,3 +615,219 @@ async def test_sync_work_budget_is_enforced_between_pages(
     assert result.status is SyncStatus.PARTIAL
     assert result.error_code == "SYNC_RUN_TIMEOUT"
     assert result.page_count == 1
+
+
+@pytest.mark.parametrize("pause", ["budget", "network", "rate", "cancel", "task_cancel"])
+@pytest.mark.parametrize("metadata_failed", [False, True])
+async def test_inbox_scan_resumes_after_restart(
+    async_session: AsyncSession,
+    test_account: int,
+    monkeypatch: pytest.MonkeyPatch,
+    pause: str,
+    metadata_failed: bool,
+) -> None:
+    from mailbrief.storage.inbox_scan import InboxScanRepository
+
+    stale = make_message(provider_message_id="archived")
+    first = make_message(provider_message_id="first")
+    older = make_message(provider_message_id="older")
+    await MessageRepository(async_session).upsert_messages(test_account, [stale])
+    await async_session.commit()
+    calls: list[str | None] = []
+    cancel = asyncio.Event()
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            calls.append(continuation)
+            if continuation is None:
+                yield MessagePage(
+                    page_number=1,
+                    messages=(first,),
+                    continuation="older-page",
+                    failed_message_count=int(metadata_failed),
+                )
+                if pause == "network":
+                    raise ProviderResponseError("synthetic network failure")
+                if pause == "rate":
+                    raise ProviderRateLimitError("synthetic", retry_after_seconds=1000)
+                if pause == "task_cancel":
+                    raise asyncio.CancelledError
+            # Duplicate IDs between pages must not inflate checkpoint counts.
+            yield MessagePage(page_number=2, messages=(first, older))
+
+    def progress(value: SyncProgress) -> None:
+        if value.pages_fetched == 1:
+            if pause == "budget":
+                monkeypatch.setattr(sync_module, "MAX_RUN_WORK_SECONDS", -1)
+            if pause == "cancel":
+                cancel.set()
+
+    def service(session: AsyncSession) -> SyncService:
+        return SyncService(
+            provider=FakeEmailProvider(),
+            message_repo=MessageRepository(session),
+            sync_run_repo=SyncRunRepository(session),
+            account_repo=AccountRepository(session),
+        )
+
+    if pause == "task_cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await service(async_session).sync_inbox(
+                reader=Reader(),
+                account_id=test_account,
+                account_identity="user@example.com",
+                progress=progress,
+                cancel=cancel,
+            )
+    else:
+        result = await service(async_session).sync_inbox(
+            reader=Reader(),
+            account_id=test_account,
+            account_identity="user@example.com",
+            progress=progress,
+            cancel=cancel,
+        )
+        assert result.status in (SyncStatus.PARTIAL, SyncStatus.CANCELLED)
+    checkpoint = await InboxScanRepository(async_session).resume(test_account)
+    assert checkpoint is not None and checkpoint.seen_ids == {"first"}
+    assert await InboxScanRepository(async_session).resume(test_account + 100) is None
+    await async_session.commit()
+    rows, _ = await MessageRepository(async_session).get_inbox_page(test_account)
+    assert {row.provider_message_id for row in rows} == {"archived", "first"}
+    factory = async_sessionmaker(async_session.bind, expire_on_commit=False)
+    await async_session.close()
+    monkeypatch.setattr(sync_module, "MAX_RUN_WORK_SECONDS", 180)
+    async with factory() as reopened:
+        result = await service(reopened).sync_inbox(
+            reader=Reader(),
+            account_id=test_account,
+            account_identity="user@example.com",
+        )
+        assert calls == [None, "older-page"]
+        assert result.page_count == 2 and result.message_count == 2
+        assert result.failed_message_count == int(metadata_failed)
+        assert result.status is (SyncStatus.PARTIAL if metadata_failed else SyncStatus.COMPLETE)
+        rows, _ = await MessageRepository(reopened).get_inbox_page(test_account)
+        assert ("archived" in {row.provider_message_id for row in rows}) == metadata_failed
+        assert await InboxScanRepository(reopened).resume(test_account) is None
+        account = await AccountRepository(reopened).get_by_id(test_account)
+        assert account is not None and account.last_sync_at_utc is None
+
+
+@pytest.mark.parametrize("invalidate", ["expired", "deleted", "clear", "oversized"])
+async def test_inbox_invalid_checkpoints_restart_without_reconciliation(
+    async_session: AsyncSession,
+    test_account: int,
+    invalidate: str,
+) -> None:
+    from sqlalchemy import delete
+
+    from mailbrief.ports.errors import ProviderContinuationError
+    from mailbrief.storage.inbox_scan import InboxScanRepository
+    from mailbrief.storage.tables import MessageTable, SyncRunTable
+
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [make_message(provider_message_id="first")])
+    run = await SyncRunRepository(async_session).create_sync_run(
+        account_id=test_account,
+        range_start_utc=TEST_WINDOW.start_utc,
+        range_end_utc=TEST_WINDOW.end_utc,
+        status="partial",
+    )
+    run.message_count = 1
+    run.page_count = 1
+    scans = InboxScanRepository(async_session)
+    await scans.remember(run.id, test_account, {"first"}, "old-page")
+    if invalidate == "deleted":
+        await async_session.execute(delete(MessageTable))
+    elif invalidate == "clear":
+        await scans.clear()
+    elif invalidate == "oversized":
+        run.inbox_continuation = "x" * 4097
+    await async_session.commit()
+    calls: list[str | None] = []
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            calls.append(continuation)
+            if continuation:
+                raise ProviderContinuationError("synthetic expired cursor")
+            yield MessagePage(page_number=1, messages=(make_message(provider_message_id="fresh"),))
+
+    service = SyncService(
+        provider=FakeEmailProvider(),
+        message_repo=repo,
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+    )
+    result = await service.sync_inbox(
+        reader=Reader(), account_id=test_account, account_identity="user@example.com"
+    )
+    if invalidate == "expired":
+        assert result.status is SyncStatus.PARTIAL
+        preserved = await repo.get_by_provider_message_id(test_account, "first")
+        assert preserved is not None and preserved.is_in_inbox
+        result = await service.sync_inbox(
+            reader=Reader(), account_id=test_account, account_identity="user@example.com"
+        )
+        assert calls == ["old-page", None]
+    else:
+        assert calls == [None]
+    assert result.status is SyncStatus.COMPLETE
+    old_run = await async_session.get(SyncRunTable, run.id)
+    assert old_run is not None and old_run.inbox_continuation is None
+
+
+async def test_inbox_checkpoint_survives_database_engine_shutdown(tmp_path: Path) -> None:
+    from mailbrief.storage.database import Database
+    from mailbrief.storage.migrate import upgrade_database
+
+    path = tmp_path / "restart.sqlite3"
+    await asyncio.to_thread(upgrade_database, path)
+    database = Database.from_path(path)
+    calls: list[str | None] = []
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            calls.append(continuation)
+            if continuation is None:
+                yield MessagePage(page_number=1, messages=(make_message(),), continuation="next")
+                raise ProviderResponseError("synthetic interruption")
+            yield MessagePage(page_number=2, messages=())
+
+    async def run(session: AsyncSession, account_id: int) -> SyncStatus:
+        result = await SyncService(
+            provider=FakeEmailProvider(),
+            message_repo=MessageRepository(session),
+            sync_run_repo=SyncRunRepository(session),
+            account_repo=AccountRepository(session),
+        ).sync_inbox(reader=Reader(), account_id=account_id, account_identity="user@example.com")
+        return result.status
+
+    try:
+        async with database.session() as session:
+            account = await AccountRepository(session).upsert(
+                AccountIdentity(
+                    provider=ProviderKind.MICROSOFT,
+                    provider_account_id="restart",
+                    email_address="user@example.com",
+                )
+            )
+            await session.commit()
+            account_id = account.id
+            assert await run(session, account_id) is SyncStatus.PARTIAL
+    finally:
+        await database.dispose()
+    reopened = Database.from_path(path)
+    try:
+        async with reopened.session() as session:
+            assert await run(session, account_id) is SyncStatus.COMPLETE
+            assert calls == [None, "next"]
+    finally:
+        await reopened.dispose()

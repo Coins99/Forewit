@@ -3,20 +3,24 @@
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any, Final
 
 from mailbrief.domain.digests import SyncProgress, SyncResult, SyncStage, SyncStatus
+from mailbrief.domain.messages import MessagePage
 from mailbrief.ports.email_provider import EmailProvider
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
+    ProviderContinuationError,
     ProviderError,
     ProviderPermissionError,
     ProviderRateLimitError,
     ProviderResponseError,
 )
+from mailbrief.ports.inbox import InboxReader
 from mailbrief.services.calendar import DayWindow
+from mailbrief.storage.inbox_scan import InboxScanRepository
 from mailbrief.storage.repositories import (
     AccountRepository,
     MessageRepository,
@@ -102,21 +106,93 @@ class SyncService:
         last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are
         honored by resuming from the last committed page.
         """
-        sync_run = await self._sync_run_repo.create_sync_run(
+
+        def pages(continuation: str | None) -> AsyncIterator[MessagePage]:
+            return self._provider.iter_message_pages(
+                range_start_utc=window.start_utc,
+                range_end_utc=window.end_utc,
+                continuation=continuation,
+            )
+
+        return await self._sync_pages(
             account_id=account_id,
-            range_start_utc=window.start_utc,
-            range_end_utc=window.end_utc,
-            status="started",
+            account_identity=account_identity,
+            window=window,
+            pages=pages,
+            progress=progress,
+            cancel=cancel,
+            record_last_sync=record_last_sync,
+        )
+
+    async def sync_inbox(
+        self,
+        *,
+        reader: InboxReader,
+        account_id: int,
+        account_identity: str,
+        progress: Callable[[SyncProgress], None] | None = None,
+        cancel: asyncio.Event | None = None,
+    ) -> SyncResult:
+        """Sync all current Inbox metadata; reconcile only after complete enumeration.
+
+        This does not advance the daily-brief watermark or download bodies.
+        """
+        now = datetime.now(UTC)
+        window = DayWindow(
+            now.date(), "UTC", datetime.min.replace(tzinfo=UTC), datetime.max.replace(tzinfo=UTC)
+        )
+        return await self._sync_pages(
+            account_id=account_id,
+            account_identity=account_identity,
+            window=window,
+            pages=reader.iter_inbox_pages,
+            progress=progress,
+            cancel=cancel,
+            record_last_sync=False,
+            resume_inbox=True,
+        )
+
+    async def _sync_pages(
+        self,
+        *,
+        account_id: int,
+        account_identity: str,
+        window: DayWindow,
+        pages: Callable[[str | None], AsyncIterator[MessagePage]],
+        progress: Callable[[SyncProgress], None] | None,
+        cancel: asyncio.Event | None,
+        record_last_sync: bool,
+        resume_inbox: bool = False,
+    ) -> SyncResult:
+        scans = None
+        if resume_inbox:
+            assert self._session is not None
+            scans = InboxScanRepository(self._session)
+        saved = await scans.resume(account_id) if scans else None
+        sync_run = (
+            None
+            if saved
+            else await self._sync_run_repo.create_sync_run(
+                account_id=account_id,
+                range_start_utc=window.start_utc,
+                range_end_utc=window.end_utc,
+                status="started",
+            )
         )
         await self._commit()
-        sync_run_id = sync_run.id
+        if saved:
+            sync_run_id = saved.run_id
+        else:
+            assert sync_run is not None
+            sync_run_id = sync_run.id
 
-        pages_count = 0
-        messages_count = 0
-        failed_count = 0
-        seen_ids: set[str] = set()
+        pages_count = saved.pages if saved else 0
+        seen_ids: set[str] = set(saved.seen_ids) if saved else set()
+        messages_count = len(seen_ids) if saved else 0
+        failed_count = saved.failed if saved else 0
         local_wait_seconds = 0.0
-        continuation: str | None = None
+        continuation: str | None = saved.continuation if saved else None
+        committed = (pages_count, messages_count, failed_count, continuation)
 
         def emit_progress() -> None:
             if progress is None:
@@ -134,6 +210,8 @@ class SyncService:
                 logger.warning("Progress callback raised an exception: %s", exc)
 
         async def finish(status: SyncStatus, error_code: str | None) -> SyncResult:
+            if scans and (status is SyncStatus.COMPLETE or continuation is None):
+                await scans.discard(sync_run_id)
             await self._sync_run_repo.update_sync_run(
                 sync_run_id,
                 status=status,
@@ -169,12 +247,7 @@ class SyncService:
                     return await finish(status, SYNC_RUN_TIMEOUT)
 
                 try:
-                    pages = self._provider.iter_message_pages(
-                        range_start_utc=window.start_utc,
-                        range_end_utc=window.end_utc,
-                        continuation=continuation,
-                    )
-                    async for page in pages:
+                    async for page in pages(continuation):
                         if cancel is not None and cancel.is_set():
                             return await finish(SyncStatus.CANCELLED, None)
 
@@ -186,6 +259,14 @@ class SyncService:
                             m.provider_message_id for m in page.messages if m.is_in_inbox
                         )
                         continuation = page.continuation
+                        if scans:
+                            messages_count = len(seen_ids)
+                            await scans.remember(
+                                sync_run_id,
+                                account_id,
+                                {m.provider_message_id for m in page.messages if m.is_in_inbox},
+                                continuation,
+                            )
 
                         await self._sync_run_repo.update_sync_run(
                             sync_run_id,
@@ -194,6 +275,7 @@ class SyncService:
                             failed_message_count=failed_count,
                         )
                         await self._commit()
+                        committed = (pages_count, messages_count, failed_count, continuation)
                         emit_progress()
 
                         if continuation is not None and work_budget_exceeded():
@@ -227,11 +309,15 @@ class SyncService:
 
         except asyncio.CancelledError:
             await self._rollback()
+            pages_count, messages_count, failed_count, continuation = committed
             await finish(SyncStatus.CANCELLED, None)
             raise
 
         except Exception as exc:
             await self._rollback()
+            pages_count, messages_count, failed_count, continuation = committed
+            if scans and isinstance(exc, ProviderContinuationError):
+                continuation = None
             error_code = sanitize_error_code(exc)
             logger.error("Synchronization failed for account %s: %s", account_id, error_code)
             status = SyncStatus.PARTIAL if pages_count > 0 else SyncStatus.FAILED

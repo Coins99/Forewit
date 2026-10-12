@@ -149,7 +149,7 @@ class PreferencesPanel(QWidget):
             self.length.addItem(name)
         self.length.setAccessibleName("Default drafting length")
         form.addRow("Drafting len&gth", self.length)
-        self.refresh_on_launch = QCheckBox("&Refresh when MailBrief starts")
+        self.refresh_on_launch = QCheckBox("&Review today's mail when MailBrief starts")
         form.addRow(self.refresh_on_launch)
         self.refresh_interval = QComboBox()
         for name, _minutes in REFRESH_CHOICES:

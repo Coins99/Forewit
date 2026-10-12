@@ -99,6 +99,11 @@ def error_guidance(code: str) -> str:
 
 def configuration_guidance(exc: ConfigurationError) -> str:
     message = str(exc)  # ConfigurationError messages are static and nonsecret by contract.
+    if "This build has no Google sign-in configuration" in message:
+        return (
+            "This build does not include Google sign-in configuration. "
+            "Use a configured MailBrief build, or choose a custom Desktop OAuth file in Settings."
+        )
     if "MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH" in message:
         return "Choose the downloaded Google Desktop OAuth client JSON file in Settings."
     if "MAILBRIEF_GROQ_MODEL" in message:

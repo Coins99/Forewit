@@ -28,6 +28,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       release-tag: ${{ github.ref_name }}
+    secrets:
+      MAILBRIEF_GOOGLE_OAUTH_JSON: ${{ secrets.MAILBRIEF_GOOGLE_OAUTH_JSON }}
 
   draft:
     needs: build

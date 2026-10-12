@@ -125,7 +125,7 @@ async def test_the_footer_buttons_fit_and_a_long_status_never_widens_the_window(
     room = sidebar.contentsRect().width()
     for footer_button in (window.connect_button, window.disconnect_button):
         assert footer_button.sizeHint().width() <= room
-    assert window.connect_button.accessibleName() == "Connect Gmail"
+    assert window.connect_button.accessibleName() == "Sign in with Google"
     narrow = window.minimumSizeHint().width()
     assert narrow <= 900
     window.status.setText("A status that keeps going " * 20)

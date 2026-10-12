@@ -241,3 +241,20 @@ def test_retry_after_parsing() -> None:
     assert retry_delay("Wed, 01 Jan 2020 00:00:00 GMT", 0) == 0
     for value in ("nan", "inf", "junk", None):
         assert 1 <= retry_delay(value, 0) <= 1.5
+
+
+async def test_rejected_pagination_is_distinct_and_sanitized(
+    respx_mock: respx.MockRouter,
+) -> None:
+    from mailbrief.ports.errors import ProviderContinuationError
+
+    respx_mock.get(MESSAGES_URL).respond(400, json={"error": "sensitive provider text"})
+    async with httpx.AsyncClient() as http:
+        client = GmailClient(http, FakeSession())
+        with pytest.raises(ProviderContinuationError) as failure:
+            await client.list_messages("", "private-cursor")
+        assert "private-cursor" not in str(failure.value)
+        assert "sensitive" not in str(failure.value)
+        with pytest.raises(ProviderResponseError) as fresh:
+            await client.list_messages("", None)
+        assert not isinstance(fresh.value, ProviderContinuationError)

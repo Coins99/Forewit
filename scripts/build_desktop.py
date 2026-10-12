@@ -1,6 +1,7 @@
 """Build the desktop package on the destination OS using the locked environment."""
 
 import argparse
+import os
 import plistlib
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from mailbrief import __version__
 # Direct script execution puts scripts/, not the project root, on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.google_client import stage_google_client  # noqa: E402
 from scripts.package_manifest import project_version, write_manifest  # noqa: E402
 
 
@@ -20,6 +22,11 @@ def main() -> int:
         "--console", action="store_true", help="Build with a troubleshooting console."
     )
     parser.add_argument("--onefile", action="store_true", help="Build one Windows x64 executable.")
+    parser.add_argument(
+        "--google-oauth-client",
+        type=Path,
+        help="Bundle a registered Google Desktop OAuth client for user sign-in (never tokens).",
+    )
     options = parser.parse_args()
     if sys.platform not in {"win32", "darwin"}:
         raise SystemExit("Build MailBrief on Windows or macOS.")
@@ -95,6 +102,10 @@ def main() -> int:
         "--hidden-import",
         "keyring.backends.Windows" if sys.platform == "win32" else "keyring.backends.macOS",
     ]
+    build_client = os.environ.get("MAILBRIEF_BUILD_GOOGLE_OAUTH_JSON", "")
+    staged = stage_google_client(options.google_oauth_client, build_client, output / "resources")
+    if staged is not None:
+        command.extend(["--add-data", f"{staged}:mailbrief/resources"])
     for revision in sorted((root / "migrations" / "versions").glob("*.py")):
         command.extend(["--add-data", f"{revision}:migrations/versions"])
     if sys.platform == "win32":
