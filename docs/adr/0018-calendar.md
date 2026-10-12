@@ -96,3 +96,41 @@ Calendar page.
   the cache changes. The calendars shown are those Google Calendar's own list shows, and
   the primary one always.
 - **Isolation.** A calendar sign-in failure never changes the Gmail connection.
+
+## Phase 3 decisions (2026-10-12): AI-proposed changes
+
+Phase 3 ships in two PRs: 3a adds the planning service, the Groq call and all-or-nothing
+apply with Undo; 3b adds the Plan with AI panel to the Calendar page. It follows the
+planner roadmap's AI rules (`docs/future-implementations.md` §3.3 and §3.10): the model
+proposes, code checks, the owner applies.
+
+- **What is sent.** The owner's instruction, the local date, time and zone, and the
+  owner's own events in four weeks from the Monday shown: titles and times, never notes.
+  Only when the owner ticks them: Google busy times without titles; their titles as a
+  separate choice; open actions' titles with their deadlines and target dates. At most
+  200 events, 200 busy times and 100 actions. A preview lists each part and its size.
+- **Consent.** An owner consent scoped `calendar` (disclosure version 1), recorded on
+  first use with the ticked box, as AI drafting does.
+- **What may change.** Only the owner's events: create, update (title, all-day, times) or
+  delete, at most 10 per request. Notes never change. Google events, actions, deadlines
+  and target dates can't be named, so they can't change.
+- **Checks in Python.** An event is named by a key that exists only in that request, and
+  at most once. Dates and times are parsed here, in the owner's zone (a time a DST change
+  skips reads as the clock shows it), must fall inside the window and meet the event
+  bounds; an event that already reaches past the window may keep those days. A date or
+  time that is given but isn't real refuses the change. On update a missing field keeps
+  the event's own: moving only the start keeps the length (elapsed time, for timed
+  events), and an end time without a date keeps its day relative to the start. A change
+  that changes nothing, or only the event's zone, is dropped. Titles and reasons lose
+  control and format characters and are capped. Dropped changes are counted for the
+  owner.
+- **Overlaps.** Worked out locally, never sent: the owner's other timed events, as the
+  other changes leave them and with the new ones, and the timed Google events a change
+  would overlap are shown as warnings; they never block.
+  Every Google event counts as busy, since phase 2 keeps no free/busy flag.
+- **Apply and Undo.** The owner keeps the changes they want. Applying is one transaction,
+  one revision per event; if any event changed since the request, nothing is applied and
+  the owner asks again. Undo reverses the whole batch, and only while every event is as
+  the apply left it.
+- **Not yet.** Work blocks linked to actions and deterministic scheduling are the planner
+  roadmap's P3; events made here are ordinary events.

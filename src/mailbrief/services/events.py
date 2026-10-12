@@ -18,8 +18,12 @@ from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.events import (
     ActionMarker,
+    AppliedBatch,
+    AppliedChange,
     CalendarEvent,
     CalendarRange,
+    ChangeKind,
+    EventChange,
     EventEdit,
     MarkerKind,
 )
@@ -33,6 +37,8 @@ MAX_RANGE_DAYS: Final = 42
 _NOT_FOUND: Final = "That event was not found."
 _STALE: Final = "The event changed since it was loaded; reload it and try again."
 _BAD_RANGE: Final = "Choose a range of 1 to 42 days."
+_UNDO: Final = "Those events changed since; they can no longer be undone together."
+_NO_CHANGES: Final = "Choose at least one change."
 
 
 class EventNotFoundError(LookupError):
@@ -220,3 +226,81 @@ class EventService:
             google_events=tuple(sorted(cached, key=GoogleEvent.sort_key)),
             google_coverage=await google.coverage(),
         )
+
+    async def apply_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:
+        """Apply every change as one transaction, each event one revision.
+
+        An update or delete names the event as it was read; when any of them has changed or
+        been deleted since, EventConflictError is raised and nothing is applied. Returns
+        what undo needs.
+        """
+        if not changes:
+            raise ValueError(_NO_CHANGES)
+
+        async def run(now: datetime) -> AppliedBatch:
+            applied: list[AppliedChange] = []
+            for change in changes:
+                if change.kind is ChangeKind.CREATE:
+                    assert change.edit is not None
+                    row = CalendarEventTable(
+                        public_id=self._id_factory(),
+                        created_at_utc=now,
+                        updated_at_utc=now,
+                        revision=1,
+                    )
+                    apply_edit(row, change.edit)
+                    self._repository.add(row)
+                    await self._session.flush()
+                    applied.append(
+                        AppliedChange(kind=change.kind, public_id=row.public_id, revision=1)
+                    )
+                    continue
+                assert change.event is not None
+                live = await self._repository.get(change.event.public_id)
+                if live is None or live.revision != change.event.revision:
+                    raise EventConflictError(_STALE)
+                row = live
+                previous = event_from_row(row).edit()
+                if change.kind is ChangeKind.UPDATE:
+                    assert change.edit is not None
+                    apply_edit(row, change.edit)
+                else:
+                    row.deleted_at_utc = now
+                _touch(row, now)
+                applied.append(
+                    AppliedChange(
+                        kind=change.kind,
+                        public_id=row.public_id,
+                        revision=row.revision,
+                        previous=previous if change.kind is ChangeKind.UPDATE else None,
+                    )
+                )
+            return AppliedBatch(changes=tuple(applied))
+
+        return await self._write(run)
+
+    async def undo_changes(self, batch: AppliedBatch) -> None:
+        """Reverse a batch while every event is exactly as it left them; all or none.
+
+        An added event is deleted, an updated one gets its earlier fields back as a new
+        revision, and a deleted one is restored. Raises EventConflictError otherwise.
+        """
+
+        async def run(now: datetime) -> None:
+            for change in batch.changes:
+                row = await self._repository.get(change.public_id, include_deleted=True)
+                gone = row is None or (row.deleted_at_utc is not None) != (
+                    change.kind is ChangeKind.DELETE
+                )
+                if row is None or gone or row.revision != change.revision:
+                    raise EventConflictError(_UNDO)
+                if change.kind is ChangeKind.CREATE:
+                    row.deleted_at_utc = now
+                elif change.kind is ChangeKind.UPDATE:
+                    assert change.previous is not None
+                    apply_edit(row, change.previous)
+                else:
+                    row.deleted_at_utc = None
+                _touch(row, now)
+
+        await self._write(run)
