@@ -470,3 +470,25 @@ def test_other_keys_still_type_and_alt_down_still_opens_the_list(editor: EventEd
     finally:
         editor.end_time.hidePopup()  # An open list would swallow later tests' wheel events.
     assert shown(editor)[3] == "10:30"
+
+
+def test_a_refused_step_doesnt_hold_back_the_next_save(editor: EventEditor) -> None:
+    asked = saves(editor)
+    press(editor.end_time, Qt.Key.Key_Down, times=4)  # 15:45, 15:30, 15:15, then the start.
+    assert shown(editor)[3] == "15:15" and editor.status.text() == ENDS_FIRST
+    press_save(editor)  # No Save came with the step, so this one goes ahead.
+    assert len(asked) == 1
+    assert asked[0].ends_at_utc == local_instant(TODAY, time(15, 15), TORONTO)
+    editor.keep_open("")  # As the window does when a save can't happen.
+    editor.start_time.setEditText("noon")
+    press(editor.start_time, Qt.Key.Key_Up)  # Taken by the step, and refused.
+    assert editor.status.text() == BAD_TIME
+    press_save(editor)
+    assert len(asked) == 2
+    editor.keep_open("")
+    choose(editor.end_time, "14:00")  # 14:00 the next day: 23 hours.
+    editor.end_date.setCurrentSection(QDateTimeEdit.Section.DaySection)
+    press(editor.end_date, Qt.Key.Key_Down)  # Back to the start's day, before the start.
+    assert shown(editor)[2:] == ("2026-10-15", "14:00") and editor.status.text() == ENDS_FIRST
+    press_save(editor)
+    assert len(asked) == 3

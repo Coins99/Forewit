@@ -164,11 +164,18 @@ def stepped_wall(wall: datetime, steps: int, zone: ZoneInfo) -> datetime:
 class DateBox(QDateEdit):
     """A date, typed as yyyy-MM-dd or picked in its calendar popup. Like a TimeBox, the
     wheel changes it only while it has focus, never gives it focus and ignores a trackpad's
-    coasting, so scrolling over the dialog never moves an event by a day."""
+    coasting, so scrolling over the dialog never moves an event by a day. ``stepped`` says
+    an arrow key or the wheel moved it, once its change has been taken or refused."""
+
+    stepped = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Tab and click; not the wheel.
+
+    def stepBy(self, steps: int) -> None:
+        super().stepBy(steps)
+        self.stepped.emit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if not self.hasFocus():
@@ -336,6 +343,8 @@ class EventEditor(QDialog):
         self.end_time.committed.connect(self._end_time_committed)
         self.start_time.stepped.connect(self._start_time_stepped)
         self.end_time.stepped.connect(self._end_time_stepped)
+        self.start_date.stepped.connect(self._stepped)
+        self.end_date.stepped.connect(self._stepped)
         for label, (day, clock) in (
             ("Starts", (self.start_date, self.start_time)),
             ("Ends", (self.end_date, self.end_time)),
@@ -502,21 +511,32 @@ class EventEditor(QDialog):
         taken is taken first, as leaving the field would; if it's refused, nothing steps.
         The start keeps its day, which has its own field: stepping past either end stops at
         the day's first or last listed time. The end moves with it."""
-        if self.start_time.typing() and not self._take_start_text():
-            return
-        local = self._start.astimezone(self._zone)
-        wall = stepped_wall(_wall(local), steps, self._zone)
-        if wall.date() != local.date():
-            times = day_times(local.date(), self._zone)
-            wall = datetime.combine(local.date(), times[0] if steps < 0 else times[-1])
-        self._move_start(local_instant(wall.date(), wall.time(), self._zone))
+        try:
+            if self.start_time.typing() and not self._take_start_text():
+                return
+            local = self._start.astimezone(self._zone)
+            wall = stepped_wall(_wall(local), steps, self._zone)
+            if wall.date() != local.date():
+                times = day_times(local.date(), self._zone)
+                wall = datetime.combine(local.date(), times[0] if steps < 0 else times[-1])
+            self._move_start(local_instant(wall.date(), wall.time(), self._zone))
+        finally:
+            self._stepped()
 
     def _end_time_stepped(self, steps: int) -> None:
         """The same in Ends, on whichever day the end falls, with the usual refusals."""
-        if self.end_time.typing() and not self._take_end_text():
-            return
-        wall = stepped_wall(_wall(self._end.astimezone(self._zone)), steps, self._zone)
-        self._try_end(local_instant(wall.date(), wall.time(), self._zone))
+        try:
+            if self.end_time.typing() and not self._take_end_text():
+                return
+            wall = stepped_wall(_wall(self._end.astimezone(self._zone)), steps, self._zone)
+            self._try_end(local_instant(wall.date(), wall.time(), self._zone))
+        finally:
+            self._stepped()
+
+    def _stepped(self) -> None:
+        """No Save comes with a step, and a refused one already says why on screen, so the
+        next Save goes ahead rather than waiting (see _save)."""
+        self._refused = False
 
     def _move_start(self, start: datetime) -> None:
         """A new start keeps the event's length, so the end moves with it."""
