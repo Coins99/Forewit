@@ -57,6 +57,13 @@ myaccount.google.com/permissions if you want to.
 
 ## Live check
 
-1. Connect, then find a repeating event and an all-day event in the right days.
-2. Choose Refresh; move nine weeks ahead and watch that week load.
-3. Disconnect: the Google rows disappear, and Gmail stays connected.
+1. With a Gmail sign-in from before ADR 0019, open the Calendar page: it says Google
+   Calendar isn't allowed yet. Choose **Allow Google Calendar**, then Cancel on Google's
+   page: Gmail stays connected and Allow is still offered.
+2. Choose **Allow Google Calendar** again, with the same Google account, and tick both
+   calendar boxes. Find a repeating event and an all-day event in the right days.
+3. Choose Refresh; move nine weeks ahead and watch that week load.
+4. Run Sync and review: the line under the Calendar heading shows a new update time.
+5. Disconnect in the sidebar: Gmail disconnects and the Google rows disappear. Connect
+   Gmail again: Google asks once for Gmail and both calendar permissions, and the rows
+   come back.
