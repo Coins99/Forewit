@@ -41,6 +41,7 @@ from mailbrief.storage.database import Database
 from mailbrief.storage.recovery import BackupValidationError, inspect_backup
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.diagnostics import log_failure
+from mailbrief.ui.dialog_guard import DialogGuard
 
 HELP = """Your data stays on this computer. Disconnect removes Gmail credentials only.
 Backup saves a consistent database snapshot, including your writing and preferences;
@@ -91,6 +92,8 @@ class DataDialog(QDialog):
         refresh: Callable[[], Awaitable[None]],
     ) -> None:
         super().__init__(parent)
+        # Its pickers and boxes open behind this cover, never modal, so quitting works.
+        self.dialog_guard = DialogGuard(self)
         self.path = database_path
         self.run = run
         self.request_restore = request_restore
@@ -103,7 +106,6 @@ class DataDialog(QDialog):
         self._confirmation: QMessageBox | None = None
         self._storage_available = False
         self.setWindowTitle("MailBrief — Data and recovery")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(640, 650)
         layout = QVBoxLayout(self)
         content = QWidget()
@@ -203,7 +205,7 @@ class DataDialog(QDialog):
         picker.finished.connect(
             lambda result: future.set_result(result) if not future.done() else None
         )
-        picker.open()
+        self.dialog_guard.show_dialog(picker)
         try:
             if await future != QDialog.DialogCode.Accepted or not picker.selectedFiles():
                 return None
@@ -233,7 +235,7 @@ class DataDialog(QDialog):
         box.finished.connect(
             lambda result: future.set_result(result) if not future.done() else None
         )
-        box.open()
+        self.dialog_guard.show_dialog(box)
         try:
             return await future == QMessageBox.StandardButton.Ok
         finally:

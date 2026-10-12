@@ -188,6 +188,24 @@ class PreferencesPanel(QWidget):
         # No permission to date yet, so ``today`` is never read.
         self.set_auto_send(None, ZoneInfo("UTC"), today=date.min)
         self.set_zones("unknown", ())
+        self._loaded_input = self._input()
+
+    def _input(self) -> tuple[object, ...]:
+        """Everything the owner can change here, to tell whether any of it is unsaved."""
+        return (
+            self.time_zone.currentIndex(),
+            self.shortlist_limit.value(),
+            self.senders.toPlainText(),
+            self.tone.currentIndex(),
+            self.length.currentIndex(),
+            tuple(box.value() for box in self.ai_limits.values()),
+            self.refresh_on_launch.isChecked(),
+            self.refresh_interval.currentIndex(),
+        )
+
+    def has_unsaved_input(self) -> bool:
+        """Whether closing now would lose a preference the owner changed but didn't save."""
+        return self._input() != self._loaded_input
 
     def set_zones(self, system_zone: str, zones: tuple[str, ...]) -> None:
         """The choices: the system time zone first, then ``zones`` (see region_zones())."""
@@ -225,6 +243,7 @@ class PreferencesPanel(QWidget):
             )
         )
         self.save_button.setEnabled(True)
+        self._loaded_input = self._input()
 
     def set_auto_send(
         self,

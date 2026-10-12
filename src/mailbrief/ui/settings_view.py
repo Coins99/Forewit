@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.providers.groq.credentials import GroqKeyError, parse_api_key
+from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
 
@@ -33,8 +34,9 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
+        # Its pickers and boxes open behind this cover, never modal, so quitting works.
+        self.dialog_guard = DialogGuard(self)
         self.setWindowTitle("MailBrief settings")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(640, 620)
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -97,12 +99,22 @@ class SettingsDialog(QDialog):
         self.revoke_button.clicked.connect(self.revoke_requested.emit)
         self.preferences_panel.status_changed.connect(self.status.setText)
         self._picker: QFileDialog | None = None
+        self._loaded_input = self._input()
+
+    def _input(self) -> tuple[str, ...]:
+        """The connection fields and a typed key, to tell whether any of it is unsaved."""
+        return (self.oauth_path.text(), self.model.text(), self.key.text())
+
+    def has_unsaved_input(self) -> bool:
+        """Whether closing now would lose something typed here or in Preferences."""
+        return self._input() != self._loaded_input or self.preferences_panel.has_unsaved_input()
 
     def set_preferences(self, preferences: DesktopPreferences) -> None:
         self.oauth_path.setText(str(preferences.gmail_oauth_client_path or ""))
         self.model.setText(preferences.groq_model or "")
         self.key.clear()
         self.status.clear()
+        self._loaded_input = self._input()
 
     def set_busy(self, busy: bool) -> None:
         self.fields.setEnabled(not busy)
@@ -115,7 +127,7 @@ class SettingsDialog(QDialog):
         self._picker.setFileMode(QFileDialog.FileMode.ExistingFile)
         self._picker.setNameFilter("JSON files (*.json)")
         self._picker.fileSelected.connect(self.oauth_path.setText)
-        self._picker.open()
+        self.dialog_guard.show_dialog(self._picker)
 
     def _save(self) -> None:
         raw_path = self.oauth_path.text().strip()
@@ -124,6 +136,7 @@ class SettingsDialog(QDialog):
             groq_model=self.model.text().strip() or None,
         )
         self.save_requested.emit(preferences)
+        self._loaded_input = self._input()  # Asked to save: no longer unsaved.
 
     def _save_key(self) -> None:
         raw = self.key.text()

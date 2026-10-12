@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -167,6 +168,7 @@ from mailbrief.ui.diagnostics import (
     log_automatic_run,
     log_failure,
 )
+from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.draft_editor import DraftEditor
 from mailbrief.ui.drafts_view import DELETE as DELETE_DRAFT
 from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
@@ -175,7 +177,7 @@ from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
-from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
@@ -861,6 +863,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
         layout.addWidget(strip)
         self.setCentralWidget(central)
+        # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
+        # closeEvent on macOS (a modal dialog's AppKit session drops them).
+        self.dialog_guard = DialogGuard(self)
+        self._quit_confirmed = False  # The owner chose to discard unsaved input and quit.
+        self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
         sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
@@ -1072,7 +1079,7 @@ class MainWindow(QMainWindow):
             accounts = await self.backend.cached_accounts() if self._ready else ()
             if not self._closing:
                 self.data_dialog.configure(accounts, available=self._ready)
-                self.data_dialog.open()
+                self.dialog_guard.show_dialog(self.data_dialog)
 
     def _run_data(self, operation: Callable[[], Awaitable[None]]) -> bool:
         if self.data_dialog is None:
@@ -1350,7 +1357,7 @@ class MainWindow(QMainWindow):
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
-            self.action_editor.open()
+            self.dialog_guard.show_dialog(self.action_editor)
         elif kind == COMPLETE:
             self.start(lambda: self._complete_action(action), cancellable=False)
         elif kind == REOPEN:
@@ -1361,14 +1368,14 @@ class MainWindow(QMainWindow):
             self.start(lambda: self._mark_seen(action), cancellable=False)
         elif kind == PROPOSALS:
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
-            self.proposals_dialog.open()
+            self.dialog_guard.show_dialog(self.proposals_dialog)
 
     def _request_new_task(self) -> None:
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
         self._show_page("actions")
         self.action_editor.new_task(self._local_today())
-        self.action_editor.open()
+        self.dialog_guard.show_dialog(self.action_editor)
 
     def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
         started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
@@ -1498,14 +1505,14 @@ class MainWindow(QMainWindow):
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
             self.event_editor.edit_new(value, self.now(), self.zone)
-            self.event_editor.open()
+            self.dialog_guard.show_dialog(self.event_editor)
         elif kind == OPEN_GOOGLE and isinstance(value, GoogleEvent):
             self._open_calendar_link(value)
         elif isinstance(value, CalendarEvent):
             event = value
             if kind == OPEN_EVENT:
                 self.event_editor.edit_event(event, self.zone)
-                self.event_editor.open()
+                self.dialog_guard.show_dialog(self.event_editor)
             elif kind == DELETE_EVENT:
                 self.start(lambda: self._delete_event(event), cancellable=False)
 
@@ -1680,7 +1687,7 @@ class MainWindow(QMainWindow):
         """Open the dialog; preparing and asking wait their turn through start()."""
         self._planning_plan = None
         self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
-        self.planning_dialog.open()
+        self.dialog_guard.show_dialog(self.planning_dialog)
 
     def _request_planning_preview(self, options: object) -> None:
         if isinstance(options, PlanningOptions):
@@ -1836,7 +1843,7 @@ class MainWindow(QMainWindow):
 
     def _edit_draft(self, draft: Draft) -> None:
         self.draft_editor.load(draft, self.zone)
-        self.draft_editor.open()
+        self.dialog_guard.show_dialog(self.draft_editor)
 
     # Writing with AI. Every step runs in draft_writes after pending autosaves; the
     # generation itself is a task of its own, so Cancel and quitting can stop it.
@@ -2213,7 +2220,7 @@ class MainWindow(QMainWindow):
     async def _open_cached(self) -> None:
         self.cached_dialog.show_today()  # Today in the owner's zone, each time it opens.
         self.cached_dialog.configure(await self.backend.cached_accounts())
-        self.cached_dialog.open()
+        self.dialog_guard.show_dialog(self.cached_dialog)
         selected = self.cached_dialog.selection()
         if selected is not None:
             await self._load_cached_page(*selected, 0)
@@ -2247,7 +2254,7 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             panel.set_unavailable()
             self.status.setText(str(exc))
-        self.settings_dialog.open()
+        self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
         self.cached_dialog.zone = self.zone
@@ -2717,7 +2724,7 @@ class MainWindow(QMainWindow):
             self.status.setText(NO_CONSENT)
             return
         self.auto_send_dialog.configure(status)
-        self.auto_send_dialog.open()
+        self.dialog_guard.show_dialog(self.auto_send_dialog)
 
     def _request_set_auto_send(self, limit: int) -> None:
         if not self.start(lambda: self._set_auto_send(limit), cancellable=False):
@@ -2878,12 +2885,59 @@ class MainWindow(QMainWindow):
         if self.task is not None and not self.task.done() and not self.task.cancelling():
             self.task.cancel()
 
+    def _unsaved_input(self) -> str | None:
+        """What quitting now would throw away: the open dialog holding unsaved input. The
+        draft editor isn't asked: closing saves its text."""
+        for dialog, what in (
+            (self.action_editor, "this action"),
+            (self.event_editor, "this event"),
+            (self.settings_dialog, "Settings"),
+        ):
+            if dialog.isVisible() and dialog.has_unsaved_input():
+                return what
+        return None
+
+    def ask_before_quitting(self) -> bool:
+        """When quitting would lose unsaved input, ask first and return True: the quit
+        waits for the answer. MailBriefApplication calls this for Cmd+Q and the Dock's
+        Quit, and closeEvent for the window's own close button."""
+        if self._closing or self._quit_confirmed:
+            return False
+        unsaved = self._unsaved_input()
+        if unsaved is None:
+            return False
+        box = self._quit_box
+        if box is None:
+            box = QMessageBox(self)
+            box.setObjectName("quitConfirmation")
+            box.setWindowTitle("Quit MailBrief")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.addButton(
+                button_label("Discard changes and quit"), QMessageBox.ButtonRole.DestructiveRole
+            )
+            box.setDefaultButton(box.addButton(QMessageBox.StandardButton.Cancel))
+            box.buttonClicked.connect(
+                lambda button: self._quit_answered(
+                    box.buttonRole(button) == QMessageBox.ButtonRole.DestructiveRole
+                )
+            )
+            self._quit_box = box
+        box.setText(f"Quit and discard your unsaved changes to {unsaved}?")
+        self.dialog_guard.show_dialog(box)  # Not modal: another quit only brings it back.
+        return True
+
+    def _quit_answered(self, discard: bool) -> None:
+        if discard:
+            self._quit_confirmed = True
+            self.close()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._shutdown_complete:
             event.accept()
             return
         event.ignore()  # Also defers QApplication.quit(), including Cmd+Q and Dock Quit.
-        if self._closing:
+        if self._closing or self.ask_before_quitting():
             return
         self._closing = True
         self.scheduler.stop()

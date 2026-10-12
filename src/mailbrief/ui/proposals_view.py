@@ -90,7 +90,6 @@ class ProposalsDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Proposals")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(680, 380)
         self._action_id: str | None = None
         self._proposals: tuple[ActionProposal, ...] = ()

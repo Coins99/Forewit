@@ -2,13 +2,14 @@
 
 import os
 import sys
+from typing import cast
 
 import pytest
-from PySide6.QtCore import QLocale
+from PySide6.QtCore import QEvent, QLocale
 from PySide6.QtWidgets import QApplication, QDateEdit
 from pytestqt.qtbot import QtBot
 
-from mailbrief.app import create_application, use_english_locale
+from mailbrief.app import MailBriefApplication, create_application, use_english_locale
 
 pytestmark = pytest.mark.skipif(
     (
@@ -48,3 +49,22 @@ def test_calendar_pop_ups_read_in_english(qtbot: QtBot) -> None:
         assert QLocale().monthName(1) == "January"
     finally:
         QLocale.setDefault(previous)
+
+
+def test_a_quit_waits_while_the_window_asks(qapp: QApplication) -> None:
+    """Cmd+Q and the Dock's Quit arrive as a Quit event; while the window is asking about
+    unsaved input, it is ignored, which cancels the quit on macOS."""
+    asked: list[bool] = []
+
+    def check() -> bool:
+        asked.append(True)
+        return True
+
+    application = cast(MailBriefApplication, qapp)  # The test's own QApplication.
+    application.quit_check = check  # Its __init__ never ran on this one.
+    try:
+        event = QEvent(QEvent.Type.Quit)
+        assert MailBriefApplication.event(application, event)
+        assert not event.isAccepted() and asked == [True]
+    finally:
+        del application.quit_check

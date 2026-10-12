@@ -442,3 +442,13 @@ async def test_unreadable_calendar_keeps_the_page(window: MainWindow, backend: F
     await window.initialize()
     assert "could not be refreshed" in window.status.text()
     assert "private" not in window.status.text()
+
+
+def test_event_editor_notices_unsaved_input(editor: EventEditor) -> None:
+    editor.edit_new(TODAY, NOW, TORONTO)
+    assert not editor.has_unsaved_input()  # What was loaded counts as saved.
+    editor.title.setText("Dentist")
+    assert editor.has_unsaved_input()
+    editor.edit_new(TODAY, NOW, TORONTO)
+    editor.end_time.setTime(QTime(17, 0))
+    assert editor.has_unsaved_input()

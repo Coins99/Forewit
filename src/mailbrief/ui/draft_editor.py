@@ -46,6 +46,7 @@ from mailbrief.domain.drafts import (
     still_to_fill,
 )
 from mailbrief.ui.deadline_text import moment_text
+from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 
 DEBOUNCE_MS = 1_500
@@ -120,6 +121,8 @@ class DraftEditor(QDialog):
         retry_ms: int = RETRY_MS,
     ) -> None:
         super().__init__(parent)
+        # Its pickers and boxes open behind this cover, never modal, so quitting works.
+        self.dialog_guard = DialogGuard(self)
         self.setWindowTitle("Draft")
         self.resize(720, 640)
         self.draft: Draft | None = None  # As last saved; its revision is what writes send.
@@ -684,7 +687,7 @@ class DraftEditor(QDialog):
         self._picker.setDefaultSuffix("md")
         self._picker.selectFile(export_filename(draft, ".md"))
         self._picker.fileSelected.connect(self.export_to)
-        self._picker.open()
+        self.dialog_guard.show_dialog(self._picker)
 
     def export_to(self, path: str) -> None:
         """Ask the window to write the draft to ``path``, which the owner chose."""

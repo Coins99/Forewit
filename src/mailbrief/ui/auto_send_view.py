@@ -48,7 +48,6 @@ class AutoSendDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Automatic analysis")
-        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(580, 440)
         self._status: AutoSendStatus | None = None
         layout = QVBoxLayout(self)

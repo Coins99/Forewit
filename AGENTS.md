@@ -131,7 +131,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Preferences tab (`preferences_view.py`) and the Briefs page for saved briefs and missed
   days (`history_view.py`), the Proposals dialog for one action and the wording of a
   proposal's effect (`proposals_view.py`); `lists.py` holds `ActivatingList`, where
-  Return or Enter activates a row once on every platform.
+  Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
+  non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
@@ -144,7 +145,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (Saved mail, Data, Settings, the Gmail and AI lines, Connect and Disconnect), the Today,
   run (review and consent), Actions, Drafts and Briefs pages, and a status strip with
   Undo.
-- `src/mailbrief/app.py` owns the qasync loop.
+- `src/mailbrief/app.py` owns the qasync loop, and `MailBriefApplication`, which lets the
+  window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
