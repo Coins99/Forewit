@@ -15,6 +15,8 @@ from sqlalchemy.orm import aliased
 
 from mailbrief.domain.actions import (
     Action,
+    ActionActivity,
+    ActionActivityKind,
     ActionFilter,
     ActionProposal,
     ActionSource,
@@ -36,6 +38,7 @@ from mailbrief.storage.database import sorted_batches
 from mailbrief.storage.proposals import ProposalRepository, proposal_from_row
 from mailbrief.storage.tables import (
     AccountTable,
+    ActionActivityTable,
     ActionSourceTable,
     ActionStepTable,
     ActionSuggestionTable,
@@ -46,6 +49,8 @@ from mailbrief.storage.tables import (
 )
 
 logger = logging.getLogger(__name__)
+
+DISPLAY_ACTIVITY_LIMIT = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +249,7 @@ def action_from_rows(
     sources: Sequence[tuple[ActionSourceTable, bool | None]],
     thread: ThreadActivity | None = None,
     proposals: Sequence[ActionProposal] = (),
+    activity: Sequence[ActionActivity] = (),
 ) -> Action:
     """Rebuild an action; each source pairs its snapshot with the cached Inbox state, if any,
     ``thread`` is its derived thread activity, and ``proposals`` its pending proposals."""
@@ -292,6 +298,7 @@ def action_from_rows(
         thread_seen_until_utc=row.thread_seen_until_utc,
         thread=thread,
         proposals=tuple(proposals),
+        activity=tuple(activity),
     )
 
 
@@ -355,6 +362,49 @@ class ActionRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    def record_activity(
+        self,
+        row: ActionTable,
+        kind: ActionActivityKind,
+        now: datetime,
+        *,
+        previous_status: str | None = None,
+        previous_completed_at_utc: datetime | None = None,
+        undo_of_revision: int | None = None,
+        previous_source_count: int | None = None,
+    ) -> None:
+        self._session.add(
+            ActionActivityTable(
+                action_id=row.id,
+                revision=row.revision,
+                kind=kind.value,
+                occurred_at_utc=now,
+                previous_status=previous_status,
+                previous_completed_at_utc=previous_completed_at_utc,
+                undo_of_revision=undo_of_revision,
+                previous_source_count=previous_source_count,
+                legacy=False,
+            )
+        )
+
+    async def activity_rows(self, action_id: int) -> list[ActionActivityTable]:
+        rows = await self._session.scalars(
+            select(ActionActivityTable)
+            .where(ActionActivityTable.action_id == action_id)
+            .order_by(ActionActivityTable.revision)
+        )
+        return list(rows)
+
+    async def latest_activity(self, action_id: int) -> ActionActivityTable | None:
+        """Read the latest event directly, without hydrating the full audit trail."""
+        result = await self._session.scalars(
+            select(ActionActivityTable)
+            .where(ActionActivityTable.action_id == action_id)
+            .order_by(ActionActivityTable.revision.desc())
+            .limit(1)
+        )
+        return result.first()
 
     async def get_suggestion(
         self, suggestion_id: int
@@ -623,6 +673,44 @@ class ActionRepository:
         """Domain actions for rows, reading steps, sources and pending proposals with one
         chunked query each, and thread activity with a fixed number more."""
         ids = [row.id for row in rows]
+        activity: dict[int, list[ActionActivity]] = {}
+        for chunk in sorted_batches(ids):
+            # The indexed threshold keeps both ORM hydration and returned rows bounded.
+            older = aliased(ActionActivityTable)
+            threshold = (
+                select(older.revision)
+                .where(older.action_id == ActionActivityTable.action_id)
+                .order_by(older.revision.desc())
+                .offset(DISPLAY_ACTIVITY_LIMIT - 1)
+                .limit(1)
+                .correlate(ActionActivityTable)
+                .scalar_subquery()
+            )
+            records = await self._session.scalars(
+                select(ActionActivityTable)
+                .where(
+                    ActionActivityTable.action_id.in_(chunk),
+                    ActionActivityTable.revision >= func.coalesce(threshold, 0),
+                )
+                .order_by(ActionActivityTable.action_id, ActionActivityTable.revision)
+            )
+            for record in records:
+                activity.setdefault(record.action_id, []).append(
+                    ActionActivity(
+                        revision=record.revision,
+                        kind=ActionActivityKind(record.kind),
+                        occurred_at_utc=record.occurred_at_utc,
+                        previous_status=(
+                            None
+                            if record.previous_status is None
+                            else ActionStatus(record.previous_status)
+                        ),
+                        previous_completed_at_utc=record.previous_completed_at_utc,
+                        undo_of_revision=record.undo_of_revision,
+                        previous_source_count=record.previous_source_count,
+                        legacy=record.legacy,
+                    )
+                )
         steps: dict[int, list[ActionStepTable]] = {}
         for chunk in sorted_batches(ids):
             step_result = await self._session.scalars(
@@ -657,6 +745,7 @@ class ActionRepository:
                     proposal_from_row(proposal, row.public_id, row.title, row.revision)
                     for proposal in proposals.get(row.id, ())
                 ],
+                activity.get(row.id, ()),
             )
             for row in rows
         ]

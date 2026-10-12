@@ -98,6 +98,7 @@ checks and pull request guidance.
 
 - [Desktop usage and keyboard navigation](docs/m5-desktop.md)
 - [Actions and plans](docs/m6-actions.md)
+- [Manual tasks and activity history](docs/p1-manual-tasks.md)
 - [Drafts, notes and AI writing](docs/m7-drafts.md)
 - [Preferences, brief history and daily operation](docs/m8-daily-operation.md)
 - [Project status and milestone documentation](docs/project-status.md)

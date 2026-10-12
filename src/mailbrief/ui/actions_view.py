@@ -59,7 +59,7 @@ from mailbrief.ui.brief_list import (
     row_height,
 )
 from mailbrief.ui.hairline import HairlineSplitter, paint_focus_ring
-from mailbrief.ui.labels import plain_label
+from mailbrief.ui.labels import outline_button, plain_label
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.proposals_view import pending_proposals
 from mailbrief.ui.theme import TEXT_PX, TITLE_PX, current_tokens, ui_metrics
@@ -263,6 +263,7 @@ class ActionsPanel(QWidget):
     the Action. Opening a source needs no backend, so the panel does it directly.
     """
 
+    new_task_requested = Signal()
     action_requested = Signal(str, object)
     draft_requested = Signal(object, object)
 
@@ -284,7 +285,15 @@ class ActionsPanel(QWidget):
         heading = plain_label("Your actions", px=TITLE_PX, medium=True)
         heading.setObjectName("actionsHeading")
         heading.setContentsMargins(12, 10, 12, 4)
-        side.addWidget(heading)
+        heading_row = QHBoxLayout()
+        heading_row.addWidget(heading, 1)
+        self.new_task_button = outline_button("&New task", "newTaskButton", mnemonic=True)
+        self.new_task_button.setAccessibleName("New task")
+        self.new_task_button.setToolTip("Create a task (Ctrl+N)")
+        self.new_task_button.clicked.connect(self.new_task_requested.emit)
+        heading_row.addWidget(self.new_task_button)
+        heading_row.setContentsMargins(0, 0, 12, 0)
+        side.addLayout(heading_row)
         self.tabs = QTabBar()
         self.tabs.setObjectName("actionsTabs")
         self.tabs.setAccessibleName("Action views")
@@ -348,7 +357,12 @@ class ActionsPanel(QWidget):
         self.proposals_button.clicked.connect(self._show_proposals)
         self.source_button.clicked.connect(self._open_source)
         # Tab: the views, the list shown, then the detail's buttons in display order.
-        chain: list[QWidget] = [self.tabs, *self.lists.values(), *detail.all_buttons()]
+        chain: list[QWidget] = [
+            self.new_task_button,
+            self.tabs,
+            *self.lists.values(),
+            *detail.all_buttons(),
+        ]
         for first, second in itertools.pairwise(chain):
             QWidget.setTabOrder(first, second)
         self._busy = False
@@ -361,6 +375,14 @@ class ActionsPanel(QWidget):
         index = list(ActionFilter).index(view)
         self.tabs.setCurrentIndex(index)
         self.stack.setCurrentIndex(index)
+
+    def select_action(self, public_id: str) -> None:
+        """Select a newly created task once, without rebuilding the other rows' details."""
+        view = self.view()
+        for index, action in enumerate(self._actions[view]):
+            if action.public_id == public_id:
+                self.lists[view].setCurrentRow(index)
+                return
 
     def selected(self) -> Action | None:
         view = self.view()
@@ -413,6 +435,7 @@ class ActionsPanel(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self.new_task_button.setEnabled(not busy)
         self._update_buttons()
 
     def _view_changed(self, index: int) -> None:

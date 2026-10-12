@@ -41,6 +41,38 @@ class ActionStatus(StrEnum):
     COMPLETED = "completed"
 
 
+class ActionActivityKind(StrEnum):
+    CREATED = "created"
+    EDITED = "edited"
+    COMPLETED = "completed"
+    REOPENED = "reopened"
+    UNDO = "undo"
+    DELETED = "deleted"
+    RESTORED = "restored"
+    SOURCE_ADDED = "source_added"
+    SUGGESTION_ACCEPTED = "suggestion_accepted"
+    THREAD_SEEN = "thread_seen"
+    PROPOSAL_APPLIED = "proposal_applied"
+
+
+class ActionActivity(DomainModel):
+    """An immutable record of an owner change, including the prior completion state."""
+
+    revision: int = Field(ge=1)
+    kind: ActionActivityKind
+    occurred_at_utc: datetime
+    previous_status: ActionStatus | None = None
+    previous_completed_at_utc: datetime | None = None
+    undo_of_revision: int | None = Field(default=None, ge=1)
+    previous_source_count: int | None = Field(default=None, ge=0)
+    legacy: bool = False  # Migrated facts, not a reconstruction of missing past changes.
+
+    @field_validator("occurred_at_utc", "previous_completed_at_utc")
+    @classmethod
+    def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else normalize_utc(value)
+
+
 class SuggestionState(StrEnum):
     """What the owner decided about a suggestion."""
 
@@ -232,6 +264,8 @@ class Action(DomainModel):
     thread_seen_until_utc: datetime | None = None  # The owner's "seen" watermark.
     thread: ThreadActivity | None = None  # None when no source has a thread snapshot.
     proposals: tuple[ActionProposal, ...] = ()  # Pending follow-up proposals only.
+    # Recent display history; the complete audit trail stays in storage and exports.
+    activity: tuple[ActionActivity, ...] = ()
 
     @field_validator(
         "deadline_at_utc",

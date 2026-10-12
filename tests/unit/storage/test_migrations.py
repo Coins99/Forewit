@@ -1243,8 +1243,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261012_0014"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0014",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261013_0015"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0015",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1318,6 +1318,40 @@ def test_calendar_events_upgrade_keeps_rows_checks_shapes_and_downgrades(
 
     assert "calendar_events" not in table_names(path)
     assert _rows(path, _OLD_ROWS) == before
+
+
+def test_p1_backfills_only_known_legacy_activity(tmp_path: Path) -> None:
+    path = tmp_path / "p1-upgrade.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20260930_0012")
+    with closing(sqlite3.connect(path)) as connection:
+        for identifier, status, completed in (
+            (1, "open", None),
+            (2, "completed", "2026-10-10 14:00:00.000000"),
+        ):
+            connection.execute(
+                "INSERT INTO actions(id,public_id,title,ownership,status,created_at_utc,"
+                "updated_at_utc,completed_at_utc,revision) VALUES(?,?,?,'mine',?,?,?, ?,5)",
+                (
+                    identifier,
+                    f"{identifier:08d}-1111-4111-8111-111111111111",
+                    "Legacy task",
+                    status,
+                    "2026-10-09 12:00:00.000000",
+                    "2026-10-10 15:00:00.000000",
+                    completed,
+                ),
+            )
+        connection.commit()
+    before = _query(path, "SELECT * FROM actions ORDER BY id")
+    command.upgrade(config, "head")
+    assert _query(path, "SELECT * FROM actions ORDER BY id") == before
+    assert _query(
+        path, "SELECT action_id,revision,kind,legacy FROM action_activity ORDER BY id"
+    ) == [(1, 1, "created", 1), (2, 1, "created", 1), (2, 5, "completed", 1)]
+    assert _query(path, "SELECT occurred_at_utc FROM action_activity WHERE kind='completed'") == [
+        ("2026-10-10 14:00:00.000000",)
+    ]
 
 
 def test_google_calendar_cache_upgrades_cascades_and_downgrades(tmp_path: Path) -> None:

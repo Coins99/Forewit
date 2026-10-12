@@ -78,10 +78,14 @@ class ActionEditor(QDialog):
     """
 
     save_requested = Signal(object, object, object)
+    create_requested = Signal(object, object)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit action")
+        self.setObjectName("actionEditor")
+        self.setAccessibleName("Task editor")
+        self._creating = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
         self._busy = False  # Another operation is running, so Save waits.
@@ -157,6 +161,8 @@ class ActionEditor(QDialog):
         ``today`` is the owner's local date, which the date picker offers when the action
         has no target. ``zone`` is the owner's, so an exact deadline reads like the brief.
         """
+        self.setWindowTitle("Edit action")
+        self._creating = False
         self._set_saving(False)
         self._action = action
         self.title.setText(action.title)
@@ -189,6 +195,28 @@ class ActionEditor(QDialog):
         self._original = self._current_steps()
         self.status.clear()
         self._update_step_buttons()
+
+    def new_task(self, today: date) -> None:
+        """Open an empty editor; cancelling creates no record."""
+        self._creating = True
+        self._action = None
+        self._set_saving(False)
+        self.setWindowTitle("New task")
+        self.title.clear()
+        self.owner.setCurrentIndex(0)
+        self.effort.setCurrentIndex(0)
+        self.has_target.setChecked(False)
+        self.target.setEnabled(False)
+        self.target.setDate(QDate(today.year, today.month, today.day))
+        self.deadline.setText("none stated")
+        self.suggested.setText("no target was suggested")
+        self.sources.setText("Manual task")
+        self.notes.clear()
+        self.steps.clear()
+        self._original = []
+        self.status.clear()
+        self._update_step_buttons()
+        self.title.setFocus()
 
     def set_busy(self, busy: bool) -> None:
         """Another operation is running: Save waits for it, but Cancel still works."""
@@ -284,7 +312,7 @@ class ActionEditor(QDialog):
 
     def _save(self) -> None:
         action = self._action
-        if action is None or self._busy or self._saving:
+        if (action is None and not self._creating) or self._busy or self._saving:
             return
         title = self.title.text().strip()
         notes = self.notes.toPlainText()
@@ -318,4 +346,7 @@ class ActionEditor(QDialog):
         # Lock first: the window may answer with keep_open() before emit() returns.
         self._set_saving(True)
         self.status.setText("Saving…")
-        self.save_requested.emit(action, edit, plan)
+        if self._creating:
+            self.create_requested.emit(edit, plan or [])
+        else:
+            self.save_requested.emit(action, edit, plan)
