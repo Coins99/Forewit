@@ -57,8 +57,10 @@ remove project or area records. No Gmail or AI setup is needed for this workflow
 7. Quit and restart, then exercise backup, restore and writing export in a test profile.
    Confirm organization, links and historical grouping survive.
 
-Validation on Windows, 2026-10-12: 3,365 tests passed, three platform/gallery skips,
-96.79% overall coverage, and the 90% per-service gate passed. Ruff formatting/lint
+Validation on Windows, 2026-10-12: the full suite passed 3,365 tests (three skips) on
+the calendar-page integration. After merging calendar AI planning from main, 80
+planning, event, project and calendar UI checks passed. Combined coverage is 96.37%,
+and the 90% per-service gate passed. Ruff formatting/lint
 and strict mypy for Windows and macOS passed. Dark/light layouts, the manager and task
 project selector were reviewed at 100% and 200% scale. macOS execution and owner
 acceptance remain pending.
