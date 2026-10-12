@@ -981,6 +981,34 @@ async def test_a_run_from_sync_and_review_that_saves_no_brief_says_how_it_ended(
     assert window.status.text() == _UNSAVED[status]
 
 
+async def test_missing_ai_model_explains_why_suggestions_did_not_update(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert isinstance(window.backend, FakeBackend)
+    before = shown_text(window)
+    saved = window.backend.saved
+    connection = window.connection.text()
+    monkeypatch.setattr(
+        window.backend,
+        "generate",
+        AsyncMock(
+            side_effect=ConfigurationError(
+                "Set MAILBRIEF_GROQ_MODEL to a Structured Outputs model."
+            )
+        ),
+    )
+    window.start(window._generate)
+    await finish(window)
+    assert "No new task suggestions were generated" in window.status.text()
+    assert "saved brief is unchanged" in window.status.text()
+    assert "The brief's Inbox check did not run" in window.status.text()
+    assert "Then retry Sync and review" in window.status.text()
+    assert "Choose a Groq model" in window.status.text()
+    assert "Choose a Groq model" in window.ai.text()
+    assert window.backend.saved == saved and shown_text(window) == before
+    assert window.connection.text() == connection
+
+
 def test_every_status_but_saved_has_its_text_above() -> None:
     assert {*_UNSAVED, BriefStatus.SAVED} == set(BriefStatus)
 

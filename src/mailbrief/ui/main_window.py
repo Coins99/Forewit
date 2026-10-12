@@ -2803,9 +2803,23 @@ class MainWindow(QMainWindow):
             else f"the Inbox for {day_text(local_date, today=self._local_today())}"
         )
         self.status.setText(f"Syncing {day}…")
-        result = await self.backend.generate(
-            self, self, self._cancel, self._progress, local_date=local_date
-        )
+        try:
+            result = await self.backend.generate(
+                self, self, self._cancel, self._progress, local_date=local_date
+            )
+        except ConfigurationError as exc:
+            if "MAILBRIEF_GROQ_MODEL" not in str(exc):
+                raise
+            log_failure(exc)
+            guidance = configuration_guidance(exc)
+            self.ai.setText("AI: " + guidance)
+            self.status.setText(
+                "No new task suggestions were generated. The brief's Inbox check did not run. "
+                "The displayed saved brief is unchanged. "
+                + guidance
+                + " Then retry Sync and review."
+            )
+            return
         if result.sync.status in (SyncStatus.COMPLETE, SyncStatus.PARTIAL):
             self._stamp_checked()
         match result.status:
