@@ -51,6 +51,7 @@ TOO_LONG: Final = "An event can last at most 31 days."
 NOTES_TOO_LONG: Final = "Notes can hold at most 10,000 characters."
 UNUSABLE: Final = "These details can't be saved; check them and try again."
 BAD_TIME: Final = "Type a time as HH:mm, for example 09:30."
+WAITING: Final = "MailBrief is busy; Save works again once it finishes."
 _STEP_MINUTES: Final = 15
 STEP: Final = timedelta(minutes=_STEP_MINUTES)
 _STEPS_A_DAY: Final = 96
@@ -319,6 +320,10 @@ class EventEditor(QDialog):
         # A typed time was just refused and the fields went back: the Save that came with
         # it (Return, or the click that took focus from the field) waits once.
         self._refused = False
+        # Ticking All day on an event that ends at midnight moves its end to the day before;
+        # the start and end before and after, so unticking at once brings the times back.
+        self._timed: tuple[datetime, datetime] | None = None
+        self._whole_days: tuple[datetime, datetime] | None = None
         layout = QVBoxLayout(self)
         self._fields = QWidget()
         form = QFormLayout(self._fields)
@@ -437,6 +442,7 @@ class EventEditor(QDialog):
         self._reset()
 
     def _load(self, start: datetime, end: datetime, *, all_day: bool) -> None:
+        self._timed = self._whole_days = None
         self._syncing = True
         try:
             self.all_day.setChecked(all_day)
@@ -484,9 +490,27 @@ class EventEditor(QDialog):
         if self._syncing:
             return
         self._refused = False
-        if not all_day and self._end <= self._start:
+        if all_day:
+            self._end_on_its_last_day()
+        elif self._timed is not None and (self._start, self._end) == self._whole_days:
+            self._start, self._end = self._timed  # Unticked with nothing changed: as it was.
+        elif self._end <= self._start:
             self._end = self._start + _DEFAULT_LENGTH  # Back to times: an end after the start.
+        if not all_day:
+            self._timed = self._whole_days = None
         self._show_moments(self._start, self._end)  # The end date's range follows the shape.
+
+    def _end_on_its_last_day(self) -> None:
+        """An event that ends at midnight doesn't touch the day that begins then, so as an
+        all-day event it ends the day before (a 20:00 to 00:00 evening is one day)."""
+        end = self._end.astimezone(self._zone)
+        first = self._start.astimezone(self._zone).date()
+        if (end.hour, end.minute) != (0, 0) or end.date() <= first:
+            return
+        self._timed = (self._start, self._end)
+        last = end.date() - timedelta(days=1)
+        self._end = local_instant(last, time(), self._zone).astimezone(UTC)
+        self._whole_days = (self._start, self._end)
 
     def _start_day_changed(self, value: QDate) -> None:
         if not self._syncing:
@@ -588,7 +612,7 @@ class EventEditor(QDialog):
         self._refused = True
 
     def _reset(self) -> None:
-        self.status.setText("")
+        self.status.setText(WAITING if self._busy else "")
         self._saving = False
         self._refused = False
         self._fields.setEnabled(True)
@@ -668,8 +692,13 @@ class EventEditor(QDialog):
         self.save_requested.emit(edit)
 
     def set_busy(self, busy: bool) -> None:
-        """Another operation is running: Save waits for it, but Cancel still works."""
+        """Another operation is running: Save waits for it, and says so, but Cancel still
+        works. The editor's own save says Saving… instead."""
         self._busy = busy
+        if busy and not self._saving and self.isVisible() and not self.status.text():
+            self.status.setText(WAITING)
+        elif not busy and self.status.text() == WAITING:
+            self.status.setText("")
         self._update_buttons()
 
     def finish_saved(self) -> None:

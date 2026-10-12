@@ -292,8 +292,62 @@ async def test_moving_past_the_cache_reads_that_week(
     await window.initialize()
     later = MONDAY + timedelta(weeks=9)
     window.calendar_panel.week_requested.emit(later)
+    await window.drain_calendar_reads()  # The week first, then Google's sync for it.
     await finish(window)
     assert backend.calendar_calls == [("sync_calendar", later)]
+
+
+def stuck(backend: FakeBackend, name: str) -> asyncio.Event:
+    """Make the backend's ``name`` wait, like Google not answering or a browser left open,
+    until the returned event is set."""
+    released = asyncio.Event()
+
+    async def wait(*_args: object) -> None:
+        backend.calendar_calls.append((name,))
+        await released.wait()
+
+    setattr(backend, name, wait)
+    return released
+
+
+@pytest.mark.parametrize(
+    ("button", "name", "said"),
+    [
+        ("refresh_button", "sync_calendar", "Cancelled. The Calendar page shows what was saved."),
+        (
+            "allow_button",
+            "allow_calendar",
+            "Cancelled. Gmail is still connected; choose Allow Google Calendar to try again.",
+        ),
+    ],
+)
+async def test_refresh_and_allow_can_be_cancelled(
+    window: MainWindow, backend: FakeBackend, button: str, name: str, said: str
+) -> None:
+    backend.calendar_permission = button == "refresh_button"  # Allow shows without it.
+    await window.initialize()
+    reads = len(backend.event_calls)
+    stuck(backend, name)
+    getattr(window.calendar_panel, button).click()
+    await asyncio.sleep(0)
+    assert backend.calendar_calls == [(name,)]
+    assert window.cancel_button.isEnabled()
+    window.cancel_button.click()
+    await finish(window)
+    await window.drain_calendar_reads()
+    assert window.status.text() == said
+    assert window.connect_button.isHidden()  # Gmail is still connected.
+    assert len(backend.event_calls) > reads  # The page is read again.
+
+
+async def test_quitting_stops_a_calendar_sync(window: MainWindow, backend: FakeBackend) -> None:
+    backend.calendar_permission = True
+    await window.initialize()
+    stuck(backend, "sync_calendar")
+    window.calendar_panel.refresh_button.click()
+    await asyncio.sleep(0)
+    await asyncio.wait_for(window.shutdown(), timeout=5)
+    assert window.task is not None and window.task.done()
 
 
 async def test_a_rejected_sign_in_is_reported_as_gmails(

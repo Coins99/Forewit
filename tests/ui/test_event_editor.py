@@ -202,6 +202,30 @@ def test_all_day_events_keep_their_days(editor: EventEditor) -> None:
     assert shown(editor) == ("2026-10-20", "13:00", "2026-10-20", "14:00")
 
 
+def test_all_day_on_an_event_that_ends_at_midnight_keeps_its_days(editor: EventEditor) -> None:
+    tomorrow = TODAY + timedelta(days=1)
+    load(editor, at(TODAY, 20), at(tomorrow, 0))  # An evening, to midnight.
+    editor.all_day.setChecked(True)
+    assert shown(editor)[::2] == ("2026-10-14", "2026-10-14")  # One day, not two.
+    edit = editor.built_edit()
+    assert isinstance(edit, EventEdit) and (edit.start_date, edit.last_date) == (TODAY, TODAY)
+    editor.all_day.setChecked(False)  # Unticked at once: the evening is back.
+    assert shown(editor) == ("2026-10-14", "20:00", "2026-10-15", "00:00")
+
+    load(editor, at(date(2026, 10, 12), 22), at(TODAY, 0))  # Monday 22:00 to Wednesday 00:00.
+    editor.all_day.setChecked(True)
+    assert shown(editor)[::2] == ("2026-10-12", "2026-10-13")  # Monday and Tuesday.
+    editor.end_date.setDate(QDate(2026, 10, 15))  # To Thursday: unticking keeps the change.
+    editor.all_day.setChecked(False)
+    assert shown(editor) == ("2026-10-12", "22:00", "2026-10-15", "00:00")
+
+    load(editor, at(TODAY, 9), at(TODAY, 10))  # Not at midnight: ticking changes no day.
+    editor.all_day.setChecked(True)
+    assert shown(editor)[::2] == ("2026-10-14", "2026-10-14")
+    editor.all_day.setChecked(False)
+    assert shown(editor) == ("2026-10-14", "09:00", "2026-10-14", "10:00")
+
+
 def test_typing_that_isnt_a_time_is_refused(editor: EventEditor) -> None:
     for bad in ("25:00", "12:60", "noon", ""):
         type_time(editor.start_time, bad)
