@@ -10,6 +10,11 @@ Decisions and limits are in [ADR 0018](adr/0018-calendar.md).
 hides it, with Undo. Events are kept on this computer, in backups and in **Export all
 writing**. Deadlines and target dates come from your open actions and change only there.
 
+Pick a time from the list (every 15 minutes) or type one as `HH:mm`. The end's list says
+how long the event lasts, and runs past midnight into the next day. Moving the start
+moves the end with it. An end at or before the start, or more than 31 days after it, isn't
+taken: the editor puts the time back and says why.
+
 ## Google Calendar, read-only
 
 MailBrief can show your Google calendars beside your own events. It only reads: nothing in

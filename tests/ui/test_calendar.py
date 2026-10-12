@@ -281,16 +281,21 @@ def test_editor_checks_before_asking(editor: EventEditor) -> None:
     assert edit.title == "Dentist" and edit.time_zone == "America/Toronto"
     assert edit.starts_at_utc == local_instant(TODAY, time(15), TORONTO)
 
+    # Save still checks what the fields hold, even when they are set around the editor's
+    # own checks (test_event_editor.py covers those).
     editor.end_time.setTime(QTime(14, 0))
     assert editor.built_edit() == ENDS_FIRST
-    editor.end_date.setDate(QDate(2026, 11, 20))
+    editor.end_date.blockSignals(True)
+    editor.end_date.setDate(QDate(2026, 11, 14))  # The last day the field allows.
+    editor.end_date.blockSignals(False)
+    editor.end_time.setTime(QTime(16, 0))  # Past 31 days by an hour.
     assert editor.built_edit() == TOO_LONG
 
     editor.all_day.setChecked(True)
     assert editor.start_time.isHidden() and editor.end_time.isHidden()
-    assert editor.built_edit() == TOO_LONG
-    editor.end_date.setDate(QDate(2026, 10, 13))
-    assert editor.built_edit() == ENDS_FIRST
+    assert editor.end_date.maximumDate() == QDate(2026, 11, 13)  # All day: 31 days at most.
+    editor.end_date.setDate(QDate(2026, 10, 13))  # Before the start: it stops at the start.
+    assert editor.end_date.date() == QDate(2026, 10, 14)
     editor.end_date.setDate(QDate(2026, 10, 15))
     edit = editor.built_edit()
     assert isinstance(edit, EventEdit)

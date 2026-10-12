@@ -340,8 +340,14 @@ The brief list's chips keep their shorter forms (see Brief list).
   events by start. Rows are plain item text, never tooltips. `calendarEmpty` (muted) shows
   under the week when it holds nothing; `calendarNote` (muted) explains markers when there
   are some. Outline New event, Open and Delete event below. Mnemonics avoid every
-  window-level letter. `EventEditor` is a dialog (title, All day, Starts and Ends as
-  `yyyy-MM-dd` and `HH:mm`, notes) that locks while saving, like the action editor.
+  window-level letter. `EventEditor` is a dialog (title, All day, Starts and Ends as a
+  `yyyy-MM-dd` date with its calendar popup and a `TimeBox`, notes) that locks while
+  saving, like the action editor. A `TimeBox` is an editable combo box: type `HH:mm`, or
+  choose from 15-minute steps; the end's list runs 15 minutes to 24 hours after the start,
+  each with the length ("00:00 (9 hrs)"), and times a DST change skips are left out.
+  Moving the start keeps the length; an end at or before the start, past 31 days or not a
+  time is refused, the fields go back, and the status line says why. The end date's range
+  runs from the start's day to 31 days on (30 for all-day events).
   Google Calendar (phase 2, one sign-in per ADR 0019): under the heading, `googleStatus`
   (muted) says whether Gmail is connected, whether Calendar is allowed and when the saved
   copy was read, beside outline Allow Google Calendar (only when the sign-in lacks it) or
