@@ -44,6 +44,10 @@ def wanted_line(count: int) -> str:
     )
 
 
+# Messages per Inbox page; Previous and Next move by one page.
+INBOX_PAGE_SIZE: Final = 100
+
+
 class InboxPanel(QWidget):
     """``wanted_requested(message_id, wanted)`` asks to mark or unmark the selected message."""
 

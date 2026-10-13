@@ -90,6 +90,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
+from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
@@ -186,8 +187,9 @@ from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
-from mailbrief.ui.inbox_view import InboxPanel
+from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
+from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
@@ -214,6 +216,8 @@ class DesktopBackend(Protocol):
         self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
     ) -> SyncResult: ...
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage: ...
+    async def search(self, text: str, account_email: str | None) -> SearchResults: ...
+    async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None: ...
     async def set_wanted(
         self, account_email: str, provider_message_id: str, wanted: bool
     ) -> None: ...
@@ -979,6 +983,14 @@ class MainWindow(QMainWindow):
         # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
         # closeEvent on macOS (a modal dialog's AppKit session drops them).
         self.dialog_guard = DialogGuard(self)
+        # Ctrl+K (Cmd+K on macOS): go to a page, start something, or search local records.
+        self.command_palette = CommandPalette(self)
+        self.command_palette.query_changed.connect(self._search)
+        self.command_palette.command_chosen.connect(self._run_command)
+        self.command_palette.hit_chosen.connect(self._open_hit)
+        self.palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.palette_shortcut.activated.connect(self._open_palette)
+        self._search_read = 0  # The newest search wins; an older one's results are dropped.
         self._quit_confirmed = False  # The owner chose to discard unsaved input and quit.
         self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
@@ -1763,29 +1775,18 @@ class MainWindow(QMainWindow):
             self.day_panel.show_summary(summary, self.zone)
 
     def _open_day_action(self, public_id: str, waiting: bool) -> None:
-        """Show an action from "Your day" on the Actions page; when a project or area filter
-        hides it, show every task first."""
-        self._show_page("waiting" if waiting else "actions")
-        self.actions_panel.select_action(public_id)
-        selected = self.actions_panel.selected()
-        if selected is not None and selected.public_id == public_id:
-            return
-
-        async def unfiltered() -> None:
-            self.actions_panel.clear_group()
-            await self._refresh_actions()
-            self.actions_panel.select_action(public_id)
-
-        if not self.start(unfiltered, cancellable=False) and not self._closing:
-            self.status.setText(_BUSY)
+        """Show an action from "Your day" on the Actions page (Waiting when someone else
+        does it); see _open_action."""
+        self._open_action(public_id, ActionFilter.WAITING if waiting else ActionFilter.OPEN)
 
     def _open_day_event(self, key: object) -> None:
         """Show an event from "Your day" on the Calendar page, in this week, selected."""
         if not isinstance(key, tuple):
             return
-        self._show_calendar_week(week_start(self._local_today()))
+        today = self._local_today()
+        self._show_calendar_week(week_start(today))
         self._show_page("calendar")
-        self._read_calendar(select=key)
+        self._read_calendar(select=key, day=today)
 
     def _show_calendar_week(self, monday: date) -> None:
         """Show the week of ``monday`` from now on; this week's follows today, so the page
@@ -1797,17 +1798,23 @@ class MainWindow(QMainWindow):
             self._show_calendar_week(first_day)
             self._read_calendar(sync=True)
 
-    def _read_calendar(self, *, sync: bool = False, select: tuple[str, ...] | None = None) -> None:
+    def _read_calendar(
+        self,
+        *,
+        sync: bool = False,
+        select: tuple[str, ...] | None = None,
+        day: date | None = None,
+    ) -> None:
         """Read the week shown beside any running operation; then select the entry
-        ``select`` (calendar_view.entry_key) on today, when given; then, with ``sync``, read
-        Google Calendar for it when that is due and nothing else is running."""
+        ``select`` (calendar_view.entry_key) on ``day``, when given; then, with ``sync``,
+        read Google Calendar for it when that is due and nothing else is running."""
         if self._closing:
             return
 
         async def read() -> None:
             await self._refresh_calendar()
             if select is not None:
-                self.calendar_panel.select_entry(select, self._local_today())
+                self.calendar_panel.select_entry(select, day)
             if sync and self._calendar_sync_due():
                 self._start_calendar_sync()
 
@@ -1856,6 +1863,142 @@ class MainWindow(QMainWindow):
                 started = self.start(lambda: self._delete_event(event), cancellable=False)
                 if not started and not self._closing:
                     self.status.setText(_BUSY)
+
+    # The command palette (Ctrl+K). A search reads local records beside any running
+    # operation, like the calendar's reads; what it opens goes through the usual paths.
+
+    def _open_palette(self) -> None:
+        if self._closing or self._dialog_open():
+            return
+        self.command_palette.open_fresh(self.zone, self._local_today())
+        self.dialog_guard.show_dialog(self.command_palette)
+
+    def _search(self, text: str) -> None:
+        if self._closing:
+            return
+        self._search_read += 1
+        read = self._search_read
+
+        async def search() -> None:
+            try:
+                results = await self.backend.search(text, self._account_email)
+            except Exception as exc:
+                log_failure(exc)
+                if read == self._search_read:
+                    self.command_palette.show_failure(text)
+                return
+            if read == self._search_read:
+                self.command_palette.show_results(text, results)
+
+        task = asyncio.get_running_loop().create_task(search())
+        # Shutdown cancels and waits for these reads before it closes the database.
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _run_command(self, key: str) -> None:
+        kind, _, page = key.partition(":")
+        if kind == "page":
+            self._request_page(page)
+        elif key == "new:task":
+            self._request_new_task()
+        elif key == "new:event":
+            self._show_page("calendar")
+            self._request_event(NEW_EVENT, self._local_today())
+        elif key == "new:note":
+            self._show_page("drafts")
+            self._request_draft(NEW_DRAFT, DraftKind.NOTE)
+        else:
+            button = {
+                "sync": self.generate_button,
+                "saved_mail": self.cached_button,
+                "data": self.data_button,
+                "settings": self.settings_button,
+            }.get(key)
+            if button is not None:
+                button.click()  # A disabled button does nothing, as it would when clicked.
+
+    def _open_hit(self, hit: object) -> None:
+        """Open a search hit where it lives: an action on Actions, writing in its editor,
+        an event in its week of the Calendar page, mail on the Inbox page (or in Gmail when
+        it has left the Inbox)."""
+        if not isinstance(hit, SearchHit):
+            return
+        if hit.kind is SearchKind.ACTION and hit.public_id is not None:
+            view = (
+                ActionFilter.COMPLETED
+                if not hit.open
+                else ActionFilter.WAITING
+                if hit.waiting
+                else ActionFilter.OPEN
+            )
+            self._open_action(hit.public_id, view)
+        elif hit.kind is SearchKind.WRITING and hit.public_id is not None:
+            public_id = hit.public_id
+            self._show_page("drafts")
+            self._start_or_busy(lambda: self._open_draft_by_id(public_id))
+        elif hit.kind in (SearchKind.EVENT, SearchKind.GOOGLE_EVENT):
+            self._open_event_hit(hit)
+        elif hit.kind is SearchKind.MAIL and hit.message_id is not None:
+            message_id, link = hit.message_id, hit.web_link
+            if hit.open and self._account_email is not None:
+                self._start_or_busy(lambda: self._open_mail(message_id, link))
+            elif link is not None:
+                self._open_source(link)
+
+    def _start_or_busy(self, operation: Callable[[], Awaitable[None]]) -> None:
+        if not self.start(operation, cancellable=False) and not self._closing:
+            self.status.setText(_BUSY)
+
+    def _open_action(self, public_id: str, view: ActionFilter) -> None:
+        """Show an action selected in ``view``; when a project or area filter (or the
+        completed list's cap) hides it, show every task first."""
+        self._show_page("actions")
+        self.actions_panel.show_view(view)
+        self.workspace.sidebar.set_current(self._sidebar_key())
+        self.actions_panel.select_action(public_id)
+        selected = self.actions_panel.selected()
+        if selected is not None and selected.public_id == public_id:
+            return
+
+        async def unfiltered() -> None:
+            self.actions_panel.clear_group()
+            await self._refresh_actions()
+            self.actions_panel.select_action(public_id)
+
+        self._start_or_busy(unfiltered)
+
+    async def _open_draft_by_id(self, public_id: str) -> None:
+        try:
+            draft = await self.backend.get_draft(public_id)
+        except _STALE as exc:
+            await self._stale(exc)
+            return
+        self._edit_draft(draft)
+
+    def _open_event_hit(self, hit: SearchHit) -> None:
+        day = hit.when.astimezone(self.zone).date() if hit.when is not None else hit.day
+        if day is None:
+            return
+        key: tuple[str, ...] = (
+            ("event", hit.public_id or "")
+            if hit.kind is SearchKind.EVENT
+            else ("google", hit.calendar_id or "", hit.event_id or "")
+        )
+        self._show_calendar_week(week_start(day))
+        self._show_page("calendar")
+        self._read_calendar(select=key, day=day)
+
+    async def _open_mail(self, message_id: str, link: str | None) -> None:
+        """The Inbox page holding the message, with it selected; Gmail when the cached
+        Inbox no longer has it."""
+        email = self._account_email
+        position = None if email is None else await self.backend.inbox_position(email, message_id)
+        if position is None:
+            if link is not None:
+                self._open_source(link)
+            return
+        self._show_page("inbox")
+        await self._load_inbox(position - position % INBOX_PAGE_SIZE, select=message_id)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -3104,6 +3247,7 @@ class MainWindow(QMainWindow):
                 self.draft_editor,
                 self.event_editor,
                 self.planning_dialog,
+                self.command_palette,
             )
         )
 
@@ -3470,6 +3614,7 @@ class MainWindow(QMainWindow):
         self.event_editor.force_close()
         self._cancel_planning()
         self.planning_dialog.reject()
+        self.command_palette.reject()
         self._cancel_drafting()
         final = self.draft_editor.final_edit() if self.draft_editor.isVisible() else None
         if final is not None:

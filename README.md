@@ -24,6 +24,8 @@ GitHub sign-in is required. [Download and launch instructions](#windows-download
   and see your Google Calendar there too, read-only ([Calendar](docs/calendar.md)).
 - Write local drafts and notes, with optional AI drafting from context you choose.
 - Browse saved briefs and cached mail metadata offline.
+- Press Ctrl+K (Cmd+K) to go anywhere, start a task or note, or search your actions,
+  notes, events and saved mail ([Go to or search](docs/search.md)).
 - Set your time zone, sender exclusions and refresh preferences.
 - Back up and restore local data, and export your writing.
 

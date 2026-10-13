@@ -376,6 +376,27 @@ class MessageRepository:
         rows = list(result.all())
         return rows[:page_size], len(rows) > page_size
 
+    async def inbox_position(self, account_id: int, provider_message_id: str) -> int | None:
+        """Where a message is in get_inbox_page's order (newest first, then by ID), counting
+        from 0; None when it isn't in the cached Inbox."""
+        row = await self.get_by_provider_message_id(account_id, provider_message_id)
+        if row is None or not row.is_in_inbox:
+            return None
+        before = await self._session.scalar(
+            select(func.count())
+            .select_from(MessageTable)
+            .where(
+                MessageTable.account_id == account_id,
+                MessageTable.is_in_inbox.is_(True),
+                (MessageTable.received_at_utc > row.received_at_utc)
+                | (
+                    (MessageTable.received_at_utc == row.received_at_utc)
+                    & (MessageTable.id < row.id)
+                ),
+            )
+        )
+        return before or 0
+
     async def reconcile_inbox(
         self, account_id: int, start_utc: datetime, end_utc: datetime, seen_ids: set[str]
     ) -> None:

@@ -564,6 +564,18 @@ The brief list's chips keep their shorter forms (see Brief list).
 - Activating a row opens its record: Return, Enter or a double-click, never a single click
   (a double-click would land on the page it opened).
 
+## Command palette (`ui/palette.py`)
+
+- `CommandPalette` (`commandPalette`, "Go to or search"), 560 × 420, opened by Ctrl+K through
+  `dialog_guard.show_dialog`, and listed in `_dialog_open()` and the quit path's closes.
+- A `QLineEdit` (`paletteField`) over an `ActivatingList` (`paletteResults`) and a 12 px muted
+  note (`paletteNote`). Section headings are list rows with `NoItemFlags`, 12 px Medium in
+  `text_muted`; Up and Down in the field skip them, Return opens the current row once.
+- Rows are plain list items: one line, the title first, " · " between parts, elided at the
+  right. Mail and AI text never goes into a tooltip.
+- The palette closes before it emits a choice, so the window sees no open dialog when it
+  acts. Typing waits 200 ms before a search; the newest search's results win.
+
 ## Run page (`ui/run_view.py`, `ui/main_window.py`)
 
 - Step 1, `review_panel`: "Step 1 of 2" (11px muted) over "Choose what MailBrief reads"

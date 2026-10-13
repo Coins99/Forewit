@@ -19,6 +19,9 @@ Run each check on Windows and on macOS, and note the date, platform and build.
       and review.
 - [ ] In Your day, Return on a row opens its action or event once; with nothing due, no
       events and no replies, each card says so ([Today](today.md)).
+- [ ] Ctrl+K (Cmd+K on macOS) opens Go to or search with the field focused; Up and Down
+      skip the section headings, Return opens the row once, Esc closes, and Cmd+Q still
+      quits with it open ([Go to or search](search.md)).
 - [ ] Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting,
       Drafts, Briefs and Calendar, in the sidebar's order; Briefs says MailBrief is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.
