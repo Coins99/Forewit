@@ -2,14 +2,16 @@
 
 With MAILBRIEF_PAINT_PROFILE=1 in the environment, every glass paint is timed, and at quit
 desktop.log gets one line per widget kind: how many paints, and the median and 95th
-percentile in milliseconds. Nothing else is recorded. Without it, a paint costs one check.
+percentile in milliseconds of the last KEPT of them. Nothing else is recorded. Without
+it, a paint costs one check.
 """
 
 import functools
 import math
 import os
 import time
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final, ParamSpec, TypeVar
 
@@ -20,8 +22,13 @@ ENVIRONMENT: Final = "MAILBRIEF_PAINT_PROFILE"
 P = ParamSpec("P")
 R = TypeVar("R")
 
+# The most recent paints kept per widget kind, so a long session's memory stays bounded;
+# the percentiles describe these, and the count is every paint.
+KEPT: Final = 10_000
+
 _enabled = os.environ.get(ENVIRONMENT) == "1"
-_samples: dict[str, list[int]] = {}  # Nanoseconds per paint, by widget kind.
+_samples: dict[str, deque[int]] = {}  # Nanoseconds per paint, by widget kind.
+_counts: dict[str, int] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +49,7 @@ def enabled() -> bool:
 
 def clear() -> None:
     _samples.clear()
+    _counts.clear()
 
 
 def profiled(kind: str | None = None) -> Callable[[Callable[P, R]], Callable[P, R]]:
@@ -59,14 +67,16 @@ def profiled(kind: str | None = None) -> Callable[[Callable[P, R]], Callable[P, 
             try:
                 return paint(*args, **kwargs)
             finally:
-                _samples.setdefault(name, []).append(time.perf_counter_ns() - start)
+                elapsed = time.perf_counter_ns() - start
+                _samples.setdefault(name, deque(maxlen=KEPT)).append(elapsed)
+                _counts[name] = _counts.get(name, 0) + 1
 
         return timed
 
     return decorate
 
 
-def _percentile(ordered: list[int], fraction: float) -> float:
+def _percentile(ordered: Sequence[int], fraction: float) -> float:
     """The nearest-rank percentile of sorted nanoseconds, in milliseconds."""
     rank = max(1, math.ceil(fraction * len(ordered)))
     return ordered[rank - 1] / 1_000_000
@@ -77,7 +87,7 @@ def summary() -> dict[str, PaintStats]:
     for kind, samples in sorted(_samples.items()):
         ordered = sorted(samples)
         stats[kind] = PaintStats(
-            count=len(ordered),
+            count=_counts.get(kind, len(ordered)),
             p50_ms=_percentile(ordered, 0.50),
             p95_ms=_percentile(ordered, 0.95),
         )

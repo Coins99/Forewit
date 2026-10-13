@@ -171,6 +171,8 @@ class PreferencesPanel(QWidget):
         # In a widget, not a bare layout: the form then gives the line the height its
         # wrapped text needs.
         automatic = QWidget()
+        automatic.setObjectName("automaticAnalysisRow")
+        automatic.setAccessibleName("Automatic analysis")
         automatic_row = QHBoxLayout(automatic)
         automatic_row.setContentsMargins(0, 0, 0, 0)
         automatic_row.addWidget(self.auto_line, 1)

@@ -84,8 +84,9 @@ MAILBRIEF_PAINT_PROFILE=1 /Applications/MailBrief.app/Contents/MacOS/MailBrief
 ```
 
 Use MailBrief, then quit. `desktop.log` in MailBrief's data folder then has one line per
-widget kind, such as `paint widget=GlassButton count=120 p50_ms=0.13 p95_ms=0.20`. It
-records nothing else. `tests/ui/glass/test_profile.py` fails if any glass paint's p95
+widget kind, such as `paint widget=GlassButton count=120 p50_ms=0.13 p95_ms=0.20`. The
+count is every paint, and the percentiles cover the last 10,000 of each kind, so memory
+stays flat however long the session. It records nothing else. `tests/ui/glass/test_profile.py` fails if any glass paint's p95
 passes 50 ms, a margin for slow CI machines that still catches a regression such as
 blurring on every paint.
 

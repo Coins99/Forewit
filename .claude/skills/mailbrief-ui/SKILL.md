@@ -22,7 +22,9 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
   before losing it.
 - Mail and AI text reaches the screen only through `plain_label()` (`ui/labels.py`, plain
   text, word wrap), `wrap_label()` (plain text that also wraps inside a long unbroken
-  token) or a delegate's `drawText()`. Never put it in a tooltip, and never use rich text
+  token), a delegate's `drawText()` or a glass pill's label (`GlassButton` paints the
+  `button_label()` text `outline_button` gave it with `drawText()`: plain text, mnemonics
+  hidden). Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
   could otherwise widen the layout.
 - Outline buttons come only from `outline_button()` in ui/labels.py; `glass=True` makes a

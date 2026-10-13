@@ -2,6 +2,7 @@
 only in desktop.log, and the real glass widgets painting well inside a frame."""
 
 import logging
+from collections import deque
 from collections.abc import Iterator
 
 import pytest
@@ -69,11 +70,11 @@ def test_paints_are_timed_only_while_profiling_is_on() -> None:
 
 
 def test_percentiles_are_nearest_rank(monkeypatch: pytest.MonkeyPatch) -> None:
-    samples = {"Kind": [ms * 1_000_000 for ms in range(1, 101)]}  # 1 to 100 ms.
+    samples = {"Kind": deque(ms * 1_000_000 for ms in range(1, 101))}  # 1 to 100 ms.
     monkeypatch.setattr(profile, "_samples", samples)
     stats = profile.summary()["Kind"]
     assert (stats.count, stats.p50_ms, stats.p95_ms) == (100, 50.0, 95.0)
-    samples["One"] = [2_500_000]
+    samples["One"] = deque([2_500_000])
     assert profile.summary()["One"] == profile.PaintStats(1, 2.5, 2.5)
 
 
@@ -122,3 +123,16 @@ def test_the_glass_chrome_and_pills_paint_well_inside_a_frame(
     for kind in ("HeaderBar", "SidebarNav", "GlassButton", "SidebarPage", "SidebarButton"):
         assert stats[kind].count >= 20, kind
         assert stats[kind].p95_ms < BUDGET_MS, (kind, stats[kind])
+
+
+def test_a_long_session_keeps_a_bounded_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the last KEPT timings per kind are kept, so memory stays flat; the count is
+    still every paint."""
+    monkeypatch.setattr(profile, "KEPT", 5)
+    profile.set_enabled(True)
+    painter = Painter()
+    for value in range(12):
+        painter.paint_named(value)
+    stats = profile.summary()["Named"]
+    assert stats.count == 12
+    assert len(profile._samples["Named"]) == 5

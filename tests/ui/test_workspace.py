@@ -10,7 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
@@ -819,3 +819,20 @@ def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
     rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
     assert rows[-1].height() == rows[0].height() + 12  # The gap above Calendar.
     assert sidebar.nav.height() >= rows[-1].bottom()  # Every row fits, none scrolls.
+
+
+def test_a_click_on_the_divider_above_calendar_chooses_nothing(qtbot: QtBot) -> None:
+    workspace = build(qtbot)
+    workspace.resize(*SIZES["mockup"])
+    show(qtbot, workspace)
+    sidebar = workspace.sidebar
+    sidebar.set_current("today")
+    pages = QSignalSpy(sidebar.page_requested)
+    calendar = sidebar.nav.visualRect(sidebar.pages.index(sidebar._row("calendar"), 0))
+    gap = QPoint(calendar.center().x(), calendar.top() + 4)  # On the divider.
+    QTest.mouseClick(sidebar.nav.viewport(), Qt.MouseButton.LeftButton, pos=gap)
+    assert sidebar.current_key() == "today"
+    assert pages.count() == 0
+    row = QPoint(calendar.center().x(), calendar.bottom() - 8)  # On the row itself.
+    QTest.mouseClick(sidebar.nav.viewport(), Qt.MouseButton.LeftButton, pos=row)
+    assert sidebar.current_key() == "calendar"

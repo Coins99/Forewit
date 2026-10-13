@@ -6,8 +6,9 @@ Colours are cosmetic, so a missing, unreadable or unknown choice gives the defau
 never stops MailBrief.
 """
 
-import asyncio
+import threading
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Final
 
@@ -19,6 +20,7 @@ from pydantic import (
     ValidatorFunctionWrapHandler,
     field_validator,
 )
+from PySide6.QtCore import QObject, Signal
 
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ui.diagnostics import log_failure
@@ -69,31 +71,53 @@ class AppearanceStore:
         write_text_atomically(self.path, appearance.model_dump_json(indent=2), overwrite=True)
 
 
-class AppearanceWriter:
-    """Saves the latest choice off the Qt thread, one write at a time: choices made while a
-    write runs are coalesced into one more write of the last of them."""
+# One worker for appearance saves: each is one small atomic write.
+_WORKER: Final = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mailbrief-appearance")
+
+
+class AppearanceWriter(QObject):
+    """Saves the latest choice on a worker thread, one write at a time: choices made while a
+    write runs become one more write of the last of them.
+
+    It uses a thread, not an asyncio task, so no write depends on qasync running a task
+    (one created like this once never ran, and shutdown waited for it). A failed write is
+    reported through ``failed``, a queued signal, on the Qt thread. ``drain`` waits for the
+    writes at shutdown.
+    """
+
+    failed = Signal()
 
     def __init__(self, store: AppearanceStore, failed: Callable[[], None]) -> None:
+        super().__init__()
         self._store = store
-        self._failed = failed
+        self.failed.connect(failed)
+        self._lock = threading.Lock()
         self._latest: Appearance | None = None
-        self._task: asyncio.Task[None] | None = None
+        self._writing: Future[None] | None = None
 
     def save(self, appearance: Appearance) -> None:
-        self._latest = appearance
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._write())
+        with self._lock:
+            self._latest = appearance
+            if self._writing is None:
+                self._writing = _WORKER.submit(self._write)
 
-    async def _write(self) -> None:
-        while self._latest is not None:
-            appearance, self._latest = self._latest, None
+    def _write(self) -> None:
+        """On the worker: write the latest choice until none is left."""
+        while True:
+            with self._lock:
+                appearance, self._latest = self._latest, None
+                if appearance is None:
+                    self._writing = None  # A later save starts a new write.
+                    return
             try:
-                await asyncio.to_thread(self._store.save, appearance)
-            except OSError as exc:
+                self._store.save(appearance)
+            except Exception as exc:  # Any failure: the loop must go on to clear _writing.
                 log_failure(exc)
-                self._failed()
+                self.failed.emit()
 
     async def drain(self) -> None:
-        """Wait for the writes in progress, for shutdown."""
-        if self._task is not None:
-            await self._task
+        """Wait for the writes in progress, for shutdown; each takes milliseconds."""
+        with self._lock:
+            writing = self._writing
+        if writing is not None:
+            wait([writing])

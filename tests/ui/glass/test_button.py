@@ -151,21 +151,47 @@ def test_pressing_shrinks_it_and_releasing_springs_back(button: GlassButton, qtb
     qtbot.waitUntil(lambda: button.scale() == 1.0)
 
 
-def test_focus_draws_an_accent_ring(button: GlassButton, qtbot: QtBot) -> None:
+def accent_in_middle_row(image: QImage) -> bool:
+    middle = round(image.height() / 2)
+    accent = current_tokens().accent_fg
+    return accent in {image.pixelColor(x, middle).name() for x in range(image.width())}
+
+
+def test_keyboard_focus_draws_an_accent_ring_and_a_click_does_not(
+    button: GlassButton, qtbot: QtBot
+) -> None:
+    """As the app's other focus rings: shown once the keyboard has moved focus."""
     with qtbot.waitActive(button, timeout=5000):
         button.activateWindow()
-    button.clearFocus()  # A lone button window takes focus when it activates.
-    qtbot.waitUntil(lambda: not button.hasFocus())
-    unfocused = picture(button)
-    button.setFocus()
+    window = button.window()
+    window.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, False)
+    button.setFocus(Qt.FocusReason.MouseFocusReason)
     qtbot.waitUntil(button.hasFocus)
-    focused = picture(button)
-    assert focused != unfocused
-    dpr = focused.devicePixelRatio()
-    middle = round(button.height() / 2 * dpr)
-    accent = current_tokens().accent_fg
-    row = [focused.pixelColor(x, middle).name() for x in range(round(button.width() * dpr))]
-    assert accent in row
+    assert not accent_in_middle_row(picture(button))  # Focused by a click: no ring.
+    window.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, True)  # As Tab sets it.
+    assert accent_in_middle_row(picture(button))
+
+
+def test_space_shrinks_it_and_releasing_springs_back(button: GlassButton, qtbot: QtBot) -> None:
+    """Pressed by the keyboard as by the mouse."""
+    QTest.keyPress(button, Qt.Key.Key_Space)
+    assert button.isDown()
+    assert button.press_animation.endValue() == PRESSED_SCALE
+    qtbot.waitUntil(lambda: button.scale() == PRESSED_SCALE)
+    QTest.keyRelease(button, Qt.Key.Key_Space)
+    assert button.press_animation.endValue() == 1.0
+    qtbot.waitUntil(lambda: button.scale() == 1.0)
+
+
+def test_disabling_a_held_pill_releases_and_unlights_it(button: GlassButton, qtbot: QtBot) -> None:
+    """A disabled button gets no release or Leave, so it would stay shrunk and lit."""
+    hover(button)
+    QTest.mousePress(button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: button.scale() == PRESSED_SCALE)
+    button.setEnabled(False)
+    qtbot.waitUntil(lambda: button.scale() == 1.0)  # Qt releases a disabled button.
+    assert button.hover() == 0.0
+    assert not button.isDown()
 
 
 def test_disabled_and_primary_paint_differently(button: GlassButton, qtbot: QtBot) -> None:

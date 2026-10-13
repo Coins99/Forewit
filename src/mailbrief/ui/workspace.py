@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QColor,
     QFontMetricsF,
     QKeyEvent,
+    QMouseEvent,
     QPainter,
     QPaintEvent,
     QResizeEvent,
@@ -315,9 +316,35 @@ class _NavDelegate(QStyledItemDelegate):
 
 
 class _NavList(QListView):
-    """Return and Enter request the current page once and are consumed."""
+    """Return and Enter request the current page once and are consumed. A click in the gap
+    above a group (the divider) chooses nothing."""
 
     page_activated = Signal(str)
+
+    def _in_gap(self, event: QMouseEvent) -> bool:
+        point = event.position().toPoint()
+        index = self.indexAt(point)
+        if not index.isValid() or index.data(KEY_ROLE) not in GROUP_STARTS:
+            return False
+        return point.y() < self.visualRect(index).top() + _GROUP_GAP
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._in_gap(event):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._in_gap(event):
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._in_gap(event):
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         index = self.currentIndex()

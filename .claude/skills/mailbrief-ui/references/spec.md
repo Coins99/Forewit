@@ -112,8 +112,12 @@ them.
       clear of the glow. Lighting the body would cut the primary pill's text contrast
       below 4.5:1 in dark mode.
   - **Press:** shrinks it to 0.97 in 90 ms, and release springs it back with OutBack in
-    280 ms. Both are instant when motion is reduced.
-  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge.
+    280 ms. Both are instant when motion is reduced. They follow the button's `pressed`
+    and `released` signals, so a keyboard press (Space) shrinks it too. Qt emits
+    `released` when a held button is disabled, and disabling also drops the hover.
+  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge, only after keyboard
+    navigation (`hairline.keyboard_focus`), like the app's other focus rings; a click
+    gives no ring.
   - **Disabled:** the body at half opacity, with `text_muted` text.
   - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
     escaping.
@@ -151,8 +155,10 @@ The owner picks a scheme in Settings > Appearance (`ui/appearance_view.py`): one
 button per scheme, each with a swatch of its dark panel ringed with its accent. Arrow
 keys move between them. The choice applies at once: `MainWindow._change_scheme` calls
 `apply_theme` whatever else is running, and `AppearanceWriter` saves it to
-`appearance.json` off the Qt thread. Startup applies the saved scheme once the data
-folder is locked.
+`appearance.json` on a one-thread worker. It never uses an asyncio task, which qasync
+once never ran. A failed save comes back through a queued signal, and shutdown waits for
+the write. Startup reads `appearance.json` once, once the data folder is locked: it
+applies the scheme and hands the choices to the window (`saved_appearance`).
 
 `apply_theme` sets the tokens before it changes the palette. Widgets that read
 `current_tokens()` at paint time need nothing more. A widget that keeps a colour, such
@@ -393,7 +399,7 @@ The brief list's chips keep their shorter forms (see Brief list).
   order (`PAGES`): today (Today, sun), inbox (Inbox, mail), actions (Actions,
   checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs (Briefs,
   calendar), then, set apart by a 12px gap with a hairline across it (`GROUP_STARTS`),
-  calendar (Calendar, calendar-week). Ctrl+1 to Ctrl+7 follow this order
+  calendar (Calendar, calendar-week). A click in the gap chooses nothing. Ctrl+1 to Ctrl+7 follow this order
   (`PAGE_SHORTCUTS`). Rows 31px: selected rows get
   a rounded selection fill (radius 8);
   a 14px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
@@ -585,7 +591,8 @@ The brief list's chips keep their shorter forms (see Brief list).
 ## Buttons, lists and tabs
 
 - A dialog page whose rows can outgrow the dialog goes in a scroll area
-  (`settings_view._scrolling`: resizable, no frame, no focus, no sideways scrolling). A
+  (`settings_view._scrolling`: resizable, no frame, no focus, no sideways scrolling,
+  named `{page}Scroll` with the tab's title as its accessible name). A
   squeezed form overlaps its rows: a wrapped note's last line hides behind the next row.
   A form field that is a box layout goes in a plain `QWidget`, so the form gives a
   wrapped label in it the height its text needs.

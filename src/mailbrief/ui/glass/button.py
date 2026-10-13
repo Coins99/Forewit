@@ -17,11 +17,12 @@ from PySide6.QtGui import (
     QPaintEvent,
     QPen,
 )
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QStyleOptionButton
 
 from mailbrief.ui.glass.painter import GlassMode, paint_glow, paint_pill, paint_specular
 from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
+from mailbrief.ui.hairline import keyboard_focus
 from mailbrief.ui.theme import current_glass, current_tokens
 
 # The outline button's box: text plus 14 px each side and 6 px above and below.
@@ -49,11 +50,11 @@ class GlassButton(QPushButton):
 
     Hovering animates in, as Apple's glass does: the pill grows a little on a spring, a
     glow starts inside its edge under the pointer and spreads round it, and its rim lights
-    near the pointer, which the light follows. Leaving eases it all back. Pressing shrinks
-    the pill slightly and releasing springs it back. With motion reduced, the light comes
-    at once and nothing moves; reduced transparency and increased contrast paint the pill
-    opaque, with no light. Focus draws a ring in the accent colour, and ``primary`` tints
-    the one primary action.
+    near the pointer, which the light follows. Leaving eases it all back. Pressing, by
+    mouse or keyboard, shrinks the pill slightly and releasing springs it back. With
+    motion reduced, the light comes at once and nothing moves; reduced transparency and
+    increased contrast paint the pill opaque, with no light. Keyboard focus draws a ring
+    in the accent colour (a click doesn't), and ``primary`` tints the one primary action.
     """
 
     def __init__(self, text: str, *, primary: bool = False) -> None:
@@ -69,6 +70,10 @@ class GlassButton(QPushButton):
         self.press_animation.valueChanged.connect(self._set_scale)
         self.hover_animation = QVariantAnimation(self)
         self.hover_animation.valueChanged.connect(self._set_hover)
+        # Qt emits these for mouse and keyboard presses alike, and emits released when a
+        # held button is disabled, so the pill never stays shrunk.
+        self.pressed.connect(self._pressed)
+        self.released.connect(self._released)
 
     def _set_scale(self, value: object) -> None:
         if isinstance(value, float):
@@ -155,14 +160,31 @@ class GlassButton(QPushButton):
         self.update()
         super().mouseMoveEvent(event)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        super().mousePressEvent(event)
-        if self.isDown():
-            self._animate_scale(PRESSED_SCALE, PRESS_MS, QEasingCurve.Type.OutQuad)
+    def _pressed(self) -> None:
+        self._animate_scale(PRESSED_SCALE, PRESS_MS, QEasingCurve.Type.OutQuad)
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        super().mouseReleaseEvent(event)
+    def _released(self) -> None:
         self._animate_scale(1.0, RELEASE_MS, QEasingCurve.Type.OutBack)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() != QEvent.Type.EnabledChange:
+            return
+        if not self.isEnabled():
+            # A disabled button gets no Leave or release: drop the hover and press now.
+            self.hover_animation.stop()
+            self.press_animation.stop()
+            self._set_hover(0.0)
+            self._set_scale(1.0)
+        elif self.underMouse():
+            self._animate(
+                self.hover_animation,
+                self._set_hover,
+                self._hover,
+                1.0,
+                HOVER_IN_MS,
+                QEasingCurve.Type.OutBack,
+            )
 
     def _pill(self) -> QRectF:
         """The pill's rectangle: grown into its room as hovered, scaled about its centre
@@ -193,7 +215,9 @@ class GlassButton(QPushButton):
             paint_glow(painter, rect, glass, light_at, self._hover)
             paint_specular(painter, rect, glass, light_at, self._hover)
         painter.setOpacity(1.0)
-        if self.hasFocus():
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        if keyboard_focus(option.state):  # As elsewhere: not after a click.
             ring = QPainterPath()
             inset = FOCUS_WIDTH / 2
             inner = rect.adjusted(inset, inset, -inset, -inset)

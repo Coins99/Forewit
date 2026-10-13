@@ -126,6 +126,7 @@ def test_no_settings_tab_squeezes_its_rows_into_each_other(
         area = dialog.tabs.currentWidget()
         assert isinstance(area, QScrollArea)
         assert area.focusPolicy() == Qt.FocusPolicy.NoFocus  # Tab skips it.
+        assert area.objectName().endswith("Scroll") and area.accessibleName()
         page = area.widget()
         assert page is not None
         qtbot.waitUntil(page.isVisible)

@@ -15,7 +15,7 @@ from qasync import QEventLoop
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
-from mailbrief.ui.appearance import APPEARANCE_FILE, AppearanceStore
+from mailbrief.ui.appearance import APPEARANCE_FILE, Appearance, AppearanceStore
 from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
 from mailbrief.ui.glass.profile import log_summary as log_paint_summary
 from mailbrief.ui.main_window import MainWindow
@@ -62,13 +62,13 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
     return application
 
 
-def apply_saved_scheme(store: AppearanceStore, *, themed: bool) -> None:
+def apply_saved_scheme(saved: Appearance, *, themed: bool) -> None:
     """The owner's colours, once the data folder is locked; the theme applied before
     then uses the default scheme. Nothing changes when that theme failed."""
     application = QApplication.instance()
     if not themed or not isinstance(application, QApplication):
         return
-    scheme = store.load().color_scheme
+    scheme = saved.color_scheme
     if scheme is current_scheme():
         return
     try:
@@ -99,11 +99,13 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         if theme_failure is not None:
             log_failure(theme_failure)
         appearance = AppearanceStore(paths.data_dir / APPEARANCE_FILE)
-        apply_saved_scheme(appearance, themed=theme_failure is None)
+        saved = appearance.load()  # Once, for the scheme now and the window's choices.
+        apply_saved_scheme(saved, themed=theme_failure is None)
         window = MainWindow(
             DesktopRuntime(paths.database_path),
             database_path=paths.database_path,
             appearance=appearance,
+            saved_appearance=saved,
         )
         closed = asyncio.Event()
         window.closing.connect(closed.set)

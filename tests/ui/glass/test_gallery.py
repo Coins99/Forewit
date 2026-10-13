@@ -147,6 +147,7 @@ def test_glass_button_states_render(
     pills["Hover"]._set_hover(1.0)  # Settled, not mid-animation.
     pills["Pressed"].setDown(True)
     pills["Pressed"]._set_scale(PRESSED_SCALE)
+    workspace.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, True)  # As Tab.
     pills["Focus"].setFocus()
     qtbot.waitUntil(pills["Focus"].hasFocus)
     pills["Disabled"].setEnabled(False)

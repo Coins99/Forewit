@@ -404,8 +404,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Use the `/mailbrief-ui` skill (`.claude/skills/mailbrief-ui/`) for any change under
   `src/mailbrief/ui`.
 - Colours come only from `ui/theme/tokens.py`; mail and AI text only through
-  `plain_label()`, `wrap_label()` or a delegate's `drawText()`; button text through
-  `button_label()`.
+  `plain_label()`, `wrap_label()`, a delegate's `drawText()` or a glass pill's label
+  (`GlassButton` paints its `button_label()` text with `drawText()`, plain, mnemonics
+  hidden); button text through `button_label()`.
 - Render the screenshot gallery with
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
   and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
