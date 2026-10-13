@@ -81,8 +81,8 @@ def pills(fill: Tint, g: GlassTokens, below: list[RGB], *, hover: bool = True) -
     """A pill over each of ``below``: bare, under its sheen, under its shade and, unless
     it's the primary pill (which never takes it), under its full hover fill."""
     extras: list[tuple[Tint, ...]] = [(), (g.pill_sheen,), (g.pill_shade,)]
-    if hover:
-        extras.append((g.pill_hover,))
+    if hover:  # The lensed glow lights a pill's body too (never the primary's).
+        extras += [(g.pill_hover,), (g.lens,), (g.pill_hover, g.lens)]
     return [layered(b, fill, *extra) for b in below for extra in extras]
 
 

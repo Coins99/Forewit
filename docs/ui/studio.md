@@ -100,13 +100,16 @@ MailBrief draws each part with QPainter (`ui/glass/painter.py`):
   that float above content, never for the content itself, and never glass on glass.
   MailBrief's glass is the header, sidebar, gutter and status bar; the pages sit on the
   white sheet. The selected page is a vibrant white fill, not a second layer of glass.
-- **Lensing and highlights.** Glass defines its shape by bending and concentrating light
-  at its edges, and light sources make specular highlights that follow its geometry. A
-  pill on the glass has a lensing band 3 px inside its edge (bright along the top,
-  faintly shaded along the bottom) and a 1 px specular rim, bright along the top,
-  brightest at the top left and reflected at the bottom right.
-- **Shadows that ground it.** An even contact edge (Apple's `#e6e6e8` ring in light
-  mode) and a soft shadow below, outside the pill only.
+- **Light, as a Liquid Glass tab takes it.** Measured pixel by pixel on a glass tab in
+  dark mode (toolbar 69, body 74 on a 0–255 lightness scale): light enters along the two
+  long edges, so the rim is a crisp line along the top (125) and an almost equal one along
+  the bottom (119); from each, the light falls steeply within a point (102, 83) and then
+  faintly over about six, so the middle of the glass is darkest. Round the ends the light
+  fades out and the outermost edge falls into shade (down to 40, darker than the
+  toolbar), fading in by one radius. There is no shadow above or below it. Studio's dark
+  pills follow those numbers (`RIM_LIGHT`, `LENS_LIGHT`, `END_SHADE`); light mode, where
+  white light can't show on a white page, keeps the same shaded ends and adds a faint
+  contact ring and a soft shadow below.
 - **Lifting into glass.** Controls in the content rest quietly and lift up into glass
   when touched: Accept, Dismiss, Draft a reply and Open in Gmail rest as outlines and,
   under the pointer, gain the frosted body, highlight and shadow as they swell on a
@@ -129,8 +132,7 @@ to a new page on monopo's expo-out curve, cubic-bezier(0.19, 1, 0.22, 1), in 420
 A glass pill with an icon carries it as a browser tab carries its site icon: a rounded
 square tile (18 px, radius 5) at its leading end, concentric with the pill's round end,
 with the glyph in white on Steel grey (on the primary pill, a lighter blue tile), then the
-label in Inter Medium. Light along the top rim and a softer bottom rim give it the same
-glassy edge as the tab it is modelled on.
+label in Inter Medium. Its light is the tab's, described above.
 
 ## A dashboard, after Dub
 

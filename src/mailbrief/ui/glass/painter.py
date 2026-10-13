@@ -12,7 +12,6 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QConicalGradient,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -220,27 +219,36 @@ def paint_pill(
     paint_rim(painter, rect, radius, _rim_stops(glass, top, mode))
 
 
-# Liquid Glass's layers on a pill (WWDC25), for schemes whose highlight token is lit.
-# The lensing band's width inside the edge (labels sit PAD_Y, 6 px, in), and the shadow's
-# rings: (spread, drop, share of the shadow token's alpha), within the button's room round
-# the pill. The first is an even contact edge all round, as a glass tab's dark outline
-# (in light mode, Apple's subtle grey ring); the others fall below it, softly.
-LENS_WIDTH = 3.0
-SHADOW_RINGS = ((0.75, 0.0, 0.9), (1.5, 1.0, 0.35), (2.5, 2.0, 0.15))
-# The specular highlight round the rim: (angle as a share of a turn from three o'clock,
-# anticlockwise; strength). Bright along the top and brightest at the top left, where the
-# light falls; softer along the bottom, reflected most at the bottom right.
-HIGHLIGHT_STOPS = (
-    (0.0, 0.3),
-    (0.1, 0.5),
-    (0.25, 0.85),
-    (0.375, 1.0),
-    (0.5, 0.45),
-    (0.6, 0.2),
-    (0.75, 0.35),
-    (0.875, 0.6),
-    (1.0, 0.3),
+# Liquid Glass's layers on a pill (WWDC25), for schemes whose highlight token is lit. The
+# light follows a Liquid Glass tab's: it enters along the two long edges, so the rim has a
+# crisp line of light along the top and an almost equal one along the bottom, and each
+# glows into the body (lensing: the edges concentrate light, the middle is darkest).
+# Round the ends the light fades out, and the outermost edge falls into shade.
+# Each profile is (position down the pill as a share of its height, strength).
+# Measured on a tab: its rim line is +51 over the body at the top and +45 at the bottom;
+# the glow falls steeply within a point of each edge, then fades over about six.
+RIM_LIGHT = ((0.0, 1.0), (0.18, 0.45), (0.34, 0.0), (0.66, 0.0), (0.82, 0.4), (1.0, 0.9))
+LENS_LIGHT = (
+    (0.0, 1.0),
+    (0.04, 0.35),
+    (0.1, 0.15),
+    (0.22, 0.0),
+    (0.78, 0.0),
+    (0.9, 0.15),
+    (0.96, 0.35),
+    (1.0, 0.9),
 )
+# The ends' shade by distance in from each end, as a share of the pill's radius: darkest
+# at the very end, faint half a radius in, gone by one (measured on the tab: -29, -13 and
+# -3 levels at 0, 0.3 and 0.55 radii).
+END_SHADE = ((0.0, 1.0), (0.31, 0.45), (0.55, 0.1), (1.0, 0.0))
+# The shaded ends and the contact ring: how far outside the edge each line sits and how
+# wide it is (logical px).
+EDGE_OFFSET = 0.5
+EDGE_WIDTH = 1.25
+# A soft shadow below the pill, within the button's room and never above it: (spread,
+# drop, share of the shadow token's alpha).
+SHADOW_RINGS = ((1.0, 1.5, 0.35), (2.0, 2.5, 0.15))
 
 
 def paint_liquid_pill(
@@ -253,14 +261,15 @@ def paint_liquid_pill(
     hover: float = 0.0,
     on_glass: bool = True,
 ) -> None:
-    """A pill as Liquid Glass (WWDC25): a soft contact shadow, a frosted body, a lensing
-    band that concentrates light just inside the edge, and a specular highlight round the
-    rim, lit at the top left and reflected at the bottom right.
+    """A pill as Liquid Glass, lit as a Liquid Glass tab is: a frosted body; light that
+    enters along its long edges, as a crisp rim line along the top and the bottom with a
+    glow fading into the body; shaded ends; and a soft shadow below.
 
     On the glass (``on_glass``, the header and sidebar) and for the primary pill, all of it
     shows at rest. In the content layer a pill rests as an outline in `rim_top` and lifts
     into glass as ``hover`` goes from 0 to 1, as WWDC's controls "lift up into Liquid
     Glass" on interaction. The body fills with `pill_hover` at the hover's strength. The
+    primary pill's glow stays off its body, so its white label keeps its contrast. The
     solid modes keep the outline and body but paint no light or shadow."""
     hover = _unit(hover)
     presence = 1.0 if on_glass or primary else hover
@@ -279,8 +288,8 @@ def paint_liquid_pill(
             painter.fillPath(path, color(glass.pill))
         if hover > 0:
             painter.fillPath(path, color(glass.pill_hover, hover))
-    if normal and presence > 0 and glass.lens.alpha > 0:
-        _paint_lens(painter, rect, path, glass.lens, presence)
+        if normal and presence > 0 and glass.lens.alpha > 0:
+            painter.fillPath(path, _profile(rect, glass.lens, LENS_LIGHT, presence))
     painter.restore()
     if mode is GlassMode.INCREASED_CONTRAST:
         solid = QColor(glass.rim_contrast)
@@ -295,18 +304,55 @@ def paint_liquid_pill(
             color(glass.rim_bottom, fade),
         )
         paint_rim(painter, rect, radius, stops)
+    if normal and presence > 0:
+        _paint_edges(painter, rect, glass, presence)
     if normal and presence > 0 and glass.highlight.alpha > 0:
         paint_highlight(painter, rect, glass.highlight, presence)
 
 
+def _profile(
+    rect: QRectF, light: Tint, profile: tuple[tuple[float, float], ...], strength: float
+) -> QBrush:
+    """``light`` down the height of ``rect``, at each profile stop's share of its alpha."""
+    gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+    for at, share in profile:
+        gradient.setColorAt(at, color(light, share * _unit(strength)))
+    return QBrush(gradient)
+
+
 def paint_highlight(painter: QPainter, rect: QRectF, light: Tint, strength: float = 1.0) -> None:
-    """The specular highlight round a pill's rim: one device pixel, brightest at the top
-    left where the light falls and again, fainter, where it reflects at the bottom
-    right."""
-    rim = QConicalGradient(rect.center(), 0.0)
-    for at, share in HIGHLIGHT_STOPS:
-        rim.setColorAt(at, color(light, share * _unit(strength)))
-    _stroke_rim(painter, rect, rect.height() / 2, QBrush(rim))
+    """The light on a pill's rim: one device pixel, a crisp line along the top and an
+    almost equal one along the bottom, fading out round the ends."""
+    _stroke_rim(painter, rect, rect.height() / 2, _profile(rect, light, RIM_LIGHT, strength))
+
+
+def _paint_edges(painter: QPainter, rect: QRectF, glass: GlassTokens, strength: float) -> None:
+    """Just outside the pill: an even contact ring (`edge`), and the shade at its ends
+    (`end_shade`), darkest where they face sideways, where the light that runs along the
+    long edges never reaches."""
+    ring = rect.adjusted(-EDGE_OFFSET, -EDGE_OFFSET, EDGE_OFFSET, EDGE_OFFSET)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QBrush())
+    if glass.edge.alpha > 0:
+        painter.setPen(QPen(color(glass.edge, _unit(strength)), EDGE_WIDTH))
+        painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+    if glass.end_shade.alpha > 0:
+        painter.setPen(QPen(_end_shade(ring, glass.end_shade, strength), EDGE_WIDTH))
+        painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+    painter.restore()
+
+
+def _end_shade(rect: QRectF, shade: Tint, strength: float) -> QBrush:
+    """``shade`` across ``rect``: darkest at each end, fading in by END_SHADE, clear in the
+    middle."""
+    gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+    reach = min(0.5, rect.height() / 2 / max(rect.width(), 1.0))  # One radius, as a share.
+    for at, share in END_SHADE:
+        alpha = share * _unit(strength)
+        gradient.setColorAt(at * reach, color(shade, alpha))
+        gradient.setColorAt(1.0 - at * reach, color(shade, alpha))
+    return QBrush(gradient)
 
 
 def _paint_shadow(
@@ -323,26 +369,4 @@ def _paint_shadow(
         ring = rect.adjusted(-spread, -spread + drop, spread, spread + drop)
         painter.setBrush(color(shadow, share * strength))
         painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
-    painter.restore()
-
-
-def _paint_lens(
-    painter: QPainter, rect: QRectF, path: QPainterPath, lens: Tint, strength: float
-) -> None:
-    """Light concentrated just inside the edge: bright along the top, clear by the middle,
-    and a faint refracted shade along the bottom."""
-    band = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-    band.setColorAt(0.0, color(lens, strength))
-    band.setColorAt(0.45, color(lens, 0.0))
-    shade = QColor(Qt.GlobalColor.black)
-    shade.setAlphaF(0.0)
-    band.setColorAt(0.8, shade)
-    shade = QColor(Qt.GlobalColor.black)
-    shade.setAlphaF(lens.alpha * 0.12 * strength)
-    band.setColorAt(1.0, shade)
-    painter.save()
-    painter.setClipPath(path)  # The stroke's outer half falls outside: a band inside.
-    painter.setPen(QPen(QBrush(band), 2 * LENS_WIDTH))
-    painter.setBrush(QBrush())
-    painter.drawPath(path)
     painter.restore()

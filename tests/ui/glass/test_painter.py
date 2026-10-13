@@ -227,20 +227,19 @@ def test_a_content_pill_lifts_into_glass_under_the_pointer(
     resting, lifted = paint(False, 0.0), paint(False, 1.0)
     assert resting.pixelColor(55, 23).name() == card  # An outline only…
     assert lifted.pixelColor(55, 23).name() != card  # …that fills as it lifts,
-    assert resting.pixelColor(55, 43).name() == card  # and casts a shadow only then.
-    assert lifted.pixelColor(55, 43).name() != card
+    assert resting.pixelColor(55, 43).name() == card  # and casts its shadow only then.
+    if glass.shadow.alpha > 0:  # Dark glass, as a tab, casts none.
+        assert lifted.pixelColor(55, 43).name() != card
     assert paint(True, 0.0).pixelColor(55, 23) == paint(True, 1.0).pixelColor(55, 23)
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_a_pill_on_the_glass_is_lit_at_the_top_left(qapp: QApplication, mode: ThemeMode) -> None:
-    """The specular highlight falls at the top left and reflects, fainter, at the bottom
-    right; the top right and bottom left stay dim."""
-    light = Tint("#ffffff", 1.0)
+def test_light_enters_a_pill_along_its_long_edges(qapp: QApplication) -> None:
+    """As on a Liquid Glass tab: a crisp line of light along the top and an almost equal
+    one along the bottom, fading out round the ends."""
     picture = image(120, 40)
     picture.fill(QColor("#000000"))
     painter = QPainter(picture)
-    paint_highlight(painter, QRectF(0, 0, 120, 40), light)
+    paint_highlight(painter, QRectF(0, 0, 120, 40), Tint("#ffffff", 1.0))
     painter.end()
 
     def lit(x: int, y: int) -> int:
@@ -248,11 +247,35 @@ def test_a_pill_on_the_glass_is_lit_at_the_top_left(qapp: QApplication, mode: Th
             picture.pixelColor(x + dx, y + dy).lightness() for dx in (-1, 0, 1) for dy in (0, 1)
         )
 
-    top_left, top_right = lit(20, 0), lit(100, 0)
-    bottom_right, bottom_left = lit(100, 38), lit(20, 38)
-    assert top_left > top_right
-    assert bottom_right > bottom_left
-    assert top_left > bottom_right
+    top, bottom, end = lit(60, 0), lit(60, 38), lit(1, 19)
+    assert top > 200 and bottom > 180  # Both long edges are lit…
+    assert top >= bottom
+    assert end < 40  # …and the light never reaches the ends' sides.
+
+
+def test_a_dark_glass_pill_matches_the_tab_it_is_measured_on(qapp: QApplication) -> None:
+    """On the tab's toolbar grey: a body a shade lighter, the light on both long edges
+    falling steeply into a faint lensed glow, no shadow above or below, and the ends
+    shaded darker than the toolbar."""
+    glass = glass_for(ThemeMode.DARK, ColorScheme.STUDIO)
+    picture = image(220, 60, 2.0)
+    picture.fill(QColor("#424448"))
+    painter = QPainter(picture)
+    paint_liquid_pill(painter, QRectF(10, 15, 195, 29), glass, on_glass=True)
+    painter.end()
+    background = QColor("#424448").lightness()
+
+    def at(x: int, y: int) -> int:
+        return picture.pixelColor(x, y).lightness()
+
+    column = [at(215, y) for y in range(20, 100)]  # The middle, in device pixels.
+    body = at(215, 59)
+    assert 0 < body - background <= 10  # A body a shade lighter than the toolbar.
+    assert max(column) - body > 40  # A crisp line of light at an edge…
+    assert at(215, 36) - body < 6  # …that has faded into the body a few points in.
+    assert min(column) >= background - 2  # No shadow above or below.
+    end = min(at(x, 59) for x in range(16, 22))  # Round the left end's outer edge.
+    assert end < background - 8  # The ends are shaded darker than the toolbar.
 
 
 def test_a_calm_selected_pill_has_no_rim(qapp: QApplication) -> None:

@@ -58,9 +58,11 @@ prototype, for every scheme. `GLASS_DARK` and `GLASS_LIGHT` are Studio's. Studio
 follows WWDC25's Liquid Glass over a fluid colour field (`docs/ui/studio.md`): a flat
 backdrop (both stops Studio Mist) with no streak, sheen or lit edge (alpha 0, a light
 turned off), and three soft pools of sage, amber and rose light (`pool_a`, `pool_b`,
-`pool_c`) that show through its frosted chrome. Its pills carry Liquid Glass's layers:
-`highlight` (the specular rim), `lens` (light concentrated just inside the edge) and
-`shadow` (an even contact edge and a soft shadow below). On the glass they are frosted
+`pool_c`) that show through its frosted chrome. Its pills are lit as a Liquid Glass tab
+is (measured on one): `highlight` (light on the rim along the top and the bottom), `lens`
+(the glow that light lenses into the body from both long edges), `end_shade` (the ends,
+where that light never reaches), `edge` (an even contact ring, light mode only) and
+`shadow` (a soft shadow below, light mode only). On the glass they are frosted
 (`pill`) at rest; in the content they rest as a Steel outline and lift into glass under
 the pointer (`pill_hover`). Its selected page is a vibrant white fill with no rim
 (`raised_rim` alpha 0: no glass on glass), and its primary pill is solid blue, labelled
@@ -150,11 +152,16 @@ them.
     False. With Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
     paints it: on the glass, frosted with its highlight, lens and shadow at rest; in the
     content, an outline that fades out as the pill lifts into glass with the hover (as
-    WWDC's controls "lift up into Liquid Glass" on interaction). The highlight is bright
-    along the top and brightest at the top left, softer along the bottom and reflected
-    at the bottom right (`HIGHLIGHT_STOPS`); the lens band is `LENS_WIDTH` (3) inside the
-    edge; the shadow (`SHADOW_RINGS`) is outside the pill only, so it never darkens the
-    body behind the label. The other schemes paint `paint_pill`.
+    WWDC's controls "lift up into Liquid Glass" on interaction). Its light follows a
+    Liquid Glass tab's, measured pixel by pixel: light enters along the two long edges,
+    as a crisp 1 device px rim line along the top and an almost equal one along the
+    bottom (`RIM_LIGHT`, a profile down the pill's height), each glowing into the body
+    and falling steeply within a point, then faintly over about six (`LENS_LIGHT`; the
+    middle is darkest). Round the ends the light fades out and the outermost edge is
+    shaded (`END_SHADE`, by distance in from each end as a share of the radius: darkest
+    at the end, gone by one radius). The primary's glow stays off its body, so its white
+    label keeps its contrast. The shadow (`SHADOW_RINGS`) falls below the pill only and
+    outside it. The other schemes paint `paint_pill`.
   - **Hover:** animates in, as Apple's glass lights from within on interaction.
     - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
       whose overshoot still fits the room.

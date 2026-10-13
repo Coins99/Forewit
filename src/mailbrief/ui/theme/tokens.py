@@ -98,12 +98,17 @@ class GlassTokens:
     pool_a: Tint
     pool_b: Tint
     pool_c: Tint
-    # Liquid Glass's layers on a pill (WWDC25): its specular highlight, lit at the top left
-    # and reflected at the bottom right; the lensing band just inside its edge, where it
-    # concentrates light; and the soft shadow it casts. Alpha 0 turns a layer off.
+    # Liquid Glass's layers on a pill (WWDC25), lit as a Liquid Glass tab is: the light on its
+    # rim, along the top and the bottom; the glow it lenses into the body from both edges;
+    # and the soft shadow it casts. Alpha 0 turns a layer off.
     highlight: Tint
     lens: Tint
     shadow: Tint
+    # A pill's edges, as on a Liquid Glass tab: an even contact ring just outside it (for a
+    # light page, where its light can't show), and the shade at its ends, where the light
+    # that runs along its long edges never reaches.
+    edge: Tint
+    end_shade: Tint
     rim_contrast: str  # Every rim when contrast is increased (3:1 on `opaque`).
 
 
@@ -411,10 +416,10 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.28),
         rim_mid=Tint("#ffffff", 0.28),
         rim_bottom=Tint("#ffffff", 0.28),
-        pill=Tint("#ffffff", 0.08),
+        pill=Tint("#ffffff", 0.03),
         pill_sheen=Tint("#ffffff", 0.0),
         pill_shade=Tint("#000000", 0.0),
-        pill_hover=Tint("#ffffff", 0.12),
+        pill_hover=Tint("#ffffff", 0.07),
         primary=Tint("#0071e3", 1.0),
         primary_rim=Tint("#0071e3", 1.0),
         primary_text="#ffffff",
@@ -424,9 +429,11 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pool_a=Tint("#2f5a3c", 0.7),
         pool_b=Tint("#6b4614", 0.6),
         pool_c=Tint("#5a1f22", 0.65),
-        highlight=Tint("#ffffff", 0.55),
+        highlight=Tint("#ffffff", 0.24),
         lens=Tint("#ffffff", 0.18),
-        shadow=Tint("#000000", 0.35),
+        shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.45),
     ),
     (ColorScheme.STUDIO, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#f5f5f7",
@@ -458,6 +465,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.95),
         lens=Tint("#ffffff", 0.6),
         shadow=Tint("#000000", 0.07),
+        edge=Tint("#000000", 0.065),
+        end_shade=Tint("#000000", 0.14),
     ),
     (ColorScheme.SLATE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#323640",
@@ -489,6 +498,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SLATE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e4e8ef",
@@ -520,6 +531,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.GRAPHITE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#373632",
@@ -551,6 +564,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.GRAPHITE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e8e8e5",
@@ -582,6 +597,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.OCEAN, ThemeMode.DARK): GlassTokens(
         backdrop_top="#2b393b",
@@ -613,6 +630,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.OCEAN, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e0eaeb",
@@ -644,6 +663,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SAGE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#303931",
@@ -675,6 +696,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SAGE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e3eae4",
@@ -706,6 +729,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.PLUM, ThemeMode.DARK): GlassTokens(
         backdrop_top="#39343d",
@@ -737,6 +762,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.PLUM, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#eae6ed",
@@ -768,6 +795,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.ROSE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#3f3234",
@@ -799,6 +828,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.ROSE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#efe5e6",
@@ -830,6 +861,8 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         highlight=Tint("#ffffff", 0.0),
         lens=Tint("#ffffff", 0.0),
         shadow=Tint("#000000", 0.0),
+        edge=Tint("#000000", 0.0),
+        end_shade=Tint("#000000", 0.0),
     ),
 }
 
