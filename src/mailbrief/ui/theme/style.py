@@ -22,7 +22,17 @@ from mailbrief.ui.theme.assets import (
     release_icon_cache,
     ui_font,
 )
-from mailbrief.ui.theme.tokens import DARK, LIGHT, TEXT_PX, ThemeMode, Tokens, tokens_for
+from mailbrief.ui.theme.tokens import (
+    DARK,
+    ITEM_MARK_PX,
+    ITEM_PAD_X,
+    ITEM_PAD_Y,
+    LIGHT,
+    TEXT_PX,
+    ThemeMode,
+    Tokens,
+    tokens_for,
+)
 
 QSS = """\
 QWidget#workspace, QWidget#sidebar { background: $panel; }
@@ -41,8 +51,8 @@ QPushButton[variant="nav"] { text-align: left; background: transparent; color: $
 QPushButton[variant="nav"]:hover, QPushButton[variant="nav"]:focus { background: $selection; color: $text; }
 QListView#sidebarNav, QListView#briefList, QListView#actionList { background: $panel; border: none; outline: 0; }
 QScrollArea#briefDetail, QScrollArea#actionDetail { background: $panel; border: none; }
-QListWidget::item { padding: 4px 8px; border-left: 2px solid transparent; }
-QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; border-left: 2px solid $accent_border; }
+QListWidget::item { padding: ${item_pad_y}px ${item_pad_x}px; border-left: ${item_mark}px solid transparent; }
+QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; border-left: ${item_mark}px solid $accent_border; }
 QTabWidget::pane { border: none; }
 QTabBar::tab { background: transparent; color: $text_secondary; padding: 6px 12px; border: none; }
 QTabBar::tab:selected { color: $text; border-bottom: 2px solid $accent_border; }
@@ -94,7 +104,8 @@ def build_palette(t: Tokens) -> QPalette:
 
 
 def build_stylesheet(t: Tokens) -> str:
-    return string.Template(QSS).substitute(dataclasses.asdict(t))
+    metrics = {"item_pad_x": ITEM_PAD_X, "item_pad_y": ITEM_PAD_Y, "item_mark": ITEM_MARK_PX}
+    return string.Template(QSS).substitute(dataclasses.asdict(t) | metrics)
 
 
 class ThemeStyle(QProxyStyle):

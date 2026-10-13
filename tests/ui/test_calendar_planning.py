@@ -2,10 +2,13 @@
 apply and Undo, all in the calendar's own words."""
 
 import asyncio
-from datetime import timedelta
+from collections.abc import Sequence
+from datetime import UTC, date, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.calendar_planning import (
@@ -17,11 +20,20 @@ from mailbrief.domain.calendar_planning import (
     ProposedChange,
 )
 from mailbrief.domain.events import ChangeKind, EventChange
+from mailbrief.domain.google_calendar import CalendarSyncResult
+from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.services.events import EventConflictError
 from mailbrief.ui.diagnostics import error_guidance
 from mailbrief.ui.main_window import MainWindow
-from mailbrief.ui.planning_dialog import NO_INSTRUCTION, TOO_LONG, proposal_text
-from tests.ui.test_calendar import NOW, TODAY, TORONTO, stored, timed, whole_days
+from mailbrief.ui.planning_dialog import (
+    NO_INSTRUCTION,
+    READING,
+    TOO_LONG,
+    PlanningDialog,
+    proposal_text,
+)
+from mailbrief.ui.theme import ThemeMode, apply_theme
+from tests.ui.test_calendar import MONDAY, NOW, TODAY, TORONTO, stored, timed, whole_days
 from tests.ui.test_workflow import FakeBackend
 
 
@@ -159,7 +171,7 @@ async def test_preview_consent_review_apply_and_undo(
     )
     item = dialog.list.item(2)
     assert item is not None
-    item.setCheckState(Qt.CheckState.Unchecked)  # Keep the trip.
+    assert item.checkState() == Qt.CheckState.Unchecked  # The delete waits for a tick.
     dialog.apply_button.click()
     await finish(window)
     applied = calls(backend, "apply")[0][1]
@@ -172,6 +184,134 @@ async def test_preview_consent_review_apply_and_undo(
     window.undo_button.click()
     await finish(window)
     assert len(backend.undone) == 1
+
+
+def test_deletions_start_unticked_and_overlaps_follow_the_ticks(qtbot: QtBot) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = PlanningDialog(parent)
+    asked: list[tuple[bool, ...]] = []
+
+    def overlaps(changes: Sequence[EventChange], ticked: Sequence[bool]) -> list[tuple[str, ...]]:
+        asked.append(tuple(ticked))
+        return [("Trip",) if row == 0 and not ticked[2] else () for row in range(len(changes))]
+
+    dialog.show_proposals(proposals(), TORONTO, TODAY, overlaps)
+    items = [dialog.list.item(row) for row in range(3)]
+    assert all(item is not None for item in items)
+    first, _, delete = items
+    assert first is not None and delete is not None
+    assert [item.checkState() for item in items if item is not None] == [
+        Qt.CheckState.Checked,
+        Qt.CheckState.Checked,
+        Qt.CheckState.Unchecked,
+    ]
+    assert dialog.list.wordWrap()  # Long reasons wrap rather than scroll sideways.
+    assert "Overlaps: Team sync (Work)" in first.text()  # As Groq's answer was checked.
+    delete.setCheckState(Qt.CheckState.Checked)
+    assert asked == [(True, True, True)] and "Overlaps" not in first.text()
+    delete.setCheckState(Qt.CheckState.Unchecked)
+    assert asked[-1] == (True, True, False) and first.text().endswith("Overlaps: Trip")
+    first.setText(first.text())  # A row's own text changing asks nothing.
+    assert len(asked) == 2
+
+
+def test_long_rows_wrap_inside_the_list(qtbot: QtBot, qapp: QApplication, themed: None) -> None:
+    apply_theme(qapp, ThemeMode.DARK)  # The theme pads rows, which once widened them.
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = PlanningDialog(parent)
+    first = (
+        proposals()
+        .proposals[0]
+        .model_copy(
+            update={
+                "reason": "Moves the dentist to Friday morning, the only free hour before your "
+                "10:30 call, and keeps it an hour long so nothing else has to move this week. "
+                "Thursday was full with the offsite, and Monday's slot clashes with the school "
+                "run, so Friday is the one morning left before the deadline on the deck.",
+                "overlaps": ("Team sync with the regional finance leads (Work)", "Budget prep"),
+            }
+        )
+    )
+    dialog.show_proposals(CalendarPlan(proposals=(first,)), TORONTO, TODAY)
+    dialog.resize(560, 420)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    item = dialog.list.item(0)
+    assert item is not None
+    row = dialog.list.visualItemRect(item)
+    assert dialog.list.horizontalScrollBar().maximum() == 0  # Nothing to scroll sideways.
+    assert row.width() <= dialog.list.viewport().width()
+    assert row.height() >= 6 * dialog.list.fontMetrics().lineSpacing()  # Every wrapped line.
+
+
+async def test_the_instruction_stays_until_changes_are_applied(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.planning_outcome = PlanningOutcome(status=PlanningStatus.PROPOSED, plan=proposals())
+    await window.initialize()
+    dialog = window.planning_dialog
+    await ask(window, "Move the dentist")
+    dialog.discard_button.click()
+    window.calendar_panel.plan_button.click()  # Ask again, perhaps with a word changed.
+    assert dialog.instruction.toPlainText() == "Move the dentist"
+    assert dialog.instruction.textCursor().hasSelection()  # Typing replaces it.
+    await ask(window, "Move the dentist")
+    dialog.apply_button.click()
+    await finish(window)
+    window.calendar_panel.plan_button.click()
+    assert dialog.instruction.toPlainText() == ""
+
+
+async def test_google_is_read_first_when_its_saved_copy_misses_the_four_weeks(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend.calendar_permission = True
+    backend.calendar_now = NOW.astimezone(UTC)
+    await window.initialize()
+    dialog = window.planning_dialog
+    before = len(backend.calendar_calls)
+
+    async def preview(*, google: bool) -> None:
+        window.calendar_panel.plan_button.click()
+        dialog.instruction.setPlainText("Find two hours for the deck")
+        dialog.google_times.setChecked(google)
+        dialog.preview_button.click()
+        await finish(window)
+
+    await preview(google=False)  # Without Google times, nothing is read.
+    assert backend.calendar_calls[before:] == []
+    dialog.reject()
+    released, sync = asyncio.Event(), backend.sync_calendar
+
+    async def slow(around: date, zone: ZoneInfo) -> CalendarSyncResult:
+        await released.wait()
+        return await sync(around, zone)
+
+    monkeypatch.setattr(backend, "sync_calendar", slow)
+    window.calendar_panel.plan_button.click()
+    dialog.google_times.setChecked(True)
+    dialog.preview_button.click()
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert dialog.reading.isVisibleTo(dialog) and dialog.reading.text() == READING
+    assert not calls(backend, "prepare")[1:]  # The preview waits for Google.
+    released.set()
+    await finish(window)
+    assert backend.calendar_calls[before:] == [("sync_calendar", MONDAY)]
+    assert len(calls(backend, "prepare")) == 2 and not dialog.reading.isVisibleTo(dialog)
+    dialog.reject()
+    await preview(google=True)  # Now saved for all four weeks, and fresh.
+    assert backend.calendar_calls[before:] == [("sync_calendar", MONDAY)]
+
+    dialog.reject()
+    backend.google_coverage = None  # Nothing saved now, as the page reads it.
+    await window._refresh_calendar()
+    backend.calendar_fail = AuthenticationRequiredError("revoked")
+    await preview(google=True)
+    assert dialog.status.text().startswith("Google rejected the sign-in.")
+    assert len(calls(backend, "prepare")) == 3  # Nothing more was prepared.
 
 
 async def test_google_parts_are_offered_only_when_calendar_is_allowed(

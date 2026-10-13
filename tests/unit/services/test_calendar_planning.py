@@ -19,6 +19,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningResponse,
     PlanningStatus,
+    ticked_at_first,
 )
 from mailbrief.domain.drafting import DraftingProblem
 from mailbrief.domain.events import ChangeKind, EventEdit, wall_clock
@@ -28,6 +29,7 @@ from mailbrief.services.calendar_planning import (
     CALENDAR_SCOPE,
     CalendarPlanningService,
     PreparedPlan,
+    overlaps_for,
     validate_plan,
 )
 from mailbrief.services.events import EventConflictError, EventService
@@ -451,8 +453,28 @@ async def test_overlaps_name_events_and_busy_google_times(
         ),
         plan,
     )
-    # Standup is being deleted, so it no longer counts.
+    # Friday 10:00 touches Standup, 9:00 to 10:00, without overlapping it.
     assert checked.proposals[0].overlaps == ("Team sync (Owner)",)
+
+
+async def test_overlaps_follow_what_is_ticked(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    plan = await seeded(session, service)
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(op="delete", event_key="e3"),  # Standup, Friday 9:00 to 10:00.
+                change(event_key="e2", start_date="2026-10-16", start_time="09:00"),
+            )
+        ),
+        plan,
+    )
+    changes = [p.change for p in checked.proposals]
+    assert [ticked_at_first(c) for c in changes] == [False, True]  # A delete waits for a tick.
+    assert checked.proposals[1].overlaps == ("Standup",)  # As it starts: Standup stays.
+    assert overlaps_for(changes, [True, True], plan) == ((), ())
+    assert overlaps_for(changes, [False, False], plan) == ((), ("Standup",))
 
 
 async def test_new_events_in_one_plan_overlap_each_other(
@@ -613,6 +635,67 @@ async def test_a_change_only_to_the_stored_zone_is_no_change(
         PlanningCandidate(changes=(change(event_key=key, title="Tokyo holiday"),)), plan
     )
     assert checked.proposals == () and checked.ignored == 1
+
+
+async def test_an_end_time_alone_is_the_first_after_the_start(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    await seeded(session, service)
+    events = EventService(session, clock=lambda: NOW)
+    thursday = date(2026, 10, 15)
+    await events.create(
+        timed("Party", thursday, 22, 23).model_copy(update={"ends_at_utc": at(FRIDAY, 0)})
+    )
+    await events.create(timed("Film", thursday, 21, 23))
+    await events.create(
+        timed("Retreat", date(2026, 10, 19), 10, 12).model_copy(
+            update={"ends_at_utc": at(date(2026, 10, 20), 12)}  # 26 hours.
+        )
+    )
+    plan = await service.prepare(PlanningOptions(instruction="x"), MONDAY, TORONTO)
+    key = {event.title: k for k, event in plan.keys.items()}
+
+    def edit(**fields: Any) -> EventEdit | None:
+        checked = validate_plan(PlanningCandidate(changes=(change(**fields),)), plan)
+        return checked.proposals[0].change.edit if checked.proposals else None
+
+    party = edit(event_key=key["Party"], end_time="23:30")  # It ended at midnight.
+    assert party is not None and party.ends_at_utc == at(thursday, 23, 30)  # Not 25½ hours.
+    film = edit(event_key=key["Film"], end_time="01:00")  # Overnight: the next morning.
+    assert film is not None and film.ends_at_utc == at(FRIDAY, 1)
+    retreat = edit(event_key=key["Retreat"], end_time="14:00")  # A day or more keeps its day.
+    assert retreat is not None and retreat.ends_at_utc == at(date(2026, 10, 20), 14)
+    late = edit(
+        op="create",
+        event_key=None,
+        title="Late",
+        all_day=False,
+        start_date="2026-10-15",
+        start_time="22:00",
+        end_time="02:00",
+    )
+    assert late is not None and late.ends_at_utc == at(FRIDAY, 2)
+    assert edit(event_key=key["Dentist"], end_time="09:00") is None  # 21 hours on: no date.
+
+
+async def test_the_preview_says_which_days_google_times_cover(
+    session: AsyncSession, service: CalendarPlanningService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    times = PlanningOptions(instruction="x", parts=frozenset({PlanningPart.GOOGLE_BUSY}))
+    plan = await seeded(session, service, times.parts)
+    assert plan.preview.lines[2].label == (
+        "0 Google Calendar times, without titles (none saved for these dates)"
+    )
+    await CalendarSyncService(session, Reader(), clock=lambda: NOW).sync(WEDNESDAY, TORONTO)
+    plan = await service.prepare(times, MONDAY, TORONTO)  # The saved copy covers it all.
+    assert plan.preview.lines[2].label == "1 Google Calendar times, without titles"
+    later = await service.prepare(times, date(2026, 11, 23), TORONTO)  # Saved up to Dec 13.
+    assert later.preview.lines[2].label.endswith("(saved only for 2026-11-23 to 2026-12-13)")
+    from mailbrief.services import calendar_planning
+
+    monkeypatch.setattr(calendar_planning, "MAX_SENT_BUSY", 0)
+    cut = await service.prepare(times, MONDAY, TORONTO)
+    assert cut.preview.lines[2].label == "First 0 of 1 Google Calendar times, without titles"
 
 
 async def test_the_preview_says_when_the_event_cap_left_some_out(

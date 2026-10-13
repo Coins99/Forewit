@@ -2,23 +2,30 @@
 
 The dialog walks four steps: your instruction and what else to send; a preview of exactly
 what leaves the device, with the first-use consent box; waiting for Groq; and the checked
-proposals, each with its reason and the events it would overlap. Nothing changes until
-Apply, and the window offers Undo after it. Titles and Groq's words are untrusted text, so
-everything here is plain label or list-item text.
+proposals, each with its reason and the events it would overlap. Deletions start unticked,
+and the overlaps follow what is ticked. Nothing changes until Apply, and the window offers
+Undo after it. The instruction stays until changes are applied, so a discarded answer can
+be asked again. Titles and Groq's words are untrusted text, so everything here is plain
+label or list-item text.
 """
 
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QHBoxLayout,
+    QListView,
     QListWidgetItem,
     QPlainTextEdit,
     QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +37,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningPart,
     PlanningPreview,
     ProposedChange,
+    ticked_at_first,
 )
 from mailbrief.domain.events import ChangeKind, EventChange, EventEdit
 from mailbrief.ui.deadline_text import day_text
@@ -40,6 +48,40 @@ NO_INSTRUCTION: Final = "Say what to change first."
 TOO_LONG: Final = "Keep the instruction to 1,000 characters."
 ASKING: Final = "Asking Groq…"
 NOTHING_KEPT: Final = "Tick at least one change to apply."
+READING: Final = "Reading Google Calendar for these four weeks first…"
+
+# Each change's overlaps, given every change and which are ticked.
+Overlaps = Callable[[Sequence[EventChange], Sequence[bool]], Sequence[tuple[str, ...]]]
+
+
+class _WrappedRows(QStyledItemDelegate):
+    """Rows that wrap at the list's width. Qt sizes a wrapped row before the theme adds
+    its padding and selection mark, so the row came out wider than the list, cutting off
+    the ends of its lines. Here a row is the list's width and as tall as its text needs
+    in the space the style paints it into."""
+
+    _TALL: Final = 100_000
+
+    def sizeHint(  # noqa: N802 - Qt's name.
+        self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+    ) -> QSize:
+        width = option.rect.width()
+        widget = option.widget
+        if width <= 0 or widget is None:
+            return super().sizeHint(option, index)
+        laid = QStyleOptionViewItem(option)
+        self.initStyleOption(laid, index)
+        laid.rect = QRect(0, 0, width, self._TALL)
+        style = widget.style()
+        area = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, laid, widget)
+        margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, laid, widget) + 1
+        text = laid.fontMetrics.boundingRect(
+            QRect(0, 0, area.width() - 2 * margin, self._TALL),
+            Qt.TextFlag.TextWordWrap,
+            laid.text,
+        )
+        height = text.height() + self._TALL - area.height()
+        return QSize(width, max(height, super().sizeHint(option, index).height()))
 
 
 def _when(edit: EventEdit, zone: ZoneInfo, today: date) -> str:
@@ -102,6 +144,10 @@ class PlanningDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Plan with AI")
         self._proposals: tuple[ProposedChange, ...] = ()
+        self._ticks: list[bool] = []
+        self._overlaps: Overlaps | None = None
+        self._zone = ZoneInfo("UTC")
+        self._today = date.min  # Both come with the proposals, before any row is shown.
         self._first_use = False
         layout = QVBoxLayout(self)
         # What went wrong or what is needed, above the step so it can't be missed.
@@ -142,6 +188,10 @@ class PlanningDialog(QDialog):
         )
         self.preview_button.clicked.connect(self._request_preview)
         column.addWidget(self.preview_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.reading = plain_label("", tone="muted")
+        self.reading.setObjectName("planningReading")
+        self.reading.hide()
+        column.addWidget(self.reading)
         self.pages.addWidget(compose)
 
         confirm = QWidget()
@@ -185,7 +235,12 @@ class PlanningDialog(QDialog):
         self.list = ActivatingList()
         self.list.setObjectName("planningProposals")
         self.list.setAccessibleName("Proposed changes")
-        self.list.itemChanged.connect(lambda _item: self._update_apply())
+        # Long reasons and overlaps wrap rather than scroll sideways.
+        self.list.setItemDelegate(_WrappedRows(self.list))
+        self.list.setWordWrap(True)
+        self.list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.list.itemChanged.connect(lambda _item: self._ticks_changed())
         column.addWidget(self.list, 1)
         row = QHBoxLayout()
         self.apply_button = outline_button(
@@ -202,8 +257,10 @@ class PlanningDialog(QDialog):
         self.start_new(google_available=False)
 
     def start_new(self, *, google_available: bool) -> None:
-        """A fresh request; Google's parts are offered only when Calendar is allowed."""
-        self.instruction.setPlainText("")
+        """A fresh request; Google's parts are offered only when Calendar is allowed. The
+        last instruction stays, selected, until changes from it are applied."""
+        self.instruction.selectAll()
+        self.reading.hide()
         for box in (self.google_times, self.google_titles, self.open_actions):
             box.setChecked(False)
         self.google_times.setEnabled(google_available)
@@ -214,6 +271,15 @@ class PlanningDialog(QDialog):
         self._show(0)
         self._say("")
         self.instruction.setFocus()
+
+    def forget_instruction(self) -> None:
+        """Changes were applied: the next request starts empty."""
+        self.instruction.setPlainText("")
+
+    def show_reading(self) -> None:
+        """Google Calendar is read before the preview, since its saved copy misses days."""
+        self.reading.setText(READING)
+        self.reading.show()
 
     def _times_toggled(self, on: bool) -> None:
         self.google_titles.setEnabled(on)
@@ -247,6 +313,7 @@ class PlanningDialog(QDialog):
     def show_preview(self, preview: PlanningPreview) -> None:
         """What will be sent, part by part; first use also needs the ticked box."""
         self._first_use = preview.first_use
+        self.reading.hide()
         self.preview_heading.setText(f"This is sent to {preview.provider} ({preview.model}):")
         self.preview_lines.setText(
             "\n".join(f"· {line.label} ({line.characters:,} characters)" for line in preview.lines)
@@ -269,19 +336,31 @@ class PlanningDialog(QDialog):
         self._say("")
         self._show(2)
 
-    def show_proposals(self, plan: CalendarPlan, zone: ZoneInfo, today: date) -> None:
-        """The checked changes, all ticked; a note when Groq dropped some or had nothing."""
+    def show_proposals(
+        self,
+        plan: CalendarPlan,
+        zone: ZoneInfo,
+        today: date,
+        overlaps: Overlaps | None = None,
+    ) -> None:
+        """The checked changes, ticked but for deletions; a note when Groq dropped some or
+        had nothing. ``overlaps`` works out each change's overlaps again when the ticks
+        change."""
         self._proposals = plan.proposals
+        self._zone, self._today, self._overlaps = zone, today, overlaps
+        self._ticks = [ticked_at_first(proposal.change) for proposal in plan.proposals]
+        self.list.blockSignals(True)
         self.list.clear()
-        for proposal in plan.proposals:
+        for proposal, ticked in zip(plan.proposals, self._ticks, strict=True):
             item = QListWidgetItem(proposal_text(proposal, zone, today))
             item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled
                 | Qt.ItemFlag.ItemIsUserCheckable
                 | Qt.ItemFlag.ItemIsSelectable
             )
-            item.setCheckState(Qt.CheckState.Checked)
+            item.setCheckState(Qt.CheckState.Checked if ticked else Qt.CheckState.Unchecked)
             self.list.addItem(item)
+        self.list.blockSignals(False)
         notes = []
         if plan.message:
             notes.append(plan.message)
@@ -295,6 +374,30 @@ class PlanningDialog(QDialog):
         self.message.setText(" ".join(notes))
         self._say("")
         self._show(3)
+        self._update_apply()
+
+    def _ticks_changed(self) -> None:
+        """A box was ticked or unticked: each row's overlaps follow what would be applied."""
+        ticks = [
+            item is not None and item.checkState() == Qt.CheckState.Checked
+            for item in (self.list.item(row) for row in range(len(self._proposals)))
+        ]
+        if ticks == self._ticks:
+            return  # A row's text changed, not its box.
+        self._ticks = ticks
+        if self._overlaps is not None:
+            changes = [proposal.change for proposal in self._proposals]
+            found = self._overlaps(changes, ticks)
+            self._proposals = tuple(
+                proposal.model_copy(update={"overlaps": tuple(overlaps)})
+                for proposal, overlaps in zip(self._proposals, found, strict=True)
+            )
+            self.list.blockSignals(True)
+            for row, proposal in enumerate(self._proposals):
+                item = self.list.item(row)
+                if item is not None:
+                    item.setText(proposal_text(proposal, self._zone, self._today))
+            self.list.blockSignals(False)
         self._update_apply()
 
     def kept(self) -> tuple[EventChange, ...]:
@@ -317,6 +420,7 @@ class PlanningDialog(QDialog):
 
     def show_problem(self, message: str) -> None:
         """Back to the instruction, with what went wrong in fixed words."""
+        self.reading.hide()
         self._show(0)
         self._say(message)
 

@@ -220,7 +220,7 @@ class DraftWire(BaseModel):
     missing_context: list[str]  # Python enforces the limits, not the schema.
 
 
-PLANNING_PROMPT_VERSION = "groq-calendar-2026-10-12.1"
+PLANNING_PROMPT_VERSION = "groq-calendar-2026-10-12.2"
 PLANNING_INSTRUCTIONS = (
     "You propose changes to one person's own calendar. They review every change before "
     "anything changes.\n"
@@ -241,8 +241,10 @@ PLANNING_INSTRUCTIONS = (
     "- start_date and end_date: YYYY-MM-DD in the person's time zone; for an all-day event, "
     "end_date is its last day. start_time and end_time: 24-hour HH:MM in the person's time "
     "zone; null for all-day events. On update, null keeps the current value, and when only "
-    "the start moves the length is kept. Resolve words like tomorrow or Friday from "
-    "now_local. Every date must be from window_first to window_last.\n"
+    "the start moves the length is kept. An end_time without an end_date is the first such "
+    "time after the start: later that day, or the next morning for an overnight event of at "
+    "most 12 hours; give end_date for anything longer. Resolve words like tomorrow or Friday "
+    "from now_local. Every date must be from window_first to window_last.\n"
     "- Avoid busy times and the person's other events unless the instruction says "
     "otherwise.\n"
     "- reason: one short sentence, at most 160 characters, saying what the change does.\n"

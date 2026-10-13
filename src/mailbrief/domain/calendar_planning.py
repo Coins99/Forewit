@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field, model_validator
 from mailbrief.domain.analysis import AIUsage
 from mailbrief.domain.common import DomainModel
 from mailbrief.domain.drafting import DraftingProblem, PreviewLine
-from mailbrief.domain.events import EventChange
+from mailbrief.domain.events import ChangeKind, EventChange
 
 PLAN_INSTRUCTION_MAX_CHARS: Final = 1_000
 PLANNING_DAYS: Final = 28  # Four weeks from the Monday shown.
@@ -136,6 +136,12 @@ class PlanningResponse(DomainModel):
         if (self.candidate is None) == (self.problem is None):
             raise ValueError("a planning response has a candidate or a problem, not both")
         return self
+
+
+def ticked_at_first(change: EventChange) -> bool:
+    """Whether the review offers ``change`` ticked: everything but a delete, which the owner
+    ticks to apply, since one Undo is all that brings a deleted event back."""
+    return change.kind is not ChangeKind.DELETE
 
 
 class ProposedChange(DomainModel):

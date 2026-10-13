@@ -382,7 +382,13 @@ The brief list's chips keep their shorter forms (see Brief list).
   waiting with Cancel request; checkable proposal rows of plain item text, Groq's reason
   and overlaps on their own lines). `planningStatus` (warning tone) sits above the stack and
   shows only with a message; outline Close (C) shows on the first two steps, and closing
-  while Groq is being asked cancels the request.
+  while Groq is being asked cancels the request. Proposal rows wrap at the list's width
+  (a delegate sizes each from the text area the style paints, inside the row padding
+  `ITEM_PAD_X`, `ITEM_PAD_Y` and mark `ITEM_MARK_PX` from `tokens.py`); deletions start
+  unticked, and each row's overlaps are worked out again whenever a box changes, as if it
+  and the ticked changes were applied. `planningReading` (muted) says Google Calendar is
+  being read first when its times are ticked and the saved copy misses some of the four
+  weeks. The instruction stays, selected, until changes from it are applied.
 - Shortcuts: `QShortcut`s on the window, Ctrl+1 to Ctrl+6 (Cmd on macOS), call
   `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.
