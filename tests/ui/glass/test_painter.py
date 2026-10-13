@@ -1,0 +1,144 @@
+"""Glass painters: text contrast on the pixels they actually paint, crisp rims at every
+scale, and the opaque fallbacks."""
+
+from collections.abc import Callable
+
+import pytest
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtWidgets import QApplication
+
+from mailbrief.ui.glass.backdrop import SCALE, Backdrop, BackdropKey, render_backdrop
+from mailbrief.ui.glass.painter import (
+    GlassMode,
+    paint_panel,
+    paint_pill,
+    paint_raised,
+    paint_rim,
+)
+from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, glass_for, tokens_for
+from tests.ui.theme.test_glass import SETS, contrast, luminance
+
+WIDTH, HEIGHT = 440, 288
+PATCH = 24  # A small panel, so its whole height lies under the sheen's strongest part.
+
+
+def image(width: int, height: int, dpr: float = 1.0) -> QImage:
+    result = QImage(
+        round(width * dpr), round(height * dpr), QImage.Format.Format_ARGB32_Premultiplied
+    )
+    result.setDevicePixelRatio(dpr)
+    result.fill(Qt.GlobalColor.transparent)
+    return result
+
+
+def extreme_spots(backdrop: Backdrop) -> list[QPointF]:
+    """The window positions of the backdrop's darkest and brightest pixels."""
+    picture = backdrop.blurred
+    spots = [
+        (luminance(rgb_of(picture.pixelColor(x, y))), x, y)
+        for y in range(picture.height())
+        for x in range(picture.width())
+    ]
+    chosen = (min(spots), max(spots))
+    return [QPointF(x / SCALE, y / SCALE) for _, x, y in chosen]
+
+
+def rgb_of(color: QColor) -> tuple[float, float, float]:
+    return (float(color.red()), float(color.green()), float(color.blue()))
+
+
+def painted(
+    glass: GlassTokens,
+    backdrop: Backdrop | None,
+    spot: QPointF,
+    surface: Callable[[QPainter, QRectF], None] | None = None,
+) -> list[tuple[float, float, float]]:
+    """A panel over ``spot``, with ``surface`` painted on it, sampled away from its edges,
+    where a glyph would sit."""
+    picture = image(PATCH, PATCH)
+    painter = QPainter(picture)
+    rect = QRectF(0, 0, PATCH, PATCH)
+    paint_panel(painter, rect, glass, backdrop, QRectF(spot.x(), spot.y(), PATCH, PATCH))
+    if surface is not None:
+        surface(painter, rect)
+    painter.end()
+    return [
+        rgb_of(picture.pixelColor(x, y))
+        for y in range(4, PATCH - 4)  # Clear of the lit top edge and any rim.
+        for x in range(8, PATCH - 8)
+    ]
+
+
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_text_on_painted_glass_meets_wcag_aa(
+    qapp: QApplication, scheme: ColorScheme, mode: ThemeMode
+) -> None:
+    """On real pixels, including 8-bit rounding, over the backdrop's darkest and brightest
+    spots. The blur keeps those inside the bounds test_glass.py proves contrast over, so
+    that proof is the stricter check; this one checks the painters follow it."""
+    tokens, glass = tokens_for(mode, scheme), glass_for(mode, scheme)
+    backdrop = render_backdrop(BackdropKey(WIDTH, HEIGHT, scheme, mode))
+    surfaces: list[tuple[str, Callable[[QPainter, QRectF], None] | None, tuple[str, ...]]] = [
+        ("panel", None, (tokens.text, tokens.text_secondary)),
+        ("raised", lambda p, r: paint_raised(p, r, glass), (tokens.text,)),
+        ("pill", lambda p, r: paint_pill(p, r, glass), (tokens.text,)),
+        ("primary", lambda p, r: paint_pill(p, r, glass, primary=True), (tokens.text,)),
+    ]
+    for spot in extreme_spots(backdrop):
+        for source in (backdrop, None):  # Also before the backdrop is ready.
+            for name, surface, texts in surfaces:
+                colours = painted(glass, source, spot, surface)
+                for text in texts:
+                    worst = min(contrast(text, colour) for colour in colours)
+                    assert worst >= 4.5, (scheme, mode, name, text, round(worst, 2))
+
+
+@pytest.mark.parametrize("dpr", [1.0, 2.0])
+def test_a_rim_is_one_crisp_device_pixel(qapp: QApplication, dpr: float) -> None:
+    picture = image(100, 40, dpr)
+    painter = QPainter(picture)
+    white = QColor(Qt.GlobalColor.white)
+    paint_rim(painter, QRectF(0, 0, 100, 40), 20, (white, white, white))
+    painter.end()
+    column = round(50 * dpr)  # Where the top edge is straight.
+    alphas = [picture.pixelColor(column, y).alpha() for y in range(round(10 * dpr))]
+    assert alphas[0] == 255
+    assert alphas[1:] == [0] * (len(alphas) - 1)
+
+
+@pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])
+def test_fallback_panels_are_opaque_with_no_backdrop(qapp: QApplication, mode: GlassMode) -> None:
+    glass = glass_for(ThemeMode.DARK)
+    backdrop = render_backdrop(BackdropKey(WIDTH, HEIGHT, ColorScheme.SLATE, ThemeMode.DARK))
+    picture = image(PATCH, PATCH)
+    painter = QPainter(picture)
+    paint_panel(
+        painter, QRectF(0, 0, PATCH, PATCH), glass, backdrop, QRectF(0, 0, PATCH, PATCH), mode
+    )
+    painter.end()
+    colours = {picture.pixelColor(x, y).name() for y in range(PATCH) for x in range(PATCH)}
+    assert colours == {glass.opaque}
+
+
+def test_increased_contrast_draws_solid_rims(qapp: QApplication) -> None:
+    glass = glass_for(ThemeMode.DARK)
+    picture = image(100, 40)
+    painter = QPainter(picture)
+    paint_pill(painter, QRectF(0, 0, 100, 40), glass, mode=GlassMode.INCREASED_CONTRAST)
+    paint_raised(painter, QRectF(0, 0, 100, 40), glass, GlassMode.INCREASED_CONTRAST)
+    painter.end()
+    for x in (50, 30, 70):
+        assert picture.pixelColor(x, 0).name() == glass.rim_contrast
+        assert picture.pixelColor(x, 39).name() == glass.rim_contrast
+
+
+def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) -> None:
+    glass = glass_for(ThemeMode.DARK)
+    picture = image(100, 40)
+    picture.fill(QColor(tokens_for(ThemeMode.DARK).panel))
+    painter = QPainter(picture)
+    paint_pill(painter, QRectF(0, 0, 100, 40), glass)
+    painter.end()
+    top, middle, bottom = (picture.pixelColor(50, y).lightness() for y in (3, 20, 36))
+    assert top > middle > bottom

@@ -52,6 +52,35 @@ at the tint's alpha and at `min_tint_alpha`:
 
 `text_muted` fails on glass in both modes, so it never sits there.
 
+### Glass painting (`ui/glass/`)
+
+No widget uses it yet. The header, sidebar and buttons move to it in later PRs.
+
+- **Backdrop** (`backdrop.py`): a diagonal gradient from `backdrop_top` to
+  `backdrop_bottom`, under five streaks of light. Their strengths scale `streak`'s peak
+  alpha, and their positions stretch with the window's width. Only the blurred copy is
+  ever seen, so it is painted at `SCALE` (a quarter) of the window's logical size and
+  blurred by halving three times and scaling back up. A backdrop depends only on
+  `BackdropKey`: logical size, scheme and mode.
+- **Renderer:** `BackdropRenderer.request(key)` returns a cached backdrop at once.
+  Otherwise it renders with `asyncio.to_thread` and `ready` emits the result.
+  - Requests made during a render become one render of the last of them, and a render
+    that finishes after a newer request is cached but not emitted.
+  - It keeps the last four backdrops. `drain()` waits at shutdown.
+- **Painters** (`painter.py`), with `current_glass()` at paint time:
+  - `paint_panel` shows the blurred backdrop behind `area`, which is the panel in window
+    coordinates. Then the tint, the sheen over the top 120 px and a lit top edge.
+  - `paint_raised` is a fill with a sheen, never a second layer of glass.
+  - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
+  - `paint_rim` is 1 device pixel at every scale, inset by half a device pixel.
+  - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
+    sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
+- **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
+  `test_glass.py` proves contrast over. It also measures text contrast on painted pixels
+  over each backdrop's darkest and brightest spots, rims at 1x and 2x, and the renderer's
+  thread, cache and stale results. `test_gallery.py` saves a glass sampler for each
+  scheme and mode as `glass-{scheme}-{mode}-{dpr}x.png` when `MAILBRIEF_UI_SHOTS` is set.
+
 ### Changing scheme
 
 The owner picks a scheme in Settings > Appearance (`ui/appearance_view.py`): one radio
