@@ -41,7 +41,12 @@ from mailbrief.domain.analysis import DeadlinePrecision, FollowUpKind
 from mailbrief.domain.digests import SECTION_TITLES, DailyDigest, DigestItem
 from mailbrief.domain.messages import EmailContact
 from mailbrief.ui.deadline_text import month_day, weekday
-from mailbrief.ui.hairline import hairline_pen, paint_focus_ring
+from mailbrief.ui.hairline import (
+    SELECTION_INSET_X,
+    SELECTION_INSET_Y,
+    hairline_pen,
+    paint_focus_ring,
+)
 from mailbrief.ui.labels import cut_text
 from mailbrief.ui.theme import (
     CAPTION_PX,
@@ -61,18 +66,16 @@ _WEEKDAY_DAYS: Final = 6
 
 # Two-line rows, in the brief list and the run page's shortlist: padding, and the gap above
 # the chip row (logical px).
-ROW_PAD_V: Final = 8
-ROW_PAD_H: Final = 12
+ROW_PAD_V: Final = 10
+ROW_PAD_H: Final = 14
 CHIP_GAP: Final = 4
 SINGLE_LINE: Final = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) | int(
     Qt.TextFlag.TextSingleLine
 )
-# Chip padding and spacing (logical px).
-_CHIP_PAD_V: Final = 1
-_CHIP_PAD_H: Final = 6
-_CHIP_SPACING: Final = 6
+# Chips are bare coloured labels, as Apple marks what's new: this far apart (logical px).
+_CHIP_SPACING: Final = 12
 # Header rows: left inset, space above and below the title.
-_HEADER_ABOVE: Final = 12
+_HEADER_ABOVE: Final = 16
 _HEADER_BELOW: Final = 4
 # The room a row's text leaves: its padding at both sides (logical px).
 ELIDE_MARGIN: Final = 2 * ROW_PAD_H
@@ -242,30 +245,22 @@ class BriefListModel(QAbstractListModel):
 
 
 def chip_height() -> int:
-    return ui_metrics(CAPTION_PX).height() + 2 * _CHIP_PAD_V
+    return ui_metrics(CAPTION_PX, medium=True).height()
 
 
 def paint_chips(painter: QPainter, chips: Sequence[Chip], left: int, top: int) -> None:
-    """Rounded chips in a row from ``left``: warning or accent colours, caption text."""
+    """Chips in a row from ``left``: bare caption text in the warning or accent colour, with
+    no fill, as Apple labels what's new."""
     tokens = current_tokens()
-    metrics = ui_metrics(CAPTION_PX)
+    metrics = ui_metrics(CAPTION_PX, medium=True)
     height = chip_height()
-    radius = min(RADIUS, height / 2)
-    painter.setFont(ui_font(CAPTION_PX))
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setFont(ui_font(CAPTION_PX, medium=True))
     x = left
     for chip in chips:
-        width = metrics.horizontalAdvance(chip.text) + 2 * _CHIP_PAD_H
+        width = metrics.horizontalAdvance(chip.text)
         warning = chip.tone is ChipTone.WARNING
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(tokens.warning_bg if warning else tokens.accent_bg))
-        painter.drawRoundedRect(QRectF(x, top, width, height), radius, radius)
         painter.setPen(QColor(tokens.warning_fg if warning else tokens.accent_fg))
-        painter.drawText(
-            QRect(x, top, width, height),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextSingleLine,
-            chip.text,
-        )
+        painter.drawText(QRect(x, top, width, height), SINGLE_LINE, chip.text)
         x += width + _CHIP_SPACING
 
 
@@ -297,12 +292,17 @@ def row_height(has_chips: bool) -> int:
 def paint_selection(
     painter: QPainter, rect: QRect, state: QStyle.StateFlag, tokens: Tokens
 ) -> None:
-    """A selected row's fill, and the 2 px accent bar at its left."""
+    """A selected row's fill: a rounded rectangle inset from the row's edges."""
     if state & QStyle.StateFlag.State_Selected:
-        painter.fillRect(rect, QColor(tokens.selection))
-        painter.fillRect(
-            QRect(rect.left(), rect.top(), 2, rect.height()), QColor(tokens.accent_border)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(tokens.selection))
+        fill = QRectF(rect).adjusted(
+            SELECTION_INSET_X, SELECTION_INSET_Y, -SELECTION_INSET_X, -SELECTION_INSET_Y
         )
+        painter.drawRoundedRect(fill, RADIUS, RADIUS)
+        painter.restore()
 
 
 def paint_lines(
@@ -335,11 +335,13 @@ def paint_lines(
 
 
 def paint_separator(painter: QPainter, rect: QRect, tokens: Tokens) -> None:
-    """The cosmetic hairline along a row's bottom edge."""
+    """The cosmetic hairline along a row's bottom edge, inset to line up with its text."""
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
     painter.setPen(hairline_pen(tokens.hairline))
     bottom = rect.bottom()
-    painter.drawLine(QPointF(rect.left(), bottom), QPointF(rect.right(), bottom))
+    painter.drawLine(
+        QPointF(rect.left() + ROW_PAD_H, bottom), QPointF(rect.right() - ROW_PAD_H, bottom)
+    )
 
 
 class BriefItemDelegate(QStyledItemDelegate):
@@ -354,9 +356,9 @@ class BriefItemDelegate(QStyledItemDelegate):
         state: QStyle.StateFlag = option.state
         painter.save()
         if row.kind == "header":
-            painter.setFont(ui_font(SMALL_PX))
-            painter.setPen(QColor(tokens.text_muted))
-            height = ui_metrics(SMALL_PX).height()
+            painter.setFont(ui_font(SMALL_PX, semibold=True))
+            painter.setPen(QColor(tokens.text_secondary))
+            height = ui_metrics(SMALL_PX, semibold=True).height()
             target = QRect(rect.left() + ROW_PAD_H, rect.top() + _HEADER_ABOVE, 0, height)
             target.setRight(rect.right() - ROW_PAD_H)
             painter.drawText(target, SINGLE_LINE, row.title)
@@ -387,7 +389,8 @@ class BriefItemDelegate(QStyledItemDelegate):
         if not isinstance(row, BriefRow):
             return QSize(width, 0)
         if row.kind == "header":
-            return QSize(width, _HEADER_ABOVE + ui_metrics(SMALL_PX).height() + _HEADER_BELOW)
+            height = ui_metrics(SMALL_PX, semibold=True).height()
+            return QSize(width, _HEADER_ABOVE + height + _HEADER_BELOW)
         return QSize(width, row_height(bool(row.chips)))
 
 

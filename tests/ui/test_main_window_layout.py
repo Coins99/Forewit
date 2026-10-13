@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from PySide6.QtCore import QSize, QUrl
 from PySide6.QtGui import QAccessible, QDesktopServices, QGuiApplication, QKeySequence, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QStyle
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QStyle, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter
@@ -79,19 +79,19 @@ def button(window: MainWindow, text: str) -> QPushButton:
     return next(b for b in content.findChildren(QPushButton) if b.text() == text)
 
 
-async def test_the_central_widget_is_the_workspace_a_hairline_and_the_status_strip(
+async def test_the_central_widget_is_the_workspace_with_the_status_strip_on_its_glass(
     window: MainWindow,
 ) -> None:
     central = window.centralWidget()
     assert central is not None and not isinstance(central, QScrollArea)
     layout = central.layout()
-    assert layout is not None and layout.count() == 3
-    items = [layout.itemAt(index) for index in range(3)]
-    widgets = [None if item is None else item.widget() for item in items]
-    assert widgets[0] is window.workspace
-    assert isinstance(widgets[1], HairlineDivider)
-    strip = widgets[2]
-    assert strip is not None and strip.objectName() == "statusStrip"
+    assert layout is not None and layout.count() == 1
+    item = layout.itemAt(0)
+    assert item is not None and item.widget() is window.workspace
+    # No hairline crosses the window: the strip sits on the glass under the sheet.
+    assert not central.findChildren(HairlineDivider)
+    strip = window.findChild(QWidget, "statusStrip")
+    assert strip is not None and strip.parent() is window.workspace.footer_bar
     assert window.status.parent() is strip and window.undo_button.parent() is strip
     # The window asks for 1100 × 720; a small screen may give it less (CI's Mac: about
     # 1024 × 649), so compare within the screen's available area and the window's maximum.

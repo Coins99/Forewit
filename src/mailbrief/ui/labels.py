@@ -16,11 +16,16 @@ from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
 from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.theme.assets import icon, ui_font
-from mailbrief.ui.theme.style import current_tokens, follow_theme
+from mailbrief.ui.theme.style import current_glass, current_tokens, follow_theme
 
 
 def plain_label(
-    text: str = "", *, tone: str | None = None, px: int | None = None, medium: bool = False
+    text: str = "",
+    *,
+    tone: str | None = None,
+    px: int | None = None,
+    medium: bool = False,
+    semibold: bool = False,
 ) -> QLabel:
     """Mail-derived text must never become rich text or an automatic hyperlink."""
     label = QLabel(text)
@@ -29,12 +34,17 @@ def plain_label(
     if tone is not None:
         label.setProperty("tone", tone)
     if px is not None:
-        label.setFont(ui_font(px, medium=medium))
+        label.setFont(ui_font(px, medium=medium, semibold=semibold))
     return label
 
 
 def wrap_label(
-    text: str = "", *, tone: str | None = None, px: int | None = None, medium: bool = False
+    text: str = "",
+    *,
+    tone: str | None = None,
+    px: int | None = None,
+    medium: bool = False,
+    semibold: bool = False,
 ) -> "WrapLabel":
     """Like ``plain_label``, but a long unbroken token wraps instead of widening its
     container."""
@@ -42,7 +52,7 @@ def wrap_label(
     if tone is not None:
         label.setProperty("tone", tone)
     if px is not None:
-        label.setFont(ui_font(px, medium=medium))
+        label.setFont(ui_font(px, medium=medium, semibold=semibold))
     return label
 
 
@@ -103,7 +113,8 @@ def outline_button(
     that carries its own ``&`` mnemonic passes ``mnemonic=True``. With ``shorten``, long
     mail-derived text is cut by short_button_label and the full text becomes the
     accessible name, never a tooltip. ``px`` sets the font size, ``icon_name`` adds a
-    bundled icon in the text colour, and ``accessible_name`` is what screen readers say
+    bundled icon in the text colour (a glass pill draws it in a tile at its leading end,
+    as a browser tab draws a site icon), and ``accessible_name`` is what screen readers say
     (without it, Qt reads the button's text). With ``glass`` it is a Liquid Glass pill
     (GlassButton); ``primary`` tints the one primary action and needs ``glass``.
     """
@@ -118,7 +129,8 @@ def outline_button(
     else:
         shown = button_label(text)
     if glass:
-        button: QPushButton = GlassButton(shown, primary=primary)
+        # A glass pill draws its icon itself, in a tile at its leading end.
+        button: QPushButton = GlassButton(shown, primary=primary, glyph=icon_name)
     else:
         button = QPushButton(shown)
         button.setProperty("variant", "outline")
@@ -129,12 +141,15 @@ def outline_button(
     if accessible_name is not None:
         button.setAccessibleName(accessible_name)
     if px is not None:
-        button.setFont(ui_font(px))
-    if icon_name is not None:
+        button.setFont(ui_font(px, medium=glass))
+    if icon_name is not None and not glass:
         glyph = icon_name  # Narrowed for the lambda.
-        follow_theme(
-            button, lambda: button.setIcon(icon(glyph, current_tokens().text, OUTLINE_ICON_PX))
-        )
+
+        def tint() -> None:
+            color = current_glass().primary_text if primary else current_tokens().text
+            button.setIcon(icon(glyph, color, OUTLINE_ICON_PX))
+
+        follow_theme(button, tint)
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))
     return button
 

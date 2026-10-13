@@ -95,6 +95,7 @@ def resource_names() -> set[str]:
         "PySide6/plugins/platforms/qwindows.dll",
         "certifi/cacert.pem",
         "mailbrief/ui/theme/fonts/Inter-Regular.ttf",
+        "mailbrief/ui/theme/fonts/Inter-SemiBold.ttf",
         "mailbrief/ui/theme/icons/refresh.svg",
         "mailbrief/ui/theme/icons/calendar-week.svg",
         "tzdata/zoneinfo/America/Toronto",

@@ -58,7 +58,7 @@ class DraftsPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         heading = QLabel("Your drafts and notes")
         heading.setTextFormat(Qt.TextFormat.PlainText)
-        heading.setFont(ui_font(TITLE_PX, medium=True))
+        heading.setFont(ui_font(TITLE_PX, semibold=True))
         layout.addWidget(heading)
         self.list = ActivatingList()
         self.list.setAccessibleName("Drafts and notes")

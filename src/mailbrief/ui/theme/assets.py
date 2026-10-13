@@ -2,6 +2,7 @@
 also load from the PyInstaller package."""
 
 import functools
+import math
 from pathlib import Path
 from typing import Final
 
@@ -28,12 +29,20 @@ ICON_NAMES: Final = frozenset(
 )
 
 _HERE: Final = Path(__file__).resolve().parent
-_FONTS: Final = (_HERE / "fonts" / "Inter-Regular.ttf", _HERE / "fonts" / "Inter-Medium.ttf")
+_FONTS: Final = tuple(
+    _HERE / "fonts" / f"Inter-{weight}.ttf" for weight in ("Regular", "Medium", "SemiBold")
+)
+# Display sizes are tracked tighter, as Inter's dynamic metrics advise (tracking = A + B *
+# e^(C * size), in ems) and Apple sets its display type; text sizes keep Inter's spacing.
+_TRACK_FROM_PX: Final = 15
+_TRACK_A: Final = -0.0223
+_TRACK_B: Final = 0.185
+_TRACK_C: Final = -0.1745
 _fonts_loaded: bool | None = None  # None until the first attempt; then cached.
 
 
 def register_fonts() -> bool:
-    """Load the bundled fonts once per process; True only when both loaded.
+    """Load the bundled fonts once per process; True only when all three loaded.
 
     A missing or unreadable font never stops the app: the theme then keeps Qt's font.
     """
@@ -44,28 +53,48 @@ def register_fonts() -> bool:
     return _fonts_loaded
 
 
+def tracking(px: int) -> float:
+    """The letter spacing for Inter at ``px``, in pixels: none at text sizes, tighter as
+    display sizes grow (-0.1 at 15 px, -0.33 at 20 px)."""
+    if px < _TRACK_FROM_PX:
+        return 0.0
+    return round(px * (_TRACK_A + _TRACK_B * math.exp(_TRACK_C * px)), 2)
+
+
+def _weight(medium: bool, semibold: bool) -> QFont.Weight:
+    if medium and semibold:
+        raise ValueError("A font is medium or semibold, not both.")
+    if semibold:
+        return QFont.Weight.DemiBold
+    return QFont.Weight.Medium if medium else QFont.Weight.Normal
+
+
 @functools.cache
-def _font(px: int, medium: bool) -> QFont:
+def _font(px: int, weight: QFont.Weight) -> QFont:
     font = QFont(FONT_FAMILY)
     font.setPixelSize(px)
-    font.setWeight(QFont.Weight.Medium if medium else QFont.Weight.Normal)
+    font.setWeight(weight)
+    spacing = tracking(px)
+    if spacing:
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, spacing)
     return font
 
 
-def ui_font(px: int, *, medium: bool = False) -> QFont:
-    """Inter at a pixel size; point sizes would scale differently on each platform. A copy,
-    so a caller that changes it never changes the cached font."""
-    return QFont(_font(px, medium))
+def ui_font(px: int, *, medium: bool = False, semibold: bool = False) -> QFont:
+    """Inter at a pixel size; point sizes would scale differently on each platform. Medium
+    is for emphasis in text, SemiBold for titles. A copy, so a caller that changes it never
+    changes the cached font."""
+    return QFont(_font(px, _weight(medium, semibold)))
 
 
 @functools.cache
-def _metrics(px: int, medium: bool) -> QFontMetrics:
-    return QFontMetrics(_font(px, medium))
+def _metrics(px: int, weight: QFont.Weight) -> QFontMetrics:
+    return QFontMetrics(_font(px, weight))
 
 
-def ui_metrics(px: int, *, medium: bool = False) -> QFontMetrics:
-    """The metrics of ``ui_font(px, medium=medium)``, built once per size and weight."""
-    return _metrics(px, medium)
+def ui_metrics(px: int, *, medium: bool = False, semibold: bool = False) -> QFontMetrics:
+    """The metrics of ``ui_font(px, ...)``, built once per size and weight."""
+    return _metrics(px, _weight(medium, semibold))
 
 
 def release_font_cache() -> None:

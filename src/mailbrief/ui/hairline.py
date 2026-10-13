@@ -2,12 +2,20 @@
 which round to whole logical pixels and blur at fractional scales."""
 
 import math
+from typing import Final
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QFrame, QSplitter, QSplitterHandle, QStyle, QWidget
 
-from mailbrief.ui.theme import RADIUS, current_tokens
+from mailbrief.ui.theme import CARD_RADIUS, RADIUS, current_tokens
+
+# A selected row's rounded fill, inset from the row's sides and from its top and bottom;
+# the focus ring follows it.
+SELECTION_INSET_X: Final = 6
+SELECTION_INSET_Y: Final = 2
+# How far a splitter's line stops short of its ends (logical px).
+SPLITTER_INSET: Final = 12
 
 
 def crisp_rect(painter: QPainter, rect: QRectF) -> QRectF:
@@ -44,38 +52,59 @@ def keyboard_focus(state: QStyle.StateFlag) -> bool:
     )
 
 
-def paint_focus_ring(painter: QPainter, rect: QRect, state: QStyle.StateFlag, color: str) -> None:
-    """A one-device-pixel ring just inside ``rect``, once the keyboard has moved focus."""
+def paint_focus_ring(
+    painter: QPainter,
+    rect: QRect,
+    state: QStyle.StateFlag,
+    color: str,
+    *,
+    inset: tuple[float, float] = (SELECTION_INSET_X, SELECTION_INSET_Y),
+    radius: float | None = RADIUS,
+) -> None:
+    """A rounded one-device-pixel ring round a row's selection (``inset`` from ``rect``),
+    once the keyboard has moved focus. ``radius`` None rounds it into a pill."""
     if not keyboard_focus(state):
         return
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    ring = QRectF(rect).adjusted(inset[0], inset[1], -inset[0], -inset[1])
+    corner = ring.height() / 2 if radius is None else radius
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(hairline_pen(color))
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawRect(QRectF(rect).adjusted(1, 1, -1, -1))
+    edge = crisp_rect(painter, ring)
+    painter.drawRoundedRect(edge, corner, corner)
+    painter.restore()
 
 
 class HairlineFrame(QFrame):
-    """A card: a rounded hairline border around its contents."""
+    """A card: its contents on a rounded ``card`` fill, set apart by tone rather than a
+    border or shadow. A ``strong`` card also has a hairline border in ``border_strong``."""
 
     def __init__(
-        self, parent: QWidget | None = None, *, radius: int = RADIUS, strong: bool = False
+        self, parent: QWidget | None = None, *, radius: int = CARD_RADIUS, strong: bool = False
     ) -> None:
         super().__init__(parent)
         self._radius = radius
         self._strong = strong
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setContentsMargins(12, 10, 12, 10)
+        self.setContentsMargins(16, 14, 16, 14)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         tokens = current_tokens()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(hairline_pen(tokens.border_strong if self._strong else tokens.hairline))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # On device pixel centres, so the line stays crisp at 125% and 150% too.
+        # On device pixel centres, so the border stays crisp at 125% and 150% too; the
+        # fill reaches the outer edges of those pixels, so its straight edges are crisp.
         rect = crisp_rect(painter, QRectF(self.rect()))
-        painter.drawRoundedRect(rect, self._radius, self._radius)
+        half = 0.5 / self.devicePixelRatioF()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(tokens.card))
+        painter.drawRoundedRect(rect.adjusted(-half, -half, half, half), self._radius, self._radius)
+        if self._strong:
+            painter.setPen(hairline_pen(tokens.border_strong))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect, self._radius, self._radius)
         painter.end()
 
 
@@ -105,7 +134,9 @@ class HairlineDivider(QWidget):
 
 
 class _HairlineHandle(QSplitterHandle):
-    """A handle wide enough to grab, drawn as one hairline at its centre."""
+    """A handle wide enough to grab, drawn as one hairline at its centre. The line stops
+    SPLITTER_INSET short of both ends, so it never meets another hairline (the sheet's
+    edge) at a sharp corner."""
 
     def paintEvent(self, event: QPaintEvent) -> None:
         tokens = current_tokens()
@@ -114,10 +145,12 @@ class _HairlineHandle(QSplitterHandle):
         painter.setPen(hairline_pen(tokens.hairline))
         if self.orientation() is Qt.Orientation.Horizontal:
             x = self.width() // 2
-            painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
+            end = max(SPLITTER_INSET, self.height() - SPLITTER_INSET)
+            painter.drawLine(QPointF(x, SPLITTER_INSET), QPointF(x, end))
         else:
             y = self.height() // 2
-            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+            end = max(SPLITTER_INSET, self.width() - SPLITTER_INSET)
+            painter.drawLine(QPointF(SPLITTER_INSET, y), QPointF(end, y))
         painter.end()
 
 

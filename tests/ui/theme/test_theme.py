@@ -27,6 +27,7 @@ from mailbrief.ui.theme import (
     register_fonts,
     release_font_cache,
     tokens_for,
+    tracking,
     ui_font,
     ui_metrics,
 )
@@ -69,9 +70,16 @@ def test_text_meets_wcag_aa_contrast(scheme: ColorScheme, mode: ThemeMode) -> No
     pairs = [
         (foreground, background)
         for foreground in (t.text, t.text_secondary, t.text_muted)
-        for background in (t.panel, t.selection)
+        for background in (t.panel, t.selection, t.card)
+    ]
+    # Warning and accent text are also bare labels, on rows and cards.
+    pairs += [
+        (foreground, background)
+        for foreground in (t.warning_fg, t.accent_fg)
+        for background in (t.panel, t.selection, t.card)
     ]
     pairs += [(t.warning_fg, t.warning_bg), (t.accent_fg, t.accent_bg)]
+    pairs += [(t.on_primary, t.primary_fill)]
     for foreground, background in pairs:
         assert contrast(foreground, background) >= 4.5, (scheme, mode, foreground, background)
 
@@ -111,6 +119,28 @@ def test_medium_font_resolves_to_bundled_weight(qapp: QApplication, themed: None
     assert QFontInfo(font).weight() == 500
     assert QFontInfo(font).family() == "Inter"
     assert font.pixelSize() == 13
+
+
+def test_semibold_font_resolves_to_bundled_weight(qapp: QApplication, themed: None) -> None:
+    apply_theme(qapp)
+    font = ui_font(20, semibold=True)
+    assert QFontInfo(font).weight() == 600
+    assert QFontInfo(font).family() == "Inter"
+    with pytest.raises(ValueError):
+        ui_font(13, medium=True, semibold=True)
+    assert ui_metrics(20, semibold=True) is not ui_metrics(20, medium=True)
+
+
+def test_display_sizes_are_tracked_tighter(qapp: QApplication) -> None:
+    """Inter's dynamic metrics: text sizes keep the font's spacing; display sizes tighten
+    as they grow, as Apple sets its display type."""
+    assert tracking(13) == 0.0 and tracking(14) == 0.0
+    assert tracking(15) < 0
+    assert tracking(28) < tracking(20) < tracking(17) < tracking(15) < 0
+    assert ui_font(13).letterSpacing() == 0
+    font = ui_font(20, semibold=True)
+    assert font.letterSpacingType() is QFont.SpacingType.AbsoluteSpacing
+    assert font.letterSpacing() == pytest.approx(tracking(20), abs=1 / 64)  # Qt's fixed point.
 
 
 def test_icon_pixmap_renders_at_device_pixel_ratio(qapp: QApplication) -> None:

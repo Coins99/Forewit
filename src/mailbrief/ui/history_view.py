@@ -65,7 +65,7 @@ class BriefHistoryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         heading = QLabel("Briefs")
         heading.setTextFormat(Qt.TextFormat.PlainText)
-        heading.setFont(ui_font(TITLE_PX, medium=True))
+        heading.setFont(ui_font(TITLE_PX, semibold=True))
         layout.addWidget(heading)
         layout.addWidget(_plain("Saved briefs"))
         self.saved = ActivatingList()

@@ -2,18 +2,22 @@
 
 ## Tokens
 
-Each `ColorScheme` has a dark and a light set (`tokens_for(mode, scheme)`):
+Each `ColorScheme` has a dark and a light set (`tokens_for(mode, scheme)`), and MailBrief
+applies the one that matches the system's mode unless the owner keeps one (see Changing
+scheme and mode):
 
-- **Slate** is the default: grey-blue, from the Liquid Glass prototype. `DARK` and `LIGHT`
-  are Slate's sets.
+- **Studio** is the default (`DEFAULT_SCHEME`): white panes, Studio Mist grey chrome and
+  cards, one blue, after the owner's Apple style reference. `DARK` and `LIGHT` are its
+  sets. Its values and the decisions behind them are in `docs/ui/studio.md`.
+- **Slate** is grey-blue, from the Liquid Glass prototype.
 - **Graphite** is the table below, measured from the first mockup
   (`docs/ui/mockup-three-pane-dark.png`).
 - **Ocean**, **Sage**, **Plum** and **Rose** keep Slate's lightness and change its hue,
-  for the neutrals and the accent alike. Warning colours stay amber in every scheme.
+  for the neutrals and the accent alike. Warning colours stay amber in those.
 
-Light sets are provisional until a light mockup is approved. In every scheme and both
-modes, text tokens meet WCAG AA (4.5:1) on `panel` and `selection`;
-`tests/ui/theme/test_theme.py` checks this.
+In every scheme and both modes, text tokens meet WCAG AA (4.5:1) on `panel`, `selection`
+and `card`, as do `warning_fg` and `accent_fg` (bare labels) and `on_primary` on
+`primary_fill`; `tests/ui/theme/test_theme.py` checks this.
 
 | field | Graphite dark (measured) | Graphite light (provisional) | used for |
 |---|---|---|---|
@@ -27,25 +31,52 @@ modes, text tokens meet WCAG AA (4.5:1) on `panel` and `selection`;
 | text_secondary | #c3c2b8 | #5f5e5a | senders, meta |
 | text_muted | #898782 | #6f6e69 | section labels, notes |
 | warning_fg / warning_bg | #d19633 / #2e1b04 | #8a5a00 / #fbefd9 | deadlines |
-| accent_fg / accent_bg | #7aa5e6 / #0b1f40 | #1d4f91 / #e3edfb | proposal chips, focus |
+| accent_fg / accent_bg | #7aa5e6 / #0b1f40 | #1d4f91 / #e3edfb | links, labels, focus / ticked boxes |
+| card | #151515 | #f5f4f0 | cards (a fill, no border) |
+| primary_fill / on_primary | #0b1f40 / #7aa5e6 | #e3edfb / #1d4f91 | the one primary button, ticked boxes |
+| tile / on_tile | #484847 / #f0efec | #c9c8c2 / #1f1e1b | a glass pill's icon tile and its glyph |
 
-Metrics (logical px): RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13, SMALL_PX 12, CAPTION_PX 11,
-TITLE_PX 15.
+The six earlier schemes' `card` is their `selection`, and their primary is their
+`accent_bg` with `accent_fg` text, so they keep their look; Studio's primary is solid
+blue with white text.
+
+Metrics (logical px): RADIUS 10 (rows, selections), CARD_RADIUS 18, PILL_RADIUS 14
+(stylesheet buttons), TAB_RADIUS 12, FIELD_RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13,
+READING_PX 14 (an email's summary), SMALL_PX 12, CAPTION_PX 11, HEADING_PX 17 (the brief's
+day, Semibold), TITLE_PX 20 (page and email titles, Semibold); list items pad
+ITEM_PAD_X 10 by ITEM_PAD_Y 5 with no selection mark (ITEM_MARK_PX 0).
+
+Fonts: bundled Inter 4.001 Regular, Medium and SemiBold (`ui_font(px, medium=...,
+semibold=...)`, never both). From 15 px up, `ui_font` tracks letters tighter by Inter's
+dynamic metrics (`tracking(px)`: −0.13 px at 15, −0.33 at 20), as Apple sets display
+type; text sizes keep Inter's own spacing.
 
 ### Glass tokens
 
 `glass_for(mode, scheme)` holds the Liquid Glass colours, taken from the planner's
-prototype, for every scheme. `GLASS_DARK` and `GLASS_LIGHT` are Slate's. No widget paints glass yet. Glass belongs to navigation
+prototype, for every scheme. `GLASS_DARK` and `GLASS_LIGHT` are Studio's. Studio's glass
+follows WWDC25's Liquid Glass over a fluid colour field (`docs/ui/studio.md`): a flat
+backdrop (both stops Studio Mist) with no streak, sheen or lit edge (alpha 0, a light
+turned off), and three soft pools of sage, amber and rose light (`pool_a`, `pool_b`,
+`pool_c`) that show through its frosted chrome. Its pills carry Liquid Glass's layers:
+`highlight` (the specular rim), `lens` (light concentrated just inside the edge) and
+`shadow` (an even contact edge and a soft shadow below). On the glass they are frosted
+(`pill`) at rest; in the content they rest as a Steel outline and lift into glass under
+the pointer (`pill_hover`). Its selected page is a vibrant white fill with no rim
+(`raised_rim` alpha 0: no glass on glass), and its primary pill is solid blue, labelled
+in `primary_text` (white). The other schemes' pools and layers have alpha 0, their
+`pill_hover` too, and their `primary_text` is their `text`. Glass belongs to navigation
 chrome only (header, sidebar, pill buttons). Lists and the reading pane stay opaque.
 A translucent colour is a `Tint`: an opaque `#rrggbb` and a separate alpha, never an
 eight-digit hex. Glass lies over a backdrop drawn from `backdrop_top`, `backdrop_bottom`
-and `streak`, so contrast can be proven. `tests/ui/theme/test_glass.py` checks the
-worst case over the backdrop's darkest and brightest pixels, under full sheen or shade,
+`streak` and the pools, so contrast can be proven. `tests/ui/theme/test_glass.py` checks
+the worst case over the backdrop's darkest and brightest pixels (either stop, under the
+streak and under every combination of the pools), under full sheen, shade or hover fill,
 at the tint's alpha and at `min_tint_alpha`:
 
 - `text` and `text_secondary` on a glass panel reach 4.5:1.
-- `text` on the raised pill and on pill buttons reaches 4.5:1, over glass, `panel` or
-  `opaque`.
+- `text` on the raised pill and on pill buttons, and `primary_text` on the primary
+  pill, reach 4.5:1, over glass, `panel`, `card` or `opaque`.
 - `accent_fg` (the focus ring) beside glass reaches 3:1.
 - The opaque fallbacks reach 4.5:1 for text on `opaque`, and 3:1 for `rim_contrast`
   on `opaque` and `panel`.
@@ -67,7 +98,9 @@ them.
 - The sidebar's Google sign-in and Disconnect are glass pills.
 
 - **Backdrop** (`backdrop.py`): a diagonal gradient from `backdrop_top` to
-  `backdrop_bottom`, under five streaks of light. Their strengths scale `streak`'s peak
+  `backdrop_bottom`, under five streaks of light, then three pools of colour (`POOLS`:
+  radial pools of `pool_a`, `pool_b` and `pool_c`, at the top left, the right and low
+  down, where the chrome shows them). The streaks' strengths scale `streak`'s peak
   alpha, and their positions stretch with the window's width. Only the blurred copy is
   ever seen, so it is painted at `SCALE` (a quarter) of the window's logical size and
   blurred by halving three times and scaling back up. A backdrop depends only on
@@ -88,8 +121,12 @@ them.
     panel's edge never leaves it see-through. Then it shows the blurred backdrop behind
     `area`, which is the panel in window coordinates, then the tint, the sheen over the
     top 120 px and a lit top edge.
-  - `paint_raised` is a fill with a sheen, never a second layer of glass.
-  - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
+  - `paint_raised` is a fill with a sheen, never a second layer of glass. Its rim is lit
+    from `raised_rim`; alpha 0 draws none (Studio: Apple's selected controls have no
+    rim), except under increased contrast.
+  - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half. A pill
+    that isn't primary fills with `pill_hover` at the hover's strength (Studio: a soft
+    ink or white fill, as apple.com's buttons fill on hover; the other schemes' is 0).
   - `paint_rim` is 1 device pixel wide. `hairline.crisp_rect` snaps it onto the device
     pixel grid through the painter's device transform, rounding inward to the first
     and last whole pixels inside the widget's clip. It stays one full pixel at 125% and
@@ -98,14 +135,34 @@ them.
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
   - **Size:** the outline button's box plus `ROOM_X` (3 px) each side and `ROOM_Y`
-    (1 px) above and below, room for the pill to grow into on hover. The header keeps
-    its height.
+    (3 px) above and below, room for the pill to grow into on hover and for its shadow.
+    Its label is 13 px Medium (`outline_button(px=...)` keeps Medium for glass).
+  - **Icon tile:** a glass pill draws its icon (`glyph`, the `icon_name` that
+    `outline_button` passes) as a browser tab draws a site icon: a rounded square
+    (`TILE_PX` 18, radius `TILE_RADIUS` 5) concentric with the pill's round end
+    (`TILE_INSET` 5 in), filled with `tile`, the glyph (`GLYPH_PX` 12) in `on_tile`; on the
+    primary pill, a lighter tile of `primary_text` at 24% with the glyph in
+    `primary_text`. Then `ICON_GAP` (6) and the label, then `PAD_X` (12). Disabled, the
+    tile is at half strength. Sync and review (refresh), Draft a reply (pencil) and Open
+    in Gmail (external-link) have tiles.
+  - **Layer:** `GlassButton.on_glass()` asks its nearest ancestor with the
+    `GLASS_LAYER` property: the header, sidebar and footer say True, the content sheet
+    False. With Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
+    paints it: on the glass, frosted with its highlight, lens and shadow at rest; in the
+    content, an outline that fades out as the pill lifts into glass with the hover (as
+    WWDC's controls "lift up into Liquid Glass" on interaction). The highlight is bright
+    along the top and brightest at the top left, softer along the bottom and reflected
+    at the bottom right (`HIGHLIGHT_STOPS`); the lens band is `LENS_WIDTH` (3) inside the
+    edge; the shadow (`SHADOW_RINGS`) is outside the pill only, so it never darkens the
+    body behind the label. The other schemes paint `paint_pill`.
   - **Hover:** animates in, as Apple's glass lights from within on interaction.
     - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
       whose overshoot still fits the room.
     - `paint_glow` lights a band within `GLOW_WIDTH` (3 px) inside the edge. It starts
       under the pointer and spreads round the pill as the animation runs.
-    - The rim's `specular` light fades in and follows the pointer.
+    - The rim's `specular` light fades in and follows the pointer, and the body fills
+      with `pill_hover`. Studio has no coloured light (specular alpha 0): only the fill
+      and the spring.
     - Leaving eases it all out (OutCubic, 200 ms). With motion reduced, the light comes
       at once and the pill never grows. The solid modes paint no light.
     - The body is never lit, and labels sit at least `PAD_Y` (6 px) inside the edge,
@@ -121,8 +178,8 @@ them.
   - **Disabled:** the body at half opacity, with `text_muted` text.
   - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
     escaping.
-  - **Where:** the header's Sync and review (primary) and Cancel, and the Today page's
-    card and footer buttons.
+  - **Where:** the header's Sync and review (primary) and Cancel, the sidebar's Google
+    sign-in and Disconnect, and the Today page's card and footer buttons.
 - **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
   reduced motion that widgets read at paint time. `effective_preferences` sets them from:
   - the system (`system.py`): Increase contrast (Qt's `contrastPreference`, or macOS
@@ -149,16 +206,23 @@ them.
   thread, cache and stale results. `test_gallery.py` saves a glass sampler for each
   scheme and mode as `glass-{scheme}-{mode}-{dpr}x.png` when `MAILBRIEF_UI_SHOTS` is set.
 
-### Changing scheme
+### Changing scheme and mode
 
 The owner picks a scheme in Settings > Appearance (`ui/appearance_view.py`): one radio
-button per scheme, each with a swatch of its dark panel ringed with its accent. Arrow
-keys move between them. The choice applies at once: `MainWindow._change_scheme` calls
-`apply_theme` whatever else is running, and `AppearanceWriter` saves it to
-`appearance.json` on a one-thread worker. It never uses an asyncio task, which qasync
+button per scheme, Studio first, each with a swatch of its panel in the mode in effect
+ringed with its accent. Arrow keys move between them. Below it, Mode: Follow the system
+(the default), Light or Dark (`ModeChoice` in `ui/appearance.py`). A choice applies at
+once, whatever else is running: `MainWindow._change_scheme` keeps the mode in effect,
+`_change_mode` applies the kept or the system's mode (`theme_mode`), and while the owner
+follows the system, Qt's `colorSchemeChanged` re-applies the theme
+(`_system_mode_changed`). `system_mode(app)` reads the system's mode, light when it
+doesn't say. A failed theme puts back what was there and shows "The colours couldn't be
+changed." `AppearanceWriter` saves the choices to `appearance.json` on a one-thread
+worker; an unknown mode reads as Follow the system. It never uses an asyncio task, which qasync
 once never ran. A failed save comes back through a queued signal, and shutdown waits for
-the write. Startup reads `appearance.json` once, once the data folder is locked: it
-applies the scheme and hands the choices to the window (`saved_appearance`).
+the write. Startup applies Studio in the system's mode, then reads `appearance.json` once,
+once the data folder is locked: it applies the saved scheme and mode and hands the choices
+to the window (`saved_appearance`).
 
 `apply_theme` sets the tokens before it changes the palette. Widgets that read
 `current_tokens()` at paint time need nothing more. A widget that keeps a colour, such
@@ -169,17 +233,25 @@ widget gets only `StyleChange`.
 ## Hairlines (`ui/hairline.py`)
 
 All read colours from `current_tokens()` at paint time.
-- `HairlineFrame(QFrame)`: card container (`radius=RADIUS`, `strong=False`), contents
-  margins 12, 10, 12, 10. Paints an antialiased rounded rect with `QPen(color, 0)`
-  (cosmetic: one device pixel at any scale), inset by `0.5 / devicePixelRatioF()`.
+- `HairlineFrame(QFrame)`: a card (`radius=CARD_RADIUS`, `strong=False`), contents
+  margins 16, 14, 16, 14. Paints a rounded `card` fill, with no border or shadow; a
+  `strong` card also has a cosmetic `border_strong` border (one device pixel at any
+  scale). The border is snapped by `crisp_rect`, and the fill reaches the outer edges of
+  those pixels, so straight edges stay crisp at 125% and 150%.
 - `HairlineDivider(QWidget)`: horizontal or vertical, 1 logical px, cosmetic line, no
   antialiasing.
 - `HairlineSplitter(QSplitter)`: `handleWidth(5)` so it can be grabbed; its handle fills
-  with panel and draws one cosmetic hairline at its centre.
-- `paint_focus_ring(painter, rect, state, color)`: the focus ring of the sidebar, brief
-  list and shortlist delegates, a 1px cosmetic rect inset by 1, painted only when
+  with panel and draws one cosmetic hairline at its centre, stopping `SPLITTER_INSET`
+  (12) short of both ends so it never meets the sheet's edge.
+- `paint_focus_ring(painter, rect, state, color, *, inset=..., radius=RADIUS)`: the
+  focus ring of the sidebar, brief list, shortlist, Actions and Your day delegates, a
+  rounded 1px cosmetic ring round the row's selection (`SELECTION_INSET_X` 6 and
+  `SELECTION_INSET_Y` 2 in from the row, defined here and shared with `paint_selection`);
+  the sidebar's follows its pill (`inset=(1, 2)`, `radius=None`). It paints only when
   `keyboard_focus(state)` is true (focus that the keyboard moved, not focus on first
   show).
+- Nothing has a sharp corner: cards, the sheet, selections, focus rings, buttons, fields,
+  tabs, menus, combo box lists and tooltips are all rounded, and no two hairlines meet.
 
 ## Brief list (`ui/brief_list.py`)
 
@@ -204,16 +276,19 @@ All read colours from `current_tokens()` at paint time.
   title or the subject ("(no subject)" when empty). Accessible text is the header title
   or "{subject}, from {sender}" plus the chip texts. Header rows are `NoItemFlags`; item
   rows are enabled and selectable.
-- Delegate (`drawText` only): header rows 12px muted at left 12, 12 above and 4 below.
-  Item rows padded 8 vertical, 12 horizontal: selected rows fill with selection and draw
-  a 2px accent_border bar at the left; title 13px Medium (text); sender 13px
-  (text_secondary); chips after a 4px gap, 11px, padding 1 × 6, radius `min(8, h/2)`, 6px
-  apart, warning or accent fg/bg; a cosmetic hairline at the bottom; with focus, a 1px
-  cosmetic accent_fg rect inset by 1. Title and sender elide to the row width minus 24.
+- Delegate (`drawText` only): header rows 12px Semibold text_secondary at left 14, 16
+  above and 4 below. Item rows padded 10 vertical, 14 horizontal: a selected row gets a
+  rounded selection fill (radius `RADIUS`) inset 6 from its sides and 2 from its top and
+  bottom, with no accent bar; title 13px Medium (text); sender 13px (text_secondary);
+  chips after a 4px gap as bare 11px Medium text in warning_fg or accent_fg, 12px apart,
+  with no fill; a cosmetic hairline at the bottom, inset 14 to line up with the text;
+  with focus, a 1px cosmetic accent_fg rect inset by 1. Title and sender elide to the row
+  width minus 28.
 - Shared with the run page's shortlist and the Actions page's rows: `paint_selection`,
   `paint_lines` (a title and a `subtitle`: a sender or a meta line), `paint_chips`,
   `paint_separator`, `row_height`, `elided`, `flat`, `SINGLE_LINE`, `ROW_PAD_V`,
-  `ROW_PAD_H`, `ELIDE_MARGIN` and `CHIP_GAP`; the focus ring is `paint_focus_ring()` from
+  `ROW_PAD_H`, `ELIDE_MARGIN`, `CHIP_GAP`, `SELECTION_INSET_X` and `SELECTION_INSET_Y`;
+  the focus ring is `paint_focus_ring()` from
   hairline.py. Never copy painting code: paint new rows with these.
 - View: objectName `briefList`, accessible name "Brief items", NoFrame,
   ScrollPerPixel, SingleSelection; `item_selected(DigestItem)`; `show_rows(rows)` selects
@@ -249,12 +324,12 @@ itself. `rebuilt()` follows each `show_item` and `show_empty`, and `buttons()` l
 content's buttons in display order. The pane has `ClickFocus`: Tab goes from the brief
 list straight to its buttons, and a click still lets the arrow keys scroll it.
 Its content is at most 720 px wide (`DETAIL_MAX_WIDTH`) and stays at the left on wide
-windows. Content margins 16, 14, 16, 14, spacing 8, in order (every mail- or AI-derived
+windows. Content margins 16, 20, 16, 20, spacing 10, in order (every mail- or AI-derived
 line is a `WrapLabel`):
-1. Subject (or "(no subject)"), 15px Medium.
+1. Subject (or "(no subject)"), `TITLE_PX` (20px) Semibold.
 2. Sender, secondary, `sender_with_address` (objectName `detailSender`). No received
    time is invented.
-3. Summary.
+3. Summary, `READING_PX` (14px).
 4. Action text, secondary, if present and different from the summary.
 5. Deadline: 14px clock icon (warning_fg) and a warning label, `Due ` + `deadline_text`
    in the brief's zone (see Dates).
@@ -280,8 +355,9 @@ Buttons are made with `outline_button()` (`button_label()` text, `variant="outli
 `ActionsPanel` (objectName `actionsPanel`) is the `actions` page, edge to edge like Today:
 a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list side
 (`actionsListPane`, at least 220 px) and `ActionDetailPane` (at least 280 px).
-- List side, top to bottom: "Your actions" (15px Medium, `actionsHeading`, margins 12,
-  10, 12, 4); `tabs`, a `QTabBar` (`actionsTabs`, "Action views": "Open (N)",
+- List side, top to bottom: "Your actions" (20px Semibold, `actionsHeading`, margins
+  14, 14, 12, 4), with New task; the project filter (at least 7 characters) and
+  "Projects & areas", 6 apart; `tabs`, a `QTabBar` (`actionsTabs`, "Action views": "Open (N)",
   "Waiting (N)", "Completed (N)" or "(200+)", no base, not expanding, `StrongFocus` so Tab
   reaches it on macOS too); `stack`, a `QStackedWidget` (`actionsStack`) holding the three
   `lists[view]`. `show_view` sets the tab bar's index and the stack; a click on a tab
@@ -308,10 +384,10 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
   detail pane all read it, so they never disagree.
 - `ActionDetailPane(QScrollArea)`: objectName `actionDetail`, "Selected action",
   `ClickFocus`, content (`actionDetailContent`) at most 720 px wide at the left, margins
-  16, 14, 16, 14, spacing 8. Its seven buttons are made once and stay (the panel exposes
+  16, 20, 16, 20, spacing 10. Its seven buttons are made once and stay (the panel exposes
   them under its old names), so only the text between them is rebuilt. In order, every
   mail-, AI- or owner-written line a `WrapLabel`:
-  1. Title, 15px Medium (`actionTitle`).
+  1. Title, 20px Semibold (`actionTitle`).
   2. State, secondary: "Yours · open", "Waiting for someone · open" (either with " · carried over" while it
      applies) or "Completed Tue Oct 6".
   3. "Due {deadline_text}", warning with " · Overdue" when overdue, else secondary
@@ -387,22 +463,24 @@ The brief list's chips keep their shorter forms (see Brief list).
 
 ## Workspace (`ui/workspace.py`)
 
-- `HeaderBar`: objectName `headerBar`, margins 14, 8, 14, 8; "MailBrief" 13px Medium, a
-  stretch, a 14px refresh icon (text_secondary), the status and the window's widgets.
+- `HeaderBar`: objectName `headerBar`, margins 16, 8, 16, 8; "MailBrief" 15px Semibold
+  (`TITLE_BAR_PX`), a stretch, a 16px refresh icon (text_secondary), the status and the window's widgets.
   The status is an `ElidedLabel` (12px, secondary, `headerStatus`): it asks for its text's
   width but shrinks to nothing, so a long status never widens the header; its accessible
   name is the whole text. `set_status(text)`; an empty status hides the refresh icon,
   which keeps its space. `add_widget(widget)` appends widgets right of the status,
   spacing 8.
-- `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 6, 10, 6, 10,
+- `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 8, 12, 8, 12,
   spacing 2. A fixed-height `QListView#sidebarNav` with pages in Gmail's and Outlook's
   order (`PAGES`): today (Today, sun), inbox (Inbox, mail), actions (Actions,
   checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs (Briefs,
   calendar), then, set apart by a 12px gap with a hairline across it (`GROUP_STARTS`),
   calendar (Calendar, calendar-week). A click in the gap chooses nothing. Ctrl+1 to Ctrl+7 follow this order
-  (`PAGE_SHORTCUTS`). Rows 31px: selected rows get
-  a rounded selection fill (radius 8);
-  a 14px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
+  (`PAGE_SHORTCUTS`). Rows 32px: the selected row is a raised pill on the glass, which
+  the list (`_NavList`) paints under its rows so it can glide from the old page to the
+  new one in `GLIDE_MS` (420 ms) on `fluid_curve()` (`ui/glass/motion.py`, monopo saigon's
+  expo-out, cubic-bezier(0.19, 1, 0.22, 1)); with motion reduced it moves at once;
+  a 16px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
   right-aligned in text_secondary; the brief list's focus ring. Below: a stretch, then
   `NavButton` rows painted like page rows: `saved_mail` (Saved mail, mail, "Saved &mail"),
   `data` (Data, database, "&Data", accessible name "Data and recovery") and `settings`
@@ -415,8 +493,8 @@ The brief list's chips keep their shorter forms (see Brief list).
 - `NavButton(text, icon_name, *, mnemonic=None, accessible_name=None)`: with a mnemonic
   (app-authored text such as "Se&ttings") Alt and that key press it; it still paints
   `text`.
-- `BriefHeading` (`briefHeading`), at the top of the list pane, margins 12, 10, 12, 4,
-  hidden until a brief is shown: `title` (13px Medium, `brief_title`: "Tue Oct 6", plus
+- `BriefHeading` (`briefHeading`), at the top of the list pane, margins 14, 16, 14, 4,
+  hidden until a brief is shown: `title` (`HEADING_PX` 17px Semibold, `brief_title`: "Tue Oct 6", plus
   " · Partial" or " · Empty") and `meta` (11px muted, elided, `brief_meta`): "{account} ·
   saved HH:MM" ("saved Oct 7 HH:MM" when saved on a later day in the brief's zone), plus
   " · N failed", " · N deferred" and " · Inbox sync incomplete". The save time is in the
@@ -424,14 +502,24 @@ The brief list's chips keep their shorter forms (see Brief list).
   owner's zone would show a different time. Its accessible name is the full sentence:
   account, save time in the brief's zone, the coverage counts and whether the Inbox sync
   was complete.
-- `ThreePaneWorkspace`: objectName `workspace`. HeaderBar, a horizontal divider, then
-  SidebarNav, a vertical divider and `pages`, a QStackedWidget. Page `today`
+- `ThreePaneWorkspace`: objectName `workspace`. One sheet of glass: HeaderBar, then
+  SidebarNav beside `sheet` (`ContentSheet`, `contentSheet`), then `footer_bar`
+  (`FooterBar`, `footerBar`, which holds the window's status strip), with no dividers
+  between them. The glass's sheen runs from the window's top across them all, and only
+  the header has the lit top edge. `sheet` paints the glass, then a `panel` sheet with
+  `SHEET_RADIUS` (12) corners and a cosmetic `hairline` edge, leaving `SHEET_GUTTER` (8)
+  of glass at its right; `pages`, a QStackedWidget, fills it 1 px inside the edge and is
+  masked to a corner one pixel smaller (a mask is aliased; its steps fall on the sheet's
+  antialiased fill), so no page's square corner shows. Page `today`
   (`todayPage`): `today_top` (a QVBoxLayout for banners) above a `HairlineSplitter`
   holding the list pane (the heading, `BriefListView` and an 11px muted coverage footer,
-  margins 12, 10, 12, 10: one elided line of `coverage_short(digest, today)`, with the
+  margins 14, 10, 14, 10: one elided line of `coverage_short(digest, today)`, with the
   services' `coverage_line` as its accessible name) and the `BriefDetailPane`; stretch
   4:5, not collapsible, minimum widths 220 and 280. `add_page(key, widget)`,
   `show_page(key)` (KeyError for an unknown key) and `current_page()`.
+  The detail's scroll position, kept when the same brief is shown again, waits until the
+  new content's range reaches it (wrapped labels can grow the range over several layout
+  passes); scrolling by hand first drops it.
   `show_digest(digest, *, links, proposals, owner_zone, today)` builds the rows (chips
   counted from `today`), the heading and the coverage, shows "No analyzed messages in this
   brief." when empty, and, for the same saved brief (account, day and save time), keeps
@@ -443,9 +531,9 @@ The brief list's chips keep their shorter forms (see Brief list).
 
 ## Main window (`ui/main_window.py`)
 
-- Central widget: the workspace (stretch), a horizontal `HairlineDivider`, then
-  `statusStrip` (margins 12, 6, 12, 6): the status (a 12px secondary `WrapLabel`) and an
-  outline Undo. No outer scroll area; the window opens at 1100 × 720 and its minimum
+- Central widget: the workspace alone. `statusStrip` (margins 16, 6, 8, 6, no background)
+  sits on the workspace's `footer_bar` glass under the sheet: the status (a 12px
+  secondary `WrapLabel`) and an outline Undo. No outer scroll area; the window opens at 1100 × 720 and its minimum
   width stays at most 900 px with the theme applied.
 - Header: after a run whose Inbox sync was complete or partial, when that sync finished
   (when the review opened, else when the run ended), in the owner's zone: "Checked Gmail
@@ -472,13 +560,13 @@ The brief list's chips keep their shorter forms (see Brief list).
   changing the tab moves the sidebar. Briefs is a page like the others: choosing it loads
   the saved briefs and missed days through `start()` (refused with a reason while busy or
   before local storage loads), then shows `BriefHistoryPanel` (`ui/history_view.py`): a
-  15px Medium "Briefs" heading, the saved and missed lists, outline Open and Brief this
+  20px Semibold "Briefs" heading, the saved and missed lists, outline Open and Brief this
   day…, and a Replace / Keep it confirmation, each button row ending in a stretch.
   Opening a saved brief returns to Today. An automatic refresh waits while a replacement
   is being confirmed there, and reloads Briefs when it ends.
 - Drafts: with no drafts the list is hidden and `draftsEmpty`, a muted, centred, wrapping
   message, fills the page; with drafts the list shows and the message hides.
-- Calendar (ADR 0018, `ui/calendar_view.py`): a 15px Medium heading "Calendar · Oct 12 –
+- Calendar (ADR 0018, `ui/calendar_view.py`): a 20px Semibold heading "Calendar · Oct 12 –
   18" with outline Previous week, This week and Next week; one `ActivatingList` row per day
   heading (Medium, enabled but not selectable, "· Today" on the owner's day) followed by
   that day's all-day events, then open actions' deadline and target markers, then timed
@@ -551,16 +639,22 @@ The brief list's chips keep their shorter forms (see Brief list).
 ## Your day (`ui/today_view.py`)
 
 - `DayPanel` (`dayPanel`, "Your day") sits in `today_top`, under the viewing banner and
-  Retry, above the brief: three `HairlineFrame` cards with stretch 1 each, 10 px apart,
-  inside 12 px side and 10 px top and bottom margins: Needs attention (`dayAttention`),
-  Today's agenda (`dayAgenda`) and New replies (`dayReplies`).
-- A card: its heading (12 px Medium, secondary, "Needs attention · 4" with a count), then
-  an `ActivatingList` that shows at most three rows and scrolls, or a 12 px muted line when
-  empty. The heading and the empty line are inset 6 px, in line with the rows' text.
-- A row (`DayRowDelegate`): one 13 px line, 5 px above and below, 6 px at the sides; the
+  Retry, above the brief: three `HairlineFrame` cards (grey `card` fills) with stretch 1
+  each, 12 px apart, inside 16 px side, 14 px top and 6 px bottom margins: Needs attention
+  (`dayAttention`), Today's agenda (`dayAgenda`) and New replies (`dayReplies`).
+- A card: no frame padding of its own, layout margins 4, 12, 4, 8; a top row with its
+  heading (12 px Semibold, secondary, "Needs attention") and, at the right, its count as
+  a dashboard's figure (`count`, `COUNT_PX` 22 Semibold, "4"; muted at 0; accessible name
+  "Needs attention: 4"), then a frameless
+  `ActivatingList` that shows at most three rows and scrolls, or a 12 px muted line when
+  empty. The heading and the empty line are inset 14 px, in line with the rows' text.
+- A row (`DayRowDelegate`): one 13 px line, 6 px above and below, `ROW_PAD_H` (14 px) at
+  the sides, clear of the rounded selection; the
   title at the left in `text`, a note at the right in `text_secondary`, or `warning_fg` when
-  something is due or overdue. The title gives way first, down to 40% of the row. Selection
-  and the focus ring as in the brief list; no separators.
+  something is due or overdue. A due row (`warning`) or one with new replies (`accent`)
+  has a `DOT_PX` (6) dot of its colour before the note, as a dashboard marks state. The
+  title gives way first, down to 40% of the row. Selection and the focus ring as in the
+  brief list; no separators.
 - Activating a row opens its record: Return, Enter or a double-click, never a single click
   (a double-click would land on the page it opened).
 
@@ -568,8 +662,10 @@ The brief list's chips keep their shorter forms (see Brief list).
 
 - `CommandPalette` (`commandPalette`, "Go to or search"), 560 × 420, opened by Ctrl+K through
   `dialog_guard.show_dialog`, and listed in `_dialog_open()` and the quit path's closes.
-- A `QLineEdit` (`paletteField`) over an `ActivatingList` (`paletteResults`) and a 12 px muted
-  note (`paletteNote`). Section headings are list rows with `NoItemFlags`, 12 px Medium in
+- A `QLineEdit` (`paletteField`, a rounded search pill: `border_strong` rim, radius
+  `PILL_RADIUS`, padding 6px 14px) over an `ActivatingList` (`paletteResults`) and a 12 px
+  muted note (`paletteNote`). Section headings are list rows with `NoItemFlags`, 12 px
+  Semibold in
   `text_muted`; Up and Down in the field skip them, Return opens the current row once.
 - Rows are plain list items: one line, the title first, " · " between parts, elided at the
   right. Mail and AI text never goes into a tooltip.
@@ -579,15 +675,15 @@ The brief list's chips keep their shorter forms (see Brief list).
 ## Run page (`ui/run_view.py`, `ui/main_window.py`)
 
 - Step 1, `review_panel`: "Step 1 of 2" (11px muted) over "Choose what MailBrief reads"
-  (15px Medium), the hint (a secondary `WrapLabel`), the shortlist and Continue, a
-  `variant="primary"` button left-aligned. Step 2, `consent_panel`: "Step 2 of 2" over
+  (20px Semibold), the hint (a secondary `WrapLabel`), the shortlist and Continue, a
+  `variant="primary"` button left-aligned. The run column's margins are 24, 20, 24, 20. Step 2, `consent_panel`: "Step 2 of 2" over
   "Approve sending to Groq", the disclosure (a `WrapLabel`) in a `HairlineFrame` card,
   then outline Approve and Decline side by side, Decline focused.
 - The shortlist stays a `QListWidget`: each item keeps its text (what is read aloud), its
   ID under `UserRole`, flags, check state and app-text tooltip. `review()` adds a
   `ShortlistRow(subject, name, address, chips, blocked)` under `ROW_ROLE`, and
-  `ShortlistDelegate` paints it with the brief list's row helpers: selection fill and 2px `accent_border`
-  bar, focus ring only after keyboard focus, subject 13px Medium, sender 13px secondary
+  `ShortlistDelegate` paints it with the brief list's row helpers: the rounded selection
+  fill, focus ring only after keyboard focus, subject 13px Medium, sender 13px secondary
   (`sender_line`: the whole "Name <address>" when it fits; else the name cut at its end
   before " <address>"; else the address alone, cut by `cut_address`; a long display name
   never hides the address, and joined parts are re-measured, shrinking the cut part 1 px
@@ -607,11 +703,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   so list mode gives them the viewport's width and no hidden horizontal range exists.
   Scrolling is per pixel.
 - Check box: MailBrief paints its own inside the style's `SE_ItemViewItemCheckIndicator`
-  rect, so the inherited `editorEvent` still handles clicks and Space. Unchecked: a
-  radius-3 rounded square with a cosmetic 1px `border_strong` outline. Checked:
-  `accent_bg` fill, `accent_border` outline and an antialiased `accent_fg` check mark.
-  `indicator_colors(checked, tokens)` returns (border, fill, mark), with `NONE`
-  ("transparent") for an unchecked box's fill and mark.
+  rect, so the inherited `editorEvent` still handles clicks and Space, with
+  `paint_check_box` from `ui/theme/indicators.py`, as the theme style paints every check
+  box. Unchecked: a radius-4 rounded square with a cosmetic 1px `border_strong` outline.
+  Checked: `primary_fill` fill, `accent_border` outline and an antialiased `on_primary`
+  check mark. `indicator_colors(checked, tokens)` returns (border, fill, mark), with
+  `NONE` ("transparent") for an unchecked box's fill and mark.
 - A blocked row is muted, has no check box and can never be checked. Its check rect is
   computed as if it had one (`HasCheckIndicator` on a copied option), so its text starts
   at the same `text_left(option, index)` as a checkable row's.
@@ -626,24 +723,50 @@ The brief list's chips keep their shorter forms (see Brief list).
   A form field that is a box layout goes in a plain `QWidget`, so the form gives a
   wrapped label in it the height its text needs.
 
-- `QPushButton[variant="primary"]`: `accent_bg` background, `accent_fg` text, 1px
-  `accent_border`, the outline button's radius and padding; `:focus` border `accent_fg`;
+- Every `QPushButton` (outline or plain) is a pill: transparent, `text`, a 1px
+  `border_strong` rim, radius `PILL_RADIUS`, padding 5px 12px; `:hover` `selection`;
+  `:focus` rim `accent_fg`; `:disabled` `text_muted` with a `hairline` rim.
+- `QPushButton[variant="primary"]`: `primary_fill` background, `on_primary` text, 1px
+  `accent_border`, the pill's radius, padding 5px 16px; `:focus` border `accent_fg`;
   `:disabled` transparent with `text_muted` text and a `hairline` border, like outline.
-- `QListWidget::item`: padding 4px 8px and a transparent 2px left border, so selected and
-  unselected rows line up; `:selected` (also `:!active`): `selection` background, `text`,
-  2px `accent_border` left border.
+- `QListView` (unless named, as the brief, action and page lists are): `panel`, a 1px
+  `hairline` border, radius `RADIUS`, padding 3px; a list set to `NoFrame` (Your day's)
+  is transparent, with no border or padding. `QListWidget::item`: padding 5px 10px,
+  no border, radius `RADIUS`; `:selected` (also `:!active`): `selection` background,
+  `text`, with no accent bar.
+- `QLineEdit`, `QPlainTextEdit`, `QTextEdit`: `panel`, `text`, a 1px `hairline` border,
+  radius `FIELD_RADIUS`, padding 4px 8px, selected text `on_primary` on `primary_fill`;
+  `:focus` border `accent_fg`; `:disabled` `text_muted`. Line edits inside combo boxes and
+  spin boxes have none of that.
+- `ThemeStyle` (Fusion behind a `QProxyStyle`) draws what the stylesheet can't without
+  image files: combo boxes, date and time fields and spin boxes as the same rounded field
+  (`paint_field`, 4 px taller than Fusion's, text 8 px in) with thin `text_secondary`
+  chevrons (`paint_chevron`), and check boxes and radio buttons (`paint_check_box`,
+  `paint_radio`: `primary_fill` with an `on_primary` mark or dot when on). Sub-control
+  values overlap between controls (a combo box's edit field is a spin box's down
+  button), so its checks pair the control with the part.
+- Pop-ups are windows of their own, so `ThemeStyle.polish` makes menus, combo box lists
+  (`QComboBoxPrivateContainer`) and tooltips translucent, and their corners are clear,
+  not square. The stylesheet rounds `QMenu` (radius `RADIUS`, padding 4px, items radius
+  `MENU_ITEM_RADIUS` with a `selection` fill) and `QToolTip`. Its rules never reach a combo
+  box's private list window, so `_RoundedPopup`, an event filter, paints that window as a
+  rounded `panel` with a hairline edge in the theme in effect. A combo box's own delegate
+  ignores the stylesheet's item rules, so `polish` gives it a `QStyledItemDelegate`; its
+  list then has 4px padding and rounded `selection` rows.
 - `QListView#actionList` and `QScrollArea#actionDetail` share the brief list's and detail's
   panel background, no border and no outline.
-- `QTabWidget::pane`: no border. `QTabBar::tab`: transparent, `text_secondary`, padding
-  6px 12px, no border; `:selected`: `text` with a 2px `accent_border` bottom border.
+- `QTabWidget::pane`: no border. `QTabBar::tab`: pill segments: transparent,
+  `text_secondary`, padding 5px 12px, margin 2px, radius `TAB_RADIUS`; `:hover` `text`;
+  `:selected`: `text` on `selection`, with no underline.
 - Briefs: the missed-days list hides when there are none; its note says why. An automatic
   refresh waits only while a replacement is being confirmed there, and reloads the page
   when it ends while Briefs shows.
 
 ## Stylesheet additions from the Phase 4 visual pass
 
-- Outline buttons use `padding: 5px 14px` (the brief's 4px 10px looked small next to the
-  mockup), with 14px icons.
+- Outline buttons use `padding: 5px 12px` and glass pills `PAD_X` 12 (the brief's 4px
+  10px looked small next to the mockup; 14 cost the rounded sheet's room at 680 px), with
+  14px icons.
 - Scrollbars are thin token-coloured handles with no arrow buttons: 8px wide, handle
   `border_strong`, radius 3, transparent track.
 - Focus rings in the painted lists show only after the keyboard moves focus

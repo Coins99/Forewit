@@ -14,12 +14,14 @@ from mailbrief.ui.glass.painter import (
     GLOW_WIDTH,
     GlassMode,
     paint_glow,
+    paint_highlight,
+    paint_liquid_pill,
     paint_panel,
     paint_pill,
     paint_raised,
     paint_rim,
 )
-from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, glass_for, tokens_for
+from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, Tint, glass_for, tokens_for
 from tests.ui.theme.test_glass import SETS, contrast, luminance
 
 WIDTH, HEIGHT = 440, 288
@@ -86,7 +88,7 @@ def test_text_on_painted_glass_meets_wcag_aa(
         ("panel", None, (tokens.text, tokens.text_secondary)),
         ("raised", lambda p, r: paint_raised(p, r, glass), (tokens.text,)),
         ("pill", lambda p, r: paint_pill(p, r, glass), (tokens.text,)),
-        ("primary", lambda p, r: paint_pill(p, r, glass, primary=True), (tokens.text,)),
+        ("primary", lambda p, r: paint_pill(p, r, glass, primary=True), (glass.primary_text,)),
     ]
     for spot in extreme_spots(backdrop):
         for source in (backdrop, None):  # Also before the backdrop is ready.
@@ -153,9 +155,9 @@ def test_increased_contrast_draws_solid_rims(qapp: QApplication) -> None:
 
 
 def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) -> None:
-    glass = glass_for(ThemeMode.DARK)
+    glass = glass_for(ThemeMode.DARK, ColorScheme.SLATE)
     picture = image(100, 40)
-    picture.fill(QColor(tokens_for(ThemeMode.DARK).panel))
+    picture.fill(QColor(tokens_for(ThemeMode.DARK, ColorScheme.SLATE).panel))
     painter = QPainter(picture)
     paint_pill(painter, QRectF(0, 0, 100, 40), glass)
     painter.end()
@@ -163,11 +165,22 @@ def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) ->
     assert top > middle > bottom
 
 
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_calm_pill_is_flat(qapp: QApplication, mode: ThemeMode) -> None:
+    """Studio has no sheen or shade: a pill is one colour from top to bottom."""
+    picture = image(100, 40)
+    picture.fill(QColor(tokens_for(mode, ColorScheme.STUDIO).panel))
+    painter = QPainter(picture)
+    paint_pill(painter, QRectF(0, 0, 100, 40), glass_for(mode, ColorScheme.STUDIO))
+    painter.end()
+    assert len({picture.pixelColor(50, y).name() for y in (3, 20, 36)}) == 1
+
+
 def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> None:
     """Labels sit at least PAD_Y inside a pill, so a glow within GLOW_WIDTH of the edge
     never lies under text and its contrast stays proven."""
     assert GLOW_WIDTH < PAD_Y
-    glass = glass_for(ThemeMode.DARK)
+    glass = glass_for(ThemeMode.DARK, ColorScheme.SLATE)  # A scheme that glows.
     width, height = 120, 40
     radius = height / 2
     picture = image(width, height)
@@ -190,3 +203,75 @@ def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> N
             inside = radius - ((px - nearest_x) ** 2 + (py - radius) ** 2) ** 0.5
             assert inside <= GLOW_WIDTH + 1, (x, y, inside)
     assert lit > 0
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_content_pill_lifts_into_glass_under_the_pointer(
+    qapp: QApplication, mode: ThemeMode
+) -> None:
+    """In the content layer a pill rests as an outline and lifts into glass as the pointer
+    arrives (WWDC25): its body fills, and a shadow appears under it. The primary pill is
+    glass at rest and keeps its colour, so its white label keeps its contrast."""
+    glass = glass_for(mode, ColorScheme.STUDIO)
+    card = tokens_for(mode, ColorScheme.STUDIO).card
+
+    def paint(primary: bool, hover: float) -> QImage:
+        picture = image(110, 50)
+        picture.fill(QColor(card))
+        painter = QPainter(picture)
+        rect = QRectF(5, 5, 100, 36)
+        paint_liquid_pill(painter, rect, glass, primary=primary, hover=hover, on_glass=False)
+        painter.end()
+        return picture
+
+    resting, lifted = paint(False, 0.0), paint(False, 1.0)
+    assert resting.pixelColor(55, 23).name() == card  # An outline only…
+    assert lifted.pixelColor(55, 23).name() != card  # …that fills as it lifts,
+    assert resting.pixelColor(55, 43).name() == card  # and casts a shadow only then.
+    assert lifted.pixelColor(55, 43).name() != card
+    assert paint(True, 0.0).pixelColor(55, 23) == paint(True, 1.0).pixelColor(55, 23)
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_pill_on_the_glass_is_lit_at_the_top_left(qapp: QApplication, mode: ThemeMode) -> None:
+    """The specular highlight falls at the top left and reflects, fainter, at the bottom
+    right; the top right and bottom left stay dim."""
+    light = Tint("#ffffff", 1.0)
+    picture = image(120, 40)
+    picture.fill(QColor("#000000"))
+    painter = QPainter(picture)
+    paint_highlight(painter, QRectF(0, 0, 120, 40), light)
+    painter.end()
+
+    def lit(x: int, y: int) -> int:
+        return max(
+            picture.pixelColor(x + dx, y + dy).lightness() for dx in (-1, 0, 1) for dy in (0, 1)
+        )
+
+    top_left, top_right = lit(20, 0), lit(100, 0)
+    bottom_right, bottom_left = lit(100, 38), lit(20, 38)
+    assert top_left > top_right
+    assert bottom_right > bottom_left
+    assert top_left > bottom_right
+
+
+def test_a_calm_selected_pill_has_no_rim(qapp: QApplication) -> None:
+    """Studio's selected page is a soft grey capsule, as Apple's selected controls: its
+    edge is its fill, with no rim, except when contrast is increased."""
+    glass = glass_for(ThemeMode.LIGHT, ColorScheme.STUDIO)
+
+    def top_edge(mode: GlassMode) -> str:
+        picture = image(100, 40)
+        picture.fill(QColor("#ffffff"))
+        painter = QPainter(picture)
+        paint_raised(painter, QRectF(0, 0, 100, 40), glass, mode)
+        painter.end()
+        return picture.pixelColor(50, 0).name()
+
+    middle = image(100, 40)
+    middle.fill(QColor("#ffffff"))
+    painter = QPainter(middle)
+    paint_raised(painter, QRectF(0, 0, 100, 40), glass)
+    painter.end()
+    assert top_edge(GlassMode.NORMAL) == middle.pixelColor(50, 20).name()
+    assert top_edge(GlassMode.INCREASED_CONTRAST) == glass.rim_contrast

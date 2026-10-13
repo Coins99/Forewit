@@ -1,4 +1,4 @@
-"""The owner's colour scheme and glass choices, saved on this device.
+"""The owner's colour scheme, light or dark mode and glass choices, saved on this device.
 
 It lives in its own file rather than desktop-settings.json, whose model forbids unknown
 fields: an older build would refuse its whole settings file over a field it doesn't know.
@@ -9,6 +9,7 @@ never stops MailBrief.
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -25,19 +26,33 @@ from PySide6.QtCore import QObject, Signal
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ui.diagnostics import log_failure
 from mailbrief.ui.glass.preferences import Motion, Transparency
-from mailbrief.ui.theme import ColorScheme
+from mailbrief.ui.theme import DEFAULT_SCHEME, ColorScheme, ThemeMode
 
 APPEARANCE_FILE: Final = "appearance.json"
+
+
+class ModeChoice(StrEnum):
+    """Light or dark: the system's, or one the owner keeps."""
+
+    SYSTEM = "system"
+    LIGHT = "light"
+    DARK = "dark"
+
+
+def theme_mode(choice: ModeChoice, system: ThemeMode) -> ThemeMode:
+    """The mode to apply: the owner's, or ``system`` when they follow the system."""
+    return system if choice is ModeChoice.SYSTEM else ThemeMode(choice.value)
 
 
 class Appearance(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore", hide_input_in_errors=True)
 
-    color_scheme: ColorScheme = ColorScheme.SLATE
+    color_scheme: ColorScheme = DEFAULT_SCHEME
+    mode: ModeChoice = ModeChoice.SYSTEM
     transparency: Transparency = Transparency.SYSTEM
     motion: Motion = Motion.SYSTEM
 
-    @field_validator("color_scheme", "transparency", "motion", mode="wrap")
+    @field_validator("color_scheme", "mode", "transparency", "motion", mode="wrap")
     @classmethod
     def _default_when_unknown(
         cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo

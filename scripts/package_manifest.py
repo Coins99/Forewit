@@ -64,6 +64,7 @@ def require_resources(names: Iterable[str], revisions: Iterable[str]) -> None:
         "migrations/env.py",
         "mailbrief/ui/theme/fonts/Inter-Regular.ttf",
         "mailbrief/ui/theme/fonts/Inter-Medium.ttf",
+        "mailbrief/ui/theme/fonts/Inter-SemiBold.ttf",
         "mailbrief/ui/theme/fonts/OFL.txt",
         "mailbrief/ui/theme/icons/LICENSE",
         "mailbrief/resources/MailBrief.ico",

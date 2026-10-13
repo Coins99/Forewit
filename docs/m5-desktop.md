@@ -27,9 +27,12 @@ OAuth tokens remain exclusively in Windows Credential Manager or macOS Keychain.
 Vault and settings I/O run off the Qt thread. Closing during a settings write
 waits for the write to finish before disposing application resources.
 
-The colour scheme (Settings > Appearance: Slate, Graphite, Ocean, Sage, Plum or Rose)
-changes at once and is saved in its own `appearance.json` beside the database. A missing
-or unreadable file gives Slate, and a failed save keeps the colours until MailBrief closes.
+The colour scheme (Settings > Appearance: Studio, Slate, Graphite, Ocean, Sage, Plum or
+Rose) and the mode (Follow the system, Light or Dark) change at once and are saved in
+their own `appearance.json` beside the database. MailBrief follows the system's light or
+dark mode by default, and changes with it while it runs. A missing or unreadable file
+gives Studio following the system, and a failed save keeps the colours until MailBrief
+closes. Studio is described in `docs/ui/studio.md`.
 
 The glass header, sidebar and buttons follow the system's accessibility settings. With
 Reduce transparency they're solid; with Increase contrast they're solid with clear edges;

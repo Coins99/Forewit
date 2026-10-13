@@ -6,7 +6,10 @@ description: Use for any change to MailBrief's desktop UI under src/mailbrief/ui
 # MailBrief desktop UI
 
 Read AGENTS.md first; its invariants win. Component specs and the token table are in
-`references/spec.md`. The approved mockup is `docs/ui/mockup-three-pane-dark.png`.
+`references/spec.md`. The default look is Studio (`docs/ui/studio.md`: white and Studio
+Mist grey, one blue, Semibold titles, pills, filled cards with no borders or shadows), in
+the system's light or dark mode. The layout's approved mockup is
+`docs/ui/mockup-three-pane-dark.png`.
 
 ## Rules
 - Colours come only from `ui/theme/tokens.py`. Widgets read `current_tokens()` at paint
@@ -32,9 +35,22 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
   of a screen. The header and the Today page use glass; other screens move one at a time. Their text is
   escaped with `button_label()` unless it is app text carrying its own `&` mnemonic
   (`mnemonic=True`); long mail-derived text uses `shorten=True`.
-- Fonts are bundled Inter (`ui_font(px, medium=...)`); sizes are in pixels, never points.
-  Metrics: `TEXT_PX` 13, `SMALL_PX` 12, `CAPTION_PX` 11, `TITLE_PX` 15, `RADIUS` 8,
-  `SIDEBAR_WIDTH` 128.
+- Fonts are bundled Inter (`ui_font(px, medium=..., semibold=...)`): Medium for emphasis
+  in text, Semibold for titles; sizes are in pixels, never points, and display sizes are
+  tracked tighter automatically. Metrics: `TEXT_PX` 13, `READING_PX` 14, `SMALL_PX` 12,
+  `CAPTION_PX` 11, `HEADING_PX` 17, `TITLE_PX` 20, `RADIUS` 10, `CARD_RADIUS` 18,
+  `PILL_RADIUS` 14, `FIELD_RADIUS` 8, `SIDEBAR_WIDTH` 128.
+- Buttons are pills; a screen has at most one primary (`primary_fill`). Status text
+  (deadlines, proposals) is bare coloured text, never a filled chip. Cards are
+  `HairlineFrame`s: a `card` fill, no border. Combo boxes, date, time and number fields,
+  check boxes and radio buttons are drawn by `ThemeStyle`; don't style them in QSS.
+- A glass pill's icon is a tile at its leading end (pass `icon_name` to
+  `outline_button(..., glass=True)`); glass belongs to the header, sidebar and footer,
+  and pills in the content rest as outlines that lift into glass on hover. Never put
+  glass on glass.
+- Nothing has a sharp corner. Pages sit on the workspace's rounded sheet; never add a
+  divider that meets the chrome or another hairline. Anything filled or outlined is
+  rounded (`RADIUS`, `CARD_RADIUS`, pills), and pop-ups are rounded by `ThemeStyle`.
 - Measure `ui_font()` text with `ui_metrics(px, medium=...)`, built once per size. `ui_font()`
   returns a copy of a cached font; both caches are cleared when the fonts are registered
   and when the app quits.
@@ -80,8 +96,9 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
    Files are named `{size}-{mode}-{dpr}x.png`, sizes `mockup` (680×520) and `desktop`
    (1100×720). The Actions page renders at the desktop size as `page-actions-*`,
    `page-waiting-*` and `page-completed-dark-*`; compare them with Today's renders.
-2. Compare `scratch/ui-shots/mockup-dark-2x.png` with the mockup. List differences in
-   spacing, sizes, weights, colours and alignment; fix them; render again. At most three
-   rounds per change.
-3. Look at the light renders for anything hard to read.
+2. Compare `scratch/ui-shots/mockup-light-2x.png` and `mockup-dark-2x.png` with
+   `docs/ui/studio.md` and the mockup's layout. List differences in spacing, sizes,
+   weights, colours and alignment; fix them; render again. At most three rounds per
+   change.
+3. Look at both modes' renders for anything hard to read.
 4. Never commit `scratch/`.

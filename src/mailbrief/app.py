@@ -15,12 +15,12 @@ from qasync import QEventLoop
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
-from mailbrief.ui.appearance import APPEARANCE_FILE, Appearance, AppearanceStore
+from mailbrief.ui.appearance import APPEARANCE_FILE, Appearance, AppearanceStore, theme_mode
 from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
 from mailbrief.ui.glass.profile import log_summary as log_paint_summary
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
-from mailbrief.ui.theme import ThemeMode, apply_theme, current_scheme
+from mailbrief.ui.theme import apply_theme, current_mode, current_scheme, system_mode
 
 
 def use_english_locale() -> None:
@@ -63,16 +63,18 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
 
 
 def apply_saved_scheme(saved: Appearance, *, themed: bool) -> None:
-    """The owner's colours, once the data folder is locked; the theme applied before
-    then uses the default scheme. Nothing changes when that theme failed."""
+    """The owner's colours and mode, once the data folder is locked; the theme applied
+    before then uses the default scheme in the system's mode. Nothing changes when that
+    theme failed."""
     application = QApplication.instance()
     if not themed or not isinstance(application, QApplication):
         return
     scheme = saved.color_scheme
-    if scheme is current_scheme():
+    mode = theme_mode(saved.mode, system_mode(application))
+    if scheme is current_scheme() and mode is current_mode():
         return
     try:
-        apply_theme(application, ThemeMode.DARK, scheme)
+        apply_theme(application, mode, scheme)
     except Exception as exc:
         log_failure(exc)  # apply_theme has put back the default scheme.
 
@@ -199,7 +201,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     use_english_locale()  # Before any widget: each takes the default locale when created.
     theme_failure: Exception | None = None
     try:
-        apply_theme(application, ThemeMode.DARK)
+        apply_theme(application, system_mode(application))
     except Exception as exc:
         # The theme is cosmetic: apply_theme has put back what was there, with tokens that
         # suit it, so the app runs unthemed rather than not at all. desktop.log isn't open

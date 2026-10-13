@@ -208,7 +208,7 @@ class CommandPalette(QDialog):
         """A heading row: muted, and never selected or activated."""
         item = QListWidgetItem(title)
         item.setFlags(Qt.ItemFlag.NoItemFlags)
-        item.setFont(ui_font(SMALL_PX, medium=True))
+        item.setFont(ui_font(SMALL_PX, semibold=True))
         item.setForeground(QColor(current_tokens().text_muted))
         self.results.addItem(item)
 

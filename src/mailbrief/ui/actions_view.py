@@ -288,9 +288,9 @@ class ActionsPanel(QWidget):
         side = QVBoxLayout(list_side)
         side.setContentsMargins(0, 0, 0, 0)
         side.setSpacing(0)
-        heading = plain_label("Your actions", px=TITLE_PX, medium=True)
+        heading = plain_label("Your actions", px=TITLE_PX, semibold=True)
         heading.setObjectName("actionsHeading")
-        heading.setContentsMargins(12, 10, 12, 4)
+        heading.setContentsMargins(ROW_PAD_H, 14, 12, 4)
         heading_row = QHBoxLayout()
         heading_row.addWidget(heading, 1)
         self.new_task_button = outline_button("&New task", "newTaskButton", mnemonic=True)
@@ -298,16 +298,18 @@ class ActionsPanel(QWidget):
         self.new_task_button.setToolTip("Create a task (Ctrl+N)")
         self.new_task_button.clicked.connect(self.new_task_requested.emit)
         heading_row.addWidget(self.new_task_button)
-        heading_row.setContentsMargins(0, 0, 12, 0)
+        heading_row.setContentsMargins(0, 0, ROW_PAD_H, 0)
         side.addLayout(heading_row)
         grouping = QHBoxLayout()
         grouping.setContentsMargins(12, 4, 12, 4)
+        grouping.setSpacing(6)
         self.group = QComboBox()
         self.group.setObjectName("actionGroup")
         # Keep the project filter in the Tab order on Cocoa as well as Windows.
         self.group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.group.setAccessibleName("Filter tasks by project or life area")
-        self.group.setMinimumContentsLength(8)
+        # Seven characters: with the gap beside it, the page is no wider than before.
+        self.group.setMinimumContentsLength(7)
         self.group.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
@@ -328,7 +330,8 @@ class ActionsPanel(QWidget):
         # Tab reaches it on every platform, not only with macOS's keyboard navigation on.
         self.tabs.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         tabs_row = QHBoxLayout()
-        tabs_row.setContentsMargins(4, 0, 12, 0)  # The tabs' own padding lines them up.
+        # The selected tab's pill (2 px in) lines up with the fields above.
+        tabs_row.setContentsMargins(ROW_PAD_H - 2, 0, ROW_PAD_H, 0)
         tabs_row.addWidget(self.tabs)
         tabs_row.addStretch(1)
         side.addLayout(tabs_row)

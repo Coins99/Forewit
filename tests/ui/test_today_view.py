@@ -6,7 +6,9 @@ from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QColor, QImage, QPainter, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import Action, ActionFilter, ThreadActivity
@@ -15,8 +17,9 @@ from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, 
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
+from mailbrief.ui.brief_list import ROW_ROLE
 from mailbrief.ui.main_window import MainWindow
-from mailbrief.ui.theme import ThemeMode, apply_theme
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
 from mailbrief.ui.today_view import (
     NO_ATTENTION,
     NO_EVENTS,
@@ -24,6 +27,7 @@ from mailbrief.ui.today_view import (
     VISIBLE_ROWS,
     DayPanel,
     DayRow,
+    DayRowDelegate,
     agenda_row,
     attention_row,
     reply_row,
@@ -140,7 +144,7 @@ def test_each_reason_reads_as_a_title_and_a_short_note() -> None:
         DayRow("Book the room", "Today"),
         DayRow("Hear back from Sam", "Planned Fri Oct 9 · waiting"),
     ]
-    assert reply_row(REPLIED) == DayRow("Finance review prep", "2 new · Priya Shah")
+    assert reply_row(REPLIED) == DayRow("Finance review prep", "2 new · Priya Shah", accent=True)
     assert reply_row(REPLIED).text() == "Finance review prep, 2 new · Priya Shah"
     undated = AttentionItem(action=PLANNED, reason=AttentionReason.OVERDUE)
     assert attention_row(undated, ZONE, TODAY).note == "Overdue"
@@ -158,7 +162,11 @@ def test_the_panel_shows_three_cards_with_counts(qtbot: QtBot) -> None:
     panel.show_summary(summary(), ZONE)
 
     assert len(rows(panel, "attention")) == 4
-    assert panel.attention.heading.text() == "Needs attention · 4"
+    # A dashboard's figure: the title, and the count large beside it.
+    assert panel.attention.heading.text() == "Needs attention"
+    assert panel.attention.count.text() == "4"
+    assert panel.attention.count.accessibleName() == "Needs attention: 4"
+    assert panel.attention.count.property("tone") is None  # Full strength with rows.
     # The agenda lists events in time order; the actions' dates are in Needs attention.
     assert rows(panel, "agenda") == ["10:00–10:15 · Stand-up, Work", "15:00–16:00 · Dentist"]
     assert rows(panel, "replies") == ["Finance review prep, 2 new · Priya Shah"]
@@ -187,8 +195,10 @@ def test_empty_cards_say_so(qtbot: QtBot) -> None:
         widget = getattr(panel, card)
         assert widget.empty.isVisible() and widget.empty.text() == text
         assert not widget.list.isVisible()
+        assert widget.count.text() == "0" and widget.count.property("tone") == "muted"
     panel.show_summary(None, ZONE)
     assert panel.summary is None and panel.attention.heading.text() == "Needs attention"
+    assert panel.attention.count.text() == "0"
 
 
 def test_activating_a_row_asks_to_open_its_record(qtbot: QtBot) -> None:
@@ -244,7 +254,7 @@ async def test_the_window_reads_the_day_with_the_actions(
     await window._refresh_actions()
 
     assert backend.day_calls[-1] == TODAY
-    assert window.day_panel.attention.heading.text() == "Needs attention · 4"
+    assert window.day_panel.attention.count.text() == "4"
     assert rows(window.day_panel, "replies") == [reply_row(REPLIED).text()]
 
 
@@ -255,7 +265,7 @@ async def test_a_failed_read_keeps_what_was_shown(qtbot: QtBot, backend: FakeBac
 
     await window._refresh_day()
 
-    assert window.day_panel.attention.heading.text() == "Needs attention · 4"
+    assert window.day_panel.attention.count.text() == "4"
     assert window.status.text()
 
 
@@ -351,3 +361,32 @@ async def test_a_finished_run_reads_the_day_again(qtbot: QtBot, backend: FakeBac
 
     assert "Brief saved" in window.status.text()
     assert len(backend.day_calls) > before
+
+
+def test_due_and_newsy_rows_carry_a_status_dot(qapp: QApplication, themed: None) -> None:
+    """A dashboard's state marker: a small dot before the note, in the warning colour for
+    a due row and the accent colour for new replies; a plain row has none."""
+    apply_theme(qapp)
+    tokens = current_tokens()
+    delegate = DayRowDelegate()
+
+    def painted(row: DayRow) -> set[str]:
+        picture = QImage(320, 28, QImage.Format.Format_ARGB32)
+        picture.fill(QColor(tokens.card))
+        painter = QPainter(picture)
+        option = QStyleOptionViewItem()
+        option.rect = QRect(0, 0, 320, 28)
+        model = QStandardItemModel()
+        item = QStandardItem(row.text())
+        item.setData(row, ROW_ROLE)
+        model.appendRow(item)
+        delegate.paint(painter, option, model.index(0, 0))
+        painter.end()
+        return {picture.pixelColor(x, y).name() for x in range(320) for y in range(28)}
+
+    due = painted(DayRow("Pay the invoice", "Due 17:00", warning=True))
+    news = painted(DayRow("Finance review prep", "2 new", accent=True))
+    plain = painted(DayRow("Book the room", "Today"))
+    assert tokens.warning_fg in due
+    assert tokens.accent_fg in news
+    assert tokens.accent_fg not in plain and tokens.warning_fg not in plain

@@ -83,6 +83,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   drafts and notes, events, cached Google event titles and the connected account's cached
   mail metadata. See `docs/search.md`.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
+  Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
+  reference, in the system's light or dark mode unless Settings > Appearance keeps one.
   The Actions page follows it: painted action rows beside the selected action's detail.
 - Ranking signals (ADR 0020) implemented, awaiting live acceptance: Gmail's category tabs,
   stars and bulk-mail headers, important senders (Settings > Preferences, `preferences
@@ -167,7 +169,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
   glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
   `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
-  header, the sidebar footer and on the Today page. The header and sidebar are glass
+  header, the sidebar footer and on the Today page: its icon sits in a leading tile, and
+  in the content it lifts into glass under the pointer. `motion.py` holds the fluid easing
+  the sidebar's selection glides on. The header and sidebar are glass
   (`workspace.GlassChrome`) over the workspace's backdrop, and the selected page is a
   raised pill; muted text in the sidebar shows as secondary there. `system.py` reads the
   system's Increase contrast, Reduce transparency and Reduce motion (Qt, NSWorkspace by
@@ -181,10 +185,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
 - `ui/theme/`: design tokens (`tokens.py`, the only place UI colours are defined: a dark
-  and a light set for each `ColorScheme`, Slate by default, and the Liquid Glass tokens),
+  and a light set for each `ColorScheme`, Studio by default, and the Liquid Glass tokens),
   the Fusion palette and stylesheet (`style.py`, `apply_theme`; `follow_theme` re-colours
-  what a widget keeps, such as a tinted icon, when the scheme changes), bundled Inter under the SIL
-  OFL (`fonts/`) and Tabler icons under MIT (`icons/`). `ui/labels.py` holds
+  what a widget keeps, such as a tinted icon, when the scheme changes; `ThemeStyle` draws
+  fields, chevrons, check boxes and radio buttons, with `indicators.py`), bundled Inter
+  Regular, Medium and SemiBold under the SIL OFL (`fonts/`) and Tabler icons under MIT
+  (`icons/`). `ui/labels.py` holds
   `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace
   (`workspace.py`, with `hairline.py`, `brief_list.py` and `brief_detail.py`): the header
   (when Gmail was last checked, Sync and review, Cancel), the sidebar's pages and footer

@@ -143,7 +143,7 @@ class CalendarPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
         self.heading = plain_label("Calendar")
-        self.heading.setFont(ui_font(TITLE_PX, medium=True))
+        self.heading.setFont(ui_font(TITLE_PX, semibold=True))
         self.heading.setObjectName("calendarHeading")
         self.heading.setWordWrap(False)
         top.addWidget(self.heading, 1)

@@ -13,7 +13,7 @@ import pytest
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractSlider, QApplication, QLabel, QVBoxLayout, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter
@@ -23,11 +23,13 @@ from mailbrief.ui.actions_view import ActionRow, ActionsPanel
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import ELIDE_MARGIN, ROW_ROLE, elided
 from mailbrief.ui.calendar_view import GOOGLE_ON, CalendarPanel
+from mailbrief.ui.hairline import HairlineDivider
 from mailbrief.ui.main_window import PAGE_SHORTCUTS
 from mailbrief.ui.theme import TEXT_PX, ThemeMode, apply_theme, current_tokens, ui_metrics
 from mailbrief.ui.workspace import (
     EMPTY_BRIEF,
     KEY_ROLE,
+    SHEET_GUTTER,
     ThreePaneWorkspace,
     brief_meta,
     brief_title,
@@ -563,6 +565,62 @@ def test_showing_the_same_brief_again_keeps_selection_and_scroll(qtbot: QtBot) -
     select(keys[1])
     again(brief.digest)
     assert view.selected_key() == keys[0]  # Another brief again: back to the first.
+
+
+def test_a_restore_waits_for_the_range_and_a_hand_scroll_ends_it(qtbot: QtBot) -> None:
+    """Wrapped labels can grow the detail's range over several layout passes: the restore
+    keeps its position until a pass reaches it, unless the owner scrolls first."""
+    workspace = build(qtbot)
+    workspace.resize(680, workspace.minimumSizeHint().height())
+    show(qtbot, workspace)
+    bar = workspace.detail.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0, timeout=2000)
+
+    def restore(position: int) -> int | None:
+        """Restore ``position`` now; what is still waiting."""
+        workspace._pending_scroll = position
+        workspace._restore_scroll()
+        return workspace._pending_scroll
+
+    far = bar.maximum() + 500
+    assert restore(far) == far  # Still waiting for a longer range…
+    assert bar.value() == bar.maximum()
+    bar.triggerAction(QAbstractSlider.SliderAction.SliderSingleStepSub)
+    assert workspace._pending_scroll is None  # …until a scroll by hand.
+    assert restore(1) is None
+    assert bar.value() == 1
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_the_pages_sit_on_a_rounded_sheet(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """No pane meets the chrome at a sharp corner: the pages are masked to a rounded sheet
+    with a gutter of glass at its right, and no hairline crosses the window."""
+    apply_theme(qapp, mode)
+    tokens = current_tokens()
+    workspace = build(qtbot)
+    workspace.resize(*SIZES["mockup"])
+    show(qtbot, workspace)
+    sheet = workspace.sheet
+    assert not workspace.findChildren(HairlineDivider)
+    edge = sheet.sheet_rect()
+    assert sheet.width() - edge.width() == SHEET_GUTTER
+    pages = workspace.pages
+    mask = pages.mask()
+    assert not mask.isEmpty()
+    assert not mask.contains(QPoint(0, 0))  # Its square corner is cut away…
+    assert not mask.contains(QPoint(pages.width() - 1, pages.height() - 1))
+    assert mask.contains(QPoint(pages.width() // 2, 0))  # …its edges are not.
+    image = sheet.grab().toImage()
+    ratio = image.devicePixelRatio()
+
+    def at(x: float, y: float) -> str:
+        return image.pixelColor(round(x * ratio), round(y * ratio)).name()
+
+    # The sheet's corner shows the glass round it, as does the gutter.
+    assert at(0, 0) != tokens.panel
+    assert at(sheet.width() - 2, 10) != tokens.panel
 
 
 def test_clear_shows_only_the_message(qtbot: QtBot) -> None:
