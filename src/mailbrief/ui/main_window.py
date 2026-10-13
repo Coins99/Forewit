@@ -45,8 +45,10 @@ from mailbrief.domain.briefs import (
 )
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage, InboxPage
 from mailbrief.domain.calendar_planning import (
+    PLANNING_DAYS,
     PlanningOptions,
     PlanningOutcome,
+    PlanningPart,
     PlanningPreview,
     PlanningStatus,
 )
@@ -111,7 +113,7 @@ from mailbrief.services.brief import (
     needs_review_sentence,
 )
 from mailbrief.services.calendar import resolve_timezone
-from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
+from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan, overlaps_for
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.drafting import (
     DraftingContextError,
@@ -505,6 +507,9 @@ _PLAN_PROBLEMS: Final = {
 _PLAN_FAILED: Final = "Planning with AI failed. Your calendar is unchanged; try again."
 _PLAN_DECLINED: Final = "Nothing was sent. Your calendar is unchanged."
 _PLAN_CANCELLED: Final = "Cancelled. Nothing was changed."
+_PLAN_SIGN_IN: Final = (
+    "Google rejected the sign-in. Connect Gmail again, or untick Google Calendar times."
+)
 _PLAN_STALE: Final = (
     "Your calendar changed since you asked, so nothing was applied. Discard and ask again."
 )
@@ -1920,11 +1925,37 @@ class MainWindow(QMainWindow):
     def _request_planning_preview(self, options: object) -> None:
         if isinstance(options, PlanningOptions):
             chosen = options
-            if not self.start(lambda: self._prepare_planning(chosen), cancellable=False):
+            started = self.start(lambda: self._prepare_planning(chosen), cancelled=_PLAN_CANCELLED)
+            if not started:
                 self.planning_dialog.show_problem(_BUSY)
 
+    def _planning_google_due(self, options: PlanningOptions, first: date) -> bool:
+        """Whether Google's saved copy misses any of the four weeks, or is old, when its
+        times are to be sent."""
+        shown = self._calendar_shown
+        return (
+            PlanningPart.GOOGLE_BUSY in options.parts
+            and self._calendar_allowed is True
+            and needs_sync(
+                None if shown is None else shown.google_coverage,
+                first,
+                first + timedelta(days=PLANNING_DAYS - 1),
+                self.now(),
+            )
+        )
+
     async def _prepare_planning(self, options: PlanningOptions) -> None:
+        """Read Google first when its times are to be sent and the saved copy misses some of
+        the four weeks; a failed read leaves what was saved, and the preview says which
+        days it holds. Quitting stops it."""
         first = self._calendar_week or week_start(self._local_today())
+        if self._planning_google_due(options, first):
+            self.planning_dialog.show_reading()
+            try:
+                await self._sync_calendar(quiet=True)
+            except AuthenticationRequiredError:
+                self.planning_dialog.show_problem(_PLAN_SIGN_IN)
+                raise  # _run reports it as Gmail's, as for any calendar sync.
         try:
             plan = await self.backend.prepare_planning(options, first, self.zone)
         except ConfigurationError as exc:
@@ -1967,7 +1998,16 @@ class MainWindow(QMainWindow):
             self._planning_cancel = self._planning_task = None
         if outcome.status is PlanningStatus.PROPOSED:
             assert outcome.plan is not None
-            self.planning_dialog.show_proposals(outcome.plan, self.zone, self._local_today())
+            prepared = plan
+
+            def overlaps(
+                changes: Sequence[EventChange], ticked: Sequence[bool]
+            ) -> tuple[tuple[str, ...], ...]:
+                return overlaps_for(changes, ticked, prepared)
+
+            self.planning_dialog.show_proposals(
+                outcome.plan, self.zone, self._local_today(), overlaps
+            )
         elif outcome.status is PlanningStatus.DECLINED:
             self.planning_dialog.show_problem(_PLAN_DECLINED)
         elif outcome.status is PlanningStatus.CANCELLED:
@@ -2000,6 +2040,7 @@ class MainWindow(QMainWindow):
             self.planning_dialog.keep_reviewing(_PLAN_FAILED)
             return
         self.planning_dialog.accept()
+        self.planning_dialog.forget_instruction()
 
         async def undo() -> None:
             await self.backend.undo_calendar_changes(batch)

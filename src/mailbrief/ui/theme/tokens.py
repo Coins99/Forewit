@@ -70,6 +70,11 @@ TEXT_PX: Final = 13
 SMALL_PX: Final = 12
 CAPTION_PX: Final = 11
 TITLE_PX: Final = 15
+# A list row's padding and its left selection mark, which the stylesheet draws; a wrapping
+# row needs them to wrap at the list's width.
+ITEM_PAD_X: Final = 8
+ITEM_PAD_Y: Final = 4
+ITEM_MARK_PX: Final = 2
 
 
 def tokens_for(mode: ThemeMode) -> Tokens:

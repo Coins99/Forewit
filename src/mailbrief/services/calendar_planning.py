@@ -41,6 +41,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningStatus,
     ProposedChange,
+    ticked_at_first,
 )
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.drafting import DraftingProblem, PreviewLine
@@ -54,7 +55,7 @@ from mailbrief.domain.events import (
     MarkerKind,
     wall_clock,
 )
-from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 from mailbrief.ports.calendar_planning import CalendarPlanningProvider
 from mailbrief.ports.errors import ProviderError
 from mailbrief.services.analysis import KEY_MISSING, provider_detail, provider_error_code
@@ -76,6 +77,8 @@ _DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _CLOCK = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 _WEEKDAYS: Final = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _DEFAULT_LENGTH: Final = timedelta(hours=1)
+_A_DAY: Final = timedelta(days=1)
+_OVERNIGHT_MAX: Final = timedelta(hours=12)  # The longest an end without a date runs on.
 
 
 class PlanningGate(Protocol):
@@ -145,11 +148,17 @@ def _size(value: object) -> int:
 
 
 def preview_lines(
-    request: CalendarPlanningRequest, *, events_held: int | None = None
+    request: CalendarPlanningRequest,
+    *,
+    events_held: int | None = None,
+    busy_held: int | None = None,
+    google_coverage: GoogleCoverage | None = None,
 ) -> tuple[PreviewLine, ...]:
     """What each part sends, in characters, computed from the request itself.
 
-    ``events_held`` is how many events the window holds, when more than were sent.
+    ``events_held`` and ``busy_held`` are how many events and Google times the window holds,
+    when more than were sent. ``google_coverage`` is the days Google's saved copy holds; the
+    busy line says so when that isn't the whole window.
     """
     # ISO dates: month names would follow the system language.
     window = f"{request.window_first.isoformat()} to {request.window_last.isoformat()}"
@@ -174,10 +183,16 @@ def preview_lines(
     ]
     if request.busy is not None:
         titled = any(b.title is not None for b in request.busy)
+        count = (
+            f"First {len(request.busy)} of {busy_held}"
+            if busy_held is not None and busy_held > len(request.busy)
+            else f"{len(request.busy)}"
+        )
         lines.append(
             PreviewLine(
-                label=f"{len(request.busy)} Google Calendar times"
-                + (" with their titles" if titled else ", without titles"),
+                label=f"{count} Google Calendar times"
+                + (" with their titles" if titled else ", without titles")
+                + _saved_days(request, google_coverage),
                 # As sent: a time sent without its title has no title key.
                 characters=_size([b.model_dump(exclude_none=True) for b in request.busy]),
             )
@@ -190,6 +205,17 @@ def preview_lines(
             )
         )
     return tuple(lines)
+
+
+def _saved_days(request: CalendarPlanningRequest, coverage: GoogleCoverage | None) -> str:
+    """Which of the window's days Google's saved copy holds, when not all of them."""
+    first, last = request.window_first, request.window_last
+    if coverage is not None and coverage.covers(first, last):
+        return ""
+    if coverage is None or coverage.last_day < first or coverage.first_day > last:
+        return " (none saved for these dates)"
+    held_first, held_last = max(first, coverage.first_day), min(last, coverage.last_day)
+    return f" (saved only for {held_first.isoformat()} to {held_last.isoformat()})"
 
 
 def _day(value: str | None) -> date | None:
@@ -225,9 +251,12 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
     """The new fields for a create or an update; raises ValueError when they don't work.
 
     On update a missing field keeps the current value: moving only the start keeps the
-    event's length (in elapsed time, so a DST change can't stretch it), and an end time
-    without a date keeps its day relative to the start, so an overnight event still ends
-    the next day. A day or time that is given but isn't real refuses the change.
+    event's length (in elapsed time, so a DST change can't stretch it). An end time without
+    a date is the first such time after the start, so an overnight event still ends the
+    next morning and a party that ends at midnight, told to end at 23:30, ends that
+    evening; an end that would run on more than 12 hours into the next day needs its date,
+    and an event of a day or more keeps its end's day relative to the start. A day or time
+    that is given but isn't real refuses the change.
     """
     zone = plan.zone
     title = _text(change.title, EVENT_TITLE_MAX_CHARS) or (
@@ -278,16 +307,17 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
     if end_day is None and end_clock is None:
         ends = starts + (_DEFAULT_LENGTH if timed is None else timed[1] - timed[0])
     else:
-        if timed is None:
-            local_end, offset = None, timedelta()
-        else:
-            local_end = timed[1].astimezone(zone)
-            offset = local_end.date() - timed[0].astimezone(zone).date()
-        day = end_day or starts.astimezone(zone).date() + offset
+        local_end = None if timed is None else timed[1].astimezone(zone)
         clock = end_clock or (None if local_end is None else _minute(local_end))
         if clock is None:
             raise ValueError("a timed event needs its end")
-        ends = normalize_utc(wall_clock(day, clock, zone))
+        if end_day is not None:
+            ends = normalize_utc(wall_clock(end_day, clock, zone))
+        elif timed is not None and local_end is not None and timed[1] - timed[0] >= _A_DAY:
+            offset = local_end.date() - timed[0].astimezone(zone).date()
+            ends = normalize_utc(wall_clock(starts.astimezone(zone).date() + offset, clock, zone))
+        else:
+            ends = _first_after(starts, clock, zone)
     _inside(
         starts.astimezone(zone).date(),
         (ends - timedelta(microseconds=1)).astimezone(zone).date(),
@@ -302,6 +332,20 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
         ends_at_utc=ends,
         time_zone=zone.key,
     )
+
+
+def _first_after(start: datetime, clock: time, zone: ZoneInfo) -> datetime:
+    """The first time after ``start`` that the clock shows ``clock``: later that day, or
+    the next morning for an overnight event of at most 12 hours. Anything else needs a
+    date: 11:00 to 10:00 is more likely a mistake than 23 hours."""
+    local = start.astimezone(zone)
+    end = normalize_utc(wall_clock(local.date(), clock, zone))
+    if end > start:
+        return end
+    end = normalize_utc(wall_clock(local.date() + timedelta(days=1), clock, zone))
+    if end - start > _OVERNIGHT_MAX:
+        raise ValueError("an end this far from the start needs its date")
+    return end
 
 
 def _inside(first: date, last: date, plan: PreparedPlan, kept: tuple[date, date] | None) -> None:
@@ -351,6 +395,25 @@ def _overlaps(
     return tuple(found[:MAX_OVERLAPS])
 
 
+def overlaps_for(
+    changes: Sequence[EventChange], ticked: Sequence[bool], plan: PreparedPlan
+) -> tuple[tuple[str, ...], ...]:
+    """Each change's overlaps if it and the ticked changes were applied, so a warning
+    follows what the owner keeps: unticking a delete brings its event back into the count."""
+    found = []
+    for change in changes:
+        applied = [c for c, on in zip(changes, ticked, strict=True) if on or c is change]
+        deleted = {c.event.public_id for c in applied if c.kind is ChangeKind.DELETE and c.event}
+        moved = {
+            c.event.public_id: c.edit
+            for c in applied
+            if c.kind is ChangeKind.UPDATE and c.event and c.edit
+        }
+        created = [c for c in applied if c.kind is ChangeKind.CREATE]
+        found.append(_overlaps(change, plan, deleted, moved, created))
+    return tuple(found)
+
+
 def validate_plan(candidate: PlanningCandidate, plan: PreparedPlan) -> CalendarPlan:
     """Check an untrusted answer change by change; a bad change is dropped, never fatal.
 
@@ -373,18 +436,11 @@ def validate_plan(candidate: PlanningCandidate, plan: PreparedPlan) -> CalendarP
             ignored += 1
             continue
         kept.append((checked, _text(change.reason, REASON_MAX_CHARS)))
-    deleted = {c.event.public_id for c, _ in kept if c.kind is ChangeKind.DELETE and c.event}
-    moved = {
-        c.event.public_id: c.edit
-        for c, _ in kept
-        if c.kind is ChangeKind.UPDATE and c.event and c.edit
-    }
-    created = [c for c, _ in kept if c.kind is ChangeKind.CREATE]
+    changes = [c for c, _ in kept]
+    overlaps = overlaps_for(changes, [ticked_at_first(c) for c in changes], plan)
     proposals = tuple(
-        ProposedChange(
-            change=c, reason=reason, overlaps=_overlaps(c, plan, deleted, moved, created)
-        )
-        for c, reason in kept
+        ProposedChange(change=c, reason=reason, overlaps=found)
+        for (c, reason), found in zip(kept, overlaps, strict=True)
     )
     return CalendarPlan(
         proposals=proposals, message=_text(candidate.message, MESSAGE_MAX_CHARS), ignored=ignored
@@ -465,7 +521,9 @@ class CalendarPlanningService:
             for key, event in keys.items()
         )
         busy = None
+        busy_held = None
         if PlanningPart.GOOGLE_BUSY in options.parts:
+            busy_held = len(shown.google_events)
             titled = PlanningPart.GOOGLE_TITLES in options.parts
             busy = tuple(
                 BusyTime(
@@ -498,7 +556,12 @@ class CalendarPlanningService:
             model=self._provider.model_name,
             privacy_notice=self._provider.privacy_notice,
             first_use=not await self.consent_active(),
-            lines=preview_lines(request, events_held=len(shown.events)),
+            lines=preview_lines(
+                request,
+                events_held=len(shown.events),
+                busy_held=busy_held,
+                google_coverage=shown.google_coverage,
+            ),
         )
         return PreparedPlan(request, preview, zone, keys, shown.events, shown.google_events)
 

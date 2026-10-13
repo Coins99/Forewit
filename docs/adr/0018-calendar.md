@@ -142,3 +142,17 @@ proposes, code checks, the owner applies.
   200-event limit left events out; the other phase 3a review fixes shipped with 3a (see
   Checks in Python). A record of applied AI changes needs a migration and waits until the
   planner migrations settle.
+- **Review fixes (2026-10-12).** These replace the matching words above.
+  - An end time without a date is the first such time after the start: later that day,
+    or the next morning for an overnight event of at most 12 hours. Anything longer
+    needs its date, except that an event of a day or more keeps its end's day relative to
+    the start. Ending a midnight party at 23:30 used to propose 25½ hours.
+  - Deletions arrive unticked, since one Undo is all that brings them back. Each change's
+    overlaps are worked out as if it and the ticked changes were applied, again whenever
+    a box changes.
+  - When Google times are ticked and the saved copy misses some of the four weeks, or is
+    stale, Google is read before the preview. The preview says which days the times
+    cover, and how many the 200 limit left out.
+  - The instruction stays until changes from it are applied. Calendars that fail to read
+    still count as checked for the window; changing that needs a migration and its own
+    decision.
