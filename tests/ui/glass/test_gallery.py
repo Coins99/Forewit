@@ -144,6 +144,7 @@ def test_glass_button_states_render(
         pill.leaveEvent(QEvent(QEvent.Type.Leave))  # Shown at the pointer, one may be hovered.
     point = QPointF(12, pills["Hover"].height() / 2)
     pills["Hover"].enterEvent(QEnterEvent(point, point, point))
+    pills["Hover"]._set_hover(1.0)  # Settled, not mid-animation.
     pills["Pressed"].setDown(True)
     pills["Pressed"]._set_scale(PRESSED_SCALE)
     pills["Focus"].setFocus()

@@ -8,10 +8,12 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -22,6 +24,20 @@ from mailbrief.ui.appearance_view import AppearancePanel
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
+
+
+def _scrolling(page: QWidget) -> QScrollArea:
+    """``page`` in a scroll area, so a tab taller than the dialog scrolls rather than
+    squeezing its rows into each other (a wrapped note then overlaps the next row). The
+    area takes no focus: Tab still moves between the page's own fields, and Qt scrolls
+    the focused one into view."""
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    area.setWidget(page)
+    return area
 
 
 class SettingsDialog(QDialog):
@@ -85,11 +101,11 @@ class SettingsDialog(QDialog):
         notice.setTextFormat(Qt.TextFormat.PlainText)
         connection_layout.addWidget(notice)
         connection_layout.addStretch(1)
-        self.tabs.addTab(connection, "Co&nnection and AI")
+        self.tabs.addTab(_scrolling(connection), "Co&nnection and AI")
         self.preferences_panel = PreferencesPanel()
-        self.tabs.addTab(self.preferences_panel, "Pre&ferences")
+        self.tabs.addTab(_scrolling(self.preferences_panel), "Pre&ferences")
         self.appearance_panel = AppearancePanel()
-        self.tabs.addTab(self.appearance_panel, "&Appearance")
+        self.tabs.addTab(_scrolling(self.appearance_panel), "&Appearance")
         layout.addWidget(self.tabs, 1)
         self.status = QLabel("")
         self.status.setWordWrap(True)

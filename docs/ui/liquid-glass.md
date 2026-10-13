@@ -24,8 +24,11 @@ This page says what was built, why, and what it costs.
 - **Pill buttons:** a fill that is lighter on top and shaded below, with a rim one
   device pixel wide.
   - Rims snap to the device pixel grid, so they stay crisp at 125% and 150%.
-  - Hovering lifts a pill a pixel and lights its rim near the pointer. Only the rim
-    lights: any light on the body would cut the dark primary pill's text below 4.5:1.
+  - Hovering animates in, as Apple's glass lights from within on interaction. The pill
+    grows a little on a spring, a glow starts inside its edge under the pointer and
+    spreads round it, and its rim lights near the pointer. Leaving eases it back.
+  - Only a 3 px band inside the edge and the rim light up: labels sit 6 px in, and any
+    light on the body would cut the dark primary pill's text below 4.5:1.
   - Pressing shrinks a pill, and it springs back on release.
 
 ## Colour and contrast
@@ -62,12 +65,13 @@ p95 in milliseconds.
 |---|---|---|---|---|
 | Header | 0.04 / 0.21 | 0.07 / 0.32 | 0.06 / 0.57 | 0.09 / 0.93 |
 | Sidebar | 0.19 / 0.22 | 0.25 / 0.60 | 0.44 / 0.46 | 0.72 / 1.12 |
-| Pill button | 0.13 / 0.14 | 0.13 / 0.20 | 0.19 / 0.21 | 0.20 / 0.25 |
+| Pill button (at every point of the hover animation) | 0.18 / 0.20 | 0.18 / 0.19 | 0.26 / 0.29 | 0.26 / 0.29 |
 | Sidebar page row | 0.02 / 0.08 | 0.02 / 0.08 | 0.03 / 0.11 | 0.03 / 0.12 |
 | Sidebar button | 0.02 / 0.02 | 0.02 / 0.03 | 0.02 / 0.03 | 0.02 / 0.03 |
 
 - **Paint budget:** the plan allowed 8 ms at p95 for animated widgets, and the slowest
-  measured is 1.12 ms.
+  measured is 1.12 ms. The pill row was measured again with the hover animation (glow
+  and growth), and the other rows didn't change.
 - **Backdrop:** rendering takes 0.4 ms at 1100×720 and 1.8 ms at 3840×2160 (p50), on the
   worker thread. A 4K window's blurred backdrop is 2 MB.
 - **Package:** the macOS app grew by 12 KB, with the same Qt libraries and files. The

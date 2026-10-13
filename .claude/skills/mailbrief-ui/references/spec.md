@@ -97,11 +97,20 @@ them.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
-  - **Size:** the outline button's box plus 1 px above and below, room for the hover
-    lift. The header keeps its height.
-  - **Hover:** lifts the pill a pixel and lights its rim near the pointer with
-    `specular`. It never lights the body, which would cut the primary pill's text
-    contrast below 4.5:1 in dark mode.
+  - **Size:** the outline button's box plus `ROOM_X` (3 px) each side and `ROOM_Y`
+    (1 px) above and below, room for the pill to grow into on hover. The header keeps
+    its height.
+  - **Hover:** animates in, as Apple's glass lights from within on interaction.
+    - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
+      whose overshoot still fits the room.
+    - `paint_glow` lights a band within `GLOW_WIDTH` (3 px) inside the edge. It starts
+      under the pointer and spreads round the pill as the animation runs.
+    - The rim's `specular` light fades in and follows the pointer.
+    - Leaving eases it all out (OutCubic, 200 ms). With motion reduced, the light comes
+      at once and the pill never grows. The solid modes paint no light.
+    - The body is never lit, and labels sit at least `PAD_Y` (6 px) inside the edge,
+      clear of the glow. Lighting the body would cut the primary pill's text contrast
+      below 4.5:1 in dark mode.
   - **Press:** shrinks it to 0.97 in 90 ms, and release springs it back with OutBack in
     280 ms. Both are instant when motion is reduced.
   - **Focus:** a 2 px `accent_fg` ring inside the pill's edge.
@@ -571,6 +580,12 @@ The brief list's chips keep their shorter forms (see Brief list).
 - Automatic runs never show the run page.
 
 ## Buttons, lists and tabs
+
+- A dialog page whose rows can outgrow the dialog goes in a scroll area
+  (`settings_view._scrolling`: resizable, no frame, no focus, no sideways scrolling). A
+  squeezed form overlaps its rows: a wrapped note's last line hides behind the next row.
+  A form field that is a box layout goes in a plain `QWidget`, so the form gives a
+  wrapped label in it the height its text needs.
 
 - `QPushButton[variant="primary"]`: `accent_bg` background, `accent_fg` text, 1px
   `accent_border`, the outline button's radius and padding; `:focus` border `accent_fg`;

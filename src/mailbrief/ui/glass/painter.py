@@ -25,6 +25,10 @@ from mailbrief.ui.theme import GlassTokens, Tint
 
 # How far a panel's sheen reaches down from its top, in logical pixels.
 SHEEN_DEPTH = 120.0
+# A hovered pill's glow: how far it reaches in from the edge, in logical pixels (labels
+# sit at least 6 px in), and its strength as a share of the specular token's alpha.
+GLOW_WIDTH = 3.0
+GLOW_STRENGTH = 0.45
 
 
 class GlassMode(Enum):
@@ -56,13 +60,44 @@ def paint_rim(
     _stroke_rim(painter, rect, radius, QBrush(gradient))
 
 
-def paint_specular(painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF) -> None:
-    """The light a pointer at ``point`` casts on a pill's rim, brightest nearest it. Only
-    the rim lights up, so text on the pill keeps its proven contrast."""
+def paint_specular(
+    painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF, strength: float = 1.0
+) -> None:
+    """The light a pointer at ``point`` casts on a pill's rim, brightest nearest it, at
+    ``strength`` (0 to 1) of the specular token. Only the rim lights up, so text on the
+    pill keeps its proven contrast."""
     light = QRadialGradient(point, rect.height() * 1.6)
-    light.setColorAt(0.0, color(glass.specular))
+    light.setColorAt(0.0, color(glass.specular, _unit(strength)))
     light.setColorAt(1.0, color(glass.specular, 0.0))
     _stroke_rim(painter, rect, rect.height() / 2, QBrush(light))
+
+
+def paint_glow(
+    painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF, spread: float
+) -> None:
+    """Light from inside a pill's edge, as Apple's glass lights from within: it starts
+    under the pointer at ``point`` and spreads round the pill as ``spread`` goes from 0 to
+    1. It stays within GLOW_WIDTH of the edge, clear of the label (which sits at least
+    PAD_Y inside), so text keeps its proven contrast."""
+    spread = _unit(spread)
+    if spread <= 0:
+        return
+    path, _radius = _pill_path(rect)
+    reach = rect.height() * 0.5 + rect.width() * 1.1 * spread
+    light = QRadialGradient(point, reach)
+    light.setColorAt(0.0, color(glass.specular, GLOW_STRENGTH * spread))
+    light.setColorAt(1.0, color(glass.specular, 0.0))
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setClipPath(path)  # The stroke's outer half falls outside: a band inside.
+    painter.setPen(QPen(QBrush(light), 2 * GLOW_WIDTH))
+    painter.setBrush(QBrush())
+    painter.drawPath(path)
+    painter.restore()
+
+
+def _unit(value: float) -> float:
+    return max(0.0, min(value, 1.0))
 
 
 def _stroke_rim(painter: QPainter, rect: QRectF, radius: float, brush: QBrush) -> None:
