@@ -14,8 +14,11 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] Without the mouse: **Sync and review**, step 1 (Space toggles a row, Continue),
       step 2 (Approve), then **Accept** a suggestion and **Undo** it.
 - [ ] Tab runs Sync and review → Cancel (while busy) → the sidebar's pages → Saved mail →
-      Data → Settings → Connect or Disconnect → the brief list → the selected email's
-      buttons in display order → Undo (when shown) → back to Sync and review.
+      Data → Settings → Connect or Disconnect → Your day's three lists → the brief list →
+      the selected email's buttons in display order → Undo (when shown) → back to Sync
+      and review.
+- [ ] In Your day, Return on a row opens its action or event once; with nothing due, no
+      events and no replies, each card says so ([Today](today.md)).
 - [ ] Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts,
       Briefs and Calendar; Briefs says MailBrief is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.

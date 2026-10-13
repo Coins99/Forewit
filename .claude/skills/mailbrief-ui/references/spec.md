@@ -516,13 +516,30 @@ The brief list's chips keep their shorter forms (see Brief list).
   `page_shortcuts`), so Briefs refuses as the sidebar does.
 - Tab order (`_link_tab_order`, at startup and on each `rebuilt`): Sync and review,
   Cancel, the sidebar's page list, Saved mail, Data, Settings, Connect or Disconnect, then
-  the page (on Today: Back to latest, Retry, the brief list and the detail's buttons in
-  display order), then Undo and back to Sync and review; hidden and disabled widgets are
+  the page (on Today: Back to latest, Retry, Your day's three lists, the brief list and the
+  detail's buttons in display order), then Undo and back to Sync and review; hidden and
+  disabled widgets are
   skipped. The chain is linked from Undo, so other pages' controls, in their own order,
   fall between Today's last button and Undo. Never walk the focus chain from Python
   (`nextInFocusChain()`, `previousInFocusChain()`): PySide re-parents the returned
   wrapper under the widget it was called on, and deleting that widget later invalidates
   the wrapper and all its children.
+
+## Your day (`ui/today_view.py`)
+
+- `DayPanel` (`dayPanel`, "Your day") sits in `today_top`, under the viewing banner and
+  Retry, above the brief: three `HairlineFrame` cards with stretch 1 each, 10 px apart,
+  inside 12 px side and 10 px top and bottom margins: Needs attention (`dayAttention`),
+  Today's agenda (`dayAgenda`) and New replies (`dayReplies`).
+- A card: its heading (12 px Medium, secondary, "Needs attention · 4" with a count), then
+  an `ActivatingList` that shows at most three rows and scrolls, or a 12 px muted line when
+  empty. The heading and the empty line are inset 6 px, in line with the rows' text.
+- A row (`DayRowDelegate`): one 13 px line, 5 px above and below, 6 px at the sides; the
+  title at the left in `text`, a note at the right in `text_secondary`, or `warning_fg` when
+  something is due or overdue. The title gives way first, down to 40% of the row. Selection
+  and the focus ring as in the brief list; no separators.
+- Activating a row opens its record: Return, Enter or a double-click, never a single click
+  (a double-click would land on the page it opened).
 
 ## Run page (`ui/run_view.py`, `ui/main_window.py`)
 

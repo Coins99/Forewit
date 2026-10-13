@@ -73,7 +73,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   optional life areas in Actions (Projects & areas), task assignment and grouped filters.
   Archived projects retain tasks; removing an area detaches projects and keeps work.
   New activity snapshots retain project/area IDs. Migration 0016 follows task history 0015.
-  See `docs/p1-projects-life-areas.md`. Unified Today is the next slice.
+  See `docs/p1-projects-life-areas.md`.
+- Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
+  above the brief on Today (what needs attention, today's agenda, new replies), a read
+  model over local actions and calendar data only (`services/today.py`,
+  `ui/today_view.py`). See `docs/today.md`.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
 
@@ -112,6 +116,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   owner's preferences, time zone rule and sender rules.
 - `src/mailbrief/services/preferences.py`: read, save and reset preferences, apply the
   saved AI limits (`effective_settings`) and the owner's zone (`owner_zone`).
+- `src/mailbrief/services/today.py`: the owner's day (`DaySummary` in `domain/today.py`):
+  open actions overdue, due or planned by today, new replies and the day's calendar. It
+  reads only, and needs no Gmail or AI.
 - `src/mailbrief/services/history.py`: saved briefs by day, missed days, the catch-up date
   rule (`check_brief_date`) and each brief's `coverage_line`.
 - `src/mailbrief/services/threads.py`: checks the threads of open actions and caches their
