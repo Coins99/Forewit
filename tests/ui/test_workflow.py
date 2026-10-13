@@ -62,6 +62,7 @@ from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.search import SearchResults
+from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -72,6 +73,7 @@ from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import sync_window
 from mailbrief.services.preferences import PreferencesConflictError
+from mailbrief.services.today import needs_attention, new_replies
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
 from tests.factories import make_action, make_digest_item, make_message
@@ -104,12 +106,16 @@ class FakeBackend(FakeDrafts):
     async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None:
         return self.inbox_positions.get(provider_message_id)
 
+    async def set_wanted(self, account_email: str, provider_message_id: str, wanted: bool) -> None:
+        self.wanted_marks.append((account_email, provider_message_id, wanted))
+
     def __init__(self) -> None:
         super().__init__()
         self.searches: list[tuple[str, str | None]] = []
         self.search_results = SearchResults()
         self.search_fail: Exception | None = None
         self.inbox_positions: dict[str, int] = {}
+        self.wanted_marks: list[tuple[str, str, bool]] = []
         self.saved = DailyDigest(
             account_id="owner@example.com",
             local_date=date(2026, 9, 4),
@@ -132,6 +138,8 @@ class FakeBackend(FakeDrafts):
         self.projects: tuple[Project, ...] = ()
         self.areas: tuple[LifeArea, ...] = ()
         self.actions: dict[ActionFilter, tuple[Action, ...]] = {}
+        self.day_calls: list[date] = []
+        self.day_fail: Exception | None = None
         self.action_counts: dict[ActionFilter, int] = {}
         self.count_calls: list[ActionFilter] = []
         self.candidates: tuple[str, ...] = ("message-1",)
@@ -599,6 +607,26 @@ class FakeBackend(FakeDrafts):
         self, first_day: date, last_day: date, zone: ZoneInfo
     ) -> CalendarRange:
         self._event_call("calendar_range", first_day, last_day)
+        return self._range(first_day, last_day, zone)
+
+    async def today_summary(self, day: date, zone: ZoneInfo, now: datetime) -> DaySummary:
+        """Built from the same actions and events by the real rules, recording no other
+        call; day_fail makes it raise."""
+        self.day_calls.append(day)
+        if self.day_fail is not None:
+            raise self.day_fail
+        actions = [
+            *self.actions.get(ActionFilter.OPEN, ()),
+            *self.actions.get(ActionFilter.WAITING, ()),
+        ]
+        return DaySummary(
+            day=day,
+            attention=needs_attention(actions, today=day, zone=zone, now=now),
+            replies=new_replies(actions),
+            calendar=self._range(day, day, zone),
+        )
+
+    def _range(self, first_day: date, last_day: date, zone: ZoneInfo) -> CalendarRange:
         live = [
             event
             for key, event in self.events.items()

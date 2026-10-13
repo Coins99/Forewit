@@ -14,8 +14,11 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] Without the mouse: **Sync and review**, step 1 (Space toggles a row, Continue),
       step 2 (Approve), then **Accept** a suggestion and **Undo** it.
 - [ ] Tab runs Sync and review → Cancel (while busy) → the sidebar's pages → Saved mail →
-      Data → Settings → Connect or Disconnect → the brief list → the selected email's
-      buttons in display order → Undo (when shown) → back to Sync and review.
+      Data → Settings → Connect or Disconnect → Your day's three lists → the brief list →
+      the selected email's buttons in display order → Undo (when shown) → back to Sync
+      and review.
+- [ ] In Your day, Return on a row opens its action or event once; with nothing due, no
+      events and no replies, each card says so ([Today](today.md)).
 - [ ] Ctrl+K (Cmd+K on macOS) opens Go to or search with the field focused; Up and Down
       skip the section headings, Return opens the row once, Esc closes, and Cmd+Q still
       quits with it open ([Go to or search](search.md)).

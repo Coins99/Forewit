@@ -2,26 +2,55 @@
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Final, Protocol
 
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.messages import (
+    InboxCategory,
     MessageImportance,
     NormalizedMessage,
     RankedMessage,
     RankReason,
+    SenderHistory,
+    SenderSignal,
     is_own_message,
     own_addresses,
 )
-from mailbrief.domain.preferences import SHORTLIST_LIMIT_MAX
+from mailbrief.domain.preferences import SHORTLIST_LIMIT_MAX, sender_matches
 
 DEFAULT_THRESHOLD: int = 10
 MIN_SHORTLIST_SIZE: int = 3
 MAX_SHORTLIST_SIZE: int = SHORTLIST_LIMIT_MAX
 _UNTRACKED: Final[Mapping[str, datetime]] = MappingProxyType({})
-_REASON_TEXT: Final = {RankReason.TRACKED_THREAD_REPLY: "reply in a thread you track"}
+_REASON_TEXT: Final = {
+    RankReason.TRACKED_THREAD_REPLY: "reply in a thread you track",
+    RankReason.STARRED: "starred in Gmail",
+    RankReason.PROMOTIONS: "in Gmail's Promotions tab",
+    RankReason.SOCIAL: "in Gmail's Social tab",
+    RankReason.UPDATES: "in Gmail's Updates tab",
+    RankReason.FORUMS: "in Gmail's Forums tab",
+    RankReason.BULK_MAIL: "mailing list or bulk mail",
+    RankReason.IMPORTANT_SENDER: "a sender you marked important",
+    RankReason.WANTED_SENDER: "you've wanted this sender's mail before",
+    RankReason.SKIPPED_SENDER: "you've left this sender's mail out before",
+}
+# How long the owner's choices about a sender count (ADR 0020), and how many messages left
+# out, with none wanted, make a sender one the owner skips.
+SENDER_HISTORY_DAYS: Final = 90
+SKIPS_TO_LEARN: Final = 2
+# Gmail's tabs other than Primary: each lowers a message's score. Promotions and Social
+# mail is written to sound urgent, so their action and approval wording earns nothing.
+_CATEGORY_RULES: Final = {
+    InboxCategory.PROMOTIONS: (-20, RankReason.PROMOTIONS),
+    InboxCategory.SOCIAL: (-15, RankReason.SOCIAL),
+    InboxCategory.FORUMS: (-8, RankReason.FORUMS),
+    InboxCategory.UPDATES: (-5, RankReason.UPDATES),
+}
+_MARKETING: Final = frozenset({InboxCategory.PROMOTIONS, InboxCategory.SOCIAL})
+_NO_SENDERS: Final[Mapping[str, SenderSignal]] = MappingProxyType({})
 # How the review and ``sync --show-metadata`` label a reply outside today's Inbox.
 OUTSIDE_REPLY_TEXT: Final = "reply in a tracked thread, not in today's Inbox"
 # How a review and ``sync --show-metadata`` mark a message the owner left out before.
@@ -31,6 +60,42 @@ DECLINED_TEXT: Final = "you left this out earlier"
 def reason_text(reason: RankReason) -> str:
     """A rank reason in words, for review and ``sync --show-metadata``."""
     return _REASON_TEXT.get(reason, reason.value.replace("_", " "))
+
+
+@dataclass(frozen=True, slots=True)
+class RankSignals:
+    """The owner's side of ranking (ADR 0020).
+
+    ``important_senders`` are the owner's sender rules for mail that matters; ``senders``
+    maps casefolded addresses to what the owner's earlier choices say about them
+    (sender_signals).
+    """
+
+    important_senders: tuple[str, ...] = ()
+    senders: Mapping[str, SenderSignal] = field(default=_NO_SENDERS)
+
+
+NO_SIGNALS: Final = RankSignals()
+
+
+def sender_signal(history: SenderHistory) -> SenderSignal | None:
+    """What a sender's history says: wanted when the owner wanted (or acted on) at least
+    as many of their messages as they left out; skipped when they left out SKIPS_TO_LEARN
+    or more and neither wanted nor kept any in a brief; otherwise nothing."""
+    if history.wanted and history.wanted >= history.skipped:
+        return SenderSignal.WANTED
+    if history.skipped >= SKIPS_TO_LEARN and not history.wanted and not history.kept:
+        return SenderSignal.SKIPPED
+    return None
+
+
+def sender_signals(history: Mapping[str, SenderHistory]) -> dict[str, SenderSignal]:
+    """The senders whose history says something, keyed as given."""
+    return {
+        address: signal
+        for address, counts in history.items()
+        if (signal := sender_signal(counts)) is not None
+    }
 
 
 class ShortlistGate(Protocol):
@@ -130,13 +195,15 @@ def score_message(
     user_email: str | frozenset[str],
     now_utc: datetime,
     tracked: Mapping[str, datetime] = _UNTRACKED,
+    signals: RankSignals = NO_SIGNALS,
 ) -> tuple[int, tuple[RankReason, ...]]:
     """Compute deterministic local score and reason list for one message.
 
-    Applies the 10 scoring rules specified in mvp-plan.md Section 9 in strict declaration
-    order, then M8's: ``tracked`` maps the threads of open actions to the time after which
-    their messages are new (ADR 0016). A message the owner sent (is_own_message) never gets
-    that bonus.
+    Applies the scoring rules in docs/ranking.md in strict declaration order: the ten
+    original metadata rules, then M8's: ``tracked`` maps the threads of open actions to the
+    time after which their messages are new (ADR 0016). A message the owner sent
+    (is_own_message) never gets that bonus. Then ADR 0020's: Gmail's star, category tab and
+    bulk mail, and the owner's ``signals``.
 
     ``user_email`` is the account's own address set, as own_addresses returns it, used by
     both the direct-recipient rule and the tracked-thread bonus; a single address stands
@@ -175,13 +242,16 @@ def score_message(
     # Search subject and preview for keyword rules
     haystack = _normalize_text(f"{msg.subject} {msg.body_preview}")
 
+    # Promotions and Social mail is written to sound urgent: its wording earns nothing.
+    marketing = msg.category in _MARKETING
+
     # 6. Action or deadline terms (+20)
-    if _ACTION_RE.search(haystack):
+    if not marketing and _ACTION_RE.search(haystack):
         score += 20
         reasons.append(RankReason.ACTION_OR_DEADLINE_LANGUAGE)
 
     # 7. Approval, reply, or request terms (+10)
-    if _APPROVAL_RE.search(haystack):
+    if not marketing and _APPROVAL_RE.search(haystack):
         score += 10
         reasons.append(RankReason.APPROVAL_OR_REPLY_LANGUAGE)
 
@@ -214,6 +284,34 @@ def score_message(
         score += 20
         reasons.append(RankReason.TRACKED_THREAD_REPLY)
 
+    # 12. Starred in Gmail (+15)
+    if msg.is_starred:
+        score += 15
+        reasons.append(RankReason.STARRED)
+
+    # 13. Gmail's tabs: Promotions (-20), Social (-15), Forums (-8), Updates (-5)
+    category_rule = None if msg.category is None else _CATEGORY_RULES.get(msg.category)
+    if category_rule is not None:
+        score += category_rule[0]
+        reasons.append(category_rule[1])
+    # 14. Mailing-list or bulk mail (-8), unless its tab already lowered it
+    elif msg.is_bulk:
+        score -= 8
+        reasons.append(RankReason.BULK_MAIL)
+
+    # 15. A sender the owner marked important (+30); their history then doesn't count.
+    sender = msg.sender.address.strip().casefold()
+    if signals.important_senders and sender_matches(sender, signals.important_senders):
+        score += 30
+        reasons.append(RankReason.IMPORTANT_SENDER)
+    # 16. What the owner's earlier choices say about the sender (+10 or -10)
+    elif (learned := signals.senders.get(sender)) is SenderSignal.WANTED:
+        score += 10
+        reasons.append(RankReason.WANTED_SENDER)
+    elif learned is SenderSignal.SKIPPED:
+        score -= 10
+        reasons.append(RankReason.SKIPPED_SENDER)
+
     return score, tuple(reasons)
 
 
@@ -223,16 +321,20 @@ def rank_messages(
     user_email: str | frozenset[str],
     now_utc: datetime,
     tracked: Mapping[str, datetime] = _UNTRACKED,
+    signals: RankSignals = NO_SIGNALS,
 ) -> list[RankedMessage]:
     """Score a collection of normalized messages with a shared reference timestamp.
 
     ``user_email`` is as score_message takes it: the account's own_addresses, or one address.
 
-    ``tracked`` maps each tracked thread ID to the time after which its messages are new.
+    ``tracked`` maps each tracked thread ID to the time after which its messages are new;
+    ``signals`` are the owner's (ADR 0020).
     """
     ranked: list[RankedMessage] = []
     for msg in messages:
-        score, reasons = score_message(msg, user_email=user_email, now_utc=now_utc, tracked=tracked)
+        score, reasons = score_message(
+            msg, user_email=user_email, now_utc=now_utc, tracked=tracked, signals=signals
+        )
         ranked.append(RankedMessage(message=msg, score=score, reasons=reasons))
     return ranked
 

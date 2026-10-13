@@ -184,6 +184,7 @@ class BriefService:
         excluded_senders: tuple[str, ...] = (),
         local_date: date | None = None,
         automatic: bool = False,
+        important_senders: tuple[str, ...] = (),
     ) -> BriefRunResult:
         """Sync one day's Inbox, prepare bodies, confirm consent, analyze and save the brief.
 
@@ -191,8 +192,9 @@ class BriefService:
         previous seven days. Any other date raises BriefDateError before Gmail is contacted
         or anything is written. A past day's brief covers only the messages still in the
         Inbox now. Messages from ``excluded_senders`` are never selected, downloaded or
-        sent. Once the brief is saved, its follow-up signals become proposals for the
-        owner's actions (ADR 0016); a failure there never fails the saved brief.
+        sent; mail from ``important_senders`` ranks higher (ADR 0020). Once the brief is
+        saved, its follow-up signals become proposals for the owner's actions (ADR 0016); a
+        failure there never fails the saved brief.
 
         Runs through a day are cumulative: the messages of the day's saved brief are carried
         forward, so a later run, automatic or not, never drops one the owner chose unless it
@@ -239,6 +241,7 @@ class BriefService:
             local_date=window.local_date,
             carried=carried,
             carried_outside=carried_outside,
+            important_senders=important_senders,
         )
         if sync.status is SyncStatus.CANCELLED:
             return BriefRunResult(status=BriefStatus.CANCELLED, sync=sync)

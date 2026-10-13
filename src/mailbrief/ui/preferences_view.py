@@ -1,5 +1,6 @@
 """The Preferences tab: the owner's time zone, messages per brief, sender exclusions,
-drafting defaults, AI limits (ADR 0014), and when MailBrief refreshes on its own (ADR 0017).
+important senders (ADR 0020), drafting defaults, AI limits (ADR 0014), and when MailBrief
+refreshes on its own (ADR 0017).
 
 The panel only validates and emits; the window saves through the backend. Sender rules
 are the owner's own text, shown back only here, in plain-text widgets. The automatic-analysis
@@ -147,6 +148,19 @@ class PreferencesPanel(QWidget):
                 "from these senders is never analyzed or sent to AI drafting."
             ),
         )
+        self.important = QPlainTextEdit()
+        self.important.setAccessibleName("Important senders, one address or @domain per line")
+        self.important.setPlaceholderText("partner@example.com\n@school.example.edu")
+        self.important.setTabChangesFocus(True)
+        self.important.setMaximumHeight(110)
+        form.addRow("&Important senders", self.important)
+        form.addRow(
+            "",
+            _plain(
+                "Mail from these senders ranks near the top of your review. A sender can't "
+                "be in both lists, and an excluded domain still wins."
+            ),
+        )
         self.tone = QComboBox()
         for _tone, name in TONE_CHOICES:
             self.tone.addItem(name)
@@ -210,6 +224,7 @@ class PreferencesPanel(QWidget):
             self.time_zone.currentIndex(),
             self.shortlist_limit.value(),
             self.senders.toPlainText(),
+            self.important.toPlainText(),
             self.tone.currentIndex(),
             self.length.currentIndex(),
             tuple(box.value() for box in self.ai_limits.values()),
@@ -243,6 +258,7 @@ class PreferencesPanel(QWidget):
         self.time_zone.setCurrentIndex(index)
         self.shortlist_limit.setValue(preferences.shortlist_limit)
         self.senders.setPlainText("\n".join(preferences.excluded_senders))
+        self.important.setPlainText("\n".join(preferences.important_senders))
         self.tone.setCurrentIndex([tone for tone, _ in TONE_CHOICES].index(preferences.draft_tone))
         self.length.setCurrentIndex(
             [length for length, _ in LENGTH_CHOICES].index(preferences.draft_length)
@@ -302,17 +318,12 @@ class PreferencesPanel(QWidget):
         if zone == "":
             self.status_changed.emit(_BAD_ZONE)
             return None
-        rules: list[str] = []
-        for number, line in enumerate(self.senders.toPlainText().splitlines(), start=1):
-            if not line.strip():
-                continue
-            try:
-                rules.append(normalize_exclusion(line))
-            except ValueError:
-                self.status_changed.emit(f"Line {number} is not an address or @domain.")
-                return None
-        if len(dict.fromkeys(rules)) > EXCLUSIONS_MAX:
-            self.status_changed.emit(f"At most {EXCLUSIONS_MAX} excluded senders.")
+        rules = self._rules(self.senders, "Excluded senders")
+        important = self._rules(self.important, "Important senders")
+        if rules is None or important is None:
+            return None
+        if set(rules) & set(important):
+            self.status_changed.emit("A sender can't be both excluded and important.")
             return None
         values: dict[str, object] = {
             name: None if box.value() == box.minimum() else box.value()
@@ -321,13 +332,32 @@ class PreferencesPanel(QWidget):
         values.update(
             time_zone=zone,
             shortlist_limit=self.shortlist_limit.value(),
-            excluded_senders=tuple(rules),
+            excluded_senders=rules,
+            important_senders=important,
             draft_tone=TONE_CHOICES[self.tone.currentIndex()][0],
             draft_length=LENGTH_CHOICES[self.length.currentIndex()][0],
             refresh_on_launch=self.refresh_on_launch.isChecked(),
             refresh_interval_minutes=REFRESH_CHOICES[self.refresh_interval.currentIndex()][1],
         )
         return PreferencesEdit.model_validate(values)
+
+    def _rules(self, box: QPlainTextEdit, name: str) -> tuple[str, ...] | None:
+        """The box's sender rules, normalized and without repeats, or None after reporting
+        the first line that isn't one, or too many."""
+        rules: list[str] = []
+        for number, line in enumerate(box.toPlainText().splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                rules.append(normalize_exclusion(line))
+            except ValueError:
+                self.status_changed.emit(f"{name}, line {number}: not an address or @domain.")
+                return None
+        unique = tuple(dict.fromkeys(rules))
+        if len(unique) > EXCLUSIONS_MAX:
+            self.status_changed.emit(f"At most {EXCLUSIONS_MAX} {name.lower()}.")
+            return None
+        return unique
 
     def _chosen_zone(self) -> str | None:
         """None for the system zone, a listed zone in its own spelling, or "" when the

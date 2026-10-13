@@ -12,11 +12,39 @@ from pydantic import HttpUrl, ValidationError
 from mailbrief.domain.messages import (
     AccountIdentity,
     EmailContact,
+    InboxCategory,
     MessageImportance,
     NormalizedMessage,
 )
 from mailbrief.providers.gmail.client import message_id
 from mailbrief.providers.gmail.errors import response_error
+
+# Gmail's category labels; a message carries at most one.
+_CATEGORY_LABELS = {
+    "CATEGORY_PERSONAL": InboxCategory.PERSONAL,
+    "CATEGORY_SOCIAL": InboxCategory.SOCIAL,
+    "CATEGORY_PROMOTIONS": InboxCategory.PROMOTIONS,
+    "CATEGORY_UPDATES": InboxCategory.UPDATES,
+    "CATEGORY_FORUMS": InboxCategory.FORUMS,
+}
+# Headers that say a message came from a mailing list; RFC 2369 and RFC 2919.
+_LIST_HEADERS = ("list-id", "list-unsubscribe")
+# Precedence values bulk senders use (RFC 3834 asks automatic replies to skip them).
+_BULK_PRECEDENCE = frozenset({"bulk", "list", "junk"})
+
+
+def category(labels: list[str]) -> InboxCategory | None:
+    """Gmail's category for these labels, or None when it gave none."""
+    return next((_CATEGORY_LABELS[label] for label in labels if label in _CATEGORY_LABELS), None)
+
+
+def is_bulk(headers: dict[str, list[str]]) -> bool:
+    """Whether the headers mark a mailing-list or bulk message; values are only tested."""
+    if any(value.strip() for name in _LIST_HEADERS for value in headers.get(name, [])):
+        return True
+    return any(
+        value.strip().casefold() in _BULK_PRECEDENCE for value in headers.get("precedence", [])
+    )
 
 
 def clean_text(value: str, limit: int) -> str:
@@ -86,6 +114,9 @@ def map_metadata(data: dict[str, object], account: AccountIdentity) -> Normalize
             else MessageImportance.NORMAL,
             # Metadata format does not reliably expose attachment structure; no ranking bonus.
             has_attachments=False,
+            category=category(labels),
+            is_starred="STARRED" in labels,
+            is_bulk=is_bulk(headers),
             body_preview=clean_text(html.unescape(snippet), 2048),
             web_link=HttpUrl(
                 "https://mail.google.com/mail/u/?"

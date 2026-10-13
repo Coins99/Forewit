@@ -9,7 +9,7 @@ from pytestqt.qtbot import QtBot
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
 from mailbrief.domain.drafting import DraftContextPart
 from mailbrief.domain.drafts import DraftKind, DraftLength, DraftTone
-from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.preferences import EXCLUSIONS_MAX, OwnerPreferences, PreferencesEdit
 from mailbrief.services.preferences import PreferencesUnavailableError
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.main_window import MainWindow
@@ -23,6 +23,7 @@ SAVED = OwnerPreferences(
     time_zone="America/Toronto",
     shortlist_limit=3,
     excluded_senders=("@news.example.com", "boss@example.com"),
+    important_senders=("partner@example.com",),
     draft_tone=DraftTone.FORMAL,
     draft_length=DraftLength.LONG,
     ai_body_character_limit=2_000,
@@ -81,7 +82,14 @@ def test_sentinels_mean_the_defaults(panel: PreferencesPanel) -> None:
 
 
 def test_every_field_has_an_accessible_name(panel: PreferencesPanel) -> None:
-    fields = [panel.time_zone, panel.shortlist_limit, panel.senders, panel.tone, panel.length]
+    fields = [
+        panel.time_zone,
+        panel.shortlist_limit,
+        panel.senders,
+        panel.important,
+        panel.tone,
+        panel.length,
+    ]
     fields.extend(panel.ai_limits.values())
     assert all(field.accessibleName() for field in fields)
 
@@ -94,7 +102,59 @@ def test_an_invalid_rule_line_emits_nothing(panel: PreferencesPanel) -> None:
     panel.save_button.click()
 
     assert saves == []
-    assert problems == ["Line 3 is not an address or @domain."]
+    assert problems == ["Excluded senders, line 3: not an address or @domain."]
+
+
+def test_an_invalid_important_sender_line_emits_nothing(panel: PreferencesPanel) -> None:
+    saves, problems = emitted(panel)
+    panel.set_preferences(OwnerPreferences.defaults())
+    panel.important.setPlainText("<partner@example.com>")
+
+    panel.save_button.click()
+
+    assert saves == []
+    assert problems == ["Important senders, line 1: not an address or @domain."]
+
+
+def test_important_senders_are_saved_normalized_and_shown_back(panel: PreferencesPanel) -> None:
+    saves, problems = emitted(panel)
+    panel.set_preferences(SAVED.model_copy(update={"important_senders": ("@school.edu",)}))
+    assert panel.important.toPlainText() == "@school.edu"
+    assert not panel.has_unsaved_input()
+    panel.important.setPlainText("Partner@Example.com\n\n*.school.edu\npartner@example.com")
+    assert panel.has_unsaved_input()
+
+    panel.save_button.click()
+
+    ((edit, _),) = saves
+    assert isinstance(edit, PreferencesEdit)
+    assert edit.important_senders == ("partner@example.com", "@school.edu")
+    assert problems == []
+
+
+def test_a_sender_in_both_lists_is_refused(panel: PreferencesPanel) -> None:
+    saves, problems = emitted(panel)
+    panel.set_preferences(OwnerPreferences.defaults())
+    panel.senders.setPlainText("boss@example.com")
+    panel.important.setPlainText("Boss@Example.com")
+
+    panel.save_button.click()
+
+    assert saves == []
+    assert problems == ["A sender can't be both excluded and important."]
+
+
+def test_too_many_important_senders_are_refused(panel: PreferencesPanel) -> None:
+    saves, problems = emitted(panel)
+    panel.set_preferences(OwnerPreferences.defaults())
+    panel.important.setPlainText(
+        "\n".join(f"person{number}@example.com" for number in range(EXCLUSIONS_MAX + 1))
+    )
+
+    panel.save_button.click()
+
+    assert saves == []
+    assert problems == [f"At most {EXCLUSIONS_MAX} important senders."]
 
 
 def test_a_typed_zone_takes_the_listed_spelling_or_is_refused(panel: PreferencesPanel) -> None:

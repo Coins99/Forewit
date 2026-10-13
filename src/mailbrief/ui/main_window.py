@@ -91,6 +91,7 @@ from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
+from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -206,6 +207,7 @@ from mailbrief.ui.theme import (
     apply_theme,
     current_scheme,
 )
+from mailbrief.ui.today_view import DayPanel
 from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
 
@@ -216,6 +218,9 @@ class DesktopBackend(Protocol):
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage: ...
     async def search(self, text: str, account_email: str | None) -> SearchResults: ...
     async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None: ...
+    async def set_wanted(
+        self, account_email: str, provider_message_id: str, wanted: bool
+    ) -> None: ...
     async def cached_accounts(self) -> tuple[CachedAccount, ...]: ...
     async def cached_messages(
         self, account_id: int, day: date, offset: int = 0
@@ -330,6 +335,7 @@ class DesktopBackend(Protocol):
     async def calendar_range(
         self, first_day: date, last_day: date, zone: ZoneInfo
     ) -> CalendarRange: ...
+    async def today_summary(self, day: date, zone: ZoneInfo, now: datetime) -> DaySummary: ...
     async def create_event(self, edit: EventEdit) -> CalendarEvent: ...
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
@@ -697,6 +703,7 @@ class MainWindow(QMainWindow):
         # newest read wins, and shutdown waits for them before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
         self._calendar_read = 0
+        self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
         self.action_editor.create_requested.connect(self._request_create_action)
         self.draft_writes = DraftWrites()
@@ -818,6 +825,11 @@ class MainWindow(QMainWindow):
         retry.addWidget(self.retry_button)
         retry.addStretch(1)
         workspace.today_top.addLayout(retry)
+        # "Your day" above the brief: local data only, so it shows without Gmail or AI.
+        self.day_panel = DayPanel()
+        self.day_panel.action_requested.connect(self._open_day_action)
+        self.day_panel.event_requested.connect(self._open_day_event)
+        workspace.today_top.addWidget(self.day_panel)
         # The run page: step 1 reviews the shortlist, step 2 approves sending.
         self.review_panel = QWidget()
         self.review_panel.setObjectName("reviewPanel")
@@ -930,6 +942,11 @@ class MainWindow(QMainWindow):
             lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
         )
         self.inbox_panel.source_requested.connect(self._open_source)
+        self.inbox_panel.wanted_requested.connect(
+            lambda message_id, wanted: self.start(
+                lambda: self._set_wanted(message_id, wanted), cancellable=False
+            )
+        )
         workspace.add_page("inbox", self.inbox_panel)
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
@@ -1024,6 +1041,9 @@ class MainWindow(QMainWindow):
             self.disconnect_button,
             self.latest_button,
             self.retry_button,
+            self.day_panel.attention.list,
+            self.day_panel.agenda.list,
+            self.day_panel.replies.list,
             workspace.brief_list,
             *workspace.detail.buttons(),
         ]
@@ -1332,6 +1352,7 @@ class MainWindow(QMainWindow):
                     )
         except Exception as exc:
             self._note_not_refreshed(exc)
+        await self._refresh_day()
 
     async def _refresh_drafts(self) -> None:
         try:
@@ -1734,6 +1755,38 @@ class MainWindow(QMainWindow):
         self.calendar_panel.show_range(shown, self.zone, self._local_today())
         self._calendar_shown = shown
         self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
+        await self._refresh_day()
+
+    async def _refresh_day(self) -> None:
+        """The Today page's "Your day", from local data; it keeps what it showed when it
+        can't be read."""
+        self._day_read += 1
+        read = self._day_read
+        now = self.now()
+        try:
+            summary = await self.backend.today_summary(
+                now.astimezone(self.zone).date(), self.zone, now
+            )
+        except Exception as exc:
+            if read == self._day_read:
+                self._note_not_refreshed(exc)
+            return
+        if read == self._day_read:
+            self.day_panel.show_summary(summary, self.zone)
+
+    def _open_day_action(self, public_id: str, waiting: bool) -> None:
+        """Show an action from "Your day" on the Actions page (Waiting when someone else
+        does it); see _open_action."""
+        self._open_action(public_id, ActionFilter.WAITING if waiting else ActionFilter.OPEN)
+
+    def _open_day_event(self, key: object) -> None:
+        """Show an event from "Your day" on the Calendar page, in this week, selected."""
+        if not isinstance(key, tuple):
+            return
+        today = self._local_today()
+        self._show_calendar_week(week_start(today))
+        self._show_page("calendar")
+        self._read_calendar(select=key, day=today)
 
     def _show_calendar_week(self, monday: date) -> None:
         """Show the week of ``monday`` from now on; this week's follows today, so the page
@@ -1945,8 +1998,7 @@ class MainWindow(QMainWindow):
                 self._open_source(link)
             return
         self._show_page("inbox")
-        await self._load_inbox(position - position % INBOX_PAGE_SIZE)
-        self.inbox_panel.select_message(message_id)
+        await self._load_inbox(position - position % INBOX_PAGE_SIZE, select=message_id)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -2948,12 +3000,29 @@ class MainWindow(QMainWindow):
         await self._refresh_calendar()  # Its Google events went with the sign-in.
         await self._show_auto_send()
 
-    async def _load_inbox(self, offset: int = 0) -> None:
+    async def _load_inbox(self, offset: int = 0, *, select: str | None = None) -> None:
         if self._account_email is None:
             self.inbox_panel.clear()
             return
         self.inbox_panel.zone = self.zone
-        self.inbox_panel.show_page(await self.backend.inbox_messages(self._account_email, offset))
+        self.inbox_panel.show_page(
+            await self.backend.inbox_messages(self._account_email, offset), select=select
+        )
+
+    async def _set_wanted(self, message_id: str, wanted: bool) -> None:
+        """Mark or unmark an Inbox message as one that should have been in a brief (ADR 0020),
+        then show the same page with it still selected."""
+        if self._account_email is None:
+            self.inbox_panel.clear()
+            return
+        await self.backend.set_wanted(self._account_email, message_id, wanted)
+        page = self.inbox_panel.page
+        await self._load_inbox(0 if page is None else page.offset, select=message_id)
+        self.status.setText(
+            "Marked: MailBrief counts this when ranking its sender's mail."
+            if wanted
+            else "Mark removed."
+        )
 
     async def _refresh_inbox(self, *, quiet: bool = False) -> None:
         previous_status = self.status.text()
@@ -3152,6 +3221,8 @@ class MainWindow(QMainWindow):
                     self.ai.setText("AI: " + guidance)
         if result.status is not BriefStatus.CANCELLED and self._calendar_allowed:
             await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
+        if result.status is not BriefStatus.CANCELLED:
+            await self._refresh_day()  # The thread check may have brought new replies.
 
     # Automatic refresh (ADR 0017): while MailBrief is open, on the owner's schedule. It has
     # no review, no consent question and no dialog; everything it says goes to the status line.

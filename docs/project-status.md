@@ -10,7 +10,9 @@ later use after Microsoft Entra access is resolved.
   history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
   lifecycle; completion/reopening/undo history survives recovery and export. Projects and
   life areas now have an implementation ([organization workflow](p1-projects-life-areas.md)),
-  awaiting owner desktop acceptance. Unified Today comes next.
+  awaiting owner desktop acceptance. Unified Today's first slice is implemented, awaiting
+  owner desktop acceptance: **Your day** on the Today page shows what needs attention,
+  today's agenda and new replies, from local data only ([Today](today.md)).
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.
@@ -46,6 +48,10 @@ later use after Microsoft Entra access is resolved.
   the database can't run while the desktop is open: they exit with code 5.
   See [M9 durability](m9-durability.md) and the
   [owner's live-validation checklist](m9-live-validation.md).
+- Ranking signals implemented, awaiting live acceptance ([ADR 0020](adr/0020-ranking-signals.md)):
+  the review's suggestions use Gmail's tabs, stars and bulk-mail headers, your important
+  senders, and what your own choices say about each sender; **Should have been in my
+  brief** on the Inbox page feeds it. See [Ranking](ranking.md).
 - Search and commands implemented, awaiting owner desktop acceptance: **Go to or search**
   (Ctrl+K) goes to pages, starts a task, event or note, and searches local records only
   ([Go to or search](search.md)).
@@ -96,6 +102,7 @@ The theme is dark only for now.
   [researched future implementation plan](future-implementations.md)
 - [Gmail setup and authentication diagnostic](gmail-setup.md)
 - [Gmail metadata synchronization and shortlist review](gmail-metadata.md)
+- [Ranking: which emails the review suggests](ranking.md)
 - [Gmail bodies (M3) and live acceptance](gmail-bodies.md)
 - [AI analysis, consent and the daily brief (M4)](ai-analysis.md)
 - [Actions, target dates and plans (M6)](m6-actions.md)

@@ -23,12 +23,13 @@ from PySide6.QtWidgets import (
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.briefs import BriefRunResult, BriefStatus
-from mailbrief.domain.messages import EmailContact, RankedMessage
+from mailbrief.domain.messages import EmailContact, RankedMessage, RankReason
 from mailbrief.services.ranking import DECLINED_TEXT, OUTSIDE_REPLY_TEXT
 from mailbrief.ui.brief_list import Chip, ChipTone, row_height
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.run_view import (
     EXCLUDED,
+    IMPORTANT,
     LEFT_OUT,
     NONE,
     ROW_ROLE,
@@ -467,3 +468,14 @@ async def test_review_step_renders(
     save_shot(image, f"run-review-{mode.value}")
     window.cancel()
     await finish(window)
+
+
+def test_mail_from_an_important_sender_says_so_in_the_review() -> None:
+    message = make_message()
+    important = RankedMessage(message=message, score=50, reasons=(RankReason.IMPORTANT_SENDER,))
+    learned = RankedMessage(message=message, score=50, reasons=(RankReason.WANTED_SENDER,))
+
+    row = shortlist_row(important, blocked=False, outside=True, declined=False)
+
+    assert row.chips == (Chip(IMPORTANT, ChipTone.ACCENT), Chip(TRACKED_REPLY, ChipTone.ACCENT))
+    assert shortlist_row(learned, blocked=False, outside=False, declined=False).chips == ()

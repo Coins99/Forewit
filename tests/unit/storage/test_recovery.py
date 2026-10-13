@@ -278,7 +278,7 @@ def rewrite_archive(
 
 def test_inspect_checks_supported_archive(archive: Path) -> None:
     metadata = inspect_backup(archive)
-    assert metadata.schema_revisions == ("20261012_0017",)
+    assert metadata.schema_revisions == ("20261013_0018",)
     assert metadata.credentials_included is False
 
 
@@ -443,7 +443,7 @@ def test_older_backup_is_upgraded_in_staging(tmp_path: Path, revision: str) -> N
     restored = tmp_path / "restored.sqlite3"
     restore_backup(backup, restored)
     assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]
-    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
+    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261013_0018",)]
     assert query(original, "SELECT version_num FROM alembic_version") == [(revision,)]
 
 

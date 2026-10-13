@@ -143,6 +143,17 @@ class MessageTable(Base):
     )
     # When the owner unchecked this message in a review that had picked it (ADR 0017).
     review_declined_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # When the owner wanted this message in a brief the automatic selection didn't give it:
+    # picked in a review, or marked "Should have been in my brief" (ADR 0020).
+    review_wanted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # Gmail's category tab, star and mailing-list headers (ADR 0020); NULL category is unknown.
+    category: Mapped[str | None] = mapped_column(String(16))
+    is_starred: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    is_bulk: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     has_attachments: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -819,6 +830,10 @@ class OwnerPreferencesTable(Base):
         Integer, nullable=False, default=SHORTLIST_LIMIT_MAX, server_default=text("10")
     )
     excluded_senders_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Mail from these ranks higher (ADR 0020).
+    important_senders_json: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
     draft_tone: Mapped[str] = mapped_column(
         String(16), nullable=False, default="neutral", server_default="neutral"
     )

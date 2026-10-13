@@ -31,16 +31,21 @@ from mailbrief.domain.digests import (
 from mailbrief.domain.messages import (
     AccountIdentity,
     EmailContact,
+    InboxCategory,
     MessageImportance,
     NormalizedMessage,
     ProviderKind,
     RankReason,
+    SenderHistory,
+    own_addresses,
 )
 from mailbrief.storage.actions import suggestion_from_row, suggestion_views
 from mailbrief.storage.database import MAX_SQLITE_BATCH_SIZE
 from mailbrief.storage.tables import (
     AccountTable,
+    ActionSourceTable,
     ActionSuggestionTable,
+    ActionTable,
     AIConsentTable,
     AnalysisTable,
     DigestItemTable,
@@ -52,6 +57,12 @@ from mailbrief.storage.tables import (
 from mailbrief.text.prepare import truncate_at_boundary
 
 _NO_SUMMARY = "No summary available"
+_CATEGORIES = {category.value: category for category in InboxCategory}
+
+
+def _category(value: str | None) -> InboxCategory | None:
+    """A cached category; one this version doesn't know counts as unknown."""
+    return None if value is None else _CATEGORIES.get(value)
 
 
 class AccountRepository:
@@ -206,6 +217,9 @@ class MessageRepository:
                         else str(m.importance)
                     ),
                     "has_attachments": m.has_attachments,
+                    "category": None if m.category is None else m.category.value,
+                    "is_starred": m.is_starred,
+                    "is_bulk": m.is_bulk,
                     "body_preview": m.body_preview,
                     "web_link": str(m.web_link),
                     "rank_reasons_json": [],
@@ -230,6 +244,9 @@ class MessageRepository:
                     "is_sent": base_stmt.excluded.is_sent,
                     "importance": base_stmt.excluded.importance,
                     "has_attachments": base_stmt.excluded.has_attachments,
+                    "category": base_stmt.excluded.category,
+                    "is_starred": base_stmt.excluded.is_starred,
+                    "is_bulk": base_stmt.excluded.is_bulk,
                     "body_preview": base_stmt.excluded.body_preview,
                     "web_link": base_stmt.excluded.web_link,
                     "synced_at_utc": base_stmt.excluded.synced_at_utc,
@@ -447,11 +464,30 @@ class MessageRepository:
         self, account_id: int, provider_message_ids: Iterable[str], now_utc: datetime | None
     ) -> int:
         """Remember that the owner declined these messages (``now_utc``), or forget it
-        (None); returns how many rows changed.
+        (None); returns how many rows changed. A message declined is no longer wanted.
 
         Rows change as ORM objects, never by a bulk UPDATE, so messages already loaded in
         the session show the change. The caller commits.
         """
+        return await self._mark(account_id, provider_message_ids, now_utc, declined=True)
+
+    async def set_review_wanted(
+        self, account_id: int, provider_message_ids: Iterable[str], now_utc: datetime | None
+    ) -> int:
+        """Remember that the owner wanted these messages in a brief the automatic selection
+        didn't give them (``now_utc``), or forget it (None); returns how many rows changed.
+        A message wanted is no longer declined (ADR 0020). The caller commits."""
+        return await self._mark(account_id, provider_message_ids, now_utc, declined=False)
+
+    async def _mark(
+        self,
+        account_id: int,
+        provider_message_ids: Iterable[str],
+        now_utc: datetime | None,
+        *,
+        declined: bool,
+    ) -> int:
+        """Set or clear one of the two review marks; setting one clears the other."""
         changed = 0
         identifiers = sorted(set(provider_message_ids))
         stamp = None if now_utc is None else normalize_utc(now_utc)
@@ -467,11 +503,91 @@ class MessageRepository:
                 .execution_options(populate_existing=True)
             )
             for row in result:
-                if (row.review_declined_at_utc is None) != (stamp is None):
-                    row.review_declined_at_utc = stamp
-                    changed += 1
+                was = (row.review_declined_at_utc, row.review_wanted_at_utc)
+                current, other = was if declined else was[::-1]
+                if (current is None) != (stamp is None):
+                    current = stamp  # A mark already set keeps its first time.
+                if stamp is not None:
+                    other = None
+                row.review_declined_at_utc, row.review_wanted_at_utc = (
+                    (current, other) if declined else (other, current)
+                )
+                changed += (row.review_declined_at_utc, row.review_wanted_at_utc) != was
         await self._session.flush()
         return changed
+
+    async def count_wanted(self, account_id: int, since_utc: datetime) -> int:
+        """How many messages the owner has wanted in a brief since ``since_utc``."""
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(MessageTable)
+            .where(
+                MessageTable.account_id == account_id,
+                MessageTable.review_wanted_at_utc >= normalize_utc(since_utc),
+            )
+        )
+        return count or 0
+
+    async def sender_history(
+        self, account: AccountTable, since_utc: datetime
+    ) -> dict[str, SenderHistory]:
+        """What the owner's own choices since ``since_utc`` say about each sender's mail
+        (ADR 0020), keyed by casefolded address: the cached messages they wanted or left out
+        of a review, the live actions with an email from the sender in this account, and the
+        messages in the briefs saved since then.
+
+        Only addresses are read, never subjects or previews; the owner's own addresses are
+        left out. Mail whose cache was cleared no longer counts, but actions keep their
+        sources' snapshots.
+        """
+        since = normalize_utc(since_utc)
+        own = own_addresses(account.email_address, account.account_addresses)
+        wanted: dict[str, set[str]] = {}
+        skipped: dict[str, set[str]] = {}
+        marked = await self._session.execute(
+            select(
+                MessageTable.sender_address,
+                MessageTable.provider_message_id,
+                MessageTable.review_wanted_at_utc,
+            ).where(
+                MessageTable.account_id == account.id,
+                (MessageTable.review_wanted_at_utc >= since)
+                | (MessageTable.review_declined_at_utc >= since),
+            )
+        )
+        for address, message_id, wanted_at in marked:
+            target = wanted if wanted_at is not None else skipped
+            target.setdefault(address.strip().casefold(), set()).add(message_id)
+        acted = await self._session.execute(
+            select(ActionSourceTable.sender_address, ActionSourceTable.action_id)
+            .join(ActionTable, ActionTable.id == ActionSourceTable.action_id)
+            .where(
+                ActionSourceTable.provider == account.provider,
+                ActionSourceTable.provider_account_id == account.provider_account_id,
+                ActionTable.deleted_at_utc.is_(None),
+                ActionTable.created_at_utc >= since,
+            )
+        )
+        actions: dict[str, set[int]] = {}
+        for address, action_id in acted:
+            actions.setdefault(address.strip().casefold(), set()).add(action_id)
+        in_briefs = await self._session.execute(
+            select(MessageTable.sender_address, MessageTable.id)
+            .join(DigestItemTable, DigestItemTable.message_id == MessageTable.id)
+            .join(DigestTable, DigestTable.id == DigestItemTable.digest_id)
+            .where(DigestTable.account_id == account.id, DigestTable.generated_at_utc >= since)
+        )
+        kept: dict[str, set[int]] = {}
+        for address, message_key in in_briefs:
+            kept.setdefault(address.strip().casefold(), set()).add(message_key)
+        history: dict[str, SenderHistory] = {}
+        for address in (wanted.keys() | skipped.keys() | actions.keys()) - own:
+            history[address] = SenderHistory(
+                wanted=len(wanted.get(address, ())) + len(actions.get(address, ())),
+                skipped=len(skipped.get(address, ())),
+                kept=len(kept.get(address, ())),
+            )
+        return history
 
     async def get_by_provider_message_id(
         self,
@@ -515,6 +631,9 @@ class MessageRepository:
             is_sent=row.is_sent,
             importance=MessageImportance(row.importance),
             has_attachments=row.has_attachments,
+            category=_category(row.category),
+            is_starred=row.is_starred,
+            is_bulk=row.is_bulk,
             body_preview=row.body_preview,
             web_link=HttpUrl(row.web_link),
         )

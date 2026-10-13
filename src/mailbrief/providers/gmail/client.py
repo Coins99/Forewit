@@ -21,7 +21,17 @@ from mailbrief.providers.google.requests import retry_delay as retry_delay
 
 MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 THREADS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/threads"
-METADATA_HEADERS = ("From", "To", "Subject", "Message-ID")
+# List-Id, List-Unsubscribe and Precedence only tell mailing-list and bulk mail apart
+# (ADR 0020); the mapper keeps whether they are there, never their values.
+METADATA_HEADERS = (
+    "From",
+    "To",
+    "Subject",
+    "Message-ID",
+    "List-Id",
+    "List-Unsubscribe",
+    "Precedence",
+)
 _MESSAGES = GetMessages(
     too_large="Gmail response exceeded its size limit.",
     timed_out="Gmail request timed out after retries; check your connection and retry.",
