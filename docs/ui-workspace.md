@@ -19,8 +19,8 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] Ctrl+K (Cmd+K on macOS) opens Go to or search with the field focused; Up and Down
       skip the section headings, Return opens the row once, Esc closes, and Cmd+Q still
       quits with it open ([Go to or search](search.md)).
-- [ ] Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts,
-      Briefs and Calendar; Briefs says MailBrief is busy while a run is in progress.
+- [ ] Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting,
+      Drafts, Briefs and Calendar, in the sidebar's order; Briefs says MailBrief is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.
 - [ ] In the brief list, Page Up and Page Down scroll the selected email while the whole
       list fits, and page the list when it scrolls.

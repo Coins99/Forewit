@@ -1,6 +1,6 @@
 # Calendar
 
-The **Calendar** page (sidebar, Ctrl+6) shows one week at a time: your own events, your
+The **Calendar** page (sidebar, Ctrl+7) shows one week at a time: your own events, your
 open actions' deadlines and target dates, and, once you connect it, your Google Calendar.
 Decisions and limits are in [ADR 0018](adr/0018-calendar.md).
 

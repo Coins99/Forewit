@@ -2,12 +2,16 @@
 
 import asyncio
 
+import pytest
 from pydantic import SecretStr
-from PySide6.QtWidgets import QLineEdit
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
+from mailbrief.ui.settings_view import SettingsDialog
+from mailbrief.ui.theme import apply_theme
 from tests.ui.test_workflow import FakeBackend, finish
 
 
@@ -102,3 +106,35 @@ async def test_unsaved_settings_are_noticed(qtbot: QtBot) -> None:
     panel = dialog.preferences_panel
     panel.refresh_on_launch.setChecked(not panel.refresh_on_launch.isChecked())
     assert dialog.has_unsaved_input()
+
+
+@pytest.mark.parametrize("size", [(640, 620), (500, 420)])
+def test_no_settings_tab_squeezes_its_rows_into_each_other(
+    qtbot: QtBot, qapp: QApplication, themed: None, size: tuple[int, int]
+) -> None:
+    """A tab taller than the dialog scrolls: every wrapped note keeps the lines it needs
+    (a squeezed note's last line hid behind the next row), and the excluded-senders box
+    shows at least three lines."""
+    apply_theme(qapp)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SettingsDialog(parent)  # The parent owns it, and closes it with itself.
+    dialog.resize(*size)
+    dialog.show()
+    for index in range(dialog.tabs.count()):
+        dialog.tabs.setCurrentIndex(index)
+        area = dialog.tabs.currentWidget()
+        assert isinstance(area, QScrollArea)
+        assert area.focusPolicy() == Qt.FocusPolicy.NoFocus  # Tab skips it.
+        assert area.objectName().endswith("Scroll") and area.accessibleName()
+        page = area.widget()
+        assert page is not None
+        qtbot.waitUntil(page.isVisible)
+        for label in page.findChildren(QLabel):
+            if label.isVisible() and label.wordWrap() and label.text():
+                assert label.height() >= label.heightForWidth(label.width()), label.text()
+    senders = dialog.preferences_panel.senders
+    assert senders.height() >= 3 * senders.fontMetrics().lineSpacing()
+    preferences = dialog.tabs.widget(1)
+    assert isinstance(preferences, QScrollArea)
+    assert preferences.verticalScrollBar().maximum() > 0  # Taller than the dialog.

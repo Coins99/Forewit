@@ -68,7 +68,9 @@ class GlassAccessibility(QObject):
         preferences = effective_preferences(self.system, self.transparency, self.motion)
         if preferences != glass_preferences():
             set_glass_preferences(preferences)
-            with paused_collection():  # Every widget is visited; see paused_collection.
-                for widget in QApplication.allWidgets():
-                    widget.update()  # Glass is read at paint time.
+            # Glass is read at paint time. A window repaints its children with it, so the
+            # windows are enough, with no wrapper made for every widget in the app.
+            with paused_collection():
+                for window in QApplication.topLevelWidgets():
+                    window.update()
         self.changed.emit(self.system)

@@ -6,9 +6,9 @@ Type, then use Up and Down and press Return to open the highlighted row; Esc clo
 ## Commands
 
 With the field empty, every command is listed; typing narrows them to those that contain
-each word: **Go to** Today, Actions, Waiting, Drafts, Briefs, Calendar or Inbox; **New task**,
-**New event today**, **New note**; **Sync and review**; and **Open saved mail**, **Open data
-and recovery** and **Open settings**. A command does what its button does, and does nothing
+each word: **Go to** any page, in the sidebar's order (Today, Inbox, Actions, Waiting,
+Drafts, Briefs, Calendar); **New task**, **New event today**, **New note**; **Sync and
+review**; and **Open saved mail**, **Open data and recovery** and **Open settings**. A command does what its button does, and does nothing
 when that button is unavailable (Sync and review while something runs, for example).
 
 ## Search

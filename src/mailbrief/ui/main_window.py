@@ -206,7 +206,7 @@ from mailbrief.ui.theme import (
     apply_theme,
     current_scheme,
 )
-from mailbrief.ui.workspace import ThreePaneWorkspace
+from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
@@ -471,7 +471,8 @@ def _ready_text(ready: int) -> str:
 
 _RUN_WIDTH = 760
 # Ctrl+1 to Ctrl+7 (Cmd on macOS) show the sidebar's pages, in its order.
-PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar", "inbox")
+# Ctrl+1 to Ctrl+7 follow the sidebar's order.
+PAGE_SHORTCUTS = tuple(key for key, _label, _icon in PAGES)
 
 
 def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
@@ -614,6 +615,7 @@ class MainWindow(QMainWindow):
         *,
         database_path: Path | None = None,
         appearance: AppearanceStore | None = None,
+        saved_appearance: Appearance | None = None,
     ) -> None:
         super().__init__()
         self.backend = backend
@@ -621,8 +623,12 @@ class MainWindow(QMainWindow):
         self.appearance_writes = (
             None if appearance is None else AppearanceWriter(appearance, self._appearance_not_saved)
         )
-        # The colour scheme and glass choices in effect, saved whole on every change.
-        self.appearance = Appearance() if appearance is None else appearance.load()
+        # The colour scheme and glass choices in effect, saved whole on every change: as
+        # startup already read them, or read here.
+        if saved_appearance is not None:
+            self.appearance = saved_appearance
+        else:
+            self.appearance = Appearance() if appearance is None else appearance.load()
         self.pending_restore: tuple[Path, BackupMetadata] | None = None
         self._unsaved_drafts: set[str] = set()
         self.data_dialog = (

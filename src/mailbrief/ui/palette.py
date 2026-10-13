@@ -27,6 +27,7 @@ from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.labels import wrap_label
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.theme import SMALL_PX, current_tokens, ui_font
+from mailbrief.ui.workspace import PAGES
 
 # How long typing must pause before a search starts (ms).
 DEBOUNCE_MS: Final = 200
@@ -55,14 +56,9 @@ class Command:
     label: str
 
 
+# The pages in the sidebar's order (workspace.PAGES), then the rest.
 COMMANDS: Final = (
-    Command("page:today", "Go to Today"),
-    Command("page:actions", "Go to Actions"),
-    Command("page:waiting", "Go to Waiting"),
-    Command("page:drafts", "Go to Drafts"),
-    Command("page:briefs", "Go to Briefs"),
-    Command("page:calendar", "Go to Calendar"),
-    Command("page:inbox", "Go to Inbox"),
+    *(Command(f"page:{key}", f"Go to {label}") for key, label, _icon in PAGES),
     Command("new:task", "New task"),
     Command("new:event", "New event today"),
     Command("new:note", "New note"),

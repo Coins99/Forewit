@@ -80,8 +80,8 @@ reads**: only the messages you leave checked have their bodies downloaded. Step 
 
 Ctrl+K (Cmd+K on macOS) opens **Go to or search**: commands, and a local search of your
 actions, drafts, notes, events and saved mail ([Go to or search](search.md)).
-Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts, Briefs
-and Calendar. Tab runs from Sync and review through the sidebar and the page to Undo.
+Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting, Drafts,
+Briefs and Calendar, in the sidebar's order. Tab runs from Sync and review through the sidebar and the page to Undo.
 The theme is dark only for now.
 
 ## Start here
