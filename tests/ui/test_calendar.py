@@ -397,7 +397,7 @@ async def test_calendar_page_loads_this_week_and_has_a_shortcut(
         first,
         first + timedelta(days=6),
     )
-    assert window.page_shortcuts["calendar"].key() == QKeySequence("Ctrl+6")
+    assert window.page_shortcuts["calendar"].key() == QKeySequence("Ctrl+7")
     window.page_shortcuts["calendar"].activated.emit()
     assert window.workspace.current_page() == "calendar"
 

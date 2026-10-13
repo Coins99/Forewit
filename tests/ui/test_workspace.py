@@ -23,6 +23,7 @@ from mailbrief.ui.actions_view import ActionRow, ActionsPanel
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import ELIDE_MARGIN, ROW_ROLE, elided
 from mailbrief.ui.calendar_view import GOOGLE_ON, CalendarPanel
+from mailbrief.ui.main_window import PAGE_SHORTCUTS
 from mailbrief.ui.theme import TEXT_PX, ThemeMode, apply_theme, current_tokens, ui_metrics
 from mailbrief.ui.workspace import (
     EMPTY_BRIEF,
@@ -193,7 +194,7 @@ def test_sidebar_requests_pages_and_settings(qtbot: QtBot) -> None:
     settings = QSignalSpy(sidebar.settings_requested)
     sidebar.set_current("drafts")
     assert pages.count() == 0  # Showing a page doesn't request it.
-    sidebar.nav.setCurrentIndex(sidebar.pages.index(1, 0))
+    sidebar.nav.setCurrentIndex(sidebar.pages.index(sidebar._row("actions"), 0))
     assert pages.at(0) == ["actions"]
     sidebar.nav.setFocus()
     QTest.keyClick(sidebar.nav, Qt.Key.Key_Return)
@@ -805,3 +806,16 @@ def test_project_organization_renders(
         for name, image in images.items():
             dpr = image.devicePixelRatio()
             assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
+
+
+def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
+    """The daily home, the mailbox, flagged and deferred work, drafts and history, then
+    Calendar set apart below a divider; Ctrl+1 to Ctrl+7 follow the same order."""
+    workspace = build(qtbot)
+    sidebar = workspace.sidebar
+    keys = [str(sidebar.pages.item(row).data(KEY_ROLE)) for row in range(sidebar.pages.rowCount())]
+    assert keys == ["today", "inbox", "actions", "waiting", "drafts", "briefs", "calendar"]
+    assert list(PAGE_SHORTCUTS) == keys
+    rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
+    assert rows[-1].height() == rows[0].height() + 12  # The gap above Calendar.
+    assert sidebar.nav.height() >= rows[-1].bottom()  # Every row fits, none scrolls.

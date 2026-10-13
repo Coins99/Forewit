@@ -57,6 +57,7 @@ from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import (
     HairlineDivider,
     HairlineSplitter,
+    hairline_pen,
     paint_focus_ring,
 )
 from mailbrief.ui.labels import ElidedLabel, button_label, plain_label
@@ -77,15 +78,21 @@ from mailbrief.ui.theme import (
 # How strongly a hovered or focused sidebar button shows the raised fill.
 ACTIVE_RAISE: Final = 0.6
 
+# Ordered as Gmail and Outlook order theirs: the daily home first (their Inbox), the
+# mailbox, flagged and deferred work (Starred, Snoozed), Drafts, then history (All Mail,
+# Archive). Calendar comes last, set apart, as Outlook keeps it apart from mail. Ctrl+1 to
+# Ctrl+7 follow this order.
 PAGES: Final = (
     ("today", "Today", "sun"),
+    ("inbox", "Inbox", "mail"),
     ("actions", "Actions", "checkbox"),
     ("waiting", "Waiting", "hourglass"),
     ("drafts", "Drafts", "pencil"),
     ("briefs", "Briefs", "calendar"),
     ("calendar", "Calendar", "calendar-week"),
-    ("inbox", "Inbox", "mail"),
 )
+# Pages that start a group: a gap with a hairline divider above them.
+GROUP_STARTS: Final = frozenset({"calendar"})
 EMPTY_BRIEF: Final = "No analyzed messages in this brief."
 
 KEY_ROLE: Final = Qt.ItemDataRole.UserRole + 1
@@ -93,6 +100,7 @@ ICON_ROLE: Final = Qt.ItemDataRole.UserRole + 2
 COUNT_ROLE: Final = Qt.ItemDataRole.UserRole + 3
 
 _NAV_ROW: Final = 31
+_GROUP_GAP: Final = 12  # Above a page that starts a group.
 _ICON_PX: Final = 14
 _ICON_X: Final = 10
 _LABEL_X: Final = _ICON_X + _ICON_PX + 10
@@ -265,6 +273,14 @@ class _NavDelegate(QStyledItemDelegate):
         selected = bool(state & QStyle.StateFlag.State_Selected)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if index.data(KEY_ROLE) in GROUP_STARTS:
+            # The gap above a group, with a hairline across its middle; the row below it.
+            painter.setPen(hairline_pen(tokens.hairline))
+            middle = rect.top() + _GROUP_GAP // 2
+            painter.drawLine(
+                QPointF(rect.left() + _ICON_X, middle), QPointF(rect.right() - 10, middle)
+            )
+            rect = rect.adjusted(0, _GROUP_GAP, 0, 0)
         if selected:  # A raised pill on the glass.
             paint_raised(
                 painter,
@@ -294,7 +310,8 @@ class _NavDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
-        return QSize(option.rect.width(), _NAV_ROW)
+        gap = _GROUP_GAP if index.data(KEY_ROLE) in GROUP_STARTS else 0
+        return QSize(option.rect.width(), _NAV_ROW + gap)
 
 
 class _NavList(QListView):
@@ -401,7 +418,7 @@ class SidebarNav(GlassChrome):
         self.nav.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.nav.setFixedHeight(_NAV_ROW * len(PAGES))
+        self.nav.setFixedHeight(_NAV_ROW * len(PAGES) + _GROUP_GAP * len(GROUP_STARTS))
         self.nav.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._quiet = False
         self.nav.selectionModel().currentChanged.connect(self._current_changed)

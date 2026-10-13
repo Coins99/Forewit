@@ -107,10 +107,10 @@ async def hold(window: MainWindow) -> asyncio.Event:
     ("number", "page", "sidebar"),
     [
         (1, "today", "today"),
-        (2, "actions", "actions"),
-        (3, "actions", "waiting"),
-        (4, "drafts", "drafts"),
-        (5, "briefs", "briefs"),
+        (3, "actions", "actions"),
+        (4, "actions", "waiting"),
+        (5, "drafts", "drafts"),
+        (6, "briefs", "briefs"),
     ],
 )
 async def test_each_shortcut_shows_its_page(
@@ -140,7 +140,7 @@ async def test_today_shows_the_waiting_review(window: MainWindow) -> None:
 
 async def test_the_briefs_shortcut_refuses_while_busy(window: MainWindow) -> None:
     release = await hold(window)
-    press(window, 5)
+    press(window, 6)
     assert window.status.text() == BUSY
     assert window.workspace.current_page() == "today"
     assert window.workspace.sidebar.current_key() == "today"
@@ -155,7 +155,7 @@ async def test_the_briefs_shortcut_waits_for_local_storage(
     window = MainWindow(FakeBackend())
     qtbot.addWidget(window)
     activate(qtbot, window)
-    press(window, 5)
+    press(window, 6)
     assert window.task is None
     assert window.status.text() == (
         "Saved briefs open once local storage loads. Choose Retry loading saved data."
@@ -174,10 +174,10 @@ async def test_a_page_that_loads_late_never_overrides_where_the_owner_went(
         return await load()
 
     monkeypatch.setattr(window.backend, "list_briefs", slow)
-    press(window, 5)  # Briefs starts loading…
+    press(window, 6)  # Briefs starts loading…
     await asyncio.sleep(0)
     assert window.task is not None and not window.task.done()
-    press(window, 4)  # …and the owner moves to Drafts before it has.
+    press(window, 5)  # …and the owner moves to Drafts before it has.
     assert window.workspace.current_page() == "drafts"
     release.set()
     await finish(window)
@@ -188,7 +188,7 @@ async def test_a_page_that_loads_late_never_overrides_where_the_owner_went(
 async def test_a_brief_that_opens_late_leaves_the_owner_where_they_went(
     window: MainWindow, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    press(window, 5)
+    press(window, 6)
     await finish(window)
     release = asyncio.Event()
     load = window.backend.load_brief
@@ -201,7 +201,7 @@ async def test_a_brief_that_opens_late_leaves_the_owner_where_they_went(
     window.history_panel.saved.setCurrentRow(0)
     window.history_panel.open_button.click()
     await asyncio.sleep(0)
-    press(window, 4)
+    press(window, 5)
     release.set()
     await finish(window)
     assert window.workspace.current_page() == "drafts"  # Today has the brief, unshown.

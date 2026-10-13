@@ -389,9 +389,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   which keeps its space. `add_widget(widget)` appends widgets right of the status,
   spacing 8.
 - `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 6, 10, 6, 10,
-  spacing 2. A fixed-height `QListView#sidebarNav` with pages today (Today, sun), actions
-  (Actions, checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs
-  (Briefs, calendar) and calendar (Calendar, calendar-week). Rows 31px: selected rows get
+  spacing 2. A fixed-height `QListView#sidebarNav` with pages in Gmail's and Outlook's
+  order (`PAGES`): today (Today, sun), inbox (Inbox, mail), actions (Actions,
+  checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs (Briefs,
+  calendar), then, set apart by a 12px gap with a hairline across it (`GROUP_STARTS`),
+  calendar (Calendar, calendar-week). Ctrl+1 to Ctrl+7 follow this order
+  (`PAGE_SHORTCUTS`). Rows 31px: selected rows get
   a rounded selection fill (radius 8);
   a 14px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
   right-aligned in text_secondary; the brief list's focus ring. Below: a stretch, then

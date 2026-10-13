@@ -204,7 +204,7 @@ from mailbrief.ui.theme import (
     apply_theme,
     current_scheme,
 )
-from mailbrief.ui.workspace import ThreePaneWorkspace
+from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
@@ -467,7 +467,8 @@ def _ready_text(ready: int) -> str:
 
 _RUN_WIDTH = 760
 # Ctrl+1 to Ctrl+7 (Cmd on macOS) show the sidebar's pages, in its order.
-PAGE_SHORTCUTS = ("today", "actions", "waiting", "drafts", "briefs", "calendar", "inbox")
+# Ctrl+1 to Ctrl+7 follow the sidebar's order.
+PAGE_SHORTCUTS = tuple(key for key, _label, _icon in PAGES)
 
 
 def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
