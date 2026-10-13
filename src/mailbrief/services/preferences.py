@@ -83,7 +83,11 @@ class PreferencesService:
             return self._replace(row, edit, now)
 
         saved = await self._write(operation)
-        logger.info("Preferences saved with %d sender rules", len(saved.excluded_senders))
+        logger.info(
+            "Preferences saved with %d sender rules and %d important senders",
+            len(saved.excluded_senders),
+            len(saved.important_senders),
+        )
         return saved
 
     async def reset(self) -> OwnerPreferences:

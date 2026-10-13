@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.config import Settings
 from mailbrief.domain.actions import (
@@ -25,7 +26,12 @@ from mailbrief.domain.briefs import (
     BriefRunResult,
     TransmissionPreview,
 )
-from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage, InboxPage
+from mailbrief.domain.cached_mail import (
+    WANTED_WINDOW_DAYS,
+    CachedAccount,
+    CachedMailPage,
+    InboxPage,
+)
 from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress, SyncResult
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
@@ -110,6 +116,7 @@ from mailbrief.storage.repositories import (
     OwnerConsentRepository,
     SyncRunRepository,
 )
+from mailbrief.storage.tables import AccountTable
 from mailbrief.ui.preferences import DesktopPreferences, PreferencesStore
 
 logger = logging.getLogger(__name__)
@@ -136,6 +143,19 @@ class _GmailBodies:
     async def fetch_message_body(self, provider_message_id: str) -> MessageBody:
         async with gmail_provider(self._settings, silent_only=True) as provider:
             return await provider.fetch_message_body(provider_message_id)
+
+
+async def _gmail_account(session: AsyncSession, account_email: str) -> AccountTable | None:
+    """The cached Gmail account with this address, if there is one."""
+    return next(
+        (
+            account
+            for account in await AccountRepository(session).list_all()
+            if account.provider == ProviderKind.GMAIL.value
+            and account.email_address == account_email
+        ),
+        None,
+    )
 
 
 class DesktopRuntime:
@@ -323,6 +343,7 @@ class DesktopRuntime:
                 shortlist_gate=review,
                 shortlist_limit=preferences.shortlist_limit,
                 excluded_senders=preferences.excluded_senders,
+                important_senders=preferences.important_senders,
                 local_date=local_date,
                 automatic=automatic,
             )
@@ -462,18 +483,12 @@ class DesktopRuntime:
 
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
         async with self._storage().session() as session:
-            accounts = await AccountRepository(session).list_all()
-            account = next(
-                (
-                    a
-                    for a in accounts
-                    if a.provider == ProviderKind.GMAIL.value and a.email_address == account_email
-                ),
-                None,
-            )
+            account = await _gmail_account(session, account_email)
             if account is None:
                 return InboxPage(account_email=account_email)
-            rows, more = await MessageRepository(session).get_inbox_page(account.id, offset)
+            messages = MessageRepository(session)
+            rows, more = await messages.get_inbox_page(account.id, offset)
+            since = datetime.now(UTC) - timedelta(days=WANTED_WINDOW_DAYS)
             return InboxPage(
                 account_email=account_email,
                 offset=offset,
@@ -484,7 +499,24 @@ class DesktopRuntime:
                     )
                     for row in rows
                 ),
+                wanted_ids=frozenset(
+                    row.provider_message_id for row in rows if row.review_wanted_at_utc
+                ),
+                wanted_recently=await messages.count_wanted(account.id, since),
             )
+
+    async def set_wanted(self, account_email: str, provider_message_id: str, wanted: bool) -> None:
+        """Mark a cached message as one that should have been in a brief, or unmark it
+        (ADR 0020). Local only: Gmail is never told."""
+        async with self._storage().session() as session:
+            account = await _gmail_account(session, account_email)
+            if account is None:
+                raise ValueError("Choose a message from the connected Gmail account.")
+            changed = await MessageRepository(session).set_review_wanted(
+                account.id, (provider_message_id,), datetime.now(UTC) if wanted else None
+            )
+            await session.commit()
+            logger.info("Wanted mark %s on %d messages", "set" if wanted else "cleared", changed)
 
     async def cached_messages(self, account_id: int, day: date, offset: int = 0) -> CachedMailPage:
         try:

@@ -16,6 +16,7 @@ from mailbrief.domain.preferences import (
     is_region_zone,
     normalize_exclusion,
     sender_excluded,
+    sender_matches,
 )
 
 
@@ -258,3 +259,37 @@ def test_saved_time_is_utc_and_revision_is_not_negative() -> None:
         OwnerPreferences(revision=-1)
     with pytest.raises(ValidationError):
         OwnerPreferences(revision=1, updated_at_utc=datetime(2026, 9, 29))
+
+
+def test_important_senders_are_normalized_and_deduplicated_like_exclusions() -> None:
+    edit = PreferencesEdit(
+        important_senders=("Partner@Example.com", "*.school.edu", "partner@example.com")
+    )
+    assert edit.important_senders == ("partner@example.com", "@school.edu")
+    assert OwnerPreferences.defaults().important_senders == ()
+
+
+def test_at_most_two_hundred_important_senders() -> None:
+    rules = tuple(f"person{index}@example.com" for index in range(EXCLUSIONS_MAX + 1))
+    with pytest.raises(ValidationError) as caught:
+        PreferencesEdit(important_senders=rules)
+    assert "important senders" in str(caught.value)
+
+
+def test_a_rule_in_both_lists_is_refused_without_echoing_it() -> None:
+    with pytest.raises(ValidationError) as caught:
+        PreferencesEdit(
+            excluded_senders=("private@example.com",), important_senders=("Private@Example.com",)
+        )
+    assert "can't be both excluded and important" in str(caught.value)
+    assert "private@" not in str(caught.value).casefold()
+    # A domain exclusion may still cover an important address: then the exclusion wins.
+    edit = PreferencesEdit(
+        excluded_senders=("@example.com",), important_senders=("partner@example.com",)
+    )
+    assert sender_excluded("partner@example.com", edit.excluded_senders)
+
+
+def test_sender_matches_is_what_exclusions_use() -> None:
+    assert sender_matches("Dean@CS.School.edu", ("@school.edu",))
+    assert not sender_matches("dean@notschool.edu", ("@school.edu",))

@@ -25,6 +25,35 @@ class MessageImportance(StrEnum):
     HIGH = "high"
 
 
+class InboxCategory(StrEnum):
+    """The tab a provider sorted a message into (Gmail's categories); None when unknown.
+
+    Gmail's Primary tab is ``personal``.
+    """
+
+    PERSONAL = "personal"
+    SOCIAL = "social"
+    PROMOTIONS = "promotions"
+    UPDATES = "updates"
+    FORUMS = "forums"
+
+
+class SenderSignal(StrEnum):
+    """What the owner's own choices say about a sender's mail (ADR 0020)."""
+
+    WANTED = "wanted"  # Mail the owner wanted, or acted on, more than mail they left out.
+    SKIPPED = "skipped"  # Mail the owner left out of reviews, and never wanted or kept.
+
+
+class SenderHistory(DomainModel):
+    """How many of a sender's messages the owner wanted (or acted on), left out of a
+    review, and kept in a brief."""
+
+    wanted: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    kept: int = Field(default=0, ge=0)
+
+
 class RankReason(StrEnum):
     """Auditable inputs to the local ranking score."""
 
@@ -39,6 +68,16 @@ class RankReason(StrEnum):
     RECENT = "recent"
     AUTOMATED_SENDER = "automated_sender"
     TRACKED_THREAD_REPLY = "tracked_thread_reply"  # A later message in a thread (ADR 0016).
+    # The provider's own signals and the owner's choices (ADR 0020).
+    STARRED = "starred"
+    PROMOTIONS = "promotions"
+    SOCIAL = "social"
+    UPDATES = "updates"
+    FORUMS = "forums"
+    BULK_MAIL = "bulk_mail"
+    IMPORTANT_SENDER = "important_sender"
+    WANTED_SENDER = "wanted_sender"
+    SKIPPED_SENDER = "skipped_sender"
 
 
 class EmailContact(DomainModel):
@@ -94,6 +133,11 @@ class NormalizedMessage(DomainModel):
     is_sent: bool = False  # Sent from this account (Gmail's SENT label).
     importance: MessageImportance = MessageImportance.NORMAL
     has_attachments: bool
+    # Gmail's category tab, star and mailing-list headers (ADR 0020); only presence of the
+    # List-Id, List-Unsubscribe or a bulk Precedence header is kept, never its value.
+    category: InboxCategory | None = None
+    is_starred: bool = False
+    is_bulk: bool = False
     body_preview: str = Field(default="", max_length=2_048)
     web_link: HttpUrl
 

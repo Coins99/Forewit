@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.messages import RankedMessage
+from mailbrief.domain.messages import RankedMessage, RankReason
 from mailbrief.ui.brief_list import (
     CHIP_GAP,
     NO_SUBJECT,
@@ -46,6 +46,7 @@ ROW_ROLE: Final = Qt.ItemDataRole.UserRole + 1
 TRACKED_REPLY: Final = "Tracked reply"
 LEFT_OUT: Final = "Left out earlier"
 EXCLUDED: Final = "Excluded in Settings"
+IMPORTANT: Final = "Important sender"
 
 _CHECK_GAP: Final = 10
 # The check box: its corner radius and the check mark's stroke (logical px).
@@ -75,6 +76,8 @@ def shortlist_row(
 ) -> ShortlistRow:
     message = ranked.message
     chips: list[Chip] = []
+    if RankReason.IMPORTANT_SENDER in ranked.reasons:
+        chips.append(Chip(IMPORTANT, ChipTone.ACCENT))
     if outside:
         chips.append(Chip(TRACKED_REPLY, ChipTone.ACCENT))
     if declined:

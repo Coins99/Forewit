@@ -39,7 +39,7 @@ def test_backup_includes_wal_and_preserves_source(tmp_path: Path) -> None:
         payload = archive.read("database.sqlite3")
     assert metadata["format_version"] == 1
     assert metadata["credentials_included"] is False
-    assert metadata["schema_revisions"] == ["20261012_0017"]
+    assert metadata["schema_revisions"] == ["20261013_0018"]
     assert metadata["database_sha256"] == hashlib.sha256(payload).hexdigest()
     restored = tmp_path / "snapshot.sqlite3"
     restored.write_bytes(payload)
@@ -75,7 +75,7 @@ def test_real_schema_backup(tmp_path: Path) -> None:
     create_backup(database, tmp_path / "backup.zip")
     with zipfile.ZipFile(tmp_path / "backup.zip") as archive:
         metadata = json.loads(archive.read("metadata.json"))
-    assert metadata["schema_revisions"] == ["20261012_0017"]
+    assert metadata["schema_revisions"] == ["20261013_0018"]
 
 
 def test_publication_failure_cleans_staging(

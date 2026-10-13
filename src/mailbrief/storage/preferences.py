@@ -56,14 +56,18 @@ def preferences_from_row(row: OwnerPreferencesTable | None) -> OwnerPreferences:
     """
     if row is None:
         return OwnerPreferences.defaults()
-    rules = row.excluded_senders_json
-    if not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules):
+    rules, important = row.excluded_senders_json, row.important_senders_json
+    if not all(
+        isinstance(saved, list) and all(isinstance(rule, str) for rule in saved)
+        for saved in (rules, important)
+    ):
         raise ValueError("Saved preferences are invalid.")
     try:
         return OwnerPreferences(
             time_zone=row.time_zone,
             shortlist_limit=row.shortlist_limit,
             excluded_senders=tuple(rules),
+            important_senders=tuple(important),
             draft_tone=row.draft_tone,
             draft_length=row.draft_length,
             ai_batch_size=row.ai_batch_size,
@@ -85,6 +89,7 @@ def apply_edit(row: OwnerPreferencesTable, edit: PreferencesEdit) -> None:
     row.time_zone = edit.time_zone
     row.shortlist_limit = edit.shortlist_limit
     row.excluded_senders_json = list(edit.excluded_senders)
+    row.important_senders_json = list(edit.important_senders)
     row.draft_tone = edit.draft_tone.value
     row.draft_length = edit.draft_length.value
     row.ai_batch_size = edit.ai_batch_size

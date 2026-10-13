@@ -212,6 +212,9 @@ class DesktopBackend(Protocol):
         self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
     ) -> SyncResult: ...
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage: ...
+    async def set_wanted(
+        self, account_email: str, provider_message_id: str, wanted: bool
+    ) -> None: ...
     async def cached_accounts(self) -> tuple[CachedAccount, ...]: ...
     async def cached_messages(
         self, account_id: int, day: date, offset: int = 0
@@ -920,6 +923,11 @@ class MainWindow(QMainWindow):
             lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
         )
         self.inbox_panel.source_requested.connect(self._open_source)
+        self.inbox_panel.wanted_requested.connect(
+            lambda message_id, wanted: self.start(
+                lambda: self._set_wanted(message_id, wanted), cancellable=False
+            )
+        )
         workspace.add_page("inbox", self.inbox_panel)
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
@@ -2784,12 +2792,29 @@ class MainWindow(QMainWindow):
         await self._refresh_calendar()  # Its Google events went with the sign-in.
         await self._show_auto_send()
 
-    async def _load_inbox(self, offset: int = 0) -> None:
+    async def _load_inbox(self, offset: int = 0, *, select: str | None = None) -> None:
         if self._account_email is None:
             self.inbox_panel.clear()
             return
         self.inbox_panel.zone = self.zone
-        self.inbox_panel.show_page(await self.backend.inbox_messages(self._account_email, offset))
+        self.inbox_panel.show_page(
+            await self.backend.inbox_messages(self._account_email, offset), select=select
+        )
+
+    async def _set_wanted(self, message_id: str, wanted: bool) -> None:
+        """Mark or unmark an Inbox message as one that should have been in a brief (ADR 0020),
+        then show the same page with it still selected."""
+        if self._account_email is None:
+            self.inbox_panel.clear()
+            return
+        await self.backend.set_wanted(self._account_email, message_id, wanted)
+        page = self.inbox_panel.page
+        await self._load_inbox(0 if page is None else page.offset, select=message_id)
+        self.status.setText(
+            "Marked: MailBrief counts this when ranking its sender's mail."
+            if wanted
+            else "Mark removed."
+        )
 
     async def _refresh_inbox(self, *, quiet: bool = False) -> None:
         previous_status = self.status.text()
