@@ -24,6 +24,26 @@ approved. Text tokens meet WCAG AA (4.5:1) on `panel` and `selection` in both mo
 Metrics (logical px): RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13, SMALL_PX 12, CAPTION_PX 11,
 TITLE_PX 15.
 
+### Glass tokens
+
+`GLASS_DARK` and `GLASS_LIGHT` (`glass_for(mode)`) hold the Liquid Glass colours, taken
+from the planner's prototype. No widget paints glass yet. Glass belongs to navigation
+chrome only (header, sidebar, pill buttons). Lists and the reading pane stay opaque.
+A translucent colour is a `Tint`: an opaque `#rrggbb` and a separate alpha, never an
+eight-digit hex. Glass lies over a backdrop drawn from `backdrop_top`, `backdrop_bottom`
+and `streak`, so contrast can be proven. `tests/ui/theme/test_glass.py` checks the
+worst case over the backdrop's darkest and brightest pixels, under full sheen or shade,
+at the tint's alpha and at `min_tint_alpha`:
+
+- `text` and `text_secondary` on a glass panel reach 4.5:1.
+- `text` on the raised pill and on pill buttons reaches 4.5:1, over glass, `panel` or
+  `opaque`.
+- `accent_fg` (the focus ring) beside glass reaches 3:1.
+- The opaque fallbacks reach 4.5:1 for text on `opaque`, and 3:1 for `rim_contrast`
+  on `opaque` and `panel`.
+
+`text_muted` fails on glass in both modes, so it never sits there.
+
 ## Hairlines (`ui/hairline.py`)
 
 All read colours from `current_tokens()` at paint time.
