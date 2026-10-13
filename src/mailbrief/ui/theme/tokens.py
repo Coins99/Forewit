@@ -79,6 +79,7 @@ class GlassTokens:
     pill_shade: Tint  # Its bottom half's shade.
     primary: Tint  # The one primary pill's fill.
     primary_rim: Tint
+    specular: Tint  # The light a pointer casts on a pill's rim; never on its body.
     opaque: str  # A panel's fill when transparency is reduced or contrast increased.
     rim_contrast: str  # Every rim when contrast is increased (3:1 on `opaque`).
 
@@ -285,6 +286,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#8db4ee", 0.18),
         primary_rim=Tint("#a9c7f5", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#15171c",
         rim_contrast="#c3c6cd",
     ),
@@ -306,6 +308,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#1d4f91", 0.12),
         primary_rim=Tint("#1d4f91", 0.45),
+        specular=Tint("#1d4f91", 0.6),
         opaque="#eef0f3",
         rim_contrast="#646872",
     ),
@@ -327,6 +330,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#8db4ee", 0.18),
         primary_rim=Tint("#a8c7f5", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#181715",
         rim_contrast="#c3c2b8",
     ),
@@ -348,6 +352,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#204e91", 0.12),
         primary_rim=Tint("#204e91", 0.45),
+        specular=Tint("#204e91", 0.6),
         opaque="#f0f0ef",
         rim_contrast="#6f6e69",
     ),
@@ -369,6 +374,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#64c2d7", 0.18),
         primary_rim=Tint("#8dd2e3", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#121919",
         rim_contrast="#bfc8c9",
     ),
@@ -390,6 +396,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#035a6a", 0.12),
         primary_rim=Tint("#035a6a", 0.45),
+        specular=Tint("#035a6a", 0.6),
         opaque="#edf1f1",
         rim_contrast="#5e6b6d",
     ),
@@ -411,6 +418,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#86c393", 0.18),
         primary_rim=Tint("#a4d3ad", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#141815",
         rim_contrast="#c2c8c3",
     ),
@@ -432,6 +440,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#03612a", 0.12),
         primary_rim=Tint("#03612a", 0.45),
+        specular=Tint("#03612a", 0.6),
         opaque="#eef1ee",
         rim_contrast="#626b63",
     ),
@@ -453,6 +462,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#c0a3e3", 0.18),
         primary_rim=Tint("#d0baec", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#19161b",
         rim_contrast="#c8c4cb",
     ),
@@ -474,6 +484,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#603b85", 0.12),
         primary_rim=Tint("#603b85", 0.45),
+        specular=Tint("#603b85", 0.6),
         opaque="#f1eff2",
         rim_contrast="#6b666f",
     ),
@@ -495,6 +506,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.22),
         primary=Tint("#e699aa", 0.18),
         primary_rim=Tint("#efb2bf", 0.7),
+        specular=Tint("#ffffff", 0.9),
         opaque="#1c1516",
         rim_contrast="#cdc3c4",
     ),
@@ -516,6 +528,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         pill_shade=Tint("#000000", 0.07),
         primary=Tint("#842d47", 0.12),
         primary_rim=Tint("#842d47", 0.45),
+        specular=Tint("#842d47", 0.6),
         opaque="#f3efef",
         rim_contrast="#716466",
     ),

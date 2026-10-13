@@ -735,9 +735,11 @@ class MainWindow(QMainWindow):
         workspace = self.workspace = ThreePaneWorkspace()
         sidebar = workspace.sidebar
         # The header: when Gmail was last checked, then Sync and review and Cancel.
-        self.generate_button = outline_button("&Sync and review", "generateButton", mnemonic=True)
+        self.generate_button = outline_button(
+            "&Sync and review", "generateButton", mnemonic=True, glass=True, primary=True
+        )
         self.generate_button.setToolTip("Refresh today's Inbox or retry an incomplete run.")
-        self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True)
+        self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True, glass=True)
         workspace.header.add_widget(self.generate_button)
         workspace.header.add_widget(self.cancel_button)
         # The sidebar's rows, under the names the rest of the window uses.

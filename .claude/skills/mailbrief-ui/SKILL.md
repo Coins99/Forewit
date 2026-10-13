@@ -25,7 +25,9 @@ Read AGENTS.md first; its invariants win. Component specs and the token table ar
   token) or a delegate's `drawText()`. Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
   could otherwise widen the layout.
-- Outline buttons come only from `outline_button()` in ui/labels.py. Their text is
+- Outline buttons come only from `outline_button()` in ui/labels.py; `glass=True` makes a
+  Liquid Glass pill (`ui/glass/button.py`), and `primary=True` tints the one primary action
+  of a screen. The header and the Today page use glass; other screens move one at a time. Their text is
   escaped with `button_label()` unless it is app text carrying its own `&` mnemonic
   (`mnemonic=True`); long mail-derived text uses `shorten=True`.
 - Fonts are bundled Inter (`ui_font(px, medium=...)`); sizes are in pixels, never points.

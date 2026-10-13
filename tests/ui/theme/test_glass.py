@@ -119,7 +119,8 @@ def test_text_on_glass_meets_wcag_aa(scheme: ColorScheme, mode: ThemeMode) -> No
     for tint in tints(g):
         glass = panels(g, tint)
         raised = [layered(b, g.raised, g.raised_sheen) for b in glass]
-        content = [rgb(t.panel), rgb(g.opaque)]  # Pills also sit on opaque surfaces.
+        # Pills also sit on opaque surfaces: panes, the opaque fallback and the header.
+        content = [rgb(t.panel), rgb(g.opaque), rgb(t.canvas)]
         surfaces = [
             ("panel", glass, (t.text, t.text_secondary)),
             ("raised", raised, (t.text,)),

@@ -22,6 +22,7 @@ from mailbrief.ui.brief_detail import (
     item_deadline_text,
     suggestion_meta,
 )
+from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import SMALL_PX
@@ -105,7 +106,7 @@ def test_mockup_item_reads_like_the_mockup(pane: BriefDetailPane) -> None:
         "Draft a reply",
         "Open in Gmail",
     ]
-    assert all(b.property("variant") == "outline" for b in pane.findChildren(QPushButton))
+    assert all(isinstance(b, GlassButton) for b in pane.findChildren(QPushButton))
     assert not any(b.autoDefault() for b in pane.findChildren(QPushButton))
 
 

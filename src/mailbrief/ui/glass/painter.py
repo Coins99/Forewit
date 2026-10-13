@@ -9,7 +9,15 @@ increased contrast does that too and draws every rim solid in `rim_contrast`.
 from enum import Enum
 
 from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QRadialGradient,
+)
 
 from mailbrief.ui.glass.backdrop import Backdrop, color
 from mailbrief.ui.theme import GlassTokens, Tint
@@ -47,13 +55,26 @@ def paint_rim(
 ) -> None:
     """A 1 device pixel rim inside ``rect``: bright at the top left, through ``stops[1]``,
     to ``stops[2]`` at the bottom right."""
-    inset = _half_device_pixel(painter)
-    inner = rect.adjusted(inset, inset, -inset, -inset)
-    gradient = QLinearGradient(inner.topLeft(), inner.bottomRight())
+    gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
     gradient.setColorAt(0.0, stops[0])
     gradient.setColorAt(0.55, stops[1])
     gradient.setColorAt(1.0, stops[2])
-    pen = QPen(QBrush(gradient), 1.0)
+    _stroke_rim(painter, rect, radius, QBrush(gradient))
+
+
+def paint_specular(painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF) -> None:
+    """The light a pointer at ``point`` casts on a pill's rim, brightest nearest it. Only
+    the rim lights up, so text on the pill keeps its proven contrast."""
+    light = QRadialGradient(point, rect.height() * 1.6)
+    light.setColorAt(0.0, color(glass.specular))
+    light.setColorAt(1.0, color(glass.specular, 0.0))
+    _stroke_rim(painter, rect, rect.height() / 2, QBrush(light))
+
+
+def _stroke_rim(painter: QPainter, rect: QRectF, radius: float, brush: QBrush) -> None:
+    inset = _half_device_pixel(painter)
+    inner = rect.adjusted(inset, inset, -inset, -inset)
+    pen = QPen(brush, 1.0)
     pen.setCosmetic(True)
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
