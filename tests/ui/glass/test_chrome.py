@@ -38,6 +38,12 @@ def workspace(qtbot: QtBot, qapp: QApplication, themed: None) -> ThreePaneWorksp
     return made
 
 
+def header_row(header: QImage) -> list[str]:
+    """Colours along the header's middle, every 10 px between the title on the left and
+    the status on the right, so no sample lands on a glyph on any platform."""
+    return [at(header, x, 20) for x in range(130, 440, 10)]
+
+
 def at(image: QImage, x: int, y: int) -> str:
     ratio = image.devicePixelRatio()
     return image.pixelColor(round(x * ratio), round(y * ratio)).name()
@@ -63,9 +69,10 @@ def test_the_header_and_sidebar_are_glass(workspace: ThreePaneWorkspace) -> None
     header = workspace.header.grab().toImage()
     sidebar = workspace.sidebar.grab().toImage()
     # Neither is a flat token colour any more: the backdrop shows through the tint.
-    assert at(header, 300, 20) not in (tokens.canvas, tokens.panel)
+    row = header_row(header)
+    assert not set(row) & {tokens.canvas, tokens.panel}
     assert at(sidebar, 64, workspace.sidebar.height() - 140) not in (tokens.canvas, tokens.panel)
-    assert at(header, 300, 20) != at(header, 600, 20)  # The streaks vary across it.
+    assert len(set(row)) > 1  # The streaks vary across it.
 
 
 @pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])
@@ -75,7 +82,7 @@ def test_accessibility_modes_paint_the_chrome_opaque(
     set_glass_preferences(GlassPreferences(mode=mode))
     header = workspace.header.grab().toImage()
     opaque = glass_for(ThemeMode.DARK).opaque
-    assert at(header, 300, 20) == at(header, 600, 20) == opaque
+    assert set(header_row(header)) == {opaque}
 
 
 def test_the_selected_page_is_a_raised_pill(workspace: ThreePaneWorkspace) -> None:
