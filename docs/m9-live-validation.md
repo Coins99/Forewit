@@ -45,6 +45,9 @@ record counts and outcomes here, not credentials, bodies or private writing.
 Keep a small labelled sample, including messages omitted by the shortlist. Track
 important missed mail, wrong dates, duplicate actions, usefulness of drafts, latency
 and AI request/token usage. Avoid private content in the journal.
+The Inbox page counts the emails you wanted in the last 14 days that the review didn't
+suggest (picked by hand in a review, or marked **Should have been in my brief**), which can
+fill the first column.
 
 | Day | Important mail missed | Wrong dates | Duplicate actions | Useful drafts / tried | Brief latency | AI requests / tokens | Issue reference |
 | --- | --- | --- | --- | --- | --- | --- | --- |

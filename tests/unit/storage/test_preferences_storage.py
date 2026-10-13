@@ -23,6 +23,7 @@ EDIT = PreferencesEdit(
     time_zone="America/Toronto",
     shortlist_limit=4,
     excluded_senders=("@news.example.com", "boss@example.com"),
+    important_senders=("partner@example.com", "@school.example.edu"),
     draft_tone=DraftTone.WARM,
     draft_length=DraftLength.SHORT,
     ai_batch_size=2,
@@ -88,6 +89,11 @@ async def test_get_row_reads_changes_made_elsewhere(
         "excluded_senders_json = '{\"a\": 1}'",
         "excluded_senders_json = '[1]'",
         "excluded_senders_json = '[\"not a rule\"]'",
+        "important_senders_json = '{\"a\": 1}'",
+        "important_senders_json = '[2]'",
+        "important_senders_json = '[\"not a rule\"]'",
+        # The same rule in both lists: saved by nothing MailBrief writes.
+        "important_senders_json = '[\"boss@example.com\"]'",
     ],
 )
 async def test_an_invalid_row_raises_a_static_error(session: AsyncSession, corruption: str) -> None:

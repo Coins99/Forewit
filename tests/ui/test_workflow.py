@@ -94,8 +94,12 @@ class FakeBackend(FakeDrafts):
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
         return InboxPage(account_email=account_email, offset=offset)
 
+    async def set_wanted(self, account_email: str, provider_message_id: str, wanted: bool) -> None:
+        self.wanted_marks.append((account_email, provider_message_id, wanted))
+
     def __init__(self) -> None:
         super().__init__()
+        self.wanted_marks: list[tuple[str, str, bool]] = []
         self.saved = DailyDigest(
             account_id="owner@example.com",
             local_date=date(2026, 9, 4),
