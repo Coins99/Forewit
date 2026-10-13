@@ -12,6 +12,11 @@ preview. **Refresh Inbox**, today's **Sync and review**, and scheduled refreshes
 check the full Inbox again. No email body is downloaded or sent to AI by this sync.
 Daily briefs still cover one local day and retain their existing consent rules.
 
+Select an email and choose **Should have been in my brief** when the review should have
+suggested it: MailBrief then ranks that sender's mail higher, and the page counts the emails
+you wanted in the last 14 days that the review didn't suggest. The mark stays on this
+computer; see [Ranking](ranking.md#should-have-been-in-my-brief).
+
 Only a complete scan reconciles cached Inbox membership. Failed, partial or cancelled
 scans retain unobserved cached entries and show an incomplete-sync message. The existing
 active-work and rate-limit budgets apply. Partial scans retain an account-scoped pagination

@@ -76,6 +76,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   See `docs/p1-projects-life-areas.md`. Unified Today is the next slice.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
+- Ranking signals (ADR 0020) implemented, awaiting live acceptance: Gmail's category tabs,
+  stars and bulk-mail headers, important senders (Settings > Preferences, `preferences
+  show`), and what the owner's own choices of the last 90 days say about each sender;
+  **Should have been in my brief** on the Inbox page. Migration 0018 follows 0017. See
+  `docs/ranking.md`.
 
 - Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
@@ -112,6 +117,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   owner's preferences, time zone rule and sender rules.
 - `src/mailbrief/services/preferences.py`: read, save and reset preferences, apply the
   saved AI limits (`effective_settings`) and the owner's zone (`owner_zone`).
+- `src/mailbrief/services/ranking.py`: the deterministic local score and its reasons, with
+  the owner's side (`RankSignals`, `sender_signal`, ADR 0020); `MessageRepository.
+  sender_history` counts what the owner wanted, left out and kept, by sender address.
 - `src/mailbrief/services/history.py`: saved briefs by day, missed days, the catch-up date
   rule (`check_brief_date`) and each brief's `coverage_line`.
 - `src/mailbrief/services/threads.py`: checks the threads of open actions and caches their
@@ -232,6 +240,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   are the owner's text: show them to the owner, but log only their count. Unreadable
   preferences fail closed (`PreferencesUnavailableError`) wherever data could be sent; display-only
   views fall back to the system time zone.
+- Ranking (ADR 0020) stays local, deterministic and explained: every rule shows its reason.
+  It learns only from the owner's own choices (picks, declines, Inbox marks, actions and
+  kept briefs), never from AI output, and reads only senders' addresses for it. Important
+  senders never override an exclusion, a decline, the review or the limit. Of the
+  `List-Id`, `List-Unsubscribe` and `Precedence` headers only whether they mark bulk mail
+  is kept, never their values. A message carries at most one review mark (declined or
+  wanted); the Inbox page's mark is local and never reaches Gmail.
 - Precedence: for AI limits, an explicit `MAILBRIEF_*` variable, then the saved
   preference, then the default; only `AI_LIMIT_FIELDS` are read from preferences, and only
   when absent from `Settings.model_fields_set`. For CLI `--timezone`, `--tone` and
