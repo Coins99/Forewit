@@ -86,7 +86,9 @@ Calendar page.
   calendars shown in Google Calendar (one the owner unticks goes with its events), replaced
   per calendar only by a complete read of it, excluded from exports and from the cleanup
   fingerprint (every sync rewrites it), and removed when the owner disconnects Google
-  Calendar, since an out-of-date schedule misleads.
+  Calendar, since an out-of-date schedule misleads. Since 2026-10-12 it is also removed
+  when Google rejects the sign-in or withdraws Calendar access, and when a backup is
+  restored.
 - **When it syncs.** A window of ten weeks around the week shown (the week before through
   eight weeks after), stale after 15 minutes. At most 20 calendars, the primary first, then
   the shown ones, read three at a time. Sign-in and rate-limit errors stop a sync; any other

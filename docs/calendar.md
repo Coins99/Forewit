@@ -55,7 +55,14 @@ while it waits for your browser; quitting stops them too. What was already read 
 
 **Disconnect** in the sidebar forgets the one sign-in and the saved Google events. It does
 not revoke MailBrief's access in your Google account; do that at
-myaccount.google.com/permissions if you want to.
+myaccount.google.com/permissions if you want to. The saved Google events also go when
+Google rejects the sign-in (it expired, or you revoked it), when Calendar access is taken
+away, and when you restore a backup, since an old schedule would look current.
+
+MailBrief only ever asks Google for read-only access to Gmail and Calendar. If Google's
+answer grants more, for example because this client was once given wider access, the
+sign-in is refused and nothing is saved: remove MailBrief at
+myaccount.google.com/permissions, then connect Gmail again.
 
 **Open in Google Calendar** opens the selected Google event in your browser.
 

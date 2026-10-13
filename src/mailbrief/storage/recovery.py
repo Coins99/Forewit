@@ -251,6 +251,10 @@ def _prepare_restored_database(database: Path) -> None:
         # Pagination checkpoints belong to a live scan, never restored history.
         connection.execute("UPDATE sync_runs SET inbox_continuation=NULL")
         connection.execute("DELETE FROM inbox_scan_messages")
+        # Google's events are a cache of the live calendar; a restored copy would show an
+        # old schedule as current (ADR 0018). The next sync reads them again.
+        connection.execute("DELETE FROM google_events")
+        connection.execute("DELETE FROM google_calendars")
         connection.commit()
         # Publish a self-contained file; no staging WAL can be left behind.
         connection.execute("PRAGMA journal_mode=DELETE")

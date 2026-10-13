@@ -13,6 +13,7 @@ import pytest
 from mailbrief.config import Settings
 from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
 from mailbrief.ports.calendar import CalendarNotAllowedError
+from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.ui import runtime as runtime_module
 from mailbrief.ui.runtime import DesktopRuntime
 
@@ -27,10 +28,13 @@ class Auth:
     def __init__(self) -> None:
         self.calendar_allowed = False
         self.grants = True  # What asking again gets from Google.
+        self.revoked = False  # Google refuses the saved sign-in.
         self.connects: list[tuple[bool, bool]] = []
 
     async def connect(self, *, silent_only: bool = False, ask_again: bool = False) -> object:
         self.connects.append((silent_only, ask_again))
+        if self.revoked:
+            raise AuthenticationRequiredError("Gmail authorization expired or was revoked.")
         if ask_again:
             self.calendar_allowed = self.grants
         return SimpleNamespace(email_address="owner@example.com")
@@ -117,6 +121,7 @@ async def test_calendar_follows_the_one_google_sign_in(
 
         await runtime.disconnect()
         assert cleared == [None] and await runtime.calendar_allowed() is None
+        assert legacy == [None, None]  # Disconnect removes the old calendar sign-in too.
         shown = await runtime.calendar_range(*WEEK, TORONTO)
         assert shown.google_events == () and shown.google_coverage is None
     finally:
@@ -140,5 +145,57 @@ async def test_a_failed_cleanup_never_fails_a_sign_in(
     runtime = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
     try:
         assert await runtime.connect(silent_only=True) == "owner@example.com"
+    finally:
+        await runtime.close()
+
+
+async def test_saved_google_events_go_when_access_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth = Auth()
+    auth.calendar_allowed = True
+
+    @asynccontextmanager
+    async def gmail_provider(settings: Settings, silent_only: bool) -> AsyncIterator[Provider]:
+        yield Provider(auth)
+
+    @asynccontextmanager
+    async def google_calendar(settings: Settings) -> AsyncIterator[Reader]:
+        yield Reader(auth)
+
+    monkeypatch.setattr(runtime_module, "gmail_provider", gmail_provider)
+    monkeypatch.setattr(runtime_module, "google_calendar", google_calendar)
+    monkeypatch.setattr(runtime_module, "forget_legacy_sign_in", lambda: None)
+    runtime = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
+    day = date(2026, 10, 14)
+
+    async def saved() -> int:
+        return len((await runtime.calendar_range(*WEEK, TORONTO)).google_events)
+
+    try:
+        await runtime.load_saved()
+        await runtime.connect(silent_only=True)
+        await runtime.sync_calendar(day, TORONTO)
+        assert await saved() == 1
+
+        auth.calendar_allowed = False  # Calendar access taken away at Google.
+        with pytest.raises(CalendarNotAllowedError):
+            await runtime.sync_calendar(day, TORONTO)
+        assert await saved() == 0
+
+        auth.calendar_allowed = True
+        await runtime.sync_calendar(day, TORONTO)
+        auth.revoked = True  # The whole sign-in revoked at Google, or expired.
+        with pytest.raises(AuthenticationRequiredError):
+            await runtime.sync_calendar(day, TORONTO)
+        assert await saved() == 0 and await runtime.calendar_allowed() is None
+
+        auth.revoked = False
+        await runtime.connect(silent_only=True)
+        await runtime.sync_calendar(day, TORONTO)
+        auth.revoked = True  # Found at the next start.
+        with pytest.raises(AuthenticationRequiredError):
+            await runtime.connect(silent_only=True)
+        assert await saved() == 0 and await runtime.calendar_allowed() is None
     finally:
         await runtime.close()

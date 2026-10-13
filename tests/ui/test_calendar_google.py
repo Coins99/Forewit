@@ -356,9 +356,14 @@ async def test_a_rejected_sign_in_is_reported_as_gmails(
     synced(backend)
     await window.initialize()
     backend.calendar_fail = AuthenticationRequiredError("private detail")
+    reads = len(backend.event_calls)
     window.calendar_panel.refresh_button.click()
     await finish(window)
     assert window.connection.text().startswith("Gmail: session expired")
+    await window.drain_calendar_reads()
+    assert len(backend.event_calls) > reads  # The page reads again, without Google's rows.
+    window.calendar_panel.plan_button.click()  # Plan with AI offers no Google times now.
+    assert not window.planning_dialog.google_times.isEnabled()
 
 
 async def test_a_sign_in_rejected_partway_through_is_reported_as_gmails(

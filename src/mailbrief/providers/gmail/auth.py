@@ -18,6 +18,7 @@ from mailbrief.providers.gmail.errors import GmailSetupError, permission_guidanc
 from mailbrief.providers.gmail.oauth import (
     CALENDAR_SCOPES,
     GMAIL_SCOPE,
+    SIGN_IN_SCOPES,
     AuthorizationGrant,
     DesktopClient,
 )
@@ -42,6 +43,8 @@ _TOKEN_MESSAGES = TokenMessages(
     invalid="Google returned an invalid token response.",
     token_type="Google returned an unsupported token type.",
     missing_scope="Gmail read-only access was not granted.",
+    extra_scope="Google gave MailBrief more than read-only access. Remove MailBrief at "
+    "myaccount.google.com/permissions, then connect Gmail again.",
 )
 
 
@@ -196,6 +199,7 @@ class GmailAuth:
             self._client.client_secret,
             fields,
             scopes=(GMAIL_SCOPE,),
+            allowed=SIGN_IN_SCOPES,
             messages=_TOKEN_MESSAGES,
             response_error=response_error,
             setup_error=GmailSetupError,

@@ -49,6 +49,7 @@ from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.ports.calendar import CalendarNotAllowedError
+from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.providers.gcal.auth import forget_legacy_sign_in
 from mailbrief.providers.gcal.errors import NOT_ALLOWED
 from mailbrief.providers.gcal.factory import google_calendar
@@ -173,11 +174,28 @@ class DesktopRuntime:
 
     async def connect(self, *, silent_only: bool) -> str:
         settings = (await self.get_preferences()).settings()
-        async with gmail_provider(settings, silent_only=silent_only) as provider:
-            identity = await provider.connect()
-            self._calendar_allowed = provider.calendar_allowed
+        try:
+            async with gmail_provider(settings, silent_only=silent_only) as provider:
+                identity = await provider.connect()
+                self._calendar_allowed = provider.calendar_allowed
+        except AuthenticationRequiredError:
+            await self._signed_out()  # Expired, revoked or never made: no Google data.
+            raise
         await self._forget_legacy_calendar_sign_in()
         return identity.email_address
+
+    async def _signed_out(self) -> None:
+        """The one Google sign-in is gone, so its saved Google events go too: a schedule
+        that can't be refreshed misleads (ADR 0018). A failure here is logged, never
+        raised over the sign-in's own error."""
+        self._calendar_allowed = None
+        if self._database is None:
+            return
+        try:
+            async with self._storage().session() as session:
+                await forget_cache(session)
+        except Exception as exc:
+            logger.info("Saved Google events not removed: %s", type(exc).__name__)
 
     async def disconnect(self) -> None:
         """Forget the one Google sign-in, so Gmail and Google Calendar both disconnect, and
@@ -188,6 +206,10 @@ class DesktopRuntime:
 
         await asyncio.to_thread(clear)
         self._calendar_allowed = None
+        try:  # The separate calendar sign-in ADR 0019 replaced, if one is still there.
+            await asyncio.to_thread(forget_legacy_sign_in)
+        except Exception as exc:
+            logger.info("Old calendar sign-in not removed: %s", type(exc).__name__)
         if self._database is not None:
             async with self._storage().session() as session:
                 await InboxScanRepository(session).clear()
@@ -876,9 +898,15 @@ class DesktopRuntime:
     async def sync_calendar(self, around: date, zone: ZoneInfo) -> CalendarSyncResult:
         settings = (await self.get_preferences()).settings()
         async with google_calendar(settings) as reader, self._storage().session() as session:
-            await reader.auth.connect(silent_only=True)
+            try:
+                await reader.auth.connect(silent_only=True)
+            except AuthenticationRequiredError:
+                await forget_cache(session)
+                self._calendar_allowed = None
+                raise
             self._calendar_allowed = reader.auth.calendar_allowed
             if not self._calendar_allowed:
+                await forget_cache(session)  # Calendar access was taken away at Google.
                 raise CalendarNotAllowedError(NOT_ALLOWED)
             return await CalendarSyncService(session, reader).sync(around, zone)
 

@@ -13,8 +13,11 @@ bought little.
 ## Decision
 
 - **One grant.** Connect Gmail asks Google once for `gmail.readonly`,
-  `calendar.events.readonly` and `calendar.calendarlist.readonly`, with
-  `include_granted_scopes=true` so asking again only adds permissions. The refresh
+  `calendar.events.readonly` and `calendar.calendarlist.readonly`, every time. (It first
+  also sent `include_granted_scopes=true`; that was dropped on 2026-10-12, since it lets
+  Google fold any wider permission this client was ever granted into the saved
+  credential. A token granting anything beyond these three is now refused, never saved.)
+  The refresh
   credential stays in Gmail's vault entry, in the same format, so older builds can still
   read it.
 - **Gmail required, Calendar optional.** The token exchange still requires only

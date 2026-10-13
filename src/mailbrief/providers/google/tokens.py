@@ -39,6 +39,7 @@ class TokenMessages:
     invalid: str
     token_type: str
     missing_scope: str
+    extra_scope: str
 
 
 async def exchange_tokens(
@@ -48,13 +49,16 @@ async def exchange_tokens(
     fields: Mapping[str, str],
     *,
     scopes: Collection[str],
+    allowed: Collection[str],
     messages: TokenMessages,
     response_error: Callable[[str], Exception],
     setup_error: Callable[[str], Exception],
     check_status: Callable[[httpx.Response], None],
 ) -> TokenResponse:
     """Post ``fields`` with the client's credentials and validate the answer: a bearer
-    token whose granted scopes, when Google lists them, include every one of ``scopes``."""
+    token whose granted scopes, when Google lists them, include every one of ``scopes`` and
+    nothing outside ``allowed``. A wider grant is refused, never saved: the sign-in's
+    read-only promise has to hold for the credential, not only for the code."""
     data = {**fields, "client_id": client_id, "client_secret": client_secret}
     try:
         response = await http.post(TOKEN_URL, data=data, follow_redirects=False)
@@ -79,6 +83,9 @@ async def exchange_tokens(
         raise response_error(messages.invalid) from None
     if tokens.token_type.casefold() != "bearer":
         raise response_error(messages.token_type)
-    if tokens.scope is not None and not set(scopes) <= set(tokens.scope.split()):
+    granted = set(() if tokens.scope is None else tokens.scope.split())
+    if tokens.scope is not None and not set(scopes) <= granted:
         raise ProviderPermissionError(messages.missing_scope)
+    if granted - set(allowed):
+        raise ProviderPermissionError(messages.extra_scope)
     return tokens

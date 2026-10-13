@@ -241,6 +241,16 @@ def archive(tmp_path: Path) -> Path:
             "VALUES(1,?,?,?,'partial',1,0,0,'synthetic-cursor')",
             (STAMP, "2026-10-05 12:00:00.000000", STAMP),
         )
+        connection.execute(
+            "INSERT INTO google_calendars (id,calendar_id,name,is_primary,updated_at_utc) "
+            "VALUES (1,'owner@example.com','Owner',1,?)",
+            (STAMP,),
+        )
+        connection.execute(
+            "INSERT INTO google_events (calendar_row_id,event_id,title,all_day,start_date,"
+            "last_date,fetched_at_utc) VALUES (1,'e','Old standup',1,'2026-10-12','2026-10-12',?)",
+            (STAMP,),
+        )
         connection.commit()
     backup = tmp_path / "backup.zip"
     create_backup(database, backup)
@@ -361,6 +371,10 @@ def test_restore_owner_records_and_disable_automatic_analysis(
         (0, None)
     ]
     assert query(tmp_path / "source.sqlite3", "SELECT auto_send_limit FROM ai_consents") == [(5,)]
+    # Google's events are a cache of the live calendar: a restored copy would be stale.
+    assert query(restored, "SELECT COUNT(*) FROM google_events") == [(0,)]
+    assert query(restored, "SELECT COUNT(*) FROM google_calendars") == [(0,)]
+    assert query(tmp_path / "source.sqlite3", "SELECT COUNT(*) FROM google_events") == [(1,)]
     assert not list(tmp_path.glob(".mailbrief-restore-*"))
     assert not Path(f"{restored}-wal").exists()
 

@@ -88,6 +88,7 @@ def test_only_google_calendar_links_are_kept() -> None:
     for link in (
         "https://calendar.google.com/calendar/event?eid=abc",
         "https://calendar.google.com",
+        "https://calendar.google.com/",
         "https://www.google.com/calendar",
     ):
         assert is_calendar_link(link)
@@ -106,6 +107,9 @@ def test_only_google_calendar_links_are_kept() -> None:
         "https://www.google.com/calendar/../url?q=https://evil.example",
         "https://www.google.com/calendar/%2e%2e/url",
         "https://www.google.com/calendar\\..\\url",
+        "https://calendar.google.com/url?q=https://evil.example",  # Its redirector too.
+        "https://calendar.google.com/x",
+        "https://www.google.com/",
     ):
         assert not is_calendar_link(link)
         mapped = map_event(event(htmlLink=link), CALENDAR)
