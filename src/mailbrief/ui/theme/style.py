@@ -287,7 +287,8 @@ class ThemeStyle(QProxyStyle):
     ) -> QSize:
         result = super().sizeFromContents(contents, option, size, widget)  # type: ignore[arg-type]
         if contents in _FIELDS:
-            result.setHeight(result.height() + _FIELD_GROW_Y)
+            line = option.fontMetrics.height()
+            result.setHeight(max(result.height(), line + _FIELD_EXTRA_Y))
         return result
 
     def _part(
@@ -391,9 +392,12 @@ _EDIT_FIELDS: Final = frozenset(
     }
 )
 _FIELDS: Final = frozenset({QStyle.ContentsType.CT_ComboBox, QStyle.ContentsType.CT_SpinBox})
-# Text fields' stylesheet padding is 4 px 8 px; drawn fields match it.
+# Text fields' stylesheet padding is 4 px 8 px; drawn fields match it. A text field is
+# its font's line height plus 12 px (that padding, a 1 px border and Qt's 1 px margin,
+# above and below); drawn fields are never shorter, on any platform (Fusion's own spin box
+# height differs between them).
 _FIELD_PAD_X: Final = 8
-_FIELD_GROW_Y: Final = 4
+_FIELD_EXTRA_Y: Final = 12
 CHEVRON_PX: Final = 8.0  # Width; the height is half of it.
 
 

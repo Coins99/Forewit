@@ -65,6 +65,7 @@ from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import (
     HairlineSplitter,
+    crisp_fill_rect,
     crisp_rect,
     hairline_pen,
     paint_focus_ring,
@@ -274,10 +275,9 @@ class ContentSheet(GlassChrome):
         # Its edge on device pixel centres, so the hairline stays crisp at any scale, and
         # the fill out to those pixels' outer edges.
         edge = crisp_rect(painter, self.sheet_rect())
-        half = 0.5 / self.devicePixelRatioF()
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(tokens.panel))
-        fill = edge.adjusted(-half, -half, half, half)
+        fill = crisp_fill_rect(painter, self.sheet_rect())
         painter.drawRoundedRect(fill, SHEET_RADIUS, SHEET_RADIUS)
         painter.setPen(hairline_pen(tokens.hairline))
         painter.setBrush(Qt.BrushStyle.NoBrush)

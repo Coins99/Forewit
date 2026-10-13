@@ -51,9 +51,10 @@ def test_fields_are_rounded_boxes_with_a_chevron(
         qtbot.addWidget(widget)
         widget.resize(200, widget.sizeHint().height())
         widget.show()
-    # Every field is about as tall as a text field and drawn in the panel colour.
+    # Every field is exactly as tall as a text field, on every platform (Fusion's own
+    # spin box height differs between them), and drawn in the panel colour.
     for widget in (combo, date, spin):
-        assert abs(widget.height() - line.height()) <= 1, widget
+        assert widget.height() == line.height(), widget
     for widget in (combo, date, spin):
         image = grab(widget)
         ratio = image.devicePixelRatio()

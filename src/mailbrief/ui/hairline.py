@@ -37,6 +37,22 @@ def crisp_rect(painter: QPainter, rect: QRectF) -> QRectF:
     return to_logical.mapRect(snapped)
 
 
+def crisp_fill_rect(painter: QPainter, rect: QRectF) -> QRectF:
+    """``rect`` snapped inward to whole device pixels, through the painter's device
+    transform, so a fill's straight edges are crisp at any scale: the outer edges of the
+    pixels `crisp_rect` puts a hairline on."""
+    to_device = painter.deviceTransform()
+    to_logical, invertible = to_device.inverted()
+    if not invertible:
+        return rect
+    edges = to_device.mapRect(rect)
+    snapped = QRectF(
+        QPointF(math.ceil(edges.left()), math.ceil(edges.top())),
+        QPointF(math.floor(edges.right()), math.floor(edges.bottom())),
+    )
+    return to_logical.mapRect(snapped)
+
+
 def hairline_pen(color: str) -> QPen:
     """A cosmetic pen: width 0 is always one device pixel."""
     pen = QPen(QColor(color), 0)
@@ -97,10 +113,10 @@ class HairlineFrame(QFrame):
         # On device pixel centres, so the border stays crisp at 125% and 150% too; the
         # fill reaches the outer edges of those pixels, so its straight edges are crisp.
         rect = crisp_rect(painter, QRectF(self.rect()))
-        half = 0.5 / self.devicePixelRatioF()
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(tokens.card))
-        painter.drawRoundedRect(rect.adjusted(-half, -half, half, half), self._radius, self._radius)
+        fill = crisp_fill_rect(painter, QRectF(self.rect()))
+        painter.drawRoundedRect(fill, self._radius, self._radius)
         if self._strong:
             painter.setPen(hairline_pen(tokens.border_strong))
             painter.setBrush(Qt.BrushStyle.NoBrush)

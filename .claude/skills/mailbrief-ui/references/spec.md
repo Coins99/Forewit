@@ -747,7 +747,7 @@ The brief list's chips keep their shorter forms (see Brief list).
   spin boxes have none of that.
 - `ThemeStyle` (Fusion behind a `QProxyStyle`) draws what the stylesheet can't without
   image files: combo boxes, date and time fields and spin boxes as the same rounded field
-  (`paint_field`, 4 px taller than Fusion's, text 8 px in) with thin `text_secondary`
+  (`paint_field`, exactly as tall as a text field on every platform: the line height plus 12 px; text 8 px in) with thin `text_secondary`
   chevrons (`paint_chevron`), and check boxes and radio buttons (`paint_check_box`,
   `paint_radio`: `primary_fill` with an `on_primary` mark or dot when on). Sub-control
   values overlap between controls (a combo box's edit field is a spin box's down
