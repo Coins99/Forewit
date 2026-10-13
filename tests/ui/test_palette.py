@@ -25,6 +25,7 @@ from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.palette import (
     COMMANDS,
+    DEBOUNCE_MS,
     FAILED,
     HINT,
     NO_MATCHES,
@@ -135,6 +136,7 @@ async def test_typing_searches_once_it_pauses_and_shows_sections(
 ) -> None:
     asked: list[str] = []
     palette.query_changed.connect(asked.append)
+    palette.show()
 
     palette.field.setText("q")  # Too short to search, and in no command.
     assert palette.note.text() == NO_MATCHES and asked == []
@@ -157,6 +159,22 @@ async def test_typing_searches_once_it_pauses_and_shows_sections(
     ]
     assert palette.results.currentRow() == 1
     assert palette.note.text() == HINT
+
+
+def test_closing_before_typing_pauses_starts_no_search(
+    qtbot: QtBot, palette: CommandPalette
+) -> None:
+    asked: list[str] = []
+    palette.query_changed.connect(asked.append)
+    palette.show()
+    palette.field.setText("budget")
+
+    palette.reject()
+    qtbot.wait(DEBOUNCE_MS * 2)
+
+    assert asked == []
+    palette._query()  # Even called directly, a closed palette asks for nothing.
+    assert asked == []
 
 
 def test_an_older_search_s_results_are_dropped(palette: CommandPalette) -> None:

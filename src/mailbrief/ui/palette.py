@@ -12,7 +12,7 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeyEvent
+from PySide6.QtGui import QColor, QHideEvent, QKeyEvent
 from PySide6.QtWidgets import QDialog, QLineEdit, QListWidgetItem, QVBoxLayout, QWidget
 
 from mailbrief.domain.drafts import KIND_NAMES
@@ -181,7 +181,14 @@ class CommandPalette(QDialog):
             self.note.setText(HINT if matching_commands(text) else NO_MATCHES)
 
     def _query(self) -> None:
-        self.query_changed.emit(self.field.text())
+        if self.isVisible():  # A search is for an open palette only.
+            self.query_changed.emit(self.field.text())
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """However it closes (Esc, a choice, the window quitting), a search still waiting
+        for typing to pause never starts."""
+        self._timer.stop()
+        super().hideEvent(event)
 
     def _show(self, commands: tuple[Command, ...], results: SearchResults | None) -> None:
         self.results.clear()
