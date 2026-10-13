@@ -9,8 +9,11 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from mailbrief.ui.glass.backdrop import SCALE, Backdrop, BackdropKey, render_backdrop
+from mailbrief.ui.glass.button import PAD_Y
 from mailbrief.ui.glass.painter import (
+    GLOW_WIDTH,
     GlassMode,
+    paint_glow,
     paint_panel,
     paint_pill,
     paint_raised,
@@ -158,3 +161,32 @@ def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) ->
     painter.end()
     top, middle, bottom = (picture.pixelColor(50, y).lightness() for y in (3, 20, 36))
     assert top > middle > bottom
+
+
+def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> None:
+    """Labels sit at least PAD_Y inside a pill, so a glow within GLOW_WIDTH of the edge
+    never lies under text and its contrast stays proven."""
+    assert GLOW_WIDTH < PAD_Y
+    glass = glass_for(ThemeMode.DARK)
+    width, height = 120, 40
+    radius = height / 2
+    picture = image(width, height)
+    painter = QPainter(picture)
+    paint_glow(painter, QRectF(0, 0, width, height), glass, QPointF(30, 20), 0.0)
+    assert all(
+        picture.pixelColor(x, y).alpha() == 0 for y in range(height) for x in range(width)
+    )  # No spread yet: no light.
+    paint_glow(painter, QRectF(0, 0, width, height), glass, QPointF(30, 20), 1.0)
+    painter.end()
+    lit = 0
+    for y in range(height):
+        for x in range(width):
+            if not picture.pixelColor(x, y).alpha():
+                continue
+            lit += 1
+            # Distance in from the stadium's edge, measured at the pixel's centre.
+            px, py = x + 0.5, y + 0.5
+            nearest_x = min(max(px, radius), width - radius)
+            inside = radius - ((px - nearest_x) ** 2 + (py - radius) ** 2) ** 0.5
+            assert inside <= GLOW_WIDTH + 1, (x, y, inside)
+    assert lit > 0

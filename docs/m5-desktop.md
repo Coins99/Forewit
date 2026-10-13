@@ -69,8 +69,8 @@ Since PR #21 the window is the three-pane workspace
   lists drafts and notes, and **Briefs** lists saved briefs and missed days.
 - The **status strip** along the bottom shows the latest status, with **Undo** after a
   change you can reverse.
-- Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts, Briefs
-  and Calendar. Briefs says so instead while MailBrief is busy or before local storage loads.
+- Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open the sidebar's pages in order: Today,
+  Inbox, Actions, Waiting, Drafts, Briefs and Calendar. Briefs says so instead while MailBrief is busy or before local storage loads.
 
 ## Daily workflow
 

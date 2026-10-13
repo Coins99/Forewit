@@ -2,6 +2,7 @@
 handles its text, name and icon like every other outline button."""
 
 import math
+from collections.abc import Callable
 from typing import Final
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, QSize, Qt, QVariantAnimation
@@ -16,31 +17,44 @@ from PySide6.QtGui import (
     QPaintEvent,
     QPen,
 )
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QStyleOptionButton
 
-from mailbrief.ui.glass.painter import GlassMode, paint_pill, paint_specular
+from mailbrief.ui.glass.painter import GlassMode, paint_glow, paint_pill, paint_specular
 from mailbrief.ui.glass.preferences import glass_preferences
+from mailbrief.ui.glass.profile import profiled
+from mailbrief.ui.hairline import keyboard_focus
 from mailbrief.ui.theme import current_glass, current_tokens
 
 # The outline button's box: text plus 14 px each side and 6 px above and below.
 PAD_X: Final = 14
 PAD_Y: Final = 6
 ICON_GAP: Final = 6
-LIFT: Final = 1  # How far a hovered pill rises; the button keeps room for it.
+# Room the button keeps round its pill, each side, for the pill to grow into on hover.
+ROOM_X: Final = 3
+ROOM_Y: Final = 1
+# How far a hovered pill grows, each side; the hover spring overshoots by about a tenth,
+# still inside the room.
+GROW_X: Final = 2.4
+GROW_Y: Final = 0.8
 FOCUS_WIDTH: Final = 2.0  # The focus ring, inside the pill's edge.
 PRESSED_SCALE: Final = 0.97
 DISABLED_OPACITY: Final = 0.5
 PRESS_MS: Final = 90
 RELEASE_MS: Final = 280
+HOVER_IN_MS: Final = 260
+HOVER_OUT_MS: Final = 200
 
 
 class GlassButton(QPushButton):
     """A pill of glass with its text and icon centred.
 
-    Hovering lifts it a pixel and lights its rim near the pointer; pressing shrinks it
-    slightly and releasing springs it back, both at once when motion is reduced. Focus
-    draws a ring in the accent colour, and ``primary`` tints the one primary action.
-    Reduced transparency and increased contrast paint it opaque.
+    Hovering animates in, as Apple's glass does: the pill grows a little on a spring, a
+    glow starts inside its edge under the pointer and spreads round it, and its rim lights
+    near the pointer, which the light follows. Leaving eases it all back. Pressing, by
+    mouse or keyboard, shrinks the pill slightly and releasing springs it back. With
+    motion reduced, the light comes at once and nothing moves; reduced transparency and
+    increased contrast paint the pill opaque, with no light. Keyboard focus draws a ring
+    in the accent colour (a click doesn't), and ``primary`` tints the one primary action.
     """
 
     def __init__(self, text: str, *, primary: bool = False) -> None:
@@ -49,18 +63,33 @@ class GlassButton(QPushButton):
         self.setProperty("variant", "glass")
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
-        self._pointer: QPointF | None = None
+        self._light_at: QPointF | None = None  # The pointer, kept while the light fades out.
+        self._hover = 0.0  # 0 at rest, 1 hovered; the spring passes 1 on the way in.
         self._scale = 1.0
         self.press_animation = QVariantAnimation(self)
         self.press_animation.valueChanged.connect(self._set_scale)
+        self.hover_animation = QVariantAnimation(self)
+        self.hover_animation.valueChanged.connect(self._set_hover)
+        # Qt emits these for mouse and keyboard presses alike, and emits released when a
+        # held button is disabled, so the pill never stays shrunk.
+        self.pressed.connect(self._pressed)
+        self.released.connect(self._released)
 
     def _set_scale(self, value: object) -> None:
         if isinstance(value, float):
             self._scale = value
             self.update()
 
+    def _set_hover(self, value: object) -> None:
+        if isinstance(value, float):
+            self._hover = value
+            self.update()
+
     def scale(self) -> float:
         return self._scale
+
+    def hover(self) -> float:
+        return self._hover
 
     def _shown_text(self) -> str:
         """The text as painted: mnemonic markers dropped and ``&&`` shown as ``&``."""
@@ -71,61 +100,107 @@ class GlassButton(QPushButton):
         width = metrics.horizontalAdvance(self._shown_text()) + 2 * PAD_X
         if not self.icon().isNull():
             width += self.iconSize().width() + ICON_GAP
-        height = metrics.height() + 2 * PAD_Y + 2 * LIFT
-        return QSize(math.ceil(width), math.ceil(height))
+        height = metrics.height() + 2 * PAD_Y
+        return QSize(math.ceil(width + 2 * ROOM_X), math.ceil(height + 2 * ROOM_Y))
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
-    def _animate_scale(self, target: float, duration: int, curve: QEasingCurve.Type) -> None:
-        animation = self.press_animation
+    def _animate(
+        self,
+        animation: QVariantAnimation,
+        set_value: Callable[[object], None],
+        start: float,
+        target: float,
+        duration: int,
+        curve: QEasingCurve.Type,
+    ) -> None:
+        """Run ``animation`` from ``start`` to ``target``; when motion is reduced, set
+        ``target`` at once instead."""
         animation.stop()
         if glass_preferences().reduce_motion:
             animation.setDuration(0)
-            self._set_scale(target)
+            set_value(float(target))
             return
         animation.setDuration(duration)
         animation.setEasingCurve(curve)
-        animation.setStartValue(self._scale)
+        animation.setStartValue(start)
         animation.setEndValue(target)
         animation.start()
 
+    def _animate_scale(self, target: float, duration: int, curve: QEasingCurve.Type) -> None:
+        animation = self.press_animation
+        self._animate(animation, self._set_scale, self._scale, target, duration, curve)
+
     def enterEvent(self, event: QEnterEvent) -> None:
-        self._pointer = event.position()
-        self.update()
+        self._light_at = event.position()
+        self._animate(
+            self.hover_animation,
+            self._set_hover,
+            self._hover,
+            1.0,
+            HOVER_IN_MS,
+            QEasingCurve.Type.OutBack,
+        )
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
-        self._pointer = None
-        self.update()
+        self._animate(
+            self.hover_animation,
+            self._set_hover,
+            self._hover,
+            0.0,
+            HOVER_OUT_MS,
+            QEasingCurve.Type.OutCubic,
+        )
         super().leaveEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        self._pointer = event.position()
+        self._light_at = event.position()
         self.update()
         super().mouseMoveEvent(event)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        super().mousePressEvent(event)
-        if self.isDown():
-            self._animate_scale(PRESSED_SCALE, PRESS_MS, QEasingCurve.Type.OutQuad)
+    def _pressed(self) -> None:
+        self._animate_scale(PRESSED_SCALE, PRESS_MS, QEasingCurve.Type.OutQuad)
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        super().mouseReleaseEvent(event)
+    def _released(self) -> None:
         self._animate_scale(1.0, RELEASE_MS, QEasingCurve.Type.OutBack)
 
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() != QEvent.Type.EnabledChange:
+            return
+        if not self.isEnabled():
+            # A disabled button gets no Leave or release: drop the hover and press now.
+            self.hover_animation.stop()
+            self.press_animation.stop()
+            self._set_hover(0.0)
+            self._set_scale(1.0)
+        elif self.underMouse():
+            self._animate(
+                self.hover_animation,
+                self._set_hover,
+                self._hover,
+                1.0,
+                HOVER_IN_MS,
+                QEasingCurve.Type.OutBack,
+            )
+
     def _pill(self) -> QRectF:
-        """The pill's rectangle: lifted when hovered, scaled about its centre."""
-        rect = QRectF(self.rect()).adjusted(0, LIFT, 0, -LIFT)
-        motion = not glass_preferences().reduce_motion
-        if motion and self.isEnabled() and self._pointer is not None and not self.isDown():
-            rect.translate(0, -LIFT)
+        """The pill's rectangle: grown into its room as hovered, scaled about its centre
+        while pressed."""
+        rect = QRectF(self.rect()).adjusted(ROOM_X, ROOM_Y, -ROOM_X, -ROOM_Y)
+        if self.isEnabled() and not glass_preferences().reduce_motion and self._hover:
+            grow_x = min(GROW_X * self._hover, ROOM_X)
+            grow_y = min(GROW_Y * self._hover, ROOM_Y)
+            rect.adjust(-grow_x, -grow_y, grow_x, grow_y)
         if self._scale != 1.0:
             centre = rect.center()
             rect.setSize(rect.size() * self._scale)
             rect.moveCenter(centre)
         return rect
 
+    @profiled("GlassButton")
     def paintEvent(self, event: QPaintEvent) -> None:
         glass, tokens, preferences = current_glass(), current_tokens(), glass_preferences()
         painter = QPainter(self)
@@ -135,10 +210,14 @@ class GlassButton(QPushButton):
             painter.setOpacity(DISABLED_OPACITY)
         paint_pill(painter, rect, glass, primary=self.primary, mode=preferences.mode)
         normal = preferences.mode is GlassMode.NORMAL
-        if normal and self.isEnabled() and self._pointer is not None:
-            paint_specular(painter, rect, glass, self._pointer)
+        light_at = self._light_at
+        if normal and self.isEnabled() and self._hover > 0 and light_at is not None:
+            paint_glow(painter, rect, glass, light_at, self._hover)
+            paint_specular(painter, rect, glass, light_at, self._hover)
         painter.setOpacity(1.0)
-        if self.hasFocus():
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        if keyboard_focus(option.state):  # As elsewhere: not after a click.
             ring = QPainterPath()
             inset = FOCUS_WIDTH / 2
             inner = rect.adjusted(inset, inset, -inset, -inset)

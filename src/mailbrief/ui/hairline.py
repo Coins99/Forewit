@@ -1,11 +1,32 @@
 """Hairlines painted with cosmetic pens: one device pixel at every scale, unlike QSS borders,
 which round to whole logical pixels and blur at fractional scales."""
 
+import math
+
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QFrame, QSplitter, QSplitterHandle, QStyle, QWidget
 
 from mailbrief.ui.theme import RADIUS, current_tokens
+
+
+def crisp_rect(painter: QPainter, rect: QRectF) -> QRectF:
+    """``rect`` moved onto the device pixel grid, half a device pixel inside its edges, so a
+    cosmetic 1 px line along it covers whole device pixels at any scale and position (at
+    125% or 150% a logical edge falls between device pixels).
+
+    Edges round inward, to the first and last whole device pixels inside ``rect``: a
+    widget's painting is clipped there, and a line rounded outward would be cut off."""
+    to_device = painter.deviceTransform()
+    to_logical, invertible = to_device.inverted()
+    if not invertible:
+        return rect
+    edges = to_device.mapRect(rect)
+    snapped = QRectF(
+        QPointF(math.ceil(edges.left()) + 0.5, math.ceil(edges.top()) + 0.5),
+        QPointF(math.floor(edges.right()) - 0.5, math.floor(edges.bottom()) - 0.5),
+    )
+    return to_logical.mapRect(snapped)
 
 
 def hairline_pen(color: str) -> QPen:
@@ -52,9 +73,8 @@ class HairlineFrame(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(hairline_pen(tokens.border_strong if self._strong else tokens.hairline))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        # Half a device pixel puts the line on pixel centres, so it stays crisp.
-        inset = 0.5 / self.devicePixelRatioF()
-        rect = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
+        # On device pixel centres, so the line stays crisp at 125% and 150% too.
+        rect = crisp_rect(painter, QRectF(self.rect()))
         painter.drawRoundedRect(rect, self._radius, self._radius)
         painter.end()
 

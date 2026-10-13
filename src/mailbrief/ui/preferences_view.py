@@ -9,6 +9,7 @@ permission is not part of the form: it is set in its own dialog, and the panel o
 import functools
 import zoneinfo
 from datetime import date
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt, Signal
@@ -87,6 +88,10 @@ def region_zones() -> tuple[str, ...]:
     return tuple(sorted(name for name in zoneinfo.available_timezones() if is_region_zone(name)))
 
 
+# A plain-text box's frame and document margins, above and below its lines.
+SENDERS_PADDING: Final = 12
+
+
 def _plain(text: str = "") -> QLabel:
     label = QLabel(text)
     label.setTextFormat(Qt.TextFormat.PlainText)
@@ -130,6 +135,9 @@ class PreferencesPanel(QWidget):
         self.senders.setAccessibleName("Excluded senders, one address or @domain per line")
         self.senders.setPlaceholderText("boss@example.com\n@newsletters.example.com")
         self.senders.setTabChangesFocus(True)
+        # Room for three addresses at least, and the placeholder's two lines in full.
+        lines = self.senders.fontMetrics().lineSpacing()
+        self.senders.setMinimumHeight(3 * lines + SENDERS_PADDING)
         self.senders.setMaximumHeight(110)
         form.addRow("&Excluded senders", self.senders)
         form.addRow(
@@ -160,9 +168,15 @@ class PreferencesPanel(QWidget):
         self.auto_line.setAccessibleName("Automatic analysis")
         self.auto_button = QPushButton("C&hange…")
         self.auto_button.setAccessibleName("Change automatic analysis")
-        automatic = QHBoxLayout()
-        automatic.addWidget(self.auto_line, 1)
-        automatic.addWidget(self.auto_button)
+        # In a widget, not a bare layout: the form then gives the line the height its
+        # wrapped text needs.
+        automatic = QWidget()
+        automatic.setObjectName("automaticAnalysisRow")
+        automatic.setAccessibleName("Automatic analysis")
+        automatic_row = QHBoxLayout(automatic)
+        automatic_row.setContentsMargins(0, 0, 0, 0)
+        automatic_row.addWidget(self.auto_line, 1)
+        automatic_row.addWidget(self.auto_button)
         form.addRow("Automatic analysis", automatic)
         form.addRow("", _plain(_REFRESH_NOTE))
         self.ai_limits: dict[str, QSpinBox] = {}

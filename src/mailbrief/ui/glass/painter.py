@@ -20,10 +20,15 @@ from PySide6.QtGui import (
 )
 
 from mailbrief.ui.glass.backdrop import Backdrop, color
+from mailbrief.ui.hairline import crisp_rect
 from mailbrief.ui.theme import GlassTokens, Tint
 
 # How far a panel's sheen reaches down from its top, in logical pixels.
 SHEEN_DEPTH = 120.0
+# A hovered pill's glow: how far it reaches in from the edge, in logical pixels (labels
+# sit at least 6 px in), and its strength as a share of the specular token's alpha.
+GLOW_WIDTH = 3.0
+GLOW_STRENGTH = 0.45
 
 
 class GlassMode(Enum):
@@ -38,22 +43,6 @@ def _fade(painter: QPainter, path: QPainterPath, start: QPointF, end: QPointF, t
     gradient.setColorAt(0.0, color(tint))
     gradient.setColorAt(1.0, color(tint, 0.0))
     painter.fillPath(path, gradient)
-
-
-def _crisp(painter: QPainter, rect: QRectF) -> QRectF:
-    """``rect`` moved onto the device pixel grid, half a device pixel inside its edges, so a
-    cosmetic 1 px line along it covers whole device pixels at any scale and position (at
-    125% or 150% a logical edge falls between device pixels)."""
-    to_device = painter.deviceTransform()
-    to_logical, invertible = to_device.inverted()
-    if not invertible:
-        return rect
-    edges = to_device.mapRect(rect)
-    snapped = QRectF(
-        QPointF(round(edges.left()) + 0.5, round(edges.top()) + 0.5),
-        QPointF(round(edges.right()) - 0.5, round(edges.bottom()) - 0.5),
-    )
-    return to_logical.mapRect(snapped)
 
 
 def paint_rim(
@@ -71,17 +60,48 @@ def paint_rim(
     _stroke_rim(painter, rect, radius, QBrush(gradient))
 
 
-def paint_specular(painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF) -> None:
-    """The light a pointer at ``point`` casts on a pill's rim, brightest nearest it. Only
-    the rim lights up, so text on the pill keeps its proven contrast."""
+def paint_specular(
+    painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF, strength: float = 1.0
+) -> None:
+    """The light a pointer at ``point`` casts on a pill's rim, brightest nearest it, at
+    ``strength`` (0 to 1) of the specular token. Only the rim lights up, so text on the
+    pill keeps its proven contrast."""
     light = QRadialGradient(point, rect.height() * 1.6)
-    light.setColorAt(0.0, color(glass.specular))
+    light.setColorAt(0.0, color(glass.specular, _unit(strength)))
     light.setColorAt(1.0, color(glass.specular, 0.0))
     _stroke_rim(painter, rect, rect.height() / 2, QBrush(light))
 
 
+def paint_glow(
+    painter: QPainter, rect: QRectF, glass: GlassTokens, point: QPointF, spread: float
+) -> None:
+    """Light from inside a pill's edge, as Apple's glass lights from within: it starts
+    under the pointer at ``point`` and spreads round the pill as ``spread`` goes from 0 to
+    1. It stays within GLOW_WIDTH of the edge, clear of the label (which sits at least
+    PAD_Y inside), so text keeps its proven contrast."""
+    spread = _unit(spread)
+    if spread <= 0:
+        return
+    path, _radius = _pill_path(rect)
+    reach = rect.height() * 0.5 + rect.width() * 1.1 * spread
+    light = QRadialGradient(point, reach)
+    light.setColorAt(0.0, color(glass.specular, GLOW_STRENGTH * spread))
+    light.setColorAt(1.0, color(glass.specular, 0.0))
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setClipPath(path)  # The stroke's outer half falls outside: a band inside.
+    painter.setPen(QPen(QBrush(light), 2 * GLOW_WIDTH))
+    painter.setBrush(QBrush())
+    painter.drawPath(path)
+    painter.restore()
+
+
+def _unit(value: float) -> float:
+    return max(0.0, min(value, 1.0))
+
+
 def _stroke_rim(painter: QPainter, rect: QRectF, radius: float, brush: QBrush) -> None:
-    inner = _crisp(painter, rect)
+    inner = crisp_rect(painter, rect)
     inset = (rect.width() - inner.width()) / 2
     pen = QPen(brush, 1.0)
     pen.setCosmetic(True)
@@ -130,7 +150,7 @@ def paint_panel(
     pen = QPen(color(glass.edge_light), 1.0)
     pen.setCosmetic(True)
     painter.setPen(pen)
-    top = _crisp(painter, rect).top()
+    top = crisp_rect(painter, rect).top()
     painter.drawLine(QPointF(rect.left(), top), QPointF(rect.right(), top))  # Lit top edge.
     painter.restore()
 

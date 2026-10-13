@@ -1,9 +1,9 @@
 """Cosmetic hairlines: cards, dividers and the splitter handle paint with token colours."""
 
 import pytest
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QStyle
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QRegion
+from PySide6.QtWidgets import QApplication, QLabel, QStyle, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.hairline import (
@@ -100,3 +100,25 @@ def transparent(image: QImage) -> bool:
 def test_the_focus_ring_paints_only_after_keyboard_movement(qapp: QApplication) -> None:
     assert transparent(ring_image(FOCUS))
     assert not transparent(ring_image(FOCUS | KEYBOARD))
+
+
+@pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 2.0])
+def test_a_card_border_is_one_crisp_device_pixel_at_any_scale(
+    qtbot: QtBot, qapp: QApplication, themed: None, dpr: float
+) -> None:
+    """At 125% and 150% a card at an odd position has edges between device pixels; its
+    border is snapped onto the grid, so it is still one full-strength pixel."""
+    apply_theme(qapp)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    parent.resize(200, 100)
+    card = HairlineFrame(parent)
+    card.setGeometry(3, 3, 120, 60)
+    picture = QImage(round(200 * dpr), round(100 * dpr), QImage.Format.Format_ARGB32_Premultiplied)
+    picture.setDevicePixelRatio(dpr)
+    picture.fill(QColor(DARK.panel))
+    parent.render(picture, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+    column = round(60 * dpr)  # Where the card's top edge is straight.
+    rows = [picture.pixelColor(column, y).name() for y in range(round(12 * dpr))]
+    border = [colour for colour in rows if colour != DARK.panel]
+    assert border == [DARK.hairline], (dpr, rows)

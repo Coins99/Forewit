@@ -75,8 +75,8 @@ MailBrief is one window with three panes (PR #21):
 reads**: only the messages you leave checked have their bodies downloaded. Step 2,
 **Approve sending to Groq**: approve or decline what will be sent; Decline starts focused.
 
-Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts, Briefs
-and Calendar. Tab runs from Sync and review through the sidebar and the page to Undo.
+Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting, Drafts,
+Briefs and Calendar, in the sidebar's order. Tab runs from Sync and review through the sidebar and the page to Undo.
 The theme is dark only for now.
 
 ## Start here
