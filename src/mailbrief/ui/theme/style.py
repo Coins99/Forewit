@@ -30,8 +30,10 @@ from mailbrief.ui.theme.tokens import (
     ITEM_PAD_Y,
     TEXT_PX,
     ColorScheme,
+    GlassTokens,
     ThemeMode,
     Tokens,
+    glass_for,
     tokens_for,
 )
 
@@ -82,6 +84,12 @@ def set_current_tokens(tokens: Tokens) -> None:
 def current_scheme() -> ColorScheme:
     """The colour scheme of the applied theme."""
     return _scheme
+
+
+def current_glass() -> GlassTokens:
+    """The glass tokens that go with the applied tokens."""
+    light = _current is tokens_for(ThemeMode.LIGHT, _scheme)
+    return glass_for(ThemeMode.LIGHT if light else ThemeMode.DARK, _scheme)
 
 
 class _ThemeFollower(QObject):
