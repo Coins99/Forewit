@@ -75,6 +75,23 @@ No widget uses it yet. The header, sidebar and buttons move to it in later PRs.
   - `paint_rim` is 1 device pixel at every scale, inset by half a device pixel.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
+- **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
+  - **Size:** the outline button's box plus 1 px above and below, room for the hover
+    lift. The header keeps its height.
+  - **Hover:** lifts the pill a pixel and lights its rim near the pointer with
+    `specular`. It never lights the body, which would cut the primary pill's text
+    contrast below 4.5:1 in dark mode.
+  - **Press:** shrinks it to 0.97 in 90 ms, and release springs it back with OutBack in
+    280 ms. Both are instant when motion is reduced.
+  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge.
+  - **Disabled:** the body at half opacity, with `text_muted` text.
+  - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
+    escaping.
+  - **Where:** the header's Sync and review (primary) and Cancel, and the Today page's
+    card and footer buttons.
+- **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
+  reduced motion that widgets read at paint time. Defaults until the system settings are
+  wired in.
 - **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
   `test_glass.py` proves contrast over. It also measures text contrast on painted pixels
   over each backdrop's darkest and brightest spots, rims at 1x and 2x, and the renderer's

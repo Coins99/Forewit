@@ -140,10 +140,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   proposal's effect (`proposals_view.py`); `lists.py` holds `ActivatingList`, where
   Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
-- `ui/glass/`: Liquid Glass, not yet used by any widget: `backdrop.py` paints the backdrop
+- `ui/glass/`: Liquid Glass: `backdrop.py` paints the backdrop
   from the glass tokens at a quarter of the window's size and blurs it, off the Qt thread
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
   glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
+  `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
+  header and on the Today page.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.

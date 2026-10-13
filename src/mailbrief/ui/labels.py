@@ -14,6 +14,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
+from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.theme.assets import icon, ui_font
 from mailbrief.ui.theme.style import current_tokens, follow_theme
 
@@ -93,6 +94,8 @@ def outline_button(
     px: int | None = None,
     icon_name: str | None = None,
     accessible_name: str | None = None,
+    glass: bool = False,
+    primary: bool = False,
 ) -> QPushButton:
     """An outline button named ``name``; every outline button is made here.
 
@@ -101,19 +104,25 @@ def outline_button(
     mail-derived text is cut by short_button_label and the full text becomes the
     accessible name, never a tooltip. ``px`` sets the font size, ``icon_name`` adds a
     bundled icon in the text colour, and ``accessible_name`` is what screen readers say
-    (without it, Qt reads the button's text).
+    (without it, Qt reads the button's text). With ``glass`` it is a Liquid Glass pill
+    (GlassButton); ``primary`` tints the one primary action and needs ``glass``.
     """
     if mnemonic and shorten:
         raise ValueError("A shortened label can't carry a mnemonic.")
+    if primary and not glass:
+        raise ValueError("Only a glass button can be primary.")
     if mnemonic:
         shown = text
     elif shorten:
         shown = short_button_label(text)
     else:
         shown = button_label(text)
-    button = QPushButton(shown)
+    if glass:
+        button: QPushButton = GlassButton(shown, primary=primary)
+    else:
+        button = QPushButton(shown)
+        button.setProperty("variant", "outline")
     button.setObjectName(name)
-    button.setProperty("variant", "outline")
     button.setAutoDefault(False)
     if shorten:
         button.setAccessibleName(text)
