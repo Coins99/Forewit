@@ -159,7 +159,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   typed `objc_msgSend`, the Windows registry and `SystemParametersInfo`; a failed read is
   no preference), and `accessibility.py` (`GlassAccessibility`) combines them with the
   owner's Settings > Appearance choices into `glass_preferences()`, again whenever the app
-  becomes active or Qt reports a contrast change.
+  becomes active or Qt reports a contrast change. `profile.py` times glass paints with
+  `MAILBRIEF_PAINT_PROFILE=1` and logs counts and percentiles at quit. What was built, its
+  measured cost and what wasn't built are in `docs/ui/liquid-glass.md`.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
@@ -409,12 +411,15 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Use the `/mailbrief-ui` skill (`.claude/skills/mailbrief-ui/`) for any change under
   `src/mailbrief/ui`.
 - Colours come only from `ui/theme/tokens.py`; mail and AI text only through
-  `plain_label()`, `wrap_label()` or a delegate's `drawText()`; button text through
-  `button_label()`.
+  `plain_label()`, `wrap_label()`, a delegate's `drawText()` or a glass pill's label
+  (`GlassButton` paints its `button_label()` text with `drawText()`, plain, mnemonics
+  hidden); button text through `button_label()`.
 - Render the screenshot gallery with
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
   and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
   Every colour scheme must pass the contrast tests in `tests/ui/theme/` in both modes.
+- Cards and glass rims snap their 1-device-pixel lines to the pixel grid with
+  `hairline.crisp_rect()`, so they stay crisp at 125% and 150%.
 - Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
   repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
   Python code for each, and a garbage collection there could free one it still visits.

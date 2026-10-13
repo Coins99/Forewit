@@ -90,21 +90,34 @@ them.
     top 120 px and a lit top edge.
   - `paint_raised` is a fill with a sheen, never a second layer of glass.
   - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
-  - `paint_rim` is 1 device pixel wide. It is snapped onto the device pixel grid through
-    the painter's device transform, so it stays one full pixel at 125% and 150% at any
-    position. `hairline.py` still insets by half a device pixel, which is crisp only on
-    whole-pixel positions.
+  - `paint_rim` is 1 device pixel wide. `hairline.crisp_rect` snaps it onto the device
+    pixel grid through the painter's device transform, rounding inward to the first
+    and last whole pixels inside the widget's clip. It stays one full pixel at 125% and
+    150% at any position. `HairlineFrame` (cards) uses the same helper.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
-  - **Size:** the outline button's box plus 1 px above and below, room for the hover
-    lift. The header keeps its height.
-  - **Hover:** lifts the pill a pixel and lights its rim near the pointer with
-    `specular`. It never lights the body, which would cut the primary pill's text
-    contrast below 4.5:1 in dark mode.
+  - **Size:** the outline button's box plus `ROOM_X` (3 px) each side and `ROOM_Y`
+    (1 px) above and below, room for the pill to grow into on hover. The header keeps
+    its height.
+  - **Hover:** animates in, as Apple's glass lights from within on interaction.
+    - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
+      whose overshoot still fits the room.
+    - `paint_glow` lights a band within `GLOW_WIDTH` (3 px) inside the edge. It starts
+      under the pointer and spreads round the pill as the animation runs.
+    - The rim's `specular` light fades in and follows the pointer.
+    - Leaving eases it all out (OutCubic, 200 ms). With motion reduced, the light comes
+      at once and the pill never grows. The solid modes paint no light.
+    - The body is never lit, and labels sit at least `PAD_Y` (6 px) inside the edge,
+      clear of the glow. Lighting the body would cut the primary pill's text contrast
+      below 4.5:1 in dark mode.
   - **Press:** shrinks it to 0.97 in 90 ms, and release springs it back with OutBack in
-    280 ms. Both are instant when motion is reduced.
-  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge.
+    280 ms. Both are instant when motion is reduced. They follow the button's `pressed`
+    and `released` signals, so a keyboard press (Space) shrinks it too. Qt emits
+    `released` when a held button is disabled, and disabling also drops the hover.
+  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge, only after keyboard
+    navigation (`hairline.keyboard_focus`), like the app's other focus rings; a click
+    gives no ring.
   - **Disabled:** the body at half opacity, with `text_muted` text.
   - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
     escaping.
@@ -125,6 +138,11 @@ them.
   application would see every event of every object. A change repaints every widget
   inside `paused_collection()`.
 - **The Appearance tab** shows a note when the system makes glass solid or still.
+- **Paint profiling** (`profile.py`): with `MAILBRIEF_PAINT_PROFILE=1`, the `@profiled`
+  paint methods are timed (GlassButton, HeaderBar, SidebarNav, SidebarPage and
+  SidebarButton). `run_desktop` logs one line per kind at quit: count, p50 and p95 in
+  ms. Without the variable, a paint costs one check. Measured costs are in
+  `docs/ui/liquid-glass.md`.
 - **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
   `test_glass.py` proves contrast over. It also measures text contrast on painted pixels
   over each backdrop's darkest and brightest spots, rims at 1x and 2x, and the renderer's
@@ -137,8 +155,10 @@ The owner picks a scheme in Settings > Appearance (`ui/appearance_view.py`): one
 button per scheme, each with a swatch of its dark panel ringed with its accent. Arrow
 keys move between them. The choice applies at once: `MainWindow._change_scheme` calls
 `apply_theme` whatever else is running, and `AppearanceWriter` saves it to
-`appearance.json` off the Qt thread. Startup applies the saved scheme once the data
-folder is locked.
+`appearance.json` on a one-thread worker. It never uses an asyncio task, which qasync
+once never ran. A failed save comes back through a queued signal, and shutdown waits for
+the write. Startup reads `appearance.json` once, once the data folder is locked: it
+applies the scheme and hands the choices to the window (`saved_appearance`).
 
 `apply_theme` sets the tokens before it changes the palette. Widgets that read
 `current_tokens()` at paint time need nothing more. A widget that keeps a colour, such
@@ -375,9 +395,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   which keeps its space. `add_widget(widget)` appends widgets right of the status,
   spacing 8.
 - `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 6, 10, 6, 10,
-  spacing 2. A fixed-height `QListView#sidebarNav` with pages today (Today, sun), actions
-  (Actions, checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs
-  (Briefs, calendar) and calendar (Calendar, calendar-week). Rows 31px: selected rows get
+  spacing 2. A fixed-height `QListView#sidebarNav` with pages in Gmail's and Outlook's
+  order (`PAGES`): today (Today, sun), inbox (Inbox, mail), actions (Actions,
+  checkbox), waiting (Waiting, hourglass), drafts (Drafts, pencil), briefs (Briefs,
+  calendar), then, set apart by a 12px gap with a hairline across it (`GROUP_STARTS`),
+  calendar (Calendar, calendar-week). A click in the gap chooses nothing. Ctrl+1 to Ctrl+7 follow this order
+  (`PAGE_SHORTCUTS`). Rows 31px: selected rows get
   a rounded selection fill (radius 8);
   a 14px icon at x 10 (text when selected, else text_secondary); a 13px label; the count
   right-aligned in text_secondary; the brief list's focus ring. Below: a stretch, then
@@ -583,6 +606,13 @@ The brief list's chips keep their shorter forms (see Brief list).
 - Automatic runs never show the run page.
 
 ## Buttons, lists and tabs
+
+- A dialog page whose rows can outgrow the dialog goes in a scroll area
+  (`settings_view._scrolling`: resizable, no frame, no focus, no sideways scrolling,
+  named `{page}Scroll` with the tab's title as its accessible name). A
+  squeezed form overlaps its rows: a wrapped note's last line hides behind the next row.
+  A form field that is a box layout goes in a plain `QWidget`, so the form gives a
+  wrapped label in it the height its text needs.
 
 - `QPushButton[variant="primary"]`: `accent_bg` background, `accent_fg` text, 1px
   `accent_border`, the outline button's radius and padding; `:focus` border `accent_fg`;

@@ -2,13 +2,24 @@
 hover, press, focus, disabled and the accessibility modes."""
 
 import pytest
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QEnterEvent, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-from mailbrief.ui.glass.button import LIFT, PRESS_MS, PRESSED_SCALE, RELEASE_MS, GlassButton
+from mailbrief.ui.glass import button as glass_button
+from mailbrief.ui.glass.button import (
+    GROW_X,
+    GROW_Y,
+    HOVER_IN_MS,
+    HOVER_OUT_MS,
+    PRESS_MS,
+    PRESSED_SCALE,
+    RELEASE_MS,
+    ROOM_Y,
+    GlassButton,
+)
 from mailbrief.ui.glass.painter import GlassMode
 from mailbrief.ui.glass.preferences import (
     GlassPreferences,
@@ -63,7 +74,7 @@ def test_a_glass_pill_is_no_taller_than_an_outline_button(
     outline = outline_button("&Cancel", "b", mnemonic=True)
     for made in (glass, outline):
         qtbot.addWidget(made)
-    assert glass.sizeHint().height() <= outline.sizeHint().height() + 2 * LIFT
+    assert glass.sizeHint().height() <= outline.sizeHint().height() + 2 * ROOM_Y
     assert glass.minimumSizeHint() == glass.sizeHint()
     with_icon = outline_button("Open", "c", glass=True, icon_name="refresh")
     qtbot.addWidget(with_icon)
@@ -79,24 +90,46 @@ def leave(button: GlassButton) -> None:
     button.leaveEvent(QEvent(QEvent.Type.Leave))
 
 
-def test_hovering_lifts_it_and_lights_its_rim(button: GlassButton) -> None:
+def test_hovering_animates_in_on_a_spring_and_eases_out(button: GlassButton, qtbot: QtBot) -> None:
+    """As Apple's glass: the pill grows a little on a spring and lights from within."""
     leave(button)  # Shown offscreen at the pointer, it may start hovered.
+    qtbot.waitUntil(lambda: button.hover() == 0.0)
     before = picture(button)
     resting = button._pill()
     hover(button)
-    assert button._pill().top() == resting.top() - LIFT
+    animation = button.hover_animation
+    assert animation.duration() == HOVER_IN_MS
+    assert animation.easingCurve().type() == QEasingCurve.Type.OutBack  # A spring.
+    qtbot.waitUntil(lambda: animation.state() == QAbstractAnimation.State.Stopped)
+    assert button.hover() == 1.0
+    grown = button._pill()
+    assert grown.width() == pytest.approx(resting.width() + 2 * GROW_X)
+    assert grown.height() == pytest.approx(resting.height() + 2 * GROW_Y)
     assert picture(button) != before
     leave(button)
+    assert animation.duration() == HOVER_OUT_MS
+    assert animation.easingCurve().type() == QEasingCurve.Type.OutCubic
+    qtbot.waitUntil(lambda: button.hover() == 0.0)
     assert button._pill() == resting
     assert picture(button) == before
 
 
-def test_reduced_motion_never_lifts_or_animates(button: GlassButton) -> None:
+def test_the_spring_overshoot_stays_inside_the_button(button: GlassButton) -> None:
+    button._set_hover(1.15)  # Past OutBack's overshoot of about a tenth.
+    assert QRectF(button.rect()).contains(button._pill())
+
+
+def test_reduced_motion_lights_at_once_and_never_moves(button: GlassButton) -> None:
     set_glass_preferences(GlassPreferences(reduce_motion=True))
     leave(button)
+    assert button.hover() == 0.0  # At once.
     resting = button._pill()
+    before = picture(button)
     hover(button)
-    assert button._pill() == resting
+    assert button.hover_animation.duration() == 0
+    assert button.hover() == 1.0
+    assert button._pill() == resting  # No growth…
+    assert picture(button) != before  # …but the light shows.
     QTest.mousePress(button, Qt.MouseButton.LeftButton)
     assert button.press_animation.duration() == 0
     assert button.scale() == PRESSED_SCALE
@@ -118,21 +151,47 @@ def test_pressing_shrinks_it_and_releasing_springs_back(button: GlassButton, qtb
     qtbot.waitUntil(lambda: button.scale() == 1.0)
 
 
-def test_focus_draws_an_accent_ring(button: GlassButton, qtbot: QtBot) -> None:
+def accent_in_middle_row(image: QImage) -> bool:
+    middle = round(image.height() / 2)
+    accent = current_tokens().accent_fg
+    return accent in {image.pixelColor(x, middle).name() for x in range(image.width())}
+
+
+def test_keyboard_focus_draws_an_accent_ring_and_a_click_does_not(
+    button: GlassButton, qtbot: QtBot
+) -> None:
+    """As the app's other focus rings: shown once the keyboard has moved focus."""
     with qtbot.waitActive(button, timeout=5000):
         button.activateWindow()
-    button.clearFocus()  # A lone button window takes focus when it activates.
-    qtbot.waitUntil(lambda: not button.hasFocus())
-    unfocused = picture(button)
-    button.setFocus()
+    window = button.window()
+    window.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, False)
+    button.setFocus(Qt.FocusReason.MouseFocusReason)
     qtbot.waitUntil(button.hasFocus)
-    focused = picture(button)
-    assert focused != unfocused
-    dpr = focused.devicePixelRatio()
-    middle = round(button.height() / 2 * dpr)
-    accent = current_tokens().accent_fg
-    row = [focused.pixelColor(x, middle).name() for x in range(round(button.width() * dpr))]
-    assert accent in row
+    assert not accent_in_middle_row(picture(button))  # Focused by a click: no ring.
+    window.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, True)  # As Tab sets it.
+    assert accent_in_middle_row(picture(button))
+
+
+def test_space_shrinks_it_and_releasing_springs_back(button: GlassButton, qtbot: QtBot) -> None:
+    """Pressed by the keyboard as by the mouse."""
+    QTest.keyPress(button, Qt.Key.Key_Space)
+    assert button.isDown()
+    assert button.press_animation.endValue() == PRESSED_SCALE
+    qtbot.waitUntil(lambda: button.scale() == PRESSED_SCALE)
+    QTest.keyRelease(button, Qt.Key.Key_Space)
+    assert button.press_animation.endValue() == 1.0
+    qtbot.waitUntil(lambda: button.scale() == 1.0)
+
+
+def test_disabling_a_held_pill_releases_and_unlights_it(button: GlassButton, qtbot: QtBot) -> None:
+    """A disabled button gets no release or Leave, so it would stay shrunk and lit."""
+    hover(button)
+    QTest.mousePress(button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: button.scale() == PRESSED_SCALE)
+    button.setEnabled(False)
+    qtbot.waitUntil(lambda: button.scale() == 1.0)  # Qt releases a disabled button.
+    assert button.hover() == 0.0
+    assert not button.isDown()
 
 
 def test_disabled_and_primary_paint_differently(button: GlassButton, qtbot: QtBot) -> None:
@@ -145,17 +204,18 @@ def test_disabled_and_primary_paint_differently(button: GlassButton, qtbot: QtBo
 
 
 @pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])
-def test_accessibility_modes_paint_no_rim_light(button: GlassButton, mode: GlassMode) -> None:
+def test_accessibility_modes_paint_no_hover_light(
+    button: GlassButton, mode: GlassMode, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    painted: list[str] = []
+    monkeypatch.setattr(glass_button, "paint_glow", lambda *args: painted.append("glow"))
+    monkeypatch.setattr(glass_button, "paint_specular", lambda *args: painted.append("rim"))
+    button._light_at = QPointF(10, 10)
+    button._set_hover(1.0)
     set_glass_preferences(GlassPreferences(mode=mode))
     assert glass_preferences().mode is mode
-    leave(button)
-    resting = picture(button)
-    hover(button)
-    lifted = picture(button)
-    # The pill rises a pixel, but no light is added to its rim.
-    lit = sum(
-        1 for y in range(lifted.height()) if lifted.pixelColor(lifted.width() // 2, y).alpha()
-    )
-    assert lit == sum(
-        1 for y in range(resting.height()) if resting.pixelColor(resting.width() // 2, y).alpha()
-    )
+    picture(button)
+    assert painted == []
+    set_glass_preferences(GlassPreferences())
+    picture(button)
+    assert painted == ["glow", "rim"]
