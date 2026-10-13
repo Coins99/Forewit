@@ -2,12 +2,20 @@
 
 ## Tokens
 
-DARK is measured from the approved mockup screenshot
-(`docs/ui/mockup-three-pane-dark.png`). LIGHT is provisional until a light mockup is
-approved. Text tokens meet WCAG AA (4.5:1) on `panel` and `selection` in both modes;
+Each `ColorScheme` has a dark and a light set (`tokens_for(mode, scheme)`):
+
+- **Slate** is the default: grey-blue, from the Liquid Glass prototype. `DARK` and `LIGHT`
+  are Slate's sets.
+- **Graphite** is the table below, measured from the first mockup
+  (`docs/ui/mockup-three-pane-dark.png`).
+- **Ocean**, **Sage**, **Plum** and **Rose** keep Slate's lightness and change its hue,
+  for the neutrals and the accent alike. Warning colours stay amber in every scheme.
+
+Light sets are provisional until a light mockup is approved. In every scheme and both
+modes, text tokens meet WCAG AA (4.5:1) on `panel` and `selection`;
 `tests/ui/theme/test_theme.py` checks this.
 
-| field | DARK (measured) | LIGHT (provisional) | used for |
+| field | Graphite dark (measured) | Graphite light (provisional) | used for |
 |---|---|---|---|
 | canvas | #151515 | #f5f4f0 | header bar |
 | panel | #1a1a19 | #ffffff | window, panes, cards |
@@ -26,8 +34,8 @@ TITLE_PX 15.
 
 ### Glass tokens
 
-`GLASS_DARK` and `GLASS_LIGHT` (`glass_for(mode)`) hold the Liquid Glass colours, taken
-from the planner's prototype. No widget paints glass yet. Glass belongs to navigation
+`glass_for(mode, scheme)` holds the Liquid Glass colours, taken from the planner's
+prototype, for every scheme. `GLASS_DARK` and `GLASS_LIGHT` are Slate's. No widget paints glass yet. Glass belongs to navigation
 chrome only (header, sidebar, pill buttons). Lists and the reading pane stay opaque.
 A translucent colour is a `Tint`: an opaque `#rrggbb` and a separate alpha, never an
 eight-digit hex. Glass lies over a backdrop drawn from `backdrop_top`, `backdrop_bottom`
@@ -43,6 +51,21 @@ at the tint's alpha and at `min_tint_alpha`:
   on `opaque` and `panel`.
 
 `text_muted` fails on glass in both modes, so it never sits there.
+
+### Changing scheme
+
+The owner picks a scheme in Settings > Appearance (`ui/appearance_view.py`): one radio
+button per scheme, each with a swatch of its dark panel ringed with its accent. Arrow
+keys move between them. The choice applies at once: `MainWindow._change_scheme` calls
+`apply_theme` whatever else is running, and `AppearanceWriter` saves it to
+`appearance.json` off the Qt thread. Startup applies the saved scheme once the data
+folder is locked.
+
+`apply_theme` sets the tokens before it changes the palette. Widgets that read
+`current_tokens()` at paint time need nothing more. A widget that keeps a colour, such
+as an icon tinted when it was made, sets it through `follow_theme(widget, apply)`. That
+runs `apply` now and again on every `PaletteChange` or `StyleChange`, because a hidden
+widget gets only `StyleChange`.
 
 ## Hairlines (`ui/hairline.py`)
 

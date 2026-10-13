@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QHBoxLayout,
     QListWidget,
@@ -148,6 +149,7 @@ from mailbrief.ui.actions_view import (
     SEEN,
     ActionsPanel,
 )
+from mailbrief.ui.appearance import Appearance, AppearanceStore, AppearanceWriter
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
@@ -191,7 +193,15 @@ from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
 from mailbrief.ui.settings_view import SettingsDialog
-from mailbrief.ui.theme import CAPTION_PX, SMALL_PX, TITLE_PX
+from mailbrief.ui.theme import (
+    CAPTION_PX,
+    SMALL_PX,
+    TITLE_PX,
+    ColorScheme,
+    ThemeMode,
+    apply_theme,
+    current_scheme,
+)
 from mailbrief.ui.workspace import ThreePaneWorkspace
 
 
@@ -592,9 +602,19 @@ class MainWindow(QMainWindow):
 
     closing = Signal()
 
-    def __init__(self, backend: DesktopBackend, *, database_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        backend: DesktopBackend,
+        *,
+        database_path: Path | None = None,
+        appearance: AppearanceStore | None = None,
+    ) -> None:
         super().__init__()
         self.backend = backend
+        # Without a store (in tests), a colour change applies but isn't saved.
+        self.appearance_writes = (
+            None if appearance is None else AppearanceWriter(appearance, self._appearance_not_saved)
+        )
         self.pending_restore: tuple[Path, BackupMetadata] | None = None
         self._unsaved_drafts: set[str] = set()
         self.data_dialog = (
@@ -701,6 +721,7 @@ class MainWindow(QMainWindow):
         self.settings_dialog.revoke_requested.connect(
             lambda: self.start(self._revoke_consent, cancellable=False)
         )
+        self.settings_dialog.appearance_panel.scheme_chosen.connect(self._change_scheme)
         preferences_panel = self.settings_dialog.preferences_panel
         preferences_panel.save_requested.connect(self._request_save_owner_preferences)
         preferences_panel.reset_requested.connect(
@@ -2523,6 +2544,7 @@ class MainWindow(QMainWindow):
             # A corrupt settings file must remain repairable from the editor.
             preferences = DesktopPreferences()
         self.settings_dialog.set_preferences(preferences)
+        self.settings_dialog.appearance_panel.set_scheme(current_scheme())
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
@@ -2586,6 +2608,27 @@ class MainWindow(QMainWindow):
         self.settings_dialog.preferences_panel.set_preferences(saved)
         self.status.setText(message)
         await self._refresh_views()
+
+    def _change_scheme(self, scheme: ColorScheme) -> None:
+        """Apply the owner's colours at once, whatever else is running, then save them."""
+        application = QApplication.instance()
+        if not isinstance(application, QApplication):
+            return
+        try:
+            apply_theme(application, ThemeMode.DARK, scheme)
+        except Exception as exc:
+            # apply_theme has put back what was there.
+            log_failure(exc)
+            self.settings_dialog.appearance_panel.set_scheme(current_scheme())
+            self.settings_dialog.status.setText("The colours couldn't be changed.")
+            return
+        if self.appearance_writes is not None:
+            self.appearance_writes.save(Appearance(color_scheme=scheme))
+
+    def _appearance_not_saved(self) -> None:
+        self.settings_dialog.status.setText(
+            "The colours couldn't be saved. They stay until MailBrief closes."
+        )
 
     def _request_save_preferences(self, preferences: DesktopPreferences) -> None:
         self.start(lambda: self._save_preferences(preferences), cancellable=False)
@@ -3325,6 +3368,8 @@ class MainWindow(QMainWindow):
                 read.cancel()
             await self.drain_calendar_reads()
             await self.draft_writes.drain()
+            if self.appearance_writes is not None:
+                await self.appearance_writes.drain()
         finally:
             try:
                 await self.backend.close()

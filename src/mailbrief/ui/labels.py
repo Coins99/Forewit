@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
 from mailbrief.ui.theme.assets import icon, ui_font
-from mailbrief.ui.theme.style import current_tokens
+from mailbrief.ui.theme.style import current_tokens, follow_theme
 
 
 def plain_label(
@@ -122,7 +122,10 @@ def outline_button(
     if px is not None:
         button.setFont(ui_font(px))
     if icon_name is not None:
-        button.setIcon(icon(icon_name, current_tokens().text, OUTLINE_ICON_PX))
+        glyph = icon_name  # Narrowed for the lambda.
+        follow_theme(
+            button, lambda: button.setIcon(icon(glyph, current_tokens().text, OUTLINE_ICON_PX))
+        )
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))
     return button
 

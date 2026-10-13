@@ -133,7 +133,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   rows and lists; `action_detail.py`: the selected action; `action_text.py`: the details
   both show) and the action editor, the drafts pane (`drafts_view.py`), editor
   (`draft_editor.py`) and its Write with AI panel (`drafting_panel.py`), the Settings
-  Preferences tab (`preferences_view.py`) and the Briefs page for saved briefs and missed
+  Preferences tab (`preferences_view.py`), the Appearance tab (`appearance_view.py`; the
+  choice is saved in `appearance.json` beside the database by `appearance.py`, never in
+  `desktop-settings.json`, which older builds would refuse) and the Briefs page for saved briefs and missed
   days (`history_view.py`), the Proposals dialog for one action and the wording of a
   proposal's effect (`proposals_view.py`); `lists.py` holds `ActivatingList`, where
   Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
@@ -141,8 +143,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
-- `ui/theme/`: design tokens (`tokens.py`, the only place UI colours are defined), the
-  Fusion palette and stylesheet (`style.py`, `apply_theme`), bundled Inter under the SIL
+- `ui/theme/`: design tokens (`tokens.py`, the only place UI colours are defined: a dark
+  and a light set for each `ColorScheme`, Slate by default, and the Liquid Glass tokens),
+  the Fusion palette and stylesheet (`style.py`, `apply_theme`; `follow_theme` re-colours
+  what a widget keeps, such as a tinted icon, when the scheme changes), bundled Inter under the SIL
   OFL (`fonts/`) and Tabler icons under MIT (`icons/`). `ui/labels.py` holds
   `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace
   (`workspace.py`, with `hairline.py`, `brief_list.py` and `brief_detail.py`): the header
@@ -389,7 +393,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `button_label()`.
 - Render the screenshot gallery with
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
-  and compare it with `docs/ui/mockup-three-pane-dark.png`.
+  and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
+  Every colour scheme must pass the contrast tests in `tests/ui/theme/` in both modes.
 
 ## Dormant Microsoft notes
 

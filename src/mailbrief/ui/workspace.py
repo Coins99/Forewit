@@ -59,6 +59,7 @@ from mailbrief.ui.theme import (
     SMALL_PX,
     TEXT_PX,
     current_tokens,
+    follow_theme,
     icon_pixmap,
     ui_font,
 )
@@ -188,8 +189,11 @@ class HeaderBar(QWidget):
         layout.addWidget(title)
         layout.addStretch(1)
         self.refresh_icon = QLabel()
-        self.refresh_icon.setPixmap(
-            icon_pixmap("refresh", current_tokens().text_secondary, _ICON_PX, 2.0)
+        follow_theme(
+            self.refresh_icon,
+            lambda: self.refresh_icon.setPixmap(
+                icon_pixmap("refresh", current_tokens().text_secondary, _ICON_PX, 2.0)
+            ),
         )
         self.refresh_icon.setObjectName("headerRefreshIcon")
         self.refresh_icon.setAccessibleName("Refresh status")

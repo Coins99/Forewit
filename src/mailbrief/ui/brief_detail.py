@@ -40,7 +40,14 @@ from mailbrief.ui.labels import (
     wrap_label,
 )
 from mailbrief.ui.proposals_view import effect_text
-from mailbrief.ui.theme import SMALL_PX, TEXT_PX, TITLE_PX, current_tokens, icon_pixmap
+from mailbrief.ui.theme import (
+    SMALL_PX,
+    TEXT_PX,
+    TITLE_PX,
+    current_tokens,
+    follow_theme,
+    icon_pixmap,
+)
 
 # What a suggestion or proposal request asks for.
 ACCEPT = "accept"
@@ -171,7 +178,12 @@ class BriefDetailPane(QScrollArea):
         row = QHBoxLayout()
         row.setSpacing(6)
         clock = QLabel()
-        clock.setPixmap(icon_pixmap("clock", current_tokens().warning_fg, _ICON_PX, 2.0))
+        follow_theme(
+            clock,
+            lambda: clock.setPixmap(
+                icon_pixmap("clock", current_tokens().warning_fg, _ICON_PX, 2.0)
+            ),
+        )
         clock.setAccessibleName("Deadline")
         row.addWidget(clock)
         row.addWidget(wrap_label(text, tone="warning", px=TEXT_PX), 1)

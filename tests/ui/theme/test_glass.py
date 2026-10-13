@@ -12,10 +12,12 @@ import re
 
 import pytest
 
-from mailbrief.ui.theme import GlassTokens, ThemeMode, Tint, glass_for, tokens_for
+from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, Tint, glass_for, tokens_for
 from tests.ui.theme.test_theme import contrast as hex_contrast
 
 RGB = tuple[float, float, float]
+# Every colour scheme in both modes.
+SETS = [(scheme, mode) for scheme in ColorScheme for mode in ThemeMode]
 
 
 def rgb(color: str) -> RGB:
@@ -81,9 +83,11 @@ def test_compositing_matches_the_theme_contrast() -> None:
     assert half == pytest.approx((127.5, 127.5, 127.5))
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_glass_colours_are_hex_and_alphas_are_fractions(mode: ThemeMode) -> None:
-    g = glass_for(mode)
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_glass_colours_are_hex_and_alphas_are_fractions(
+    scheme: ColorScheme, mode: ThemeMode
+) -> None:
+    g = glass_for(mode, scheme)
     for field in dataclasses.fields(g):
         value = getattr(g, field.name)
         if isinstance(value, Tint):
@@ -94,24 +98,24 @@ def test_glass_colours_are_hex_and_alphas_are_fractions(mode: ThemeMode) -> None
     assert 0 < g.min_tint_alpha <= 1
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_the_tint_respects_its_minimum(mode: ThemeMode) -> None:
-    g = glass_for(mode)
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_the_tint_respects_its_minimum(scheme: ColorScheme, mode: ThemeMode) -> None:
+    g = glass_for(mode, scheme)
     assert g.tint.alpha >= g.min_tint_alpha
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_streaks_only_lighten_the_backdrop(mode: ThemeMode) -> None:
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_streaks_only_lighten_the_backdrop(scheme: ColorScheme, mode: ThemeMode) -> None:
     """So the backdrop's darkest pixel is its darker stop."""
-    g = glass_for(mode)
+    g = glass_for(mode, scheme)
     streak = luminance(rgb(g.streak.color))
     assert streak >= luminance(rgb(g.backdrop_top))
     assert streak >= luminance(rgb(g.backdrop_bottom))
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_text_on_glass_meets_wcag_aa(mode: ThemeMode) -> None:
-    t, g = tokens_for(mode), glass_for(mode)
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_text_on_glass_meets_wcag_aa(scheme: ColorScheme, mode: ThemeMode) -> None:
+    t, g = tokens_for(mode, scheme), glass_for(mode, scheme)
     for tint in tints(g):
         glass = panels(g, tint)
         raised = [layered(b, g.raised, g.raised_sheen) for b in glass]
@@ -125,21 +129,21 @@ def test_text_on_glass_meets_wcag_aa(mode: ThemeMode) -> None:
         for name, backgrounds, texts in surfaces:
             for text in texts:
                 worst = min(contrast(text, background) for background in backgrounds)
-                assert worst >= 4.5, (mode, name, text, tint.alpha, round(worst, 2))
+                assert worst >= 4.5, (scheme, mode, name, text, tint.alpha, round(worst, 2))
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_focus_ring_stands_out_beside_glass(mode: ThemeMode) -> None:
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_focus_ring_stands_out_beside_glass(scheme: ColorScheme, mode: ThemeMode) -> None:
     """The ring is drawn just outside a pill, on the panel around it (WCAG 1.4.11)."""
-    t, g = tokens_for(mode), glass_for(mode)
+    t, g = tokens_for(mode, scheme), glass_for(mode, scheme)
     around = [*panels(g, g.tint), rgb(t.panel), rgb(g.opaque)]
     assert min(contrast(t.accent_fg, background) for background in around) >= 3.0
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_opaque_fallbacks_meet_wcag(mode: ThemeMode) -> None:
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_opaque_fallbacks_meet_wcag(scheme: ColorScheme, mode: ThemeMode) -> None:
     """Reduced transparency and increased contrast paint glass opaque, with solid rims."""
-    t, g = tokens_for(mode), glass_for(mode)
+    t, g = tokens_for(mode, scheme), glass_for(mode, scheme)
     for text in (t.text, t.text_secondary):
         assert hex_contrast(text, g.opaque) >= 4.5
     for background in (g.opaque, t.panel):

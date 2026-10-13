@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QStyle
 from mailbrief.ui.theme import (
     DARK,
     LIGHT,
+    ColorScheme,
     ThemeMode,
     Tokens,
     apply_theme,
@@ -26,6 +27,9 @@ from mailbrief.ui.theme import (
 )
 from mailbrief.ui.theme import style as theme_style
 from mailbrief.ui.theme.style import ThemeStyle
+
+# Every colour scheme in both modes.
+SETS = [(scheme, mode) for scheme in ColorScheme for mode in ThemeMode]
 
 
 def luminance(color: str) -> float:
@@ -48,15 +52,15 @@ def test_contrast_formula_matches_wcag_reference_values() -> None:
     assert contrast("#777777", "#ffffff") == pytest.approx(4.48, abs=0.01)
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_every_token_is_a_lowercase_hex_colour(mode: ThemeMode) -> None:
-    for value in dataclasses.asdict(tokens_for(mode)).values():
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_every_token_is_a_lowercase_hex_colour(scheme: ColorScheme, mode: ThemeMode) -> None:
+    for value in dataclasses.asdict(tokens_for(mode, scheme)).values():
         assert re.fullmatch(r"#[0-9a-f]{6}", value)
 
 
-@pytest.mark.parametrize("mode", list(ThemeMode))
-def test_text_meets_wcag_aa_contrast(mode: ThemeMode) -> None:
-    t = tokens_for(mode)
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_text_meets_wcag_aa_contrast(scheme: ColorScheme, mode: ThemeMode) -> None:
+    t = tokens_for(mode, scheme)
     pairs = [
         (foreground, background)
         for foreground in (t.text, t.text_secondary, t.text_muted)
@@ -64,7 +68,7 @@ def test_text_meets_wcag_aa_contrast(mode: ThemeMode) -> None:
     ]
     pairs += [(t.warning_fg, t.warning_bg), (t.accent_fg, t.accent_bg)]
     for foreground, background in pairs:
-        assert contrast(foreground, background) >= 4.5, (mode, foreground, background)
+        assert contrast(foreground, background) >= 4.5, (scheme, mode, foreground, background)
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
