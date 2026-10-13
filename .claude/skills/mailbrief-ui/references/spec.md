@@ -54,7 +54,17 @@ at the tint's alpha and at `min_tint_alpha`:
 
 ### Glass painting (`ui/glass/`)
 
-No widget uses it yet. The header, sidebar and buttons move to it in later PRs.
+**Chrome** (`workspace.GlassChrome`): the header and sidebar have transparent stylesheet
+backgrounds and paint a glass panel over the part of the workspace's backdrop behind
+them.
+
+- The workspace asks its renderer for a backdrop on every resize and theme change,
+  keyed by its size, scheme and mode, and repaints both when it arrives.
+- The selected page is `paint_raised`. A hovered or focused sidebar button gets the
+  raised fill at `ACTIVE_RAISE` strength, with no rim.
+- Muted labels inside the sidebar (the note, and the Gmail and AI lines) take
+  `text_secondary`, because `text_muted` fails contrast on glass.
+- The sidebar's Google sign-in and Disconnect are glass pills.
 
 - **Backdrop** (`backdrop.py`): a diagonal gradient from `backdrop_top` to
   `backdrop_bottom`, under five streaks of light. Their strengths scale `streak`'s peak
@@ -62,17 +72,28 @@ No widget uses it yet. The header, sidebar and buttons move to it in later PRs.
   ever seen, so it is painted at `SCALE` (a quarter) of the window's logical size and
   blurred by halving three times and scaling back up. A backdrop depends only on
   `BackdropKey`: logical size, scheme and mode.
-- **Renderer:** `BackdropRenderer.request(key)` returns a cached backdrop at once.
-  Otherwise it renders with `asyncio.to_thread` and `ready` emits the result.
+- **Renderer:** `BackdropRenderer.request(key)` returns a cached backdrop at once, and
+  with no asyncio loop running it renders one at once.
+  - Otherwise it renders on a one-thread worker pool, and the result returns by a queued
+    Qt signal, never an asyncio task. Under qasync, a task created while the smoke check
+    built its window never ran, and shutdown waited for it forever. `ready` then emits
+    the result.
   - Requests made during a render become one render of the last of them, and a render
     that finishes after a newer request is cached but not emitted.
-  - It keeps the last four backdrops. `drain()` waits at shutdown.
+  - A failed render is logged, and a later request tries again.
+  - It keeps the last four backdrops. `drain()` finishes the render in progress at
+    shutdown.
 - **Painters** (`painter.py`), with `current_glass()` at paint time:
-  - `paint_panel` shows the blurred backdrop behind `area`, which is the panel in window
-    coordinates. Then the tint, the sheen over the top 120 px and a lit top edge.
+  - `paint_panel` fills `opaque` first, so a backdrop that doesn't yet reach a growing
+    panel's edge never leaves it see-through. Then it shows the blurred backdrop behind
+    `area`, which is the panel in window coordinates, then the tint, the sheen over the
+    top 120 px and a lit top edge.
   - `paint_raised` is a fill with a sheen, never a second layer of glass.
   - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
-  - `paint_rim` is 1 device pixel at every scale, inset by half a device pixel.
+  - `paint_rim` is 1 device pixel wide. It is snapped onto the device pixel grid through
+    the painter's device transform, so it stays one full pixel at 125% and 150% at any
+    position. `hairline.py` still insets by half a device pixel, which is crisp only on
+    whole-pixel positions.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):

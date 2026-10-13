@@ -17,6 +17,8 @@ from mailbrief.ui.theme import (
     apply_theme,
     assets,
     build_stylesheet,
+    current_mode,
+    current_scheme,
     current_tokens,
     icon_pixmap,
     register_fonts,
@@ -247,3 +249,18 @@ def test_a_failed_theme_keeps_the_theme_style_it_found(
     assert isinstance(qapp.style(), ThemeStyle)
     assert theme_style._style is qapp.style()  # Its Python override stays alive.
     assert current_tokens() is DARK
+
+
+def test_the_mode_follows_the_applied_theme_and_a_failure(
+    qapp: QApplication, themed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stored beside the scheme, not guessed from which tokens object is current."""
+    apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.SAGE)
+    assert current_mode() is ThemeMode.LIGHT
+    monkeypatch.setattr("mailbrief.ui.theme.style.build_stylesheet", broken_stylesheet)
+    with pytest.raises(RuntimeError):
+        apply_theme(qapp, ThemeMode.DARK, ColorScheme.SAGE)
+    # Put back: the light palette, so the light tokens and mode.
+    assert current_mode() is ThemeMode.LIGHT
+    assert current_tokens() == tokens_for(ThemeMode.LIGHT, ColorScheme.SAGE)
+    assert current_scheme() is ColorScheme.SAGE

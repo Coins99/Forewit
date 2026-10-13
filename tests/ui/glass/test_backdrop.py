@@ -1,7 +1,6 @@
 """The glass backdrop: painted within the bounds the contrast proof assumes, blurred, and
 rendered off the Qt thread by a renderer that caches and drops stale results."""
 
-import asyncio
 import threading
 
 import pytest
@@ -9,6 +8,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
+from shiboken6 import Shiboken
 
 from mailbrief.ui.glass.backdrop import (
     CACHE_SIZE,
@@ -81,19 +81,19 @@ def test_a_backdrop_maps_window_areas_to_its_image(qapp: QApplication) -> None:
 
 
 class Recorder:
-    """A render that notes its keys and whether it ran off the main thread."""
+    """A render that notes its keys and whether it ran off the main thread; with a gate,
+    each render waits for it."""
 
     def __init__(self) -> None:
         self.keys: list[BackdropKey] = []
         self.off_main_thread: list[bool] = []
-        self.gate: asyncio.Event | None = None
-        self.loop = asyncio.get_running_loop()
+        self.gate: threading.Event | None = None
 
     def __call__(self, wanted: BackdropKey) -> Backdrop:
         self.keys.append(wanted)
         self.off_main_thread.append(threading.current_thread() is not threading.main_thread())
         if self.gate is not None:
-            asyncio.run_coroutine_threadsafe(self.gate.wait(), self.loop).result(timeout=5)
+            assert self.gate.wait(timeout=5)
         return render_backdrop(wanted)
 
 
@@ -115,15 +115,14 @@ async def test_renders_run_off_the_qt_thread_and_are_cached(qtbot: QtBot) -> Non
 
 async def test_requests_during_a_render_become_one_render_of_the_last(qtbot: QtBot) -> None:
     recorder = Recorder()
-    recorder.gate = asyncio.Event()
+    recorder.gate = threading.Event()
     renderer = BackdropRenderer(render=recorder)
     emitted: list[BackdropKey] = []
     renderer.ready.connect(lambda backdrop: emitted.append(backdrop.key))
     first, middle, last = (
         BackdropKey(WIDTH + step, HEIGHT, ColorScheme.SLATE, ThemeMode.DARK) for step in range(3)
     )
-    renderer.request(first)
-    await asyncio.sleep(0.05)  # The first render starts and waits at the gate.
+    renderer.request(first)  # Starts, and waits at the gate.
     renderer.request(middle)
     renderer.request(last)
     recorder.gate.set()
@@ -151,3 +150,58 @@ async def test_only_the_last_few_backdrops_are_kept(qtbot: QtBot) -> None:
 
 async def test_draining_an_idle_renderer_returns_at_once() -> None:
     await BackdropRenderer().drain()
+
+
+def test_without_a_running_loop_a_request_renders_at_once(qapp: QApplication) -> None:
+    renderer = BackdropRenderer()
+    backdrop = renderer.request(key())
+    assert backdrop is not None and backdrop.key == key()
+    assert renderer.request(key()) is backdrop
+
+
+async def test_results_arrive_through_the_qt_event_loop(qtbot: QtBot) -> None:
+    """Without drain: the worker hands the result to the Qt thread by a queued signal,
+    which any running event loop delivers."""
+    renderer = BackdropRenderer()
+    with qtbot.waitSignal(renderer.ready, timeout=5000) as blocker:
+        assert renderer.request(key()) is None
+    assert blocker.args[0].key == key()
+    await renderer.drain()  # Nothing left to finish.
+
+
+async def test_a_failed_render_is_retried_by_a_later_request(qtbot: QtBot) -> None:
+    attempts: list[BackdropKey] = []
+
+    def failing(wanted: BackdropKey) -> Backdrop:
+        attempts.append(wanted)
+        if len(attempts) == 1:
+            raise RuntimeError("render failed")
+        return render_backdrop(wanted)
+
+    renderer = BackdropRenderer(render=failing)
+    emitted: list[Backdrop] = []
+    renderer.ready.connect(emitted.append)
+    renderer.request(key())
+    await renderer.drain()
+    assert emitted == []
+    assert renderer.request(key()) is None  # Not cached: rendered again.
+    await renderer.drain()
+    assert [backdrop.key for backdrop in emitted] == [key()]
+
+
+async def test_a_renderer_deleted_mid_render_fails_quietly(
+    qtbot: QtBot, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Its window can close while the worker still renders; handing back the result must
+    not raise on the worker thread."""
+    recorder = Recorder()
+    recorder.gate = threading.Event()
+    renderer = BackdropRenderer(render=recorder)
+    renderer.request(key())
+    job = renderer._job
+    assert job is not None
+    Shiboken.delete(renderer)
+    recorder.gate.set()
+    job[1].result(timeout=5)
+    qtbot.wait(50)  # Let the worker's done callback run.
+    assert not [r for r in caplog.records if r.name == "concurrent.futures"]

@@ -145,7 +145,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
   glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
   `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
-  header and on the Today page.
+  header, the sidebar footer and on the Today page. The header and sidebar are glass
+  (`workspace.GlassChrome`) over the workspace's backdrop, and the selected page is a
+  raised pill; muted text in the sidebar shows as secondary there.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.

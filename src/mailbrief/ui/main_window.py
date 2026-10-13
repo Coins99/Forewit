@@ -758,6 +758,7 @@ class MainWindow(QMainWindow):
             mnemonic=True,
             px=SMALL_PX,
             accessible_name="Sign in with Google",
+            glass=True,
         )
         self.disconnect_button = outline_button(
             "&Disconnect",
@@ -765,6 +766,7 @@ class MainWindow(QMainWindow):
             mnemonic=True,
             px=SMALL_PX,
             accessible_name="Disconnect Gmail",
+            glass=True,
         )
         for line in (self.connection, self.ai):
             line.setContentsMargins(10, 0, 0, 0)  # In line with the rows' icons.
@@ -3372,6 +3374,7 @@ class MainWindow(QMainWindow):
             await self.draft_writes.drain()
             if self.appearance_writes is not None:
                 await self.appearance_writes.drain()
+            await self.workspace.backdrop_renders.drain()
         finally:
             try:
                 await self.backend.close()
