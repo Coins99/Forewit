@@ -169,8 +169,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
   glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
   `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
-  header, the sidebar footer and on the Today page: its icon sits in a leading tile, and
-  in the content it lifts into glass under the pointer. `motion.py` holds the fluid easing
+  header, the sidebar footer and on the Today page; every other push button is drawn by
+  `ThemeStyle` as the same glass pill, so every button looks like the sidebar's
+  Disconnect. Icons are plain, beside the label. `dialog.py` (`DialogSheet`) gives every
+  dialog the home screen's glass round a rounded sheet. `motion.py` holds the fluid easing
   the sidebar's selection glides on. The header and sidebar are glass
   (`workspace.GlassChrome`) over the workspace's backdrop, and the selected page is a
   raised pill; muted text in the sidebar shows as secondary there. `system.py` reads the
@@ -188,7 +190,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   and a light set for each `ColorScheme`, Studio by default, and the Liquid Glass tokens),
   the Fusion palette and stylesheet (`style.py`, `apply_theme`; `follow_theme` re-colours
   what a widget keeps, such as a tinted icon, when the scheme changes; `ThemeStyle` draws
-  fields, chevrons, check boxes and radio buttons, with `indicators.py`), bundled Inter
+  push buttons as glass pills, fields, chevrons, check boxes and radio buttons, with
+  `indicators.py`, and installs `DialogSheet` on every dialog), bundled Inter
   Regular, Medium and SemiBold under the SIL OFL (`fonts/`) and Tabler icons under MIT
   (`icons/`). `ui/labels.py` holds
   `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace

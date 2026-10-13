@@ -3,24 +3,36 @@ check boxes and radio buttons."""
 
 import pytest
 from PySide6.QtCore import QDate, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QDialog,
     QLineEdit,
     QMenu,
+    QMessageBox,
+    QPushButton,
     QRadioButton,
     QSpinBox,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 from pytestqt.qtbot import QtBot
 
-from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens, tokens_for
+from mailbrief.ui.theme import (
+    DIALOG_GUTTER,
+    DIALOG_MARGIN,
+    ThemeMode,
+    apply_theme,
+    current_glass,
+    current_tokens,
+    tokens_for,
+)
 from mailbrief.ui.theme.indicators import indicator_colors, paint_check_box, paint_radio
 from mailbrief.ui.theme.style import CHEVRON_PX, paint_chevron
 
@@ -191,3 +203,77 @@ def test_menus_and_combo_lists_have_round_corners(
     middle = image.pixelColor(round(4 * ratio), image.height() // 2)
     assert middle.name() in (tokens.panel, tokens.selection)
     combo.hidePopup()
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_every_push_button_is_a_glass_pill(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """A plain push button, as Qt's own in a message box, is drawn as the sidebar's
+    Disconnect is: a pill of glass the size of a GlassButton, with a Medium label;
+    brighter hovered, fainter disabled; the primary one blue with a white label."""
+    apply_theme(qapp, mode)
+    tokens = current_tokens()
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.setAutoFillBackground(True)
+    plain = QPushButton("Save", host)
+    primary = QPushButton("Continue", host)
+    primary.setProperty("variant", "primary")
+    for button in (plain, primary):
+        button.ensurePolished()
+        button.resize(button.sizeHint())
+    plain.move(10, 10)
+    primary.move(10, 60)
+    host.resize(200, 110)
+    host.show()
+    assert plain.font().weight() == QFont.Weight.Medium
+    text = plain.fontMetrics().horizontalAdvance("Save")
+    padding = plain.sizeHint().width() - text  # Qt may round the text up a pixel.
+    assert 2 * (10 + 3) <= padding <= 2 * (10 + 3) + 1
+    assert plain.sizeHint().height() == plain.fontMetrics().height() + 2 * (6 + 3)
+
+    def at(button: QPushButton, x: float) -> QColor:
+        image = button.grab().toImage()
+        ratio = image.devicePixelRatio()
+        return image.pixelColor(round(x * ratio), image.height() // 2)
+
+    # The pill's end: glass's shaded edge, not the panel behind it (in light mode the
+    # body is white on white, so its edge is what shows).
+    edge = min((at(plain, 3 + step / 2) for step in range(4)), key=QColor.lightness)
+    assert edge.name() != tokens.panel
+    assert at(primary, 12).name() == current_glass().primary.color
+    resting = at(plain, 12)
+    plain.setEnabled(False)
+    assert at(plain, 3.5) != edge or at(plain, 12) != resting
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_every_dialog_has_the_home_screen_s_sheet(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """Glass at the window's edge, the content on a rounded panel-coloured sheet inside
+    it, with no square corner, and the dialog's own layout inside the sheet."""
+    apply_theme(qapp, mode)
+    tokens = current_tokens()
+    for dialog in (QDialog(), QMessageBox(QMessageBox.Icon.NoIcon, "MailBrief", "Discard?")):
+        qtbot.addWidget(dialog)
+        dialog.setLayout(dialog.layout() or QVBoxLayout())
+        dialog.resize(320, 200)
+        dialog.show()
+        image = dialog.grab().toImage()
+
+        def at(x: float, y: float, image: QImage = image) -> str:
+            ratio = image.devicePixelRatio()
+            return image.pixelColor(round(x * ratio), round(y * ratio)).name()
+
+        # A message box sizes itself, so sample by the size it took.
+        width, height = dialog.width(), dialog.height()
+        assert at(2, height / 2) != tokens.panel  # The glass round the sheet.
+        corner = DIALOG_GUTTER + 1  # Inside the sheet's square corner, outside its curve.
+        assert at(corner, corner) != tokens.panel
+        assert at(width / 2, DIALOG_GUTTER + 2) == tokens.panel  # Its straight top edge.
+    plain = QDialog()
+    qtbot.addWidget(plain)
+    layout = QVBoxLayout(plain)
+    assert layout.contentsMargins().left() == DIALOG_MARGIN

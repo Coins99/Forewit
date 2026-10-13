@@ -259,20 +259,17 @@ def paint_liquid_pill(
     primary: bool = False,
     mode: GlassMode = GlassMode.NORMAL,
     hover: float = 0.0,
-    on_glass: bool = True,
 ) -> None:
     """A pill as Liquid Glass, lit as a Liquid Glass tab is: a frosted body; light that
     enters along its long edges, as a crisp rim line along the top and the bottom with a
     glow fading into the body; shaded ends; and a soft shadow below.
 
-    On the glass (``on_glass``, the header and sidebar) and for the primary pill, all of it
-    shows at rest. In the content layer a pill rests as an outline in `rim_top` and lifts
-    into glass as ``hover`` goes from 0 to 1, as WWDC's controls "lift up into Liquid
-    Glass" on interaction. The body fills with `pill_hover` at the hover's strength. The
+    Every pill is glass at rest, wherever it sits, as the sidebar's Disconnect is; under
+    the pointer its body brightens with `pill_hover` at ``hover``'s strength (0 to 1). The
     primary pill's glow stays off its body, so its white label keeps its contrast. The
-    solid modes keep the outline and body but paint no light or shadow."""
+    solid modes keep the body but paint no light or shadow."""
     hover = _unit(hover)
-    presence = 1.0 if on_glass or primary else hover
+    presence = 1.0
     normal = mode is GlassMode.NORMAL
     path, radius = _pill_path(rect)
     painter.save()
@@ -284,8 +281,7 @@ def paint_liquid_pill(
     if primary:
         painter.fillPath(path, color(glass.primary))
     else:
-        if on_glass:
-            painter.fillPath(path, color(glass.pill))
+        painter.fillPath(path, color(glass.pill))
         if hover > 0:
             painter.fillPath(path, color(glass.pill_hover, hover))
         if normal and presence > 0 and glass.lens.alpha > 0:
@@ -296,14 +292,6 @@ def paint_liquid_pill(
         paint_rim(painter, rect, radius, (solid, solid, solid))
     elif primary:
         paint_rim(painter, rect, radius, _rim_stops(glass, glass.primary_rim, mode))
-    elif not on_glass and presence < 1:
-        fade = 1.0 - presence
-        stops = (
-            color(glass.rim_top, fade),
-            color(glass.rim_mid, fade),
-            color(glass.rim_bottom, fade),
-        )
-        paint_rim(painter, rect, radius, stops)
     if normal and presence > 0:
         _paint_edges(painter, rect, glass, presence)
     if normal and presence > 0 and glass.highlight.alpha > 0:

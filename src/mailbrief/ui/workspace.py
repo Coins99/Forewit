@@ -58,7 +58,6 @@ from mailbrief.ui.brief_list import ROW_PAD_H, BriefListView, build_rows
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
 from mailbrief.ui.glass.backdrop import Backdrop, BackdropKey, BackdropRenderer
 from mailbrief.ui.glass.backdrop import color as tint_color
-from mailbrief.ui.glass.button import GLASS_LAYER
 from mailbrief.ui.glass.motion import GLIDE_MS, fluid_curve
 from mailbrief.ui.glass.painter import paint_panel, paint_raised
 from mailbrief.ui.glass.preferences import glass_preferences
@@ -220,7 +219,6 @@ class GlassChrome(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.workspace: ThreePaneWorkspace | None = None
-        self.setProperty(GLASS_LAYER, True)  # Pills here are Liquid Glass at rest.
 
     @profiled()  # HeaderBar and SidebarNav report apart.
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -243,7 +241,6 @@ class ContentSheet(GlassChrome):
     def __init__(self, pages: QWidget, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         _styled(self, "contentSheet")
-        self.setProperty(GLASS_LAYER, False)  # Its pages are content, not glass.
         self.pages = pages
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, SHEET_GUTTER + 1, 1)  # Inside the hairline.

@@ -13,12 +13,15 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QComboBox,
+    QDialog,
     QProxyStyle,
+    QPushButton,
     QStyle,
     QStyledItemDelegate,
     QStyleFactory,
     QStyleHintReturn,
     QStyleOption,
+    QStyleOptionButton,
     QStyleOptionComboBox,
     QStyleOptionComplex,
     QStyleOptionSpinBox,
@@ -35,6 +38,7 @@ from mailbrief.ui.theme.indicators import paint_check_box, paint_radio
 from mailbrief.ui.theme.tokens import (
     DARK,
     DEFAULT_SCHEME,
+    DIALOG_MARGIN,
     FIELD_RADIUS,
     ITEM_PAD_X,
     ITEM_PAD_Y,
@@ -58,13 +62,6 @@ QLabel[tone="secondary"] { color: $text_secondary; }
 QLabel[tone="muted"] { color: $text_muted; }
 QWidget#sidebar QLabel[tone="muted"] { color: $text_secondary; }
 QLabel[tone="warning"] { color: $warning_fg; }
-QPushButton, QPushButton[variant="outline"] { background: transparent; color: $text; border: 1px solid $border_strong; border-radius: ${pill_radius}px; padding: 5px 12px; }
-QPushButton:hover, QPushButton[variant="outline"]:hover { background: $selection; }
-QPushButton:focus, QPushButton[variant="outline"]:focus { border-color: $accent_fg; }
-QPushButton:disabled, QPushButton[variant="outline"]:disabled { color: $text_muted; border-color: $hairline; }
-QPushButton[variant="primary"] { background: $primary_fill; color: $on_primary; border: 1px solid $accent_border; border-radius: ${pill_radius}px; padding: 5px 16px; }
-QPushButton[variant="primary"]:focus { border-color: $accent_fg; }
-QPushButton[variant="primary"]:disabled { background: transparent; color: $text_muted; border-color: $hairline; }
 QPushButton[variant="nav"] { text-align: left; background: transparent; color: $text_secondary; border: none; border-radius: ${radius}px; padding: 6px 10px; }
 QPushButton[variant="nav"]:hover, QPushButton[variant="nav"]:focus { background: $selection; color: $text; }
 QListView { background: $panel; border: 1px solid $hairline; border-radius: ${radius}px; padding: 3px; }
@@ -217,7 +214,10 @@ class ThemeStyle(QProxyStyle):
     letter is underlined, as on macOS. Combo boxes, date fields and spin boxes are drawn
     as rounded fields, like the stylesheet's text fields, with thin chevrons in the
     secondary text colour (the stylesheet can't draw an arrow without an image file).
-    Check boxes and radio buttons are drawn as in ``indicators``."""
+    Check boxes and radio buttons are drawn as in ``indicators``. Every push button is a
+    pill of glass, as the sidebar's Disconnect is (`paint_button_pill`), whoever made it:
+    the app's own, plain ones and Qt's own in message boxes and button rows; its label is
+    Medium, and its size matches a `GlassButton`'s."""
 
     def drawPrimitive(
         self,
@@ -227,6 +227,15 @@ class ThemeStyle(QProxyStyle):
         widget: QWidget | None = None,
     ) -> None:
         rect = QRectF(option.rect)
+        if _is_pill(widget):
+            if element is QStyle.PrimitiveElement.PE_PanelButtonCommand:
+                paint_button_pill(painter, option, widget)
+                return
+            if element is QStyle.PrimitiveElement.PE_FrameDefaultButton:
+                return  # The pill is the button; a default one needs no second frame.
+            if element is QStyle.PrimitiveElement.PE_FrameFocusRect:
+                paint_button_focus(painter, option, widget)
+                return
         if element in _CHEVRONS:
             paint_chevron(painter, rect, _arrow_color(option), up=element in _UP)
             return
@@ -243,6 +252,28 @@ class ThemeStyle(QProxyStyle):
             paint_radio(painter, rect, current_tokens(), checked=on, enabled=enabled)
             return
         super().drawPrimitive(element, option, painter, widget)
+
+    def drawControl(
+        self,
+        element: QStyle.ControlElement,
+        option: QStyleOption,
+        painter: QPainter,
+        widget: QWidget | None = None,
+    ) -> None:
+        if (
+            element is QStyle.ControlElement.CE_PushButtonLabel
+            and _is_pill(widget)
+            and _is_primary(widget)
+            and isinstance(option, QStyleOptionButton)
+        ):
+            # The primary pill's label is white on its solid blue.
+            label = QStyleOptionButton(option)
+            label.palette.setColor(
+                QPalette.ColorRole.ButtonText, QColor(current_glass().primary_text)
+            )
+            super().drawControl(element, label, painter, widget)
+            return
+        super().drawControl(element, option, painter, widget)
 
     def drawComplexControl(
         self,
@@ -285,6 +316,12 @@ class ThemeStyle(QProxyStyle):
         size: QSize,
         widget: QWidget | None = None,
     ) -> QSize:
+        if contents is QStyle.ContentsType.CT_PushButton and _is_pill(widget):
+            # As a GlassButton: the label (and icon) plus padding and room round the pill.
+            return QSize(
+                size.width() + 2 * (_PILL_PAD_X + _PILL_ROOM_X),
+                size.height() + 2 * (_PILL_PAD_Y + _PILL_ROOM_Y),
+            )
         result = super().sizeFromContents(contents, option, size, widget)  # type: ignore[arg-type]
         if contents in _FIELDS:
             line = option.fontMetrics.height()
@@ -313,11 +350,31 @@ class ThemeStyle(QProxyStyle):
             target.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             if target.inherits(_COMBO_LIST):
                 target.installEventFilter(_rounded_popup())
+        if isinstance(target, QPushButton) and _is_pill(target) and not target.font().bold():
+            font = target.font()  # Keeps a size set before; a Medium label, as Disconnect's.
+            font.setWeight(QFont.Weight.Medium)
+            target.setFont(font)
+        if isinstance(target, QDialog):
+            # The home screen's style: glass round a rounded sheet (ui/glass imports this
+            # package, so it is imported here).
+            from mailbrief.ui.glass.dialog import dialog_sheet
+
+            target.installEventFilter(dialog_sheet())
         if isinstance(target, QComboBox):
             delegate = target.itemDelegate()
             if delegate is None or delegate.metaObject().className() in _COMBO_DELEGATES:
                 target.setItemDelegate(QStyledItemDelegate(target))
         super().polish(target)
+
+    def pixelMetric(
+        self,
+        metric: QStyle.PixelMetric,
+        option: QStyleOption | None = None,
+        widget: QWidget | None = None,
+    ) -> int:
+        if metric in _DIALOG_MARGINS and isinstance(widget, QDialog):
+            return DIALOG_MARGIN  # A dialog's content sits inside its sheet.
+        return super().pixelMetric(metric, option, widget)
 
     def styleHint(
         self,
@@ -329,6 +386,95 @@ class ThemeStyle(QProxyStyle):
         if hint == QStyle.StyleHint.SH_UnderlineShortcut:
             return 0
         return super().styleHint(hint, option, widget, returnData)
+
+
+# A push button drawn as a pill: its padding and the room kept round it (logical px), the
+# same as a GlassButton's (ui/glass/button.py), and how a pressed one shrinks.
+_PILL_PAD_X: Final = 10
+_PILL_PAD_Y: Final = 6
+_PILL_ROOM_X: Final = 3
+_PILL_ROOM_Y: Final = 3
+_PILL_PRESSED: Final = 0.97
+_PILL_DISABLED: Final = 0.5
+_PILL_FOCUS_WIDTH: Final = 2.0
+# The margins of a dialog's own layout, which keep its content inside its sheet.
+_DIALOG_MARGINS: Final = frozenset(
+    {
+        QStyle.PixelMetric.PM_LayoutLeftMargin,
+        QStyle.PixelMetric.PM_LayoutTopMargin,
+        QStyle.PixelMetric.PM_LayoutRightMargin,
+        QStyle.PixelMetric.PM_LayoutBottomMargin,
+    }
+)
+# Buttons that paint themselves: the glass pill and the sidebar's rows.
+_SELF_PAINTED: Final = frozenset({"glass", "nav"})
+
+
+def _is_pill(widget: QWidget | None) -> bool:
+    """A push button the style draws as a pill (not one that paints itself)."""
+    return isinstance(widget, QPushButton) and widget.property("variant") not in _SELF_PAINTED
+
+
+def _is_primary(widget: QWidget | None) -> bool:
+    return widget is not None and widget.property("variant") == "primary"
+
+
+def _pill_rect(option: QStyleOption) -> QRectF:
+    rect = QRectF(option.rect).adjusted(_PILL_ROOM_X, _PILL_ROOM_Y, -_PILL_ROOM_X, -_PILL_ROOM_Y)
+    if option.state & (QStyle.StateFlag.State_Sunken | QStyle.StateFlag.State_On):
+        centre = rect.center()
+        rect.setSize(rect.size() * _PILL_PRESSED)
+        rect.moveCenter(centre)
+    return rect
+
+
+def paint_button_pill(painter: QPainter, option: QStyleOption, widget: QWidget | None) -> None:
+    """A push button as a pill of glass, as the sidebar's Disconnect: brighter under the
+    pointer, a little smaller while pressed, at half strength while disabled. Glass is
+    imported here: ui/glass imports this package."""
+    from mailbrief.ui.glass.painter import paint_liquid_pill, paint_pill
+    from mailbrief.ui.glass.preferences import glass_preferences
+
+    state = option.state
+    enabled = bool(state & QStyle.StateFlag.State_Enabled)
+    hover = 1.0 if enabled and state & QStyle.StateFlag.State_MouseOver else 0.0
+    glass, mode = current_glass(), glass_preferences().mode
+    primary = _is_primary(widget)
+    painter.save()
+    if not enabled:
+        painter.setOpacity(_PILL_DISABLED)
+    if glass.highlight.alpha > 0:
+        paint_liquid_pill(
+            painter, _pill_rect(option), glass, primary=primary, mode=mode, hover=hover
+        )
+    else:
+        paint_pill(painter, _pill_rect(option), glass, primary=primary, mode=mode, hover=hover)
+    painter.restore()
+
+
+def paint_button_focus(painter: QPainter, option: QStyleOption, widget: QWidget | None) -> None:
+    """A 2 px ring inside the pill, only after the keyboard moved focus, as a GlassButton's:
+    the accent, or the label's colour on the primary's solid fill."""
+    state = option.state
+    if not (
+        state & QStyle.StateFlag.State_HasFocus
+        and state & QStyle.StateFlag.State_KeyboardFocusChange
+    ):
+        return
+    rect = QRectF(option.rect)
+    if isinstance(widget, QPushButton):
+        rect = QRectF(widget.rect()).adjusted(
+            _PILL_ROOM_X, _PILL_ROOM_Y, -_PILL_ROOM_X, -_PILL_ROOM_Y
+        )
+    inset = _PILL_FOCUS_WIDTH / 2
+    ring = rect.adjusted(inset, inset, -inset, -inset)
+    color = current_glass().primary_text if _is_primary(widget) else current_tokens().accent_fg
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(color), _PILL_FOCUS_WIDTH))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+    painter.restore()
 
 
 # Windows of their own, rounded: menus, combo box lists and tooltips.

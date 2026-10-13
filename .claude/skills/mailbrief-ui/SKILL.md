@@ -7,8 +7,10 @@ description: Use for any change to MailBrief's desktop UI under src/mailbrief/ui
 
 Read AGENTS.md first; its invariants win. Component specs and the token table are in
 `references/spec.md`. The default look is Studio (`docs/ui/studio.md`: white and Studio
-Mist grey, one blue, Semibold titles, pills, filled cards with no borders or shadows), in
-the system's light or dark mode. The layout's approved mockup is
+Mist grey, one blue, Semibold titles, glass pills, filled cards with no borders or
+shadows), in the system's light or dark mode. Its approved renders are
+`docs/ui/studio-light.png` and `docs/ui/studio-dark.png` (the window at 1100 × 720) and
+`docs/ui/studio-dialog.png` (a dialog). The layout's original mockup is
 `docs/ui/mockup-three-pane-dark.png`.
 
 ## Rules
@@ -30,11 +32,15 @@ the system's light or dark mode. The layout's approved mockup is
   hidden). Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
   could otherwise widen the layout.
-- Outline buttons come only from `outline_button()` in ui/labels.py; `glass=True` makes a
-  Liquid Glass pill (`ui/glass/button.py`), and `primary=True` tints the one primary action
-  of a screen. The header and the Today page use glass; other screens move one at a time. Their text is
-  escaped with `button_label()` unless it is app text carrying its own `&` mnemonic
-  (`mnemonic=True`); long mail-derived text uses `shorten=True`.
+- Every button is a glass pill that looks like the sidebar's Disconnect: frosted and lit at
+  rest, wherever it sits, brighter under the pointer. Make buttons with `outline_button()`
+  in ui/labels.py. `glass=True` makes a `GlassButton` (`ui/glass/button.py`, which adds the
+  hover spring and light), and `primary=True` tints the one primary action of a screen.
+  `ThemeStyle` draws every other `QPushButton` as the same pill: a plain
+  `outline_button()`, `variant="primary"` and Qt's own buttons in message boxes and button
+  boxes. Never style `QPushButton` in the stylesheet; only the sidebar's `variant="nav"`
+  rows are. Button text is escaped with `button_label()` unless it is app text carrying
+  its own `&` mnemonic (`mnemonic=True`); long mail-derived text uses `shorten=True`.
 - Fonts are bundled Inter (`ui_font(px, medium=..., semibold=...)`): Medium for emphasis
   in text, Semibold for titles; sizes are in pixels, never points, and display sizes are
   tracked tighter automatically. Metrics: `TEXT_PX` 13, `READING_PX` 14, `SMALL_PX` 12,
@@ -44,10 +50,18 @@ the system's light or dark mode. The layout's approved mockup is
   (deadlines, proposals) is bare coloured text, never a filled chip. Cards are
   `HairlineFrame`s: a `card` fill, no border. Combo boxes, date, time and number fields,
   check boxes and radio buttons are drawn by `ThemeStyle`; don't style them in QSS.
-- A glass pill's icon is a tile at its leading end (pass `icon_name` to
-  `outline_button(..., glass=True)`); glass belongs to the header, sidebar and footer,
-  and pills in the content rest as outlines that lift into glass on hover. Never put
-  glass on glass.
+- Icons are plain: a button's icon (`icon_name`) is drawn in the label's colour beside
+  the label, never in a tile or square behind it.
+- Glass panels are the chrome only: the header, sidebar, gutter, status strip and a
+  dialog's frame. Pages and a dialog's content sit on a white sheet, and the selected
+  page is a fill, never a second layer of glass.
+- Dialogs get the home screen's style automatically: `ThemeStyle.polish` installs
+  `DialogSheet` (`ui/glass/dialog.py`) on every `QDialog`, which paints the glass with its
+  colour field round a rounded sheet (`DIALOG_GUTTER` 8 from the edge, `SHEET_RADIUS`
+  12), and gives the dialog's own layout `DIALOG_MARGIN` (22) so its content sits inside
+  the sheet. Keep a dialog's content in its own top-level layout with those default
+  margins; never paint a dialog's background, give it a stylesheet background or set its
+  top-level margins.
 - Nothing has a sharp corner. Pages sit on the workspace's rounded sheet; never add a
   divider that meets the chrome or another hairline. Anything filled or outlined is
   rounded (`RADIUS`, `CARD_RADIUS`, pills), and pop-ups are rounded by `ThemeStyle`.
@@ -75,7 +89,14 @@ the system's light or dark mode. The layout's approved mockup is
   `themed` fixture from `tests/ui/conftest.py`, which restores the style, palette,
   stylesheet, font, tokens and the default `QLocale` (`app.main` sets it to English).
 - On macOS, UI tests need `MACOS_GUI_AVAILABLE=1` (or a real session) and run offscreen
-  with `QT_QPA_PLATFORM=offscreen`.
+  with `QT_QPA_PLATFORM=offscreen`. CI also runs them on the real macOS platform
+  (`MACOS_GUI_AVAILABLE=1 QT_QPA_PLATFORM=cocoa uv run pytest tests/ui tests/unit/test_app.py`),
+  which catches platform-only sizes and high-DPI fills; run that before pushing a change
+  to painting or sizes. Locally a test can fail there with "not activated in 5000 ms"
+  when the desktop won't give the window focus; that isn't a bug in the change.
+- Keep the 680 px width tests passing (`test_unbroken_mail_text_never_widens_the_workspace`,
+  `test_a_long_unbroken_title_never_widens_the_page`): they limit how wide buttons, pill
+  padding and margins can grow.
 - Never assert a top-level window's requested size: CI's macOS screen is small (about
   1024 × 649 available), and Cocoa keeps windows inside it. Derive expectations from the
   actual geometry (a list shorter than its rows scrolls) or from the screen's available
@@ -88,17 +109,21 @@ the system's light or dark mode. The layout's approved mockup is
   `src/mailbrief`.
 
 ## Screenshot review loop
-1. Render the gallery at 1x and 2x (PowerShell: set `$env:MAILBRIEF_UI_SHOTS` instead):
+1. Render the gallery at 1x and 2x (PowerShell: set `$env:MAILBRIEF_UI_SHOTS` instead; on
+   macOS add `MACOS_GUI_AVAILABLE=1 QT_QPA_PLATFORM=offscreen`):
    ```
-   MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov
-   QT_SCALE_FACTOR=2 MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov
+   MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_main_window_layout.py tests/ui/test_workspace.py -q --no-cov
+   QT_SCALE_FACTOR=2 MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_main_window_layout.py tests/ui/test_workspace.py -q --no-cov
    ```
-   Files are named `{size}-{mode}-{dpr}x.png`, sizes `mockup` (680×520) and `desktop`
-   (1100×720). The Actions page renders at the desktop size as `page-actions-*`,
-   `page-waiting-*` and `page-completed-dark-*`; compare them with Today's renders.
-2. Compare `scratch/ui-shots/mockup-light-2x.png` and `mockup-dark-2x.png` with
-   `docs/ui/studio.md` and the mockup's layout. List differences in spacing, sizes,
-   weights, colours and alignment; fix them; render again. At most three rounds per
-   change.
+   The whole window renders as `window-desktop-{mode}-{dpr}x.png`; the workspace as
+   `{size}-{mode}-{dpr}x.png`, sizes `mockup` (680×520) and `desktop` (1100×720); the
+   pages as `page-*` (Actions as `page-actions-*`, `page-waiting-*` and
+   `page-completed-dark-*`); the project dialog as `dialog-project-*`.
+2. Compare `window-desktop-light-1x.png` and `window-desktop-dark-1x.png` with
+   `docs/ui/studio-light.png` and `docs/ui/studio-dark.png`, and any dialog with
+   `docs/ui/studio-dialog.png`; check `mockup-*-2x.png` for the narrow layout. List
+   differences in spacing, sizes, weights, colours and alignment; fix them; render again.
+   At most three rounds per change. When the owner approves a change to the look, copy
+   the new renders over those three references in the same pull request.
 3. Look at both modes' renders for anything hard to read.
 4. Never commit `scratch/`.

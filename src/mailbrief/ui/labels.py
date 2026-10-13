@@ -113,8 +113,7 @@ def outline_button(
     that carries its own ``&`` mnemonic passes ``mnemonic=True``. With ``shorten``, long
     mail-derived text is cut by short_button_label and the full text becomes the
     accessible name, never a tooltip. ``px`` sets the font size, ``icon_name`` adds a
-    bundled icon in the text colour (a glass pill draws it in a tile at its leading end,
-    as a browser tab draws a site icon), and ``accessible_name`` is what screen readers say
+    bundled icon in the text colour, and ``accessible_name`` is what screen readers say
     (without it, Qt reads the button's text). With ``glass`` it is a Liquid Glass pill
     (GlassButton); ``primary`` tints the one primary action and needs ``glass``.
     """
@@ -129,8 +128,7 @@ def outline_button(
     else:
         shown = button_label(text)
     if glass:
-        # A glass pill draws its icon itself, in a tile at its leading end.
-        button: QPushButton = GlassButton(shown, primary=primary, glyph=icon_name)
+        button: QPushButton = GlassButton(shown, primary=primary)
     else:
         button = QPushButton(shown)
         button.setProperty("variant", "outline")
@@ -142,7 +140,7 @@ def outline_button(
         button.setAccessibleName(accessible_name)
     if px is not None:
         button.setFont(ui_font(px, medium=glass))
-    if icon_name is not None and not glass:
+    if icon_name is not None:
         glyph = icon_name  # Narrowed for the lambda.
 
         def tint() -> None:

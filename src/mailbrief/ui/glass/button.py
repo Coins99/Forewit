@@ -29,26 +29,16 @@ from mailbrief.ui.glass.painter import (
 from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import keyboard_focus
-from mailbrief.ui.theme import TEXT_PX, current_glass, current_tokens, icon_pixmap, ui_font
+from mailbrief.ui.theme import TEXT_PX, current_glass, current_tokens, ui_font
 
-# The outline button's box: text plus 14 px each side and 6 px above and below.
-PAD_X: Final = 12
+# The pill's box: its label plus 10 px each side and 6 px above and below.
+PAD_X: Final = 10
 PAD_Y: Final = 6
 ICON_GAP: Final = 6
 # Room the button keeps round its pill, each side, for the pill to grow into on hover and
 # for its shadow.
 ROOM_X: Final = 3
 ROOM_Y: Final = 3
-# A leading icon sits in a tile, as a browser tab's site icon does: a rounded square
-# concentric with the pill's round end (TILE_INSET from it), with its glyph in the middle.
-TILE_PX: Final = 18
-TILE_RADIUS: Final = 5
-TILE_INSET: Final = 5
-GLYPH_PX: Final = 12
-DISABLED_TILE_OPACITY: Final = 0.5
-# A widget property: True on the glass chrome (header, sidebar), False on the content
-# sheet. A pill on the glass is Liquid Glass at rest; one in the content lifts into it.
-GLASS_LAYER: Final = "liquidGlass"
 # How far a hovered pill grows, each side; the hover spring overshoots by about a tenth,
 # still inside the room.
 GROW_X: Final = 2.4
@@ -74,11 +64,9 @@ class GlassButton(QPushButton):
     in the accent colour (a click doesn't), and ``primary`` tints the one primary action.
     """
 
-    def __init__(self, text: str, *, primary: bool = False, glyph: str | None = None) -> None:
+    def __init__(self, text: str, *, primary: bool = False) -> None:
         super().__init__(text)
         self.primary = primary
-        # A bundled icon's name, drawn in a tile at the leading end (see TILE_PX).
-        self.glyph = glyph
         self.setFont(ui_font(TEXT_PX, medium=True))
         self.setProperty("variant", "glass")
         self.setMouseTracking(True)
@@ -111,26 +99,13 @@ class GlassButton(QPushButton):
     def hover(self) -> float:
         return self._hover
 
-    def on_glass(self) -> bool:
-        """Whether the pill sits on the glass chrome: the nearest ancestor that says."""
-        widget = self.parentWidget()
-        while widget is not None:
-            layer = widget.property(GLASS_LAYER)
-            if layer is not None:
-                return bool(layer)
-            widget = widget.parentWidget()
-        return False
-
     def _shown_text(self) -> str:
         """The text as painted: mnemonic markers dropped and ``&&`` shown as ``&``."""
         return self.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
 
     def _content_width(self) -> float:
-        """The pill's width for its content: the tile from its inset (or the leading
-        padding), the label and the trailing padding."""
+        """The pill's width for its content: the padding, the icon and the label."""
         text = QFontMetricsF(self.font()).horizontalAdvance(self._shown_text())
-        if self.glyph is not None:
-            return TILE_INSET + TILE_PX + ICON_GAP + text + PAD_X
         width = text + 2 * PAD_X
         if not self.icon().isNull():
             width += self.iconSize().width() + ICON_GAP
@@ -138,7 +113,7 @@ class GlassButton(QPushButton):
 
     def sizeHint(self) -> QSize:
         metrics = QFontMetricsF(self.font())
-        height = max(metrics.height() + 2 * PAD_Y, TILE_PX + 2 * TILE_INSET)
+        height = metrics.height() + 2 * PAD_Y
         width = self._content_width()
         return QSize(math.ceil(width + 2 * ROOM_X), math.ceil(height + 2 * ROOM_Y))
 
@@ -256,7 +231,6 @@ class GlassButton(QPushButton):
                 primary=self.primary,
                 mode=preferences.mode,
                 hover=hover,
-                on_glass=self.on_glass(),
             )
         else:
             paint_pill(
@@ -288,9 +262,6 @@ class GlassButton(QPushButton):
         painter.end()
 
     def _paint_label(self, painter: QPainter, rect: QRectF, text_color: str) -> None:
-        if self.glyph is not None:
-            self._paint_tile_and_label(painter, rect, self.glyph, text_color)
-            return
         metrics = QFontMetricsF(self.font())
         text_width = metrics.horizontalAdvance(self._shown_text())
         icon_width = 0 if self.icon().isNull() else self.iconSize().width()
@@ -306,40 +277,4 @@ class GlassButton(QPushButton):
         painter.setPen(QColor(text_color))
         flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         area = QRectF(left + icon_width + gap, rect.top(), text_width + 1, rect.height())
-        painter.drawText(area, int(flags) | int(Qt.TextFlag.TextHideMnemonic), self.text())
-
-    def _paint_tile_and_label(
-        self, painter: QPainter, rect: QRectF, glyph: str, text_color: str
-    ) -> None:
-        """The icon tile at the leading end, concentric with the pill's round end, then the
-        label: a browser tab's site icon and title. A pill wider than its content centres
-        both together."""
-        tokens = current_tokens()
-        metrics = QFontMetricsF(self.font())
-        text_width = metrics.horizontalAdvance(self._shown_text())
-        left = rect.left() + max(0.0, (rect.width() - self._content_width()) / 2)
-        tile = QRectF(left + TILE_INSET, rect.center().y() - TILE_PX / 2, TILE_PX, TILE_PX)
-        if self.primary:
-            # On the primary's solid fill: a lighter tile of its own colour, white glyph.
-            fill = QColor(current_glass().primary_text)
-            fill.setAlphaF(0.24)
-            glyph_color = current_glass().primary_text
-        else:
-            fill = QColor(tokens.tile)
-            glyph_color = tokens.on_tile
-        painter.save()
-        if not self.isEnabled():
-            painter.setOpacity(DISABLED_TILE_OPACITY)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-        painter.drawRoundedRect(tile, TILE_RADIUS, TILE_RADIUS)
-        pixmap = icon_pixmap(glyph, glyph_color, GLYPH_PX, self.devicePixelRatioF())
-        corner = tile.center() - QPointF(GLYPH_PX / 2, GLYPH_PX / 2)
-        painter.drawPixmap(corner, pixmap)
-        painter.restore()
-        painter.setFont(self.font())
-        painter.setPen(QColor(text_color))
-        flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-        area = QRectF(tile.right() + ICON_GAP, rect.top(), text_width + 1, rect.height())
         painter.drawText(area, int(flags) | int(Qt.TextFlag.TextHideMnemonic), self.text())

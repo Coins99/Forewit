@@ -206,12 +206,12 @@ def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> N
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
-def test_a_content_pill_lifts_into_glass_under_the_pointer(
+def test_every_pill_is_glass_at_rest_and_brightens_under_the_pointer(
     qapp: QApplication, mode: ThemeMode
 ) -> None:
-    """In the content layer a pill rests as an outline and lifts into glass as the pointer
-    arrives (WWDC25): its body fills, and a shadow appears under it. The primary pill is
-    glass at rest and keeps its colour, so its white label keeps its contrast."""
+    """As the sidebar's Disconnect: glass at rest wherever it sits, its body brighter under
+    the pointer. The primary pill keeps its colour, so its white label keeps its
+    contrast."""
     glass = glass_for(mode, ColorScheme.STUDIO)
     card = tokens_for(mode, ColorScheme.STUDIO).card
 
@@ -219,17 +219,13 @@ def test_a_content_pill_lifts_into_glass_under_the_pointer(
         picture = image(110, 50)
         picture.fill(QColor(card))
         painter = QPainter(picture)
-        rect = QRectF(5, 5, 100, 36)
-        paint_liquid_pill(painter, rect, glass, primary=primary, hover=hover, on_glass=False)
+        paint_liquid_pill(painter, QRectF(5, 5, 100, 36), glass, primary=primary, hover=hover)
         painter.end()
         return picture
 
-    resting, lifted = paint(False, 0.0), paint(False, 1.0)
-    assert resting.pixelColor(55, 23).name() == card  # An outline only…
-    assert lifted.pixelColor(55, 23).name() != card  # …that fills as it lifts,
-    assert resting.pixelColor(55, 43).name() == card  # and casts its shadow only then.
-    if glass.shadow.alpha > 0:  # Dark glass, as a tab, casts none.
-        assert lifted.pixelColor(55, 43).name() != card
+    resting, hovered = paint(False, 0.0), paint(False, 1.0)
+    assert resting.pixelColor(55, 23).name() != card  # Glass at rest…
+    assert hovered.pixelColor(55, 23) != resting.pixelColor(55, 23)  # …brighter hovered.
     assert paint(True, 0.0).pixelColor(55, 23) == paint(True, 1.0).pixelColor(55, 23)
 
 
@@ -261,7 +257,7 @@ def test_a_dark_glass_pill_matches_the_tab_it_is_measured_on(qapp: QApplication)
     picture = image(220, 60, 2.0)
     picture.fill(QColor("#424448"))
     painter = QPainter(picture)
-    paint_liquid_pill(painter, QRectF(10, 15, 195, 29), glass, on_glass=True)
+    paint_liquid_pill(painter, QRectF(10, 15, 195, 29), glass)
     painter.end()
     background = QColor("#424448").lightness()
 

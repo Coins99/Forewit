@@ -29,10 +29,10 @@ Measured on apple.com in light mode (October 2026):
   rim; its selected local-nav item is a plain fill. Studio's selected page is that grey
   capsule (`raised`), with no rim (`raised_rim` alpha 0).
 - Its secondary buttons are outlined pills with no fill; they fill on hover, and have no
-  glow. Studio's glass pills are the same: a 1 px Steel rim, no fill, a soft fill
-  (`pill_hover`) as the pointer lifts them, and no coloured light. They now match the
-  stylesheet's outline buttons. The spring Apple's apps give a pressed or hovered glass
-  button stays.
+  glow. Studio's pills first matched them; the owner then chose glass at rest for every
+  button (see Buttons like Disconnect). They keep the soft hover fill (`pill_hover`) and
+  no coloured light, and the spring Apple's apps give a pressed or hovered glass button
+  stays.
 - Its primary is solid #0071e3 with white text, as Studio's.
 3. **Desktop type scale.** Body text stays at 13 px, as in macOS Mail, rather than the
    web page's 17 px. Titles are Inter Semibold, tracked tighter, as Apple sets display
@@ -46,7 +46,7 @@ Measured on apple.com in light mode (October 2026):
 | Header, sidebar, cards (`canvas`, glass, `card`) | #f5f5f7 | #161617, #2a2a2c | Studio Mist |
 | Selected row (`selection`) | #ebebef | #2c2c2e | near Control Gray |
 | Dividers (`hairline`) | #d6d6d6 | #3a3a3c | Hairline Silver |
-| Outline buttons (`border_strong`) | #86868b | #6e6e73 | Steel |
+| Check box rims, scroll bars (`border_strong`) | #86868b | #6e6e73 | Steel |
 | Text | #1d1d1f | #f5f5f7 | Ink |
 | Secondary text | #515154 | #a1a1a6 | |
 | Muted text | #68686d | #98989d | |
@@ -63,16 +63,17 @@ selected rows and cards, in every scheme and mode.
 
 - **Cards** are a `card` fill with an 18 px radius (`CARD_RADIUS`) and no border or
   shadow. The guide's 28 px suits a web page's tall cards; MailBrief's are shorter.
-- **Buttons** are pills. Outline buttons have a 1 px `border_strong` rim and no fill.
-  Each screen has at most one primary button, a solid `primary_fill` pill with
-  `on_primary` text (Sync and review, Continue).
+- **Buttons** are glass pills, every one like the sidebar's Disconnect (see Buttons like
+  Disconnect). Each screen has at most one primary button, a solid `primary_fill` pill
+  with `on_primary` text (Sync and review, Continue).
 - **Fields** (text, combo box, date, time and number) are rounded 8 px boxes with a
   hairline that turns `accent_fg` with focus. Combo boxes and date and time fields have
   a thin chevron. Check boxes and radio buttons fill with `primary_fill` when on.
 - **No sharp corners.** The pages sit on one rounded white sheet (12 px corners) that
   floats on the glass, with a gutter of glass at its right; header, sidebar, gutter and
-  status strip are one surface, and no hairline meets another. Focus rings, menus, combo
-  box lists and tooltips are rounded too.
+  status strip are one surface, and no hairline meets another. Dialogs sit on the same
+  rounded sheet (see Dialogs). Focus rings, menus, combo box lists and tooltips are
+  rounded too.
 - **Lists** select with a rounded fill inset from the row's edges, and no accent bar.
   Row separators line up with the text. Tabs are pill segments.
 - **Status labels** (deadlines, "Proposes a new deadline", "2 new in thread") are bare
@@ -110,10 +111,12 @@ MailBrief draws each part with QPainter (`ui/glass/painter.py`):
   pills follow those numbers (`RIM_LIGHT`, `LENS_LIGHT`, `END_SHADE`); light mode, where
   white light can't show on a white page, keeps the same shaded ends and adds a faint
   contact ring and a soft shadow below.
-- **Lifting into glass.** Controls in the content rest quietly and lift up into glass
-  when touched: Accept, Dismiss, Draft a reply and Open in Gmail rest as outlines and,
-  under the pointer, gain the frosted body, highlight and shadow as they swell on a
-  spring. The light still starts under the pointer and spreads round the pill.
+- **Glass at rest.** WWDC's controls lift up into glass when touched, and Studio's
+  buttons in the content first did: outlines that turned to glass under the pointer. The
+  owner chose glass at rest instead, so every button, in the chrome, the pages and the
+  dialogs, is the same frosted, lit pill as the sidebar's Disconnect. Under the pointer it
+  brightens, and a `GlassButton` swells on a spring, with the light starting under the
+  pointer and spreading round the pill.
 - **Accessibility.** Reduce transparency makes the glass solid, Increase contrast draws
   solid rims, and Reduce motion stops the springs and the glide.
 
@@ -127,12 +130,34 @@ at about half strength, as Liquid Glass picks up colourful content nearby. The c
 sheet never takes a hue. Motion glides rather than snaps: the sidebar's selection moves
 to a new page on monopo's expo-out curve, cubic-bezier(0.19, 1, 0.22, 1), in 420 ms.
 
-## Buttons like tabs
+## Buttons like Disconnect
 
-A glass pill with an icon carries it as a browser tab carries its site icon: a rounded
-square tile (18 px, radius 5) at its leading end, concentric with the pill's round end,
-with the glyph in white on Steel grey (on the primary pill, a lighter blue tile), then the
-label in Inter Medium. Its light is the tab's, described above.
+Every button looks like the sidebar's Disconnect, which the owner picked as the model on
+2026-10-13: a pill of Liquid Glass at rest, wherever it sits, with its label in Inter
+Medium 13 px and 10 px of glass each side of it, lit as described above. The glass pills
+in the header, the sidebar and Today (`GlassButton`) also swell and light under the
+pointer; `ThemeStyle` draws every other button, Qt's own in message boxes included, as the
+same pill, brighter under the pointer and a little smaller while pressed. The one primary
+is solid blue with a white label.
+
+Icons are plain: a button's icon is drawn in its label's colour, beside the label, with
+no tile or square behind it. (For a while a glass pill carried its icon in a rounded
+tile, as a browser tab carries its site icon; the owner preferred plain icons.)
+
+## Dialogs
+
+Every dialog keeps the home screen's style (`ui/glass/dialog.py`): the window's glass,
+with the colour field showing through, round a rounded white sheet (12 px corners, 8 px of
+glass from the edge, a hairline edge), and the dialog's content 22 px in, inside the
+sheet. It applies to every dialog without any code in the dialog: Plan with AI, New event,
+the draft and note editor, Settings, the project dialog and message boxes alike.
+
+## Reference renders
+
+`studio-light.png` and `studio-dark.png` are the window at 1100 × 720 in each mode, and
+`studio-dialog.png` is the project dialog, rendered by the UI tests' gallery (see the
+mailbrief-ui skill). Compare new work with them, and replace them when the owner approves
+a change to the look.
 
 ## A dashboard, after Dub
 

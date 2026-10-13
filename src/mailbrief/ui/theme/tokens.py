@@ -37,7 +37,7 @@ class Tokens:
     panel: str  # Window, panes and cards.
     selection: str  # Selected row and navigation item, hover.
     hairline: str  # Dividers and card borders.
-    border_strong: str  # Outline buttons.
+    border_strong: str  # Check box rims, strong cards, scroll bars, the palette field.
     accent_border: str  # Selected-row bar.
     text: str  # Titles and body.
     text_secondary: str  # Senders and meta.
@@ -49,8 +49,6 @@ class Tokens:
     card: str  # Cards in a pane: a fill, with no border.
     primary_fill: str  # The one primary button of a screen.
     on_primary: str  # Its text.
-    tile: str  # A pill button's icon tile, at its leading end.
-    on_tile: str  # The glyph in it.
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +85,7 @@ class GlassTokens:
     pill: Tint  # A pill button's fill.
     pill_sheen: Tint  # Its top half's light.
     pill_shade: Tint  # Its bottom half's shade.
-    pill_hover: Tint  # A pill button's fill under the pointer, faded in as it lifts.
+    pill_hover: Tint  # A pill button's fill under the pointer, faded in with the hover.
     primary: Tint  # The one primary pill's fill.
     primary_rim: Tint
     primary_text: str  # The primary pill's label.
@@ -130,8 +128,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#2a2a2c",
         primary_fill="#0071e3",
         on_primary="#ffffff",
-        tile="#6e6e73",
-        on_tile="#ffffff",
     ),
     (ColorScheme.STUDIO, ThemeMode.LIGHT): Tokens(
         canvas="#f5f5f7",
@@ -150,8 +146,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#f5f5f7",
         primary_fill="#0071e3",
         on_primary="#ffffff",
-        tile="#86868b",
-        on_tile="#ffffff",
     ),
     (ColorScheme.SLATE, ThemeMode.DARK): Tokens(
         canvas="#16171b",
@@ -170,8 +164,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#22242a",
         primary_fill="#13284a",
         on_primary="#8db4ee",
-        tile="#454852",
-        on_tile="#eff0f2",
     ),
     (ColorScheme.SLATE, ThemeMode.LIGHT): Tokens(
         canvas="#eef0f3",
@@ -190,8 +182,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#eceef2",
         primary_fill="#e3edfb",
         on_primary="#1d4f91",
-        tile="#c5c8cf",
-        on_tile="#1c1d20",
     ),
     (ColorScheme.GRAPHITE, ThemeMode.DARK): Tokens(
         canvas="#151515",
@@ -210,8 +200,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#151515",
         primary_fill="#0b1f40",
         on_primary="#7aa5e6",
-        tile="#484847",
-        on_tile="#f0efec",
     ),
     (ColorScheme.GRAPHITE, ThemeMode.LIGHT): Tokens(
         canvas="#f5f4f0",
@@ -230,8 +218,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#f5f4f0",
         primary_fill="#e3edfb",
         on_primary="#1d4f91",
-        tile="#c9c8c2",
-        on_tile="#1f1e1b",
     ),
     (ColorScheme.OCEAN, ThemeMode.DARK): Tokens(
         canvas="#131819",
@@ -250,8 +236,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#1e2627",
         primary_fill="#012f38",
         on_primary="#64c2d7",
-        tile="#3e4b4d",
-        on_tile="#eef1f1",
     ),
     (ColorScheme.OCEAN, ThemeMode.LIGHT): Tokens(
         canvas="#edf1f1",
@@ -270,8 +254,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#eaeff0",
         primary_fill="#ddf0f5",
         on_primary="#035a6a",
-        tile="#c1cacb",
-        on_tile="#1a1e1e",
     ),
     (ColorScheme.SAGE, ThemeMode.DARK): Tokens(
         canvas="#151815",
@@ -290,8 +272,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#202621",
         primary_fill="#073215",
         on_primary="#86c393",
-        tile="#424b44",
-        on_tile="#eff1ef",
     ),
     (ColorScheme.SAGE, ThemeMode.LIGHT): Tokens(
         canvas="#eef1ee",
@@ -310,8 +290,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#ebefec",
         primary_fill="#e2f0e5",
         on_primary="#03612a",
-        tile="#c4cac5",
-        on_tile="#1b1e1c",
     ),
     (ColorScheme.PLUM, ThemeMode.DARK): Tokens(
         canvas="#18161a",
@@ -330,8 +308,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#262328",
         primary_fill="#311f43",
         on_primary="#c0a3e3",
-        tile="#4b4650",
-        on_tile="#f1eff1",
     ),
     (ColorScheme.PLUM, ThemeMode.LIGHT): Tokens(
         canvas="#f1eff2",
@@ -350,8 +326,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#efedf1",
         primary_fill="#efe9f8",
         on_primary="#603b85",
-        tile="#cac6cd",
-        on_tile="#1e1c1f",
     ),
     (ColorScheme.ROSE, ThemeMode.DARK): Tokens(
         canvas="#1b1616",
@@ -370,8 +344,6 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#2a2223",
         primary_fill="#431824",
         on_primary="#e699aa",
-        tile="#514546",
-        on_tile="#f2efef",
     ),
     (ColorScheme.ROSE, ThemeMode.LIGHT): Tokens(
         canvas="#f3efef",
@@ -390,18 +362,16 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         card="#f2eced",
         primary_fill="#fae6ea",
         on_primary="#842d47",
-        tile="#cfc5c6",
-        on_tile="#201c1c",
     ),
 }
 
 _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
     # Liquid Glass after WWDC25, over a fluid colour field after monopo saigon: three soft
     # pools of sage, amber and rose light behind frosted chrome, with no streak, sheen or
-    # lit edge. Pills on the glass are frosted with a specular rim, a lensing band and a
-    # soft shadow; pills in the content rest as outlines (a crisp Steel rim) and lift into
-    # glass under the pointer. The selected page is a vibrant white fill with no rim (no
-    # glass on glass); the primary pill is solid blue with white text.
+    # lit edge. Every pill, wherever it sits, is frosted at rest with a specular rim, a
+    # lensing band and a soft shadow, as the sidebar's Disconnect is. The selected page is
+    # a vibrant white fill with no rim (no glass on glass); the primary pill is solid blue
+    # with white text.
     (ColorScheme.STUDIO, ThemeMode.DARK): GlassTokens(
         backdrop_top="#161617",
         backdrop_bottom="#161617",
@@ -876,7 +846,13 @@ GLASS_LIGHT: Final = _GLASS[DEFAULT_SCHEME, ThemeMode.LIGHT]
 RADIUS: Final = 10  # Rows, list selections and small controls.
 CARD_RADIUS: Final = 18  # Cards in a pane.
 SHEET_RADIUS: Final = 12  # The rounded sheet the pages sit on.
-# Stylesheet buttons are pills: half their height (13 px text, 5 px padding, 1 px border).
+# A dialog in the home screen's style: its glass round a rounded sheet, DIALOG_GUTTER from
+# the window's edge, and its content DIALOG_MARGIN in (inside the sheet, clear of its
+# rounded corners).
+DIALOG_GUTTER: Final = 8
+DIALOG_MARGIN: Final = 22
+# The command palette's search field is a pill: half its height. Buttons are glass pills,
+# drawn by GlassButton and ThemeStyle.
 PILL_RADIUS: Final = 14
 TAB_RADIUS: Final = 12  # Tabs are segments of a pill.
 FIELD_RADIUS: Final = 8  # Text fields, combo boxes and date and time fields.

@@ -25,7 +25,7 @@ and `card`, as do `warning_fg` and `accent_fg` (bare labels) and `on_primary` on
 | panel | #1a1a19 | #ffffff | window, panes, cards |
 | selection | #151515 | #f5f4f0 | selected row and nav item, hover |
 | hairline | #313130 | #e3e2dd | dividers, card borders |
-| border_strong | #484847 | #c9c8c2 | outline buttons |
+| border_strong | #484847 | #c9c8c2 | check box rims, strong cards, scroll bar handles, the palette field |
 | accent_border | #193567 | #9dbbe8 | selected-row bar |
 | text | #f0efec | #1f1e1b | titles, body |
 | text_secondary | #c3c2b8 | #5f5e5a | senders, meta |
@@ -34,14 +34,14 @@ and `card`, as do `warning_fg` and `accent_fg` (bare labels) and `on_primary` on
 | accent_fg / accent_bg | #7aa5e6 / #0b1f40 | #1d4f91 / #e3edfb | links, labels, focus / ticked boxes |
 | card | #151515 | #f5f4f0 | cards (a fill, no border) |
 | primary_fill / on_primary | #0b1f40 / #7aa5e6 | #e3edfb / #1d4f91 | the one primary button, ticked boxes |
-| tile / on_tile | #484847 / #f0efec | #c9c8c2 / #1f1e1b | a glass pill's icon tile and its glyph |
 
 The six earlier schemes' `card` is their `selection`, and their primary is their
 `accent_bg` with `accent_fg` text, so they keep their look; Studio's primary is solid
 blue with white text.
 
-Metrics (logical px): RADIUS 10 (rows, selections), CARD_RADIUS 18, PILL_RADIUS 14
-(stylesheet buttons), TAB_RADIUS 12, FIELD_RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13,
+Metrics (logical px): RADIUS 10 (rows, selections), CARD_RADIUS 18, SHEET_RADIUS 12 (the
+pages' sheet and a dialog's), DIALOG_GUTTER 8, DIALOG_MARGIN 22 (see Dialogs), PILL_RADIUS
+14 (the command palette's search field), TAB_RADIUS 12, FIELD_RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13,
 READING_PX 14 (an email's summary), SMALL_PX 12, CAPTION_PX 11, HEADING_PX 17 (the brief's
 day, Semibold), TITLE_PX 20 (page and email titles, Semibold); list items pad
 ITEM_PAD_X 10 by ITEM_PAD_Y 5 with no selection mark (ITEM_MARK_PX 0).
@@ -62,13 +62,13 @@ turned off), and three soft pools of sage, amber and rose light (`pool_a`, `pool
 is (measured on one): `highlight` (light on the rim along the top and the bottom), `lens`
 (the glow that light lenses into the body from both long edges), `end_shade` (the ends,
 where that light never reaches), `edge` (an even contact ring, light mode only) and
-`shadow` (a soft shadow below, light mode only). On the glass they are frosted
-(`pill`) at rest; in the content they rest as a Steel outline and lift into glass under
-the pointer (`pill_hover`). Its selected page is a vibrant white fill with no rim
+`shadow` (a soft shadow below, light mode only). Every pill is frosted (`pill`) and lit
+at rest, wherever it sits, and brightens under the pointer (`pill_hover`). Its selected page is a vibrant white fill with no rim
 (`raised_rim` alpha 0: no glass on glass), and its primary pill is solid blue, labelled
 in `primary_text` (white). The other schemes' pools and layers have alpha 0, their
 `pill_hover` too, and their `primary_text` is their `text`. Glass belongs to navigation
-chrome only (header, sidebar, pill buttons). Lists and the reading pane stay opaque.
+chrome only (header, sidebar, a dialog's frame) and pill buttons. Lists and the reading
+pane stay opaque.
 A translucent colour is a `Tint`: an opaque `#rrggbb` and a separate alpha, never an
 eight-digit hex. Glass lies over a backdrop drawn from `backdrop_top`, `backdrop_bottom`
 `streak` and the pools, so contrast can be proven. `tests/ui/theme/test_glass.py` checks
@@ -135,33 +135,31 @@ them.
     150% at any position. `HairlineFrame` (cards) uses the same helper.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
-- **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
-  - **Size:** the outline button's box plus `ROOM_X` (3 px) each side and `ROOM_Y`
-    (3 px) above and below, room for the pill to grow into on hover and for its shadow.
-    Its label is 13 px Medium (`outline_button(px=...)` keeps Medium for glass).
-  - **Icon tile:** a glass pill draws its icon (`glyph`, the `icon_name` that
-    `outline_button` passes) as a browser tab draws a site icon: a rounded square
-    (`TILE_PX` 18, radius `TILE_RADIUS` 5) concentric with the pill's round end
-    (`TILE_INSET` 5 in), filled with `tile`, the glyph (`GLYPH_PX` 12) in `on_tile`; on the
-    primary pill, a lighter tile of `primary_text` at 24% with the glyph in
-    `primary_text`. Then `ICON_GAP` (6) and the label, then `PAD_X` (12). Disabled, the
-    tile is at half strength. Sync and review (refresh), Draft a reply (pencil) and Open
-    in Gmail (external-link) have tiles.
-  - **Layer:** `GlassButton.on_glass()` asks its nearest ancestor with the
-    `GLASS_LAYER` property: the header, sidebar and footer say True, the content sheet
-    False. With Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
-    paints it: on the glass, frosted with its highlight, lens and shadow at rest; in the
-    content, an outline that fades out as the pill lifts into glass with the hover (as
-    WWDC's controls "lift up into Liquid Glass" on interaction). Its light follows a
-    Liquid Glass tab's, measured pixel by pixel: light enters along the two long edges,
-    as a crisp 1 device px rim line along the top and an almost equal one along the
-    bottom (`RIM_LIGHT`, a profile down the pill's height), each glowing into the body
-    and falling steeply within a point, then faintly over about six (`LENS_LIGHT`; the
-    middle is darkest). Round the ends the light fades out and the outermost edge is
-    shaded (`END_SHADE`, by distance in from each end as a share of the radius: darkest
-    at the end, gone by one radius). The primary's glow stays off its body, so its white
-    label keeps its contrast. The shadow (`SHADOW_RINGS`) falls below the pill only and
-    outside it. The other schemes paint `paint_pill`.
+- **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`).
+  Every button in MailBrief looks like the sidebar's Disconnect: a pill of glass at rest,
+  wherever it sits. A `GlassButton` paints itself; `ThemeStyle` draws every other push
+  button as the same pill (see Buttons, lists and tabs).
+  - **Size:** its label (and icon) plus `PAD_X` (10 px) each side and `PAD_Y` (6 px)
+    above and below, plus `ROOM_X` (3 px) each side and `ROOM_Y` (3 px) above and below,
+    room for the pill to grow into on hover and for its shadow. Its label is 13 px Medium
+    (`outline_button(px=...)` keeps Medium for glass). Keep `PAD_X` at 10: 12 widens the
+    content past the 680 px width tests.
+  - **Icon:** plain, as the label is: `outline_button(icon_name=...)` sets a bundled icon
+    tinted in `text` (through `follow_theme`), drawn at the leading end, then `ICON_GAP`
+    (6) and the label. Never put an icon in a tile or square. Sync and review (refresh),
+    Draft a reply (pencil) and Open in Gmail (external-link) have icons.
+  - **Light:** with Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
+    paints every pill as glass at rest, wherever it sits: frosted (`pill`) with its
+    highlight, lens and shadow, and `pill_hover` over the body as the hover rises. Its
+    light follows a Liquid Glass tab's, measured pixel by pixel: light enters along the
+    two long edges, as a crisp 1 device px rim line along the top and an almost equal one
+    along the bottom (`RIM_LIGHT`, a profile down the pill's height), each glowing into
+    the body and falling steeply within a point, then faintly over about six
+    (`LENS_LIGHT`; the middle is darkest). Round the ends the light fades out and the
+    outermost edge is shaded (`END_SHADE`, by distance in from each end as a share of the
+    radius: darkest at the end, gone by one radius). The primary's glow stays off its
+    body, so its white label keeps its contrast. The shadow (`SHADOW_RINGS`) falls below
+    the pill only and outside it. The other schemes paint `paint_pill`.
   - **Hover:** animates in, as Apple's glass lights from within on interaction.
     - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
       whose overshoot still fits the room.
@@ -186,7 +184,8 @@ them.
   - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
     escaping.
   - **Where:** the header's Sync and review (primary) and Cancel, the sidebar's Google
-    sign-in and Disconnect, and the Today page's card and footer buttons.
+    sign-in and Disconnect, and the Today page's card and footer buttons. Every other
+    button is a `ThemeStyle` pill that looks the same at rest.
 - **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
   reduced motion that widgets read at paint time. `effective_preferences` sets them from:
   - the system (`system.py`): Increase contrast (Qt's `contrastPreference`, or macOS
@@ -352,7 +351,7 @@ line is a `WrapLabel`):
 9. Footer: "Draft a reply" (pencil) and, only for https links on mail.google.com,
    "Open in Gmail" (external-link).
 10. A stretch.
-Buttons are made with `outline_button()` (`button_label()` text, `variant="outline"`,
+Buttons are made with `outline_button(..., glass=True)` (`button_label()` text,
 `setAutoDefault(False)`) and have an objectName: `acceptButton`, `dismissButton`,
 `addToButton`, `applyProposalButton`, `dismissProposalButton`, `replyButton` and
 `openInGmailButton`.
@@ -730,12 +729,28 @@ The brief list's chips keep their shorter forms (see Brief list).
   A form field that is a box layout goes in a plain `QWidget`, so the form gives a
   wrapped label in it the height its text needs.
 
-- Every `QPushButton` (outline or plain) is a pill: transparent, `text`, a 1px
-  `border_strong` rim, radius `PILL_RADIUS`, padding 5px 12px; `:hover` `selection`;
-  `:focus` rim `accent_fg`; `:disabled` `text_muted` with a `hairline` rim.
-- `QPushButton[variant="primary"]`: `primary_fill` background, `on_primary` text, 1px
-  `accent_border`, the pill's radius, padding 5px 16px; `:focus` border `accent_fg`;
-  `:disabled` transparent with `text_muted` text and a `hairline` border, like outline.
+- "Outline" in this spec names a button made by `outline_button()`, not its look: every
+  button is drawn as a glass pill.
+- Every `QPushButton` that isn't a `GlassButton` (a plain `outline_button()`, a
+  `variant="primary"` button, Qt's own in message boxes and button boxes) is drawn by
+  `ThemeStyle` as a glass pill, the same as the sidebar's Disconnect at rest. The
+  stylesheet has no `QPushButton` rules except the sidebar's `[variant="nav"]` rows; never
+  add any, or Qt draws the stylesheet's box instead of the pill.
+  - `paint_button_pill` (`PE_PanelButtonCommand`) paints `paint_liquid_pill` (or
+    `paint_pill` in the other schemes) inside the same room as a `GlassButton`
+    (`_PILL_ROOM_X`, `_PILL_ROOM_Y` 3): `pill_hover` at full strength under the pointer,
+    shrunk to 0.97 while pressed or checked, and at half strength while disabled. It
+    neither grows nor springs; only a `GlassButton` animates.
+  - `sizeFromContents(CT_PushButton)` gives it a `GlassButton`'s size: the label (and
+    icon) plus `_PILL_PAD_X` (10, the same as `PAD_X`) and `_PILL_PAD_Y` (6), plus the
+    room. `polish` sets its label to Medium, keeping any size set before.
+  - `variant="primary"` is the solid `primary` pill with its label in `primary_text`
+    (`drawControl(CE_PushButtonLabel)`). A default button gets no second frame
+    (`PE_FrameDefaultButton` draws nothing).
+  - Focus (`PE_FrameFocusRect`): a 2 px ring inside the pill, only after keyboard
+    navigation, in `accent_fg` (`primary_text` on the primary), as a `GlassButton`'s.
+  - A disabled pill's label is the palette's disabled `ButtonText` (`text_muted`); the
+    primary's stays `primary_text`.
 - `QListView` (unless named, as the brief, action and page lists are): `panel`, a 1px
   `hairline` border, radius `RADIUS`, padding 3px; a list set to `NoFrame` (Your day's)
   is transparent, with no border or padding. `QListWidget::item`: padding 5px 10px,
@@ -769,11 +784,37 @@ The brief list's chips keep their shorter forms (see Brief list).
   refresh waits only while a replacement is being confirmed there, and reloads the page
   when it ends while Briefs shows.
 
+## Dialogs (`ui/glass/dialog.py`)
+
+Every dialog keeps the home screen's style: Plan with AI, New event, the draft and note
+editor, Settings, the project dialog, message boxes and Qt's own dialogs alike.
+
+- `ThemeStyle.polish` installs `dialog_sheet()`, one shared `DialogSheet` event filter, on
+  every `QDialog`. On each paint, before the dialog's content paints over it, it paints:
+  - the window's glass (`paint_panel` with the glass preferences, so the solid modes are
+    solid) over a backdrop of its own, rendered at once at `SCALE` of the dialog's size
+    with the colour field, and kept by size, scheme and mode (`CACHE_SIZE` 4);
+  - a rounded `panel` sheet `DIALOG_GUTTER` (8) in from each edge, radius
+    `SHEET_RADIUS` (12), with a hairline edge, both snapped to device pixels
+    (`crisp_fill_rect`, `crisp_rect`).
+- `ThemeStyle.pixelMetric` gives a dialog's own top-level layout `DIALOG_MARGIN` (22) on
+  every side (`PM_Layout*Margin` for a `QDialog`), so its content sits 14 px inside the
+  sheet, clear of its rounded corners. Keep a dialog's content in that layout and leave
+  its margins alone; nested layouts and pages may set their own.
+- Never paint a dialog's background, give it a stylesheet background or make it
+  translucent: the sheet is its background. Text fields, lists and cards in a dialog sit
+  on the white sheet as they do on a page.
+- `tests/ui/theme/test_controls.py` checks that a plain dialog and a message box show the
+  glass at the edge, no square corner and the sheet's straight edge, and that a dialog's
+  layout gets `DIALOG_MARGIN`. `docs/ui/studio-dialog.png` is the reference render.
+
 ## Stylesheet additions from the Phase 4 visual pass
 
-- Outline buttons use `padding: 5px 12px` and glass pills `PAD_X` 12 (the brief's 4px
-  10px looked small next to the mockup; 14 cost the rounded sheet's room at 680 px), with
-  14px icons.
+- Pills pad `PAD_X` 10 each side (`_PILL_PAD_X` for `ThemeStyle`'s), with 14px icons:
+  14 cost the rounded sheet's room at 680 px, and 12 fails the 680 px width tests
+  (`test_unbroken_mail_text_never_widens_the_workspace`,
+  `test_a_long_unbroken_title_never_widens_the_page`) now that every button is a pill
+  with room round it.
 - Scrollbars are thin token-coloured handles with no arrow buttons: 8px wide, handle
   `border_strong`, radius 3, transparent track.
 - Focus rings in the painted lists show only after the keyboard moves focus

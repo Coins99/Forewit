@@ -186,12 +186,12 @@ def test_releasing_the_icon_cache_empties_it(qapp: QApplication, themed: None) -
     assert qapp.isSignalConnected(QMetaMethod.fromSignal(qapp.aboutToQuit))
 
 
-def test_disabled_outline_buttons_are_muted() -> None:
+def test_the_stylesheet_leaves_push_buttons_to_the_style() -> None:
+    """Every push button is drawn as a glass pill by ThemeStyle (see test_controls); only
+    the sidebar's rows keep a stylesheet rule."""
     sheet = build_stylesheet(DARK)
-    assert (
-        'QPushButton[variant="outline"]:disabled '
-        f"{{ color: {DARK.text_muted}; border-color: {DARK.hairline}; }}"
-    ) in sheet
+    rules = [line for line in sheet.splitlines() if line.startswith("QPushButton")]
+    assert rules and all('[variant="nav"]' in rule for rule in rules)
 
 
 def test_the_theme_style_never_underlines_mnemonics(qapp: QApplication, themed: None) -> None:

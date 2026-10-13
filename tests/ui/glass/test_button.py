@@ -5,7 +5,7 @@ import pytest
 from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QEnterEvent, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.glass import button as glass_button
@@ -221,47 +221,18 @@ def test_accessibility_modes_paint_no_hover_light(
     assert painted == ["glow", "rim"]
 
 
-def test_an_icon_sits_in_a_tile_at_the_leading_end(
+def test_a_glass_pill_s_icon_sits_beside_its_label(
     qtbot: QtBot, qapp: QApplication, themed: None
 ) -> None:
-    """As a browser tab carries its site icon: a rounded square tile concentric with the
-    pill's round end, in the tile colour, then the label; no QIcon of its own."""
+    """A plain icon, in the label's colour, before the label: white on the primary."""
     apply_theme(qapp)
-    tokens = current_tokens()
     made = outline_button("Open in Gmail", "openInGmailButton", glass=True, icon_name="mail")
-    assert isinstance(made, GlassButton) and made.glyph == "mail"
-    assert made.icon().isNull()
     qtbot.addWidget(made)
-    made.resize(made.sizeHint())
-    made.show()
-    image = picture(made)
-    ratio = image.devicePixelRatio()
-    # A pixel inside the tile, clear of its glyph's strokes: the tile's colour.
-    x = glass_button.ROOM_X + glass_button.TILE_INSET + 2
-    y = made.height() / 2 - glass_button.TILE_PX / 2 + 2
-    assert image.pixelColor(round(x * ratio), round(y * ratio)).name() == tokens.tile
-    width = made.sizeHint().width() - 2 * glass_button.ROOM_X
+    assert isinstance(made, GlassButton)
+    assert not made.icon().isNull()
+    assert (made.iconSize().width(), made.iconSize().height()) == (14, 14)
     plain = outline_button("Open in Gmail", "plain", glass=True)
     qtbot.addWidget(plain)
-    text = width - (glass_button.TILE_INSET + glass_button.TILE_PX + glass_button.ICON_GAP)
-    assert text - glass_button.PAD_X == plain.sizeHint().width() - 2 * (
-        glass_button.ROOM_X + glass_button.PAD_X
-    )
+    gap = glass_button.ICON_GAP
+    assert made.sizeHint().width() == plain.sizeHint().width() + 14 + gap
     assert made.font().weight() == plain.font().weight()  # Both Medium.
-
-
-def test_a_pill_knows_whether_it_sits_on_the_glass(qtbot: QtBot) -> None:
-    """The nearest ancestor that says decides: the chrome says glass, the content sheet
-    says content, and a pill with neither is content."""
-    outer = QWidget()
-    outer.setProperty(glass_button.GLASS_LAYER, True)
-    inner = QWidget(outer)
-    inner.setProperty(glass_button.GLASS_LAYER, False)
-    qtbot.addWidget(outer)
-    on_glass = GlassButton("Sync", glyph=None)
-    on_glass.setParent(outer)
-    in_content = GlassButton("Accept")
-    in_content.setParent(inner)
-    loose = GlassButton("Dismiss")
-    qtbot.addWidget(loose)
-    assert on_glass.on_glass() and not in_content.on_glass() and not loose.on_glass()
