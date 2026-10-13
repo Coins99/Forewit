@@ -12,9 +12,11 @@ import pytest
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.glass.backdrop import BackdropKey, render_backdrop
-from mailbrief.ui.glass.painter import paint_panel, paint_pill, paint_raised
+from mailbrief.ui.glass.painter import GlassMode, paint_panel, paint_pill, paint_raised
+from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
 from mailbrief.ui.theme import (
     SIDEBAR_WIDTH,
     TEXT_PX,
@@ -26,6 +28,8 @@ from mailbrief.ui.theme import (
     ui_font,
     ui_metrics,
 )
+from tests.ui.test_workspace import build
+from tests.ui.window_wait import show
 
 WIDTH, HEIGHT, HEADER = 680, 220, 44
 PILL_HEIGHT = 30
@@ -95,3 +99,22 @@ def test_glass_sampler_renders(
     if folder:
         Path(folder).mkdir(parents=True, exist_ok=True)
         assert picture.save(str(Path(folder) / f"glass-{scheme.value}-{mode.value}-{dpr:g}x.png"))
+
+
+@pytest.mark.parametrize("mode", list(GlassMode))
+def test_workspace_renders_in_each_glass_mode(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: GlassMode
+) -> None:
+    """Saved as ``accessibility-{mode}-{dpr}x.png`` with MAILBRIEF_UI_SHOTS set."""
+    apply_theme(qapp)
+    set_glass_preferences(GlassPreferences(mode=mode))
+    workspace = build(qtbot)
+    workspace.resize(680, 520)
+    show(qtbot, workspace)
+    image = workspace.grab()
+    assert not image.isNull()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        name = f"accessibility-{mode.value}-{image.devicePixelRatio():g}x.png"
+        assert image.save(str(Path(folder) / name))

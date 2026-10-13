@@ -147,7 +147,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
   header, the sidebar footer and on the Today page. The header and sidebar are glass
   (`workspace.GlassChrome`) over the workspace's backdrop, and the selected page is a
-  raised pill; muted text in the sidebar shows as secondary there.
+  raised pill; muted text in the sidebar shows as secondary there. `system.py` reads the
+  system's Increase contrast, Reduce transparency and Reduce motion (Qt, NSWorkspace by
+  typed `objc_msgSend`, the Windows registry and `SystemParametersInfo`; a failed read is
+  no preference), and `accessibility.py` (`GlassAccessibility`) combines them with the
+  owner's Settings > Appearance choices into `glass_preferences()`, again whenever the app
+  becomes active or Qt reports a contrast change.
 - `ui/scheduler.py` (`RefreshScheduler`, the minute tick behind timed refresh) and
   `ui/auto_send_view.py` (the automatic-analysis permission dialog); `services/consent.py`
   reads and sets that permission.
@@ -403,6 +408,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
   and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
   Every colour scheme must pass the contrast tests in `tests/ui/theme/` in both modes.
+- Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
+  repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
+  Python code for each, and a garbage collection there could free one it still visits.
 
 ## Dormant Microsoft notes
 

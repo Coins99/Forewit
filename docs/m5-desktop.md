@@ -31,6 +31,13 @@ The colour scheme (Settings > Appearance: Slate, Graphite, Ocean, Sage, Plum or 
 changes at once and is saved in its own `appearance.json` beside the database. A missing
 or unreadable file gives Slate, and a failed save keeps the colours until MailBrief closes.
 
+The glass header, sidebar and buttons follow the system's accessibility settings. With
+Reduce transparency they're solid; with Increase contrast they're solid with clear edges;
+with Reduce motion they don't lift or spring. MailBrief checks again whenever it becomes
+the active app. In the same tab, Glass can be "Always solid" and Motion can be "Reduce
+motion" whatever the system says; neither can turn a system setting off. An unknown
+value in `appearance.json` resets only that setting.
+
 On first use, the two desktop fields inherit `MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH`
 and `MAILBRIEF_GROQ_MODEL` when present. Once saved, desktop settings override
 those environment values, including deliberately blank fields. Diagnostic CLIs
