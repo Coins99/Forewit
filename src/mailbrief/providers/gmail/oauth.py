@@ -114,8 +114,9 @@ class LoopbackAuthorization:
         scopes: tuple[str, ...] = SIGN_IN_SCOPES,
     ) -> None:
         """``scopes`` are what Google is asked for: the one Google sign-in's, Gmail and the
-        read-only calendar permissions (ADR 0019). Google is told to keep what was granted
-        before, so asking again only adds permissions."""
+        read-only calendar permissions (ADR 0019). Every request asks for all of them and
+        nothing else: Google isn't told to fold in other permissions this client was ever
+        granted, which could widen the saved credential beyond read-only."""
         if not scopes:
             raise ValueError("at least one scope is required")
         self._browser = browser
@@ -211,7 +212,6 @@ class LoopbackAuthorization:
                     "code_challenge": challenge.rstrip(b"=").decode("ascii"),
                     "code_challenge_method": "S256",
                     "access_type": "offline",
-                    "include_granted_scopes": "true",
                     "prompt": "consent select_account",
                 }
             )

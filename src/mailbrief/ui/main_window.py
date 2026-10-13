@@ -2460,6 +2460,10 @@ class MainWindow(QMainWindow):
         except AuthenticationRequiredError as exc:
             log_failure(exc)
             self._set_account(None)
+            # The one Google sign-in went with it: no Google times for Plan with AI, and the
+            # page reads again without the saved Google events the backend forgot.
+            self._calendar_allowed = None
+            self._read_calendar()
             self.connection.setText("Gmail: session expired or missing. Connect Gmail to continue.")
             self.status.setText("Sign in to Gmail, then retry. The saved brief is still available.")
         except ConfigurationError as exc:

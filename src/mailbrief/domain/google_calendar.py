@@ -19,13 +19,16 @@ CALENDAR_NAME_MAX_CHARS: Final = 120
 GOOGLE_EVENT_MAX_DAYS: Final = 366  # Longer events, such as all-year ones, are skipped.
 UNTITLED: Final = "(No title)"
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
-# Each host's allowed path prefix. Other paths on www.google.com include a redirector.
-_LINK_PREFIXES: Final = {"calendar.google.com": "/", "www.google.com": "/calendar/"}
+# Each host's allowed path prefix; both hosts have other paths that redirect anywhere
+# (/url?q=…). calendar.google.com's own front page is allowed too.
+_LINK_PREFIXES: Final = {"calendar.google.com": "/calendar/", "www.google.com": "/calendar/"}
+_FRONT_PAGES: Final = {"calendar.google.com"}
 
 
 def is_calendar_link(url: str) -> bool:
-    """Only https links to Google Calendar are kept and offered for opening: any page on
-    calendar.google.com, and /calendar on www.google.com, so never Google's redirector.
+    """Only https links to Google Calendar are kept and offered for opening: /calendar on
+    calendar.google.com or www.google.com, and calendar.google.com's front page, so never
+    Google's redirector.
 
     The link is read as a browser reads it, with dot segments resolved, so
     "/calendar/../url" doesn't pass; a user name or a port other than 443 is refused.
@@ -34,12 +37,14 @@ def is_calendar_link(url: str) -> bool:
         link = HttpUrl(url)
     except ValidationError:
         return False
-    prefix = _LINK_PREFIXES.get(link.host or "")
+    host = link.host or ""
+    prefix = _LINK_PREFIXES.get(host)
+    path = link.path or "/"
     return (
         link.scheme == "https"
         and prefix is not None
         and link.port == 443
-        and f"{link.path or ''}/".startswith(prefix)
+        and (f"{path}/".startswith(prefix) or (path == "/" and host in _FRONT_PAGES))
         and not link.username
         and not link.password
     )

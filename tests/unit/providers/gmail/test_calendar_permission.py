@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from mailbrief.ports.errors import AuthenticationRequiredError
+from mailbrief.ports.errors import AuthenticationRequiredError, ProviderPermissionError
 from mailbrief.providers.gmail.auth import PROFILE_URL, GmailAuth
 from mailbrief.providers.gmail.oauth import (
     CALENDAR_SCOPES,
@@ -28,7 +28,7 @@ def allowed(auth: GmailAuth) -> bool:
     return auth.calendar_allowed
 
 
-async def test_sign_in_asks_for_gmail_and_calendar_and_keeps_earlier_grants() -> None:
+async def test_sign_in_asks_for_gmail_and_calendar_and_nothing_else() -> None:
     opened: list[str] = []
 
     async def browser(url: str) -> bool:
@@ -40,7 +40,7 @@ async def test_sign_in_asks_for_gmail_and_calendar_and_keeps_earlier_grants() ->
     query = parse_qs(urlsplit(opened[0]).query)
     assert query["scope"] == [EVERYTHING]
     assert (GMAIL_SCOPE, *CALENDAR_SCOPES) == SIGN_IN_SCOPES
-    assert query["include_granted_scopes"] == ["true"]
+    assert "include_granted_scopes" not in query  # Never folds in other grants.
     assert query["access_type"] == ["offline"]
 
 
@@ -100,3 +100,22 @@ async def test_asking_again_opens_the_browser_even_when_the_sign_in_works(
     profile.respond(json={"emailAddress": "other@example.com"})
     with pytest.raises(AuthenticationRequiredError):
         await auth.connect(ask_again=True)
+
+
+@pytest.mark.parametrize(
+    "wider",
+    ["https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/calendar"],
+)
+async def test_a_grant_wider_than_read_only_is_refused_and_never_saved(
+    http: httpx.AsyncClient, respx_mock: respx.MockRouter, wider: str
+) -> None:
+    auth, store, _ = make_auth(http)
+    respx_mock.post(TOKEN_URL).respond(json=token_json() | {"scope": f"{EVERYTHING} {wider}"})
+    respx_mock.get(PROFILE_URL).respond(json={"emailAddress": "me@example.com"})
+    with pytest.raises(ProviderPermissionError, match="more than read-only"):
+        await auth.connect()
+    assert store.load() is None and not allowed(auth)
+
+    seed(store)  # A saved sign-in that Google now answers with a wider grant.
+    with pytest.raises(ProviderPermissionError):
+        await auth.connect(silent_only=True)
