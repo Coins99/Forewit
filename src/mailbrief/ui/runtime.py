@@ -54,6 +54,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.domain.today import DaySummary
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.providers.gcal.auth import forget_legacy_sign_in
@@ -105,6 +106,7 @@ from mailbrief.services.projects import ProjectService
 from mailbrief.services.proposals import ProposalService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.threads import ThreadService
+from mailbrief.services.today import TodayService
 from mailbrief.storage.database import Database
 from mailbrief.storage.inbox_scan import InboxScanRepository
 from mailbrief.storage.migrate import upgrade_database
@@ -857,6 +859,11 @@ class DesktopRuntime:
     ) -> CalendarRange:
         async with self._storage().session() as session:
             return await EventService(session).list_range(first_day, last_day, zone)
+
+    async def today_summary(self, day: date, zone: ZoneInfo, now: datetime) -> DaySummary:
+        """The Today page's "Your day": local data only, so it needs no Gmail or AI."""
+        async with self._storage().session() as session:
+            return await TodayService(session).summary(day, zone, now)
 
     async def create_event(self, edit: EventEdit) -> CalendarEvent:
         async with self._storage().session() as session:

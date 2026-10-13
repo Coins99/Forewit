@@ -10,7 +10,9 @@ later use after Microsoft Entra access is resolved.
   history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
   lifecycle; completion/reopening/undo history survives recovery and export. Projects and
   life areas now have an implementation ([organization workflow](p1-projects-life-areas.md)),
-  awaiting owner desktop acceptance. Unified Today comes next.
+  awaiting owner desktop acceptance. Unified Today's first slice is implemented, awaiting
+  owner desktop acceptance: **Your day** on the Today page shows what needs attention,
+  today's agenda and new replies, from local data only ([Today](today.md)).
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

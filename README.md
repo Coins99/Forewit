@@ -17,6 +17,8 @@ GitHub sign-in is required. [Download and launch instructions](#windows-download
 - Review ranked Inbox messages and open the originals in Gmail. The ranking uses Gmail's
   tabs and stars, the senders you mark important and what you picked before
   ([Ranking](docs/ranking.md)).
+- See your day at a glance on Today: what's overdue, due or planned, today's events and
+  new replies ([Today](docs/today.md)).
 - Keep track of actions, plans, target dates and follow-up replies.
 - Keep your own calendar events beside your open actions' deadlines and target dates,
   and see your Google Calendar there too, read-only ([Calendar](docs/calendar.md)).
