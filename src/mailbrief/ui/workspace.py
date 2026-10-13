@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import (
     QModelIndex,
     QPersistentModelIndex,
+    QPoint,
+    QPointF,
     QRect,
     QRectF,
     QSize,
@@ -22,6 +24,7 @@ from PySide6.QtGui import (
     QKeyEvent,
     QPainter,
     QPaintEvent,
+    QResizeEvent,
     QStandardItem,
     QStandardItemModel,
 )
@@ -46,6 +49,10 @@ from mailbrief.services.history import coverage_line, outside_count
 from mailbrief.ui.brief_detail import BriefDetailPane
 from mailbrief.ui.brief_list import BriefListView, build_rows
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
+from mailbrief.ui.glass.backdrop import Backdrop, BackdropKey, BackdropRenderer
+from mailbrief.ui.glass.backdrop import color as tint_color
+from mailbrief.ui.glass.painter import paint_panel, paint_raised
+from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.hairline import (
     HairlineDivider,
     HairlineSplitter,
@@ -54,15 +61,20 @@ from mailbrief.ui.hairline import (
 from mailbrief.ui.labels import ElidedLabel, button_label, plain_label
 from mailbrief.ui.theme import (
     CAPTION_PX,
-    RADIUS,
     SIDEBAR_WIDTH,
     SMALL_PX,
     TEXT_PX,
+    current_glass,
+    current_mode,
+    current_scheme,
     current_tokens,
     follow_theme,
     icon_pixmap,
     ui_font,
 )
+
+# How strongly a hovered or focused sidebar button shows the raised fill.
+ACTIVE_RAISE: Final = 0.6
 
 PAGES: Final = (
     ("today", "Today", "sun"),
@@ -176,7 +188,26 @@ class _StatusLabel(ElidedLabel):
         return QSize(width + margins.left() + margins.right(), super().sizeHint().height())
 
 
-class HeaderBar(QWidget):
+class GlassChrome(QWidget):
+    """The header and sidebar: Liquid Glass over the part of ``workspace``'s backdrop that
+    lies behind them. Their stylesheet background is transparent."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.workspace: ThreePaneWorkspace | None = None
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        rect = QRectF(self.rect())
+        workspace = self.workspace
+        backdrop = None if workspace is None else workspace.backdrop
+        offset = QPointF(0, 0) if workspace is None else QPointF(self.mapTo(workspace, QPoint()))
+        painter = QPainter(self)
+        mode = glass_preferences().mode
+        paint_panel(painter, rect, current_glass(), backdrop, rect.translated(offset), mode)
+        painter.end()
+
+
+class HeaderBar(GlassChrome):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         _styled(self, "headerBar")
@@ -231,10 +262,13 @@ class _NavDelegate(QStyledItemDelegate):
         selected = bool(state & QStyle.StateFlag.State_Selected)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if selected:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.selection))
-            painter.drawRoundedRect(QRectF(rect), RADIUS, RADIUS)
+        if selected:  # A raised pill on the glass.
+            paint_raised(
+                painter,
+                QRectF(rect).adjusted(1, 2, -1, -2),
+                current_glass(),
+                glass_preferences().mode,
+            )
         name = index.data(ICON_ROLE)
         color = tokens.text if selected else tokens.text_secondary
         if isinstance(name, str):
@@ -310,14 +344,14 @@ class NavButton(QPushButton):
         return tokens.text if self._active() else tokens.text_secondary
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        tokens = current_tokens()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
-        if self._active():  # Never while disabled.
+        if self._active():  # Never while disabled: a fainter raised fill, with no rim.
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.selection))
-            painter.drawRoundedRect(QRectF(rect), RADIUS, RADIUS)
+            painter.setBrush(tint_color(current_glass().raised, ACTIVE_RAISE))
+            pill = QRectF(rect).adjusted(1, 2, -1, -2)
+            painter.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
         color = self._color()
         pixmap = icon_pixmap(self._icon_name, color, _ICON_PX, self.devicePixelRatioF())
         painter.drawPixmap(_ICON_X, (rect.height() - _ICON_PX) // 2, pixmap)
@@ -329,7 +363,7 @@ class NavButton(QPushButton):
         painter.end()
 
 
-class SidebarNav(QWidget):
+class SidebarNav(GlassChrome):
     """``page_requested(key)`` on selection and on Return or Enter; ``settings_requested``.
 
     Below the pages: Saved mail, Data, Settings, the note, then ``footer`` for the window's
@@ -525,6 +559,33 @@ class ThreePaneWorkspace(QWidget):
         self._today: date | None = None
         self.brief_list.item_selected.connect(self._show_item)
         self.detail.verticalScrollBar().rangeChanged.connect(self._restore_scroll)
+        # The backdrop the header's and sidebar's glass shows, for this size and theme.
+        self.backdrop: Backdrop | None = None
+        self.backdrop_renders = BackdropRenderer(self)
+        self.backdrop_renders.ready.connect(self._backdrop_ready)
+        self.header.workspace = self.sidebar.workspace = self
+        follow_theme(self, self._request_backdrop)
+
+    def _backdrop_key(self) -> BackdropKey:
+        return BackdropKey(self.width(), self.height(), current_scheme(), current_mode())
+
+    def _request_backdrop(self) -> None:
+        backdrop = self.backdrop_renders.request(self._backdrop_key())
+        if backdrop is not None:
+            self._show_backdrop(backdrop)
+
+    def _backdrop_ready(self, backdrop: Backdrop) -> None:
+        if backdrop.key == self._backdrop_key():
+            self._show_backdrop(backdrop)
+
+    def _show_backdrop(self, backdrop: Backdrop) -> None:
+        self.backdrop = backdrop
+        self.header.update()
+        self.sidebar.update()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._request_backdrop()
 
     def add_page(self, key: str, widget: QWidget) -> None:
         self._pages[key] = widget

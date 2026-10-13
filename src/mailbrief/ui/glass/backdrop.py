@@ -9,12 +9,14 @@ blurred there; glass scales it up. Painting a QImage is allowed off the Qt threa
 import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Final
 
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
 
+from mailbrief.ui.diagnostics import log_failure
 from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, Tint, glass_for
 
 # The backdrop is painted at this fraction of the window's logical size.
@@ -121,12 +123,26 @@ def render_backdrop(key: BackdropKey) -> Backdrop:
     return Backdrop(key=key, blurred=blur(paint_backdrop(key)))
 
 
+# One worker for every renderer: renders are short and only the latest matters.
+_WORKER: Final = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mailbrief-backdrop")
+
+
+class _Relay(QObject):
+    """Carries a finished render from the worker thread to the Qt thread (queued)."""
+
+    finished = Signal(object, object)  # BackdropKey, Future[Backdrop]
+
+
 class BackdropRenderer(QObject):
     """Renders backdrops off the Qt thread, one at a time, and keeps the last few.
 
-    ``request`` returns a cached backdrop at once. Otherwise it renders in a worker
-    thread and ``ready`` emits the backdrop, unless a newer request came first: requests
-    made during a render (a window being resized) become one render of the last of them.
+    ``request`` returns a cached backdrop at once, and with no asyncio loop running it
+    renders one at once. Otherwise it renders in a worker thread and ``ready`` emits it,
+    unless a newer request came first: requests made during a render (a window being
+    resized) become one render of the last of them.
+
+    Results come back through a queued Qt signal, not an asyncio task, so they arrive under
+    any event loop. ``drain`` finishes the render in progress at shutdown.
     """
 
     ready = Signal(object)
@@ -141,7 +157,9 @@ class BackdropRenderer(QObject):
         self._render = render
         self._cache: OrderedDict[BackdropKey, Backdrop] = OrderedDict()
         self._latest: BackdropKey | None = None
-        self._task: asyncio.Task[None] | None = None
+        self._job: tuple[BackdropKey, Future[Backdrop]] | None = None
+        self._relay = _Relay(self)
+        self._relay.finished.connect(self._finished)
 
     def request(self, key: BackdropKey) -> Backdrop | None:
         self._latest = key
@@ -149,21 +167,48 @@ class BackdropRenderer(QObject):
         if cached is not None:
             self._cache.move_to_end(key)
             return cached
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop yet (before the app's loop starts, or in a plain script): a
+            # quarter-size render is quick enough to do now.
+            backdrop = self._render(key)
+            self._keep(backdrop)
+            return backdrop
+        if self._job is None:
+            self._start(key)
         return None
 
-    async def _run(self) -> None:
-        while self._latest is not None and self._latest not in self._cache:
-            key = self._latest
-            backdrop = await asyncio.to_thread(self._render, key)
-            self._cache[key] = backdrop
-            while len(self._cache) > CACHE_SIZE:
-                self._cache.popitem(last=False)
+    def _start(self, key: BackdropKey) -> None:
+        future = _WORKER.submit(self._render, key)
+        self._job = (key, future)
+        relay = self._relay
+        future.add_done_callback(lambda done: relay.finished.emit(key, done))
+
+    def _keep(self, backdrop: Backdrop) -> None:
+        self._cache[backdrop.key] = backdrop
+        while len(self._cache) > CACHE_SIZE:
+            self._cache.popitem(last=False)
+
+    def _finished(self, key: BackdropKey, future: Future[Backdrop]) -> None:
+        if self._job is None or self._job[1] is not future:
+            return  # Already handled by drain.
+        self._job = None
+        try:
+            backdrop = future.result()
+        except Exception as exc:
+            log_failure(exc)  # The glass keeps its opaque underlay; a later request retries.
+        else:
+            self._keep(backdrop)
             if key == self._latest:
                 self.ready.emit(backdrop)
+        latest = self._latest
+        if latest is not None and latest not in self._cache and latest != key:
+            self._start(latest)
 
     async def drain(self) -> None:
-        """Wait for the render in progress, for shutdown."""
-        if self._task is not None:
-            await self._task
+        """Finish the renders in progress, for shutdown; each takes milliseconds."""
+        while self._job is not None:
+            key, future = self._job
+            wait([future])
+            self._finished(key, future)

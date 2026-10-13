@@ -38,10 +38,11 @@ from mailbrief.ui.theme.tokens import (
 )
 
 QSS = """\
-QWidget#workspace, QWidget#sidebar { background: $panel; }
-QWidget#headerBar { background: $canvas; }
+QWidget#workspace { background: $panel; }
+QWidget#headerBar, QWidget#sidebar, QListView#sidebarNav { background: transparent; border: none; outline: 0; }
 QLabel[tone="secondary"] { color: $text_secondary; }
 QLabel[tone="muted"] { color: $text_muted; }
+QWidget#sidebar QLabel[tone="muted"] { color: $text_secondary; }
 QLabel[tone="warning"] { color: $warning_fg; }
 QPushButton[variant="outline"] { background: transparent; color: $text; border: 1px solid $border_strong; border-radius: 8px; padding: 5px 14px; }
 QPushButton[variant="outline"]:hover { background: $selection; }
@@ -52,7 +53,7 @@ QPushButton[variant="primary"]:focus { border-color: $accent_fg; }
 QPushButton[variant="primary"]:disabled { background: transparent; color: $text_muted; border-color: $hairline; }
 QPushButton[variant="nav"] { text-align: left; background: transparent; color: $text_secondary; border: none; border-radius: 8px; padding: 6px 10px; }
 QPushButton[variant="nav"]:hover, QPushButton[variant="nav"]:focus { background: $selection; color: $text; }
-QListView#sidebarNav, QListView#briefList, QListView#actionList { background: $panel; border: none; outline: 0; }
+QListView#briefList, QListView#actionList { background: $panel; border: none; outline: 0; }
 QScrollArea#briefDetail, QScrollArea#actionDetail { background: $panel; border: none; }
 QListWidget::item { padding: ${item_pad_y}px ${item_pad_x}px; border-left: ${item_mark}px solid transparent; }
 QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; border-left: ${item_mark}px solid $accent_border; }
@@ -86,10 +87,14 @@ def current_scheme() -> ColorScheme:
     return _scheme
 
 
+def current_mode() -> ThemeMode:
+    """Whether the applied tokens are the scheme's light or dark set."""
+    return ThemeMode.LIGHT if _current is tokens_for(ThemeMode.LIGHT, _scheme) else ThemeMode.DARK
+
+
 def current_glass() -> GlassTokens:
     """The glass tokens that go with the applied tokens."""
-    light = _current is tokens_for(ThemeMode.LIGHT, _scheme)
-    return glass_for(ThemeMode.LIGHT if light else ThemeMode.DARK, _scheme)
+    return glass_for(current_mode(), _scheme)
 
 
 class _ThemeFollower(QObject):
