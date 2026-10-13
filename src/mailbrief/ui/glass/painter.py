@@ -40,11 +40,20 @@ def _fade(painter: QPainter, path: QPainterPath, start: QPointF, end: QPointF, t
     painter.fillPath(path, gradient)
 
 
-def _half_device_pixel(painter: QPainter) -> float:
-    """Half a device pixel in logical pixels: where a cosmetic 1 px line sits crisply."""
-    device = painter.device()
-    ratio = device.devicePixelRatioF() if device is not None else 1.0
-    return 0.5 / ratio
+def _crisp(painter: QPainter, rect: QRectF) -> QRectF:
+    """``rect`` moved onto the device pixel grid, half a device pixel inside its edges, so a
+    cosmetic 1 px line along it covers whole device pixels at any scale and position (at
+    125% or 150% a logical edge falls between device pixels)."""
+    to_device = painter.deviceTransform()
+    to_logical, invertible = to_device.inverted()
+    if not invertible:
+        return rect
+    edges = to_device.mapRect(rect)
+    snapped = QRectF(
+        QPointF(round(edges.left()) + 0.5, round(edges.top()) + 0.5),
+        QPointF(round(edges.right()) - 0.5, round(edges.bottom()) - 0.5),
+    )
+    return to_logical.mapRect(snapped)
 
 
 def paint_rim(
@@ -53,8 +62,8 @@ def paint_rim(
     radius: float,
     stops: tuple[QColor, QColor, QColor],
 ) -> None:
-    """A 1 device pixel rim inside ``rect``: bright at the top left, through ``stops[1]``,
-    to ``stops[2]`` at the bottom right."""
+    """A 1 device pixel rim inside ``rect``, on the device pixel grid: bright at the top
+    left, through ``stops[1]``, to ``stops[2]`` at the bottom right."""
     gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
     gradient.setColorAt(0.0, stops[0])
     gradient.setColorAt(0.55, stops[1])
@@ -72,8 +81,8 @@ def paint_specular(painter: QPainter, rect: QRectF, glass: GlassTokens, point: Q
 
 
 def _stroke_rim(painter: QPainter, rect: QRectF, radius: float, brush: QBrush) -> None:
-    inset = _half_device_pixel(painter)
-    inner = rect.adjusted(inset, inset, -inset, -inset)
+    inner = _crisp(painter, rect)
+    inset = (rect.width() - inner.width()) / 2
     pen = QPen(brush, 1.0)
     pen.setCosmetic(True)
     painter.save()
@@ -107,9 +116,10 @@ def paint_panel(
         painter.fillRect(rect, QColor(glass.opaque))
         painter.restore()
         return
-    if backdrop is None:
-        painter.fillRect(rect, QColor(glass.opaque))
-    else:
+    # Under the backdrop too: while a window grows, the last backdrop may not reach the
+    # panel's new edge, and the tint alone would let what lies below show through.
+    painter.fillRect(rect, QColor(glass.opaque))
+    if backdrop is not None:
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawImage(rect, backdrop.blurred, backdrop.source(area))
     painter.fillRect(rect, color(glass.tint))
@@ -120,7 +130,7 @@ def paint_panel(
     pen = QPen(color(glass.edge_light), 1.0)
     pen.setCosmetic(True)
     painter.setPen(pen)
-    top = rect.top() + _half_device_pixel(painter)
+    top = _crisp(painter, rect).top()
     painter.drawLine(QPointF(rect.left(), top), QPointF(rect.right(), top))  # Lit top edge.
     painter.restore()
 

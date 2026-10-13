@@ -7,6 +7,7 @@ blurred there; glass scales it up. Painting a QImage is allowed off the Qt threa
 """
 
 import asyncio
+import contextlib
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
@@ -183,7 +184,13 @@ class BackdropRenderer(QObject):
         future = _WORKER.submit(self._render, key)
         self._job = (key, future)
         relay = self._relay
-        future.add_done_callback(lambda done: relay.finished.emit(key, done))
+
+        def deliver(done: Future[Backdrop]) -> None:
+            # On the worker thread; the renderer may have been deleted with its window.
+            with contextlib.suppress(RuntimeError):
+                relay.finished.emit(key, done)
+
+        future.add_done_callback(deliver)
 
     def _keep(self, backdrop: Backdrop) -> None:
         self._cache[backdrop.key] = backdrop

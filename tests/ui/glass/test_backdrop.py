@@ -8,6 +8,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
+from shiboken6 import Shiboken
 
 from mailbrief.ui.glass.backdrop import (
     CACHE_SIZE,
@@ -186,3 +187,21 @@ async def test_a_failed_render_is_retried_by_a_later_request(qtbot: QtBot) -> No
     assert renderer.request(key()) is None  # Not cached: rendered again.
     await renderer.drain()
     assert [backdrop.key for backdrop in emitted] == [key()]
+
+
+async def test_a_renderer_deleted_mid_render_fails_quietly(
+    qtbot: QtBot, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Its window can close while the worker still renders; handing back the result must
+    not raise on the worker thread."""
+    recorder = Recorder()
+    recorder.gate = threading.Event()
+    renderer = BackdropRenderer(render=recorder)
+    renderer.request(key())
+    job = renderer._job
+    assert job is not None
+    Shiboken.delete(renderer)
+    recorder.gate.set()
+    job[1].result(timeout=5)
+    qtbot.wait(50)  # Let the worker's done callback run.
+    assert not [r for r in caplog.records if r.name == "concurrent.futures"]

@@ -84,11 +84,16 @@ them.
   - It keeps the last four backdrops. `drain()` finishes the render in progress at
     shutdown.
 - **Painters** (`painter.py`), with `current_glass()` at paint time:
-  - `paint_panel` shows the blurred backdrop behind `area`, which is the panel in window
-    coordinates. Then the tint, the sheen over the top 120 px and a lit top edge.
+  - `paint_panel` fills `opaque` first, so a backdrop that doesn't yet reach a growing
+    panel's edge never leaves it see-through. Then it shows the blurred backdrop behind
+    `area`, which is the panel in window coordinates, then the tint, the sheen over the
+    top 120 px and a lit top edge.
   - `paint_raised` is a fill with a sheen, never a second layer of glass.
   - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
-  - `paint_rim` is 1 device pixel at every scale, inset by half a device pixel.
+  - `paint_rim` is 1 device pixel wide. It is snapped onto the device pixel grid through
+    the painter's device transform, so it stays one full pixel at 125% and 150% at any
+    position. `hairline.py` still insets by half a device pixel, which is crisp only on
+    whole-pixel positions.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):

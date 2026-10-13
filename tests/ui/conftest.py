@@ -35,7 +35,7 @@ def themed(qapp: QApplication) -> Iterator[None]:
     palette = qapp.palette()
     font = qapp.font()
     locale = QLocale()  # The default locale.
-    scheme = theme_style.current_scheme()
+    scheme, mode = theme_style.current_scheme(), theme_style.current_mode()
     qapp.setStyleSheet(stylesheet)
     try:
         yield
@@ -46,5 +46,5 @@ def themed(qapp: QApplication) -> Iterator[None]:
         qapp.setFont(font)
         qapp.setStyleSheet(stylesheet)
         set_current_tokens(DARK)
-        theme_style._scheme = scheme
+        theme_style._scheme, theme_style._mode = scheme, mode
         QLocale.setDefault(locale)

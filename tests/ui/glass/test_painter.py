@@ -94,17 +94,33 @@ def test_text_on_painted_glass_meets_wcag_aa(
                     assert worst >= 4.5, (scheme, mode, name, text, round(worst, 2))
 
 
-@pytest.mark.parametrize("dpr", [1.0, 2.0])
-def test_a_rim_is_one_crisp_device_pixel(qapp: QApplication, dpr: float) -> None:
-    picture = image(100, 40, dpr)
+@pytest.mark.parametrize("offset", [0.0, 3.0])
+@pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 2.0])
+def test_a_rim_is_one_crisp_device_pixel(qapp: QApplication, dpr: float, offset: float) -> None:
+    """At 125% and 150% a logical edge at an odd position falls between device pixels; the
+    rim is snapped onto the device grid, so it is still one full pixel."""
+    picture = image(110, 50, dpr)
     painter = QPainter(picture)
+    painter.translate(offset, offset)
     white = QColor(Qt.GlobalColor.white)
     paint_rim(painter, QRectF(0, 0, 100, 40), 20, (white, white, white))
     painter.end()
-    column = round(50 * dpr)  # Where the top edge is straight.
-    alphas = [picture.pixelColor(column, y).alpha() for y in range(round(10 * dpr))]
-    assert alphas[0] == 255
-    assert alphas[1:] == [0] * (len(alphas) - 1)
+    column = round((offset + 50) * dpr)  # Where the top edge is straight.
+    alphas = [picture.pixelColor(column, y).alpha() for y in range(round((offset + 10) * dpr))]
+    lit = [alpha for alpha in alphas if alpha]
+    assert lit == [255], (dpr, offset, alphas)
+
+
+def test_a_panel_wider_than_its_backdrop_stays_opaque(qapp: QApplication) -> None:
+    """While a window grows, the last backdrop may not reach the panel's new edge."""
+    glass = glass_for(ThemeMode.DARK)
+    small = render_backdrop(BackdropKey(200, 100, ColorScheme.SLATE, ThemeMode.DARK))
+    picture = image(400, 60)
+    painter = QPainter(picture)
+    paint_panel(painter, QRectF(0, 0, 400, 60), glass, small, QRectF(0, 0, 400, 60))
+    painter.end()
+    alphas = {picture.pixelColor(x, y).alpha() for y in range(0, 60, 5) for x in range(0, 400, 5)}
+    assert alphas == {255}
 
 
 @pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])
