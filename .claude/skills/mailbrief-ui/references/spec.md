@@ -90,10 +90,10 @@ them.
     top 120 px and a lit top edge.
   - `paint_raised` is a fill with a sheen, never a second layer of glass.
   - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half.
-  - `paint_rim` is 1 device pixel wide. It is snapped onto the device pixel grid through
-    the painter's device transform, so it stays one full pixel at 125% and 150% at any
-    position. `hairline.py` still insets by half a device pixel, which is crisp only on
-    whole-pixel positions.
+  - `paint_rim` is 1 device pixel wide. `hairline.crisp_rect` snaps it onto the device
+    pixel grid through the painter's device transform, rounding inward to the first
+    and last whole pixels inside the widget's clip. It stays one full pixel at 125% and
+    150% at any position. `HairlineFrame` (cards) uses the same helper.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`):
@@ -125,6 +125,11 @@ them.
   application would see every event of every object. A change repaints every widget
   inside `paused_collection()`.
 - **The Appearance tab** shows a note when the system makes glass solid or still.
+- **Paint profiling** (`profile.py`): with `MAILBRIEF_PAINT_PROFILE=1`, the `@profiled`
+  paint methods are timed (GlassButton, HeaderBar, SidebarNav, SidebarPage and
+  SidebarButton). `run_desktop` logs one line per kind at quit: count, p50 and p95 in
+  ms. Without the variable, a paint costs one check. Measured costs are in
+  `docs/ui/liquid-glass.md`.
 - **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
   `test_glass.py` proves contrast over. It also measures text contrast on painted pixels
   over each backdrop's darkest and brightest spots, rims at 1x and 2x, and the renderer's

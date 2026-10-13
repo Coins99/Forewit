@@ -53,6 +53,7 @@ from mailbrief.ui.glass.backdrop import Backdrop, BackdropKey, BackdropRenderer
 from mailbrief.ui.glass.backdrop import color as tint_color
 from mailbrief.ui.glass.painter import paint_panel, paint_raised
 from mailbrief.ui.glass.preferences import glass_preferences
+from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import (
     HairlineDivider,
     HairlineSplitter,
@@ -196,6 +197,7 @@ class GlassChrome(QWidget):
         super().__init__(parent)
         self.workspace: ThreePaneWorkspace | None = None
 
+    @profiled()  # HeaderBar and SidebarNav report apart.
     def paintEvent(self, event: QPaintEvent) -> None:
         rect = QRectF(self.rect())
         workspace = self.workspace
@@ -255,6 +257,7 @@ class HeaderBar(GlassChrome):
 
 
 class _NavDelegate(QStyledItemDelegate):
+    @profiled("SidebarPage")
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: _Index) -> None:
         tokens = current_tokens()
         rect: QRect = option.rect
@@ -343,6 +346,7 @@ class NavButton(QPushButton):
             return tokens.text_muted
         return tokens.text if self._active() else tokens.text_secondary
 
+    @profiled("SidebarButton")
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

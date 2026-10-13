@@ -17,6 +17,7 @@ from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
 from mailbrief.ui.appearance import APPEARANCE_FILE, AppearanceStore
 from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
+from mailbrief.ui.glass.profile import log_summary as log_paint_summary
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import ThemeMode, apply_theme, current_scheme
@@ -157,6 +158,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         QMessageBox.warning(None, "MailBrief", "MailBrief could not start or close cleanly.")
     finally:
         if handler is not None:
+            log_paint_summary()  # Only with MAILBRIEF_PAINT_PROFILE=1.
             logger.removeHandler(handler)
             handler.close()
         lock.unlock()

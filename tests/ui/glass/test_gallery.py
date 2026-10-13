@@ -9,14 +9,16 @@ import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.glass.backdrop import BackdropKey, render_backdrop
+from mailbrief.ui.glass.button import PRESSED_SCALE, GlassButton
 from mailbrief.ui.glass.painter import GlassMode, paint_panel, paint_pill, paint_raised
 from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
+from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import (
     SIDEBAR_WIDTH,
     TEXT_PX,
@@ -117,4 +119,43 @@ def test_workspace_renders_in_each_glass_mode(
     if folder:
         Path(folder).mkdir(parents=True, exist_ok=True)
         name = f"accessibility-{mode.value}-{image.devicePixelRatio():g}x.png"
+        assert image.save(str(Path(folder) / name))
+
+
+@pytest.mark.parametrize("theme", list(ThemeMode))
+def test_glass_button_states_render(
+    qtbot: QtBot, qapp: QApplication, themed: None, theme: ThemeMode
+) -> None:
+    """Every pill state on the glass header. Saved as ``glass-states-{theme}-{dpr}x.png``
+    with MAILBRIEF_UI_SHOTS set."""
+    apply_theme(qapp, theme)
+    workspace = build(qtbot)
+    pills: dict[str, GlassButton] = {}
+    for state in ("Normal", "Hover", "Pressed", "Focus", "Disabled", "Primary"):
+        pill = outline_button(state, f"{state.lower()}Pill", glass=True)
+        assert isinstance(pill, GlassButton)
+        workspace.header.add_widget(pill)
+        pills[state] = pill
+    workspace.resize(1100, 720)
+    show(qtbot, workspace)
+    with qtbot.waitActive(workspace, timeout=5000):
+        workspace.activateWindow()
+    for pill in pills.values():
+        pill.leaveEvent(QEvent(QEvent.Type.Leave))  # Shown at the pointer, one may be hovered.
+    point = QPointF(12, pills["Hover"].height() / 2)
+    pills["Hover"].enterEvent(QEnterEvent(point, point, point))
+    pills["Pressed"].setDown(True)
+    pills["Pressed"]._set_scale(PRESSED_SCALE)
+    pills["Focus"].setFocus()
+    qtbot.waitUntil(pills["Focus"].hasFocus)
+    pills["Disabled"].setEnabled(False)
+    pills["Primary"].primary = True
+    image = workspace.header.grab()
+    assert not image.isNull()
+    states = [pill.grab().toImage() for pill in pills.values()]
+    assert len({state.size().width() for state in states}) > 1  # Each its own label.
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        name = f"glass-states-{theme.value}-{image.devicePixelRatio():g}x.png"
         assert image.save(str(Path(folder) / name))

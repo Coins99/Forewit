@@ -20,6 +20,7 @@ from PySide6.QtGui import (
 )
 
 from mailbrief.ui.glass.backdrop import Backdrop, color
+from mailbrief.ui.hairline import crisp_rect
 from mailbrief.ui.theme import GlassTokens, Tint
 
 # How far a panel's sheen reaches down from its top, in logical pixels.
@@ -38,22 +39,6 @@ def _fade(painter: QPainter, path: QPainterPath, start: QPointF, end: QPointF, t
     gradient.setColorAt(0.0, color(tint))
     gradient.setColorAt(1.0, color(tint, 0.0))
     painter.fillPath(path, gradient)
-
-
-def _crisp(painter: QPainter, rect: QRectF) -> QRectF:
-    """``rect`` moved onto the device pixel grid, half a device pixel inside its edges, so a
-    cosmetic 1 px line along it covers whole device pixels at any scale and position (at
-    125% or 150% a logical edge falls between device pixels)."""
-    to_device = painter.deviceTransform()
-    to_logical, invertible = to_device.inverted()
-    if not invertible:
-        return rect
-    edges = to_device.mapRect(rect)
-    snapped = QRectF(
-        QPointF(round(edges.left()) + 0.5, round(edges.top()) + 0.5),
-        QPointF(round(edges.right()) - 0.5, round(edges.bottom()) - 0.5),
-    )
-    return to_logical.mapRect(snapped)
 
 
 def paint_rim(
@@ -81,7 +66,7 @@ def paint_specular(painter: QPainter, rect: QRectF, glass: GlassTokens, point: Q
 
 
 def _stroke_rim(painter: QPainter, rect: QRectF, radius: float, brush: QBrush) -> None:
-    inner = _crisp(painter, rect)
+    inner = crisp_rect(painter, rect)
     inset = (rect.width() - inner.width()) / 2
     pen = QPen(brush, 1.0)
     pen.setCosmetic(True)
@@ -130,7 +115,7 @@ def paint_panel(
     pen = QPen(color(glass.edge_light), 1.0)
     pen.setCosmetic(True)
     painter.setPen(pen)
-    top = _crisp(painter, rect).top()
+    top = crisp_rect(painter, rect).top()
     painter.drawLine(QPointF(rect.left(), top), QPointF(rect.right(), top))  # Lit top edge.
     painter.restore()
 

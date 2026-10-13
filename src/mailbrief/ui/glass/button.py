@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QPushButton
 
 from mailbrief.ui.glass.painter import GlassMode, paint_pill, paint_specular
 from mailbrief.ui.glass.preferences import glass_preferences
+from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.theme import current_glass, current_tokens
 
 # The outline button's box: text plus 14 px each side and 6 px above and below.
@@ -126,6 +127,7 @@ class GlassButton(QPushButton):
             rect.moveCenter(centre)
         return rect
 
+    @profiled("GlassButton")
     def paintEvent(self, event: QPaintEvent) -> None:
         glass, tokens, preferences = current_glass(), current_tokens(), glass_preferences()
         painter = QPainter(self)
