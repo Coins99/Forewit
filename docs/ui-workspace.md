@@ -16,6 +16,9 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] Tab runs Sync and review → Cancel (while busy) → the sidebar's pages → Saved mail →
       Data → Settings → Connect or Disconnect → the brief list → the selected email's
       buttons in display order → Undo (when shown) → back to Sync and review.
+- [ ] Ctrl+K (Cmd+K on macOS) opens Go to or search with the field focused; Up and Down
+      skip the section headings, Return opens the row once, Esc closes, and Cmd+Q still
+      quits with it open ([Go to or search](search.md)).
 - [ ] Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts,
       Briefs and Calendar; Briefs says MailBrief is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.

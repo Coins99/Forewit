@@ -46,6 +46,9 @@ later use after Microsoft Entra access is resolved.
   the database can't run while the desktop is open: they exit with code 5.
   See [M9 durability](m9-durability.md) and the
   [owner's live-validation checklist](m9-live-validation.md).
+- Search and commands implemented, awaiting owner desktop acceptance: **Go to or search**
+  (Ctrl+K) goes to pages, starts a task, event or note, and searches local records only
+  ([Go to or search](search.md)).
 - Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
   own events (timed or all-day, with Undo) and your open actions' deadlines and target
   dates. Google Calendar, read-only (phase 2), implemented, awaiting live acceptance:
@@ -75,6 +78,8 @@ MailBrief is one window with three panes (PR #21):
 reads**: only the messages you leave checked have their bodies downloaded. Step 2,
 **Approve sending to Groq**: approve or decline what will be sent; Decline starts focused.
 
+Ctrl+K (Cmd+K on macOS) opens **Go to or search**: commands, and a local search of your
+actions, drafts, notes, events and saved mail ([Go to or search](search.md)).
 Ctrl+1 to Ctrl+6 (Cmd+1 to Cmd+6 on macOS) open Today, Actions, Waiting, Drafts, Briefs
 and Calendar. Tab runs from Sync and review through the sidebar and the page to Undo.
 The theme is dark only for now.

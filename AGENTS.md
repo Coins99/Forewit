@@ -74,6 +74,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Archived projects retain tasks; removing an area detaches projects and keeps work.
   New activity snapshots retain project/area IDs. Migration 0016 follows task history 0015.
   See `docs/p1-projects-life-areas.md`. Unified Today is the next slice.
+- Search and commands implemented, awaiting owner desktop acceptance: the command palette
+  (Ctrl+K, `ui/palette.py`) and `services/search.py`, a bounded local search of actions,
+  drafts and notes, events, cached Google event titles and the connected account's cached
+  mail metadata. See `docs/search.md`.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   The Actions page follows it: painted action rows beside the selected action's detail.
 
@@ -112,6 +116,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   owner's preferences, time zone rule and sender rules.
 - `src/mailbrief/services/preferences.py`: read, save and reset preferences, apply the
   saved AI limits (`effective_settings`) and the owner's zone (`owner_zone`).
+- `src/mailbrief/services/search.py`: the palette's search (`domain/search.py`): parameterized
+  `LIKE` queries with the wildcards escaped, at most `HITS_PER_KIND` per kind, no full-text
+  index (recovery refuses extra tables and triggers).
 - `src/mailbrief/services/history.py`: saved briefs by day, missed days, the catch-up date
   rule (`check_brief_date`) and each brief's `coverage_line`.
 - `src/mailbrief/services/threads.py`: checks the threads of open actions and caches their
@@ -293,6 +300,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Gmail access is read-only (`gmail.readonly`). No mailbox writes or sends.
 - Email content is untrusted input. It can never authorize actions, settings changes,
   mail writes or sending other messages to the AI.
+- Search (`services/search.py`) reads only local SQLite: never a provider, never a body
+  (none is stored), and mail only for the connected account. The query is the owner's
+  text: log only counts, and keep it out of exceptions.
 - Schema changes need a new additive Alembic revision; never edit an existing revision.
 - No blocking network or database work on the Qt main thread (M5).
 - Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
