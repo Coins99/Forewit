@@ -313,6 +313,7 @@ async def sync(
                     exclude_ids=exclude_ids,
                     shortlist_limit=owner.preferences.shortlist_limit,
                     excluded_senders=rules,
+                    important_senders=owner.preferences.important_senders,
                 )
                 identity = await provider.current_account()
                 assert identity is not None
@@ -433,6 +434,7 @@ async def bodies(
                     exclude_ids=exclude_ids,
                     shortlist_limit=owner.preferences.shortlist_limit,
                     excluded_senders=owner.preferences.excluded_senders,
+                    important_senders=owner.preferences.important_senders,
                 )
         finally:
             await database.dispose()
@@ -1063,6 +1065,7 @@ async def brief(
                     exclude_ids=exclude_ids,
                     shortlist_limit=owner.preferences.shortlist_limit,
                     excluded_senders=owner.preferences.excluded_senders,
+                    important_senders=owner.preferences.important_senders,
                     local_date=window.local_date,
                     automatic=automatic,
                 )
@@ -1549,6 +1552,10 @@ async def preferences_show(*, database_path: Path | None) -> int:
     rules = preferences.excluded_senders
     print(f"Excluded senders: {len(rules) or 'none'}")
     for rule in rules:
+        print(f"  {rule}")
+    important = preferences.important_senders
+    print(f"Important senders: {len(important) or 'none'}")
+    for rule in important:
         print(f"  {rule}")
     print(
         f"Drafting defaults: tone {preferences.draft_tone.value}, "

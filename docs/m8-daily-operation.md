@@ -153,6 +153,10 @@ diagnostic CLI use the same ones, and a backup of the database includes them:
   `--include`, never has its body downloaded and is never offered to AI drafting. It still
   appears in review, marked as excluded. Briefs saved before a rule keep their analyses;
   new briefs leave the message out.
+- **Important senders** ([ADR 0020](adr/0020-ranking-signals.md)): the same rule forms.
+  Their mail ranks +30, so it is among the first suggestions, and shows an "Important
+  sender" chip in review. A rule can't be in both lists, and an excluded domain still wins
+  over an important address in it. See [Ranking](ranking.md).
 - **Drafting defaults:** the tone and length Write with AI starts with.
 - **AI limits:** body characters sent, output tokens, requests per run, messages per AI
   request and the timeout, within the ranges in [ai-analysis.md](ai-analysis.md).
@@ -164,7 +168,8 @@ Device settings stay where they were: the OAuth client file and Groq model in
 
 **Settings** has two tabs. **Connection and AI** is the earlier dialog. **Preferences**
 holds the choices above: the time zone list starts with "System time zone (…)", excluded
-senders take one address or `@domain` per line, and each AI limit's lowest setting reads
+and important senders take one address or `@domain` per line, and each AI limit's lowest
+setting reads
 "Default (…)". **Save preferences** saves them. **Reset to defaults** restores every
 default, whatever is saved, and also repairs preferences that can't be read. If another
 save happened since Settings opened, the save is refused with "Preferences changed since
@@ -184,7 +189,8 @@ actions lists and offline browsing, use the system time zone meanwhile.
 ### CLI
 
 - `mailbrief-gmail-diagnostic preferences show [--database PATH]` prints the time zone,
-  messages per brief, excluded senders one per line, drafting defaults, and each AI limit
+  messages per brief, excluded and important senders one per line, drafting defaults, and
+  each AI limit
   with where its value comes from (environment, saved or default). It uses no network and
   never creates a missing database.
 - `sync`, `bodies`, `brief`, `actions list` and `drafts generate` read your preferences

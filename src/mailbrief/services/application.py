@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.digests import SyncProgress, SyncResult, SyncStage, SyncStatus
@@ -13,11 +13,14 @@ from mailbrief.ports.email_provider import EmailProvider
 from mailbrief.services.calendar import day_window, local_day_window, resolve_timezone
 from mailbrief.services.ranking import (
     MAX_SHORTLIST_SIZE,
+    SENDER_HISTORY_DAYS,
     ExcludedSenderError,
+    RankSignals,
     ShortlistGate,
     ShortlistReviewError,
     rank_messages,
     review_shortlist,
+    sender_signals,
 )
 from mailbrief.services.sync import SyncService
 from mailbrief.services.threads import ThreadService
@@ -111,21 +114,46 @@ class ApplicationService:
             }
         )
 
-    async def _remember_declines(
-        self, account_id: int, *, left_out: set[str], taken_back: frozenset[str], now: datetime
+    async def _remember_choices(
+        self,
+        account_id: int,
+        *,
+        left_out: set[str],
+        taken_back: frozenset[str],
+        wanted: set[str],
+        now: datetime,
     ) -> None:
-        """Remember the owner's declines, and forget those they took back (ADR 0017)."""
-        if not left_out and not taken_back:
+        """Remember the owner's declines, forget those they took back (ADR 0017), and
+        remember the messages they picked that the automatic selection hadn't (ADR 0020)."""
+        if not left_out and not taken_back and not wanted:
             return
         await self._message_repo.set_review_declined(account_id, left_out, now)
         await self._message_repo.set_review_declined(account_id, taken_back, None)
+        await self._message_repo.set_review_wanted(account_id, wanted, now)
         if self._session:
             await self._session.commit()
         logger.info(
-            "Review left out %d messages and took back %d earlier declines",
+            "Review left out %d messages, took back %d earlier declines and picked %d more",
             len(left_out),
             len(taken_back),
+            len(wanted),
         )
+
+    async def _signals(
+        self, account: AccountTable, important_senders: tuple[str, ...], now: datetime
+    ) -> RankSignals:
+        """The owner's side of ranking (ADR 0020): their important senders, and what their
+        choices of the last SENDER_HISTORY_DAYS say about senders."""
+        history = await self._message_repo.sender_history(
+            account, now - timedelta(days=SENDER_HISTORY_DAYS)
+        )
+        senders = sender_signals(history)
+        logger.info(
+            "Ranking with %d important-sender rules and %d senders learned from your choices",
+            len(important_senders),
+            len(senders),
+        )
+        return RankSignals(important_senders=important_senders, senders=senders)
 
     async def _carried_outside(
         self,
@@ -168,6 +196,7 @@ class ApplicationService:
         local_date: date | None = None,
         carried: Sequence[str] = (),
         carried_outside: frozenset[str] = frozenset(),
+        important_senders: tuple[str, ...] = (),
     ) -> tuple[SyncResult, list[RankedMessage]]:
         """Connect, sync and rank one day, optionally reviewing all metadata before body access.
 
@@ -196,6 +225,12 @@ class ApplicationService:
         unchecks in the gate's review, or names in ``exclude_ids``, becomes declined. One that
         is merely pushed out by the limit, because ``include_ids`` named others, is not. Each
         message selected, by the gate or by ``include_ids``, has any earlier decline forgotten.
+
+        Ranking also uses the owner's side (ADR 0020): ``important_senders`` rank higher
+        (an exclusion still wins), and so does mail from senders whose messages the owner
+        wanted or acted on in the last SENDER_HISTORY_DAYS, while senders they keep leaving
+        out rank lower. A message the owner selects that the automatic selection didn't
+        pick, in the gate's review or by ``include_ids``, is remembered as wanted.
 
         ``carried`` are the messages of the day's saved brief, in brief order (ADR 0017): runs
         through a day are cumulative, so each still-eligible one stays selected ahead of the
@@ -318,6 +353,7 @@ class ApplicationService:
             user_email=own_addresses(account.email_address, account.account_addresses),
             now_utc=now,
             tracked=tracked,
+            signals=await self._signals(account, important_senders, now),
         )
 
         # 4. Batch persist computed rankings in SQLite
@@ -404,7 +440,7 @@ class ApplicationService:
             ]
         shortlist_keys = tuple(m.message.provider_message_id for m in shortlist)
         picked = {item.message.provider_message_id for item in automatic}
-        await self._remember_declines(
+        await self._remember_choices(
             account.id,
             # The owner's review decides what was left out; without one, only --exclude does.
             left_out=(
@@ -413,6 +449,7 @@ class ApplicationService:
                 else picked.intersection(exclude_ids)
             ),
             taken_back=declined.intersection(shortlist_keys),
+            wanted=set(shortlist_keys).difference(picked),
             now=now,
         )
 

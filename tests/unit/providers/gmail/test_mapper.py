@@ -2,7 +2,7 @@
 
 import pytest
 
-from mailbrief.domain.messages import MessageImportance
+from mailbrief.domain.messages import InboxCategory, MessageImportance
 from mailbrief.ports.errors import ProviderResponseError
 from mailbrief.providers.gmail.mapper import map_metadata
 from tests.unit.providers.gmail.metadata_fixtures import ACCOUNT, NOW, metadata
@@ -64,3 +64,71 @@ def test_invalid_required_metadata_is_safe(key: str, value: object) -> None:
     with pytest.raises(ProviderResponseError) as error:
         map_metadata(raw, ACCOUNT)
     assert "sender@example.com" not in str(error.value)
+
+
+def with_labels(*labels: str) -> dict[str, object]:
+    raw = metadata()
+    raw["labelIds"] = ["INBOX", *labels]
+    return raw
+
+
+def with_headers(*headers: tuple[str, str]) -> dict[str, object]:
+    raw = metadata()
+    payload = raw["payload"]
+    assert isinstance(payload, dict)
+    payload["headers"] = [
+        *payload["headers"],
+        *({"name": name, "value": value} for name, value in headers),
+    ]
+    return raw
+
+
+@pytest.mark.parametrize(
+    ("label", "category"),
+    [
+        ("CATEGORY_PERSONAL", InboxCategory.PERSONAL),
+        ("CATEGORY_SOCIAL", InboxCategory.SOCIAL),
+        ("CATEGORY_PROMOTIONS", InboxCategory.PROMOTIONS),
+        ("CATEGORY_UPDATES", InboxCategory.UPDATES),
+        ("CATEGORY_FORUMS", InboxCategory.FORUMS),
+    ],
+)
+def test_gmails_category_label_becomes_the_category(label: str, category: InboxCategory) -> None:
+    assert map_metadata(with_labels(label), ACCOUNT).category is category
+
+
+def test_no_category_label_is_an_unknown_category_and_unstarred() -> None:
+    item = map_metadata(metadata(), ACCOUNT)
+    assert item.category is None
+    assert not item.is_starred
+    assert not item.is_bulk
+
+
+def test_the_star_label_marks_a_starred_message() -> None:
+    assert map_metadata(with_labels("STARRED"), ACCOUNT).is_starred
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        ("List-Id", "Team news <news.example.com>"),
+        ("List-Unsubscribe", "<https://example.com/unsubscribe?token=SECRET-TOKEN>"),
+        ("LIST-UNSUBSCRIBE", "<mailto:leave@example.com>"),
+        ("Precedence", "bulk"),
+        ("Precedence", " List "),
+        ("Precedence", "junk"),
+    ],
+)
+def test_list_and_bulk_headers_mark_bulk_mail(header: tuple[str, str]) -> None:
+    item = map_metadata(with_headers(header), ACCOUNT)
+    assert item.is_bulk
+    # Only whether the header is there is kept, never its value.
+    assert "SECRET-TOKEN" not in item.model_dump_json()
+    assert "unsubscribe" not in item.model_dump_json().casefold()
+
+
+@pytest.mark.parametrize(
+    "header", [("Precedence", "first-class"), ("List-Id", "  "), ("X-List", "news")]
+)
+def test_other_headers_are_not_bulk_mail(header: tuple[str, str]) -> None:
+    assert not map_metadata(with_headers(header), ACCOUNT).is_bulk

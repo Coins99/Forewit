@@ -48,6 +48,10 @@ later use after Microsoft Entra access is resolved.
   the database can't run while the desktop is open: they exit with code 5.
   See [M9 durability](m9-durability.md) and the
   [owner's live-validation checklist](m9-live-validation.md).
+- Ranking signals implemented, awaiting live acceptance ([ADR 0020](adr/0020-ranking-signals.md)):
+  the review's suggestions use Gmail's tabs, stars and bulk-mail headers, your important
+  senders, and what your own choices say about each sender; **Should have been in my
+  brief** on the Inbox page feeds it. See [Ranking](ranking.md).
 - Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
   own events (timed or all-day, with Undo) and your open actions' deadlines and target
   dates. Google Calendar, read-only (phase 2), implemented, awaiting live acceptance:
@@ -93,6 +97,7 @@ The theme is dark only for now.
   [researched future implementation plan](future-implementations.md)
 - [Gmail setup and authentication diagnostic](gmail-setup.md)
 - [Gmail metadata synchronization and shortlist review](gmail-metadata.md)
+- [Ranking: which emails the review suggests](ranking.md)
 - [Gmail bodies (M3) and live acceptance](gmail-bodies.md)
 - [AI analysis, consent and the daily brief (M4)](ai-analysis.md)
 - [Actions, target dates and plans (M6)](m6-actions.md)

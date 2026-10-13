@@ -88,6 +88,9 @@ analysis follows this command yet.
 Metadata format does not reliably reveal file attachments, so M2 does not award
 the attachment ranking bonus. Gmail's IMPORTANT label maps to high importance;
 it is Gmail prioritization rather than a sender's explicit importance declaration.
+Since ADR 0020 the metadata read also asks for the `List-Id`, `List-Unsubscribe` and
+`Precedence` headers and keeps only whether they mark bulk mail, never their values, and
+keeps Gmail's category label and star. [Ranking](ranking.md) lists every rule.
 Missing/invalid sender headers use `unknown@invalid`; optional malformed addresses
 are skipped. Source links select the mailbox via `authuser` and open the thread.
 Verify browser behavior with your own signed-in Google accounts.

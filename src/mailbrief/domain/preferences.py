@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Final, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH
 from mailbrief.domain.bodies import MAX_ANALYSIS_CHARS
@@ -45,6 +45,7 @@ _LOCAL_FORBIDDEN: Final = frozenset('<>()[],;:"\\')
 _INVALID_RULE: Final = "A sender rule must be an address or @domain."
 _INVALID_ZONE: Final = "The time zone must be UTC or a region such as America/Toronto."
 _INVALID_INTERVAL: Final = "Refresh every 60, 120 or 240 minutes, or never."
+_BOTH_LISTS: Final = "A sender can't be both excluded and important."
 
 
 def is_region_zone(name: str) -> bool:
@@ -107,7 +108,7 @@ def normalize_exclusion(text: str) -> str:
     return rule
 
 
-def sender_excluded(address: str, rules: Iterable[str]) -> bool:
+def sender_matches(address: str, rules: Iterable[str]) -> bool:
     """Whether a sender matches a rule: the exact address, or a ``@domain`` rule for its
     domain or any subdomain. ``@example.com`` does not match ``notexample.com``."""
     folded = address.strip().casefold()
@@ -121,6 +122,19 @@ def sender_excluded(address: str, rules: Iterable[str]) -> bool:
     return False
 
 
+def sender_excluded(address: str, rules: Iterable[str]) -> bool:
+    """Whether a sender matches one of the owner's exclusions (see sender_matches)."""
+    return sender_matches(address, rules)
+
+
+def _sender_rules(value: tuple[str, ...], what: str) -> tuple[str, ...]:
+    """Normalized, duplicates dropped keeping the first, at most EXCLUSIONS_MAX."""
+    rules = tuple(dict.fromkeys(normalize_exclusion(rule) for rule in value))
+    if len(rules) > EXCLUSIONS_MAX:
+        raise ValueError(f"At most {EXCLUSIONS_MAX} {what}.")
+    return rules
+
+
 class PreferencesEdit(DomainModel):
     """What the owner can change. None for an AI limit means "use the default"."""
 
@@ -129,6 +143,8 @@ class PreferencesEdit(DomainModel):
     time_zone: str | None = Field(default=None, max_length=TIME_ZONE_MAX_CHARS)
     shortlist_limit: int = Field(default=SHORTLIST_LIMIT_MAX, ge=1, le=SHORTLIST_LIMIT_MAX)
     excluded_senders: tuple[str, ...] = ()
+    # Mail from these ranks higher (ADR 0020); an exclusion always wins over them.
+    important_senders: tuple[str, ...] = ()
     draft_tone: DraftTone = DraftTone.NEUTRAL
     draft_length: DraftLength = DraftLength.MEDIUM
     ai_batch_size: int | None = Field(default=None, ge=1, le=MAX_ANALYSIS_BATCH)
@@ -159,11 +175,20 @@ class PreferencesEdit(DomainModel):
     @field_validator("excluded_senders")
     @classmethod
     def _rules(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        """Normalized, duplicates dropped keeping the first, at most EXCLUSIONS_MAX."""
-        rules = tuple(dict.fromkeys(normalize_exclusion(rule) for rule in value))
-        if len(rules) > EXCLUSIONS_MAX:
-            raise ValueError(f"At most {EXCLUSIONS_MAX} sender rules.")
-        return rules
+        return _sender_rules(value, "sender rules")
+
+    @field_validator("important_senders")
+    @classmethod
+    def _important(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _sender_rules(value, "important senders")
+
+    @model_validator(mode="after")
+    def _not_both(self) -> Self:
+        """A rule can't be both excluded and important; a domain rule may still exclude an
+        important address, and then the exclusion wins."""
+        if set(self.excluded_senders) & set(self.important_senders):
+            raise ValueError(_BOTH_LISTS)
+        return self
 
 
 class OwnerPreferences(PreferencesEdit):

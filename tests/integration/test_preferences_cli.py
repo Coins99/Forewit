@@ -77,6 +77,7 @@ def test_show_on_a_fresh_database_prints_the_defaults_and_creates_nothing(
         "Time zone: system (America/Toronto)",
         "Messages per brief: 10",
         "Excluded senders: none",
+        "Important senders: none",
         "Drafting defaults: tone neutral, length medium",
         "Refresh when MailBrief starts: no",
         "Refresh while running: off",
@@ -102,6 +103,7 @@ def test_show_lists_rules_and_where_each_limit_comes_from(
             time_zone="Asia/Tokyo",
             shortlist_limit=3,
             excluded_senders=("@news.example.com", "Boss@Example.com"),
+            important_senders=("Partner@Example.com",),
             draft_tone=DraftTone.WARM,
             ai_batch_size=2,
             ai_body_character_limit=2_000,
@@ -116,6 +118,7 @@ def test_show_lists_rules_and_where_each_limit_comes_from(
     assert "Time zone: Asia/Tokyo\n" in output
     assert "Messages per brief: 3\n" in output
     assert "Excluded senders: 2\n  @news.example.com\n  boss@example.com\n" in output
+    assert "Important senders: 1\n  partner@example.com\n" in output
     assert "Drafting defaults: tone warm, length medium\n" in output
     assert "  Messages per AI request: 4 (environment)\n" in output
     assert "  Body characters sent: 2000 (saved)\n" in output

@@ -39,7 +39,16 @@ async def test_the_thread_request_asks_for_metadata_only(respx_mock: respx.MockR
     request = route.calls[0].request
     assert request.method == "GET"
     assert request.url.params["format"] == "metadata"
-    assert request.url.params.get_list("metadataHeaders") == ["From", "To", "Subject", "Message-ID"]
+    # The list headers only tell bulk mail apart; their values are never kept (ADR 0020).
+    assert request.url.params.get_list("metadataHeaders") == [
+        "From",
+        "To",
+        "Subject",
+        "Message-ID",
+        "List-Id",
+        "List-Unsubscribe",
+        "Precedence",
+    ]
     assert request.url.params["fields"] == (
         "id,messages(id,threadId,labelIds,internalDate,snippet,payload/headers)"
     )

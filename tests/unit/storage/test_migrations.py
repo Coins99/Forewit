@@ -1244,8 +1244,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261012_0017"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261013_0018"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0018",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1412,8 +1412,44 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261012_0017",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0018",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")
     assert _schema(path) == before
+
+
+def test_ranking_signals_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path: Path) -> None:
+    """0018 (ADR 0020) adds Gmail's category, star and bulk flags and the owner's wanted mark
+    to messages, and important senders to the preferences, keeping existing rows."""
+    path = tmp_path / "signals.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20260925_0004")
+    _seed_before_actions(path)
+    command.upgrade(config, "20261012_0017")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT INTO owner_preferences(id,excluded_senders_json,updated_at_utc) "
+            "VALUES(1,'[\"@news.example.com\"]','2026-10-12 00:00:00')"
+        )
+        connection.commit()
+    kept = (*_OLD_ROWS, "owner_preferences")
+    before = _rows(path, kept)
+    fresh = tmp_path / "fresh-0017.sqlite3"
+    command.upgrade(_alembic_config(fresh), "20261012_0017")
+
+    command.upgrade(config, "20261013_0018")
+
+    assert _earlier_columns(_rows(path, kept), before) == before
+    assert _query(
+        path, "SELECT category, is_starred, is_bulk, review_wanted_at_utc FROM messages"
+    ) == [(None, 0, 0, None)]
+    assert _query(
+        path, "SELECT excluded_senders_json, important_senders_json FROM owner_preferences"
+    ) == [('["@news.example.com"]', "[]")]
+    command.check(config)
+
+    command.downgrade(config, "20261012_0017")
+
+    assert _rows(path, kept) == before
+    assert _schema(path) == _schema(fresh)
