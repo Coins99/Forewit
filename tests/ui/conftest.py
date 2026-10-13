@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtCore import QLocale
 from PySide6.QtWidgets import QApplication, QProxyStyle
 
+from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
 from mailbrief.ui.theme import DARK, set_current_tokens
 from mailbrief.ui.theme import style as theme_style
 
@@ -20,6 +21,14 @@ def require_gui_session() -> None:
         and not os.environ.get("MACOS_GUI_AVAILABLE")
     ):
         pytest.skip("Requires active macOS GUI WindowServer session")
+
+
+@pytest.fixture(autouse=True)
+def default_glass() -> Iterator[None]:
+    """Glass drawn normally after every test: a window reads the system's accessibility
+    settings when it opens, and a test may choose solid glass or reduced motion."""
+    yield
+    set_glass_preferences(GlassPreferences())
 
 
 @pytest.fixture

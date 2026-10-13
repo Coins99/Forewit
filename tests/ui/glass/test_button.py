@@ -1,8 +1,6 @@
 """The glass pill button: made like every outline button, the same size, and painted for
 hover, press, focus, disabled and the accessibility modes."""
 
-from collections.abc import Iterator
-
 import pytest
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QEnterEvent, QImage
@@ -19,12 +17,6 @@ from mailbrief.ui.glass.preferences import (
 )
 from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import apply_theme, current_tokens
-
-
-@pytest.fixture(autouse=True)
-def default_preferences() -> Iterator[None]:
-    yield
-    set_glass_preferences(GlassPreferences())
 
 
 @pytest.fixture

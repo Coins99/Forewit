@@ -1,8 +1,6 @@
 """The header and sidebar as glass over the workspace's backdrop, the selected page as a
 raised pill, and the sidebar's muted text raised to secondary on glass."""
 
-from collections.abc import Iterator
-
 import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QImage, QPalette
@@ -21,12 +19,6 @@ from mailbrief.ui.theme import (
 from mailbrief.ui.workspace import ThreePaneWorkspace
 from tests.ui.test_workspace import build
 from tests.ui.window_wait import show
-
-
-@pytest.fixture(autouse=True)
-def default_preferences() -> Iterator[None]:
-    yield
-    set_glass_preferences(GlassPreferences())
 
 
 @pytest.fixture

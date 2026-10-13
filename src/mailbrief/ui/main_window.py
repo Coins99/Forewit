@@ -181,6 +181,8 @@ from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
+from mailbrief.ui.glass.accessibility import GlassAccessibility
+from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import InboxPanel
@@ -611,10 +613,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.backend = backend
-        # Without a store (in tests), a colour change applies but isn't saved.
+        # Without a store (in tests), an appearance change applies but isn't saved.
         self.appearance_writes = (
             None if appearance is None else AppearanceWriter(appearance, self._appearance_not_saved)
         )
+        # The colour scheme and glass choices in effect, saved whole on every change.
+        self.appearance = Appearance() if appearance is None else appearance.load()
         self.pending_restore: tuple[Path, BackupMetadata] | None = None
         self._unsaved_drafts: set[str] = set()
         self.data_dialog = (
@@ -721,7 +725,16 @@ class MainWindow(QMainWindow):
         self.settings_dialog.revoke_requested.connect(
             lambda: self.start(self._revoke_consent, cancellable=False)
         )
-        self.settings_dialog.appearance_panel.scheme_chosen.connect(self._change_scheme)
+        appearance_panel = self.settings_dialog.appearance_panel
+        appearance_panel.scheme_chosen.connect(self._change_scheme)
+        appearance_panel.transparency_chosen.connect(self._change_transparency)
+        appearance_panel.motion_chosen.connect(self._change_motion)
+        # How glass is drawn: the system's accessibility settings and the owner's choices.
+        self.glass_accessibility = GlassAccessibility(
+            self, transparency=self.appearance.transparency, motion=self.appearance.motion
+        )
+        self.glass_accessibility.changed.connect(appearance_panel.set_system)
+        appearance_panel.set_system(self.glass_accessibility.system)
         preferences_panel = self.settings_dialog.preferences_panel
         preferences_panel.save_requested.connect(self._request_save_owner_preferences)
         preferences_panel.reset_requested.connect(
@@ -2548,7 +2561,9 @@ class MainWindow(QMainWindow):
             # A corrupt settings file must remain repairable from the editor.
             preferences = DesktopPreferences()
         self.settings_dialog.set_preferences(preferences)
-        self.settings_dialog.appearance_panel.set_scheme(current_scheme())
+        appearance_panel = self.settings_dialog.appearance_panel
+        appearance_panel.set_scheme(current_scheme())
+        appearance_panel.set_choices(self.appearance.transparency, self.appearance.motion)
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
@@ -2626,12 +2641,24 @@ class MainWindow(QMainWindow):
             self.settings_dialog.appearance_panel.set_scheme(current_scheme())
             self.settings_dialog.status.setText("The colours couldn't be changed.")
             return
+        self._save_appearance(self.appearance.model_copy(update={"color_scheme": scheme}))
+
+    def _change_transparency(self, transparency: Transparency) -> None:
+        self.glass_accessibility.set_choices(transparency, self.appearance.motion)
+        self._save_appearance(self.appearance.model_copy(update={"transparency": transparency}))
+
+    def _change_motion(self, motion: Motion) -> None:
+        self.glass_accessibility.set_choices(self.appearance.transparency, motion)
+        self._save_appearance(self.appearance.model_copy(update={"motion": motion}))
+
+    def _save_appearance(self, appearance: Appearance) -> None:
+        self.appearance = appearance
         if self.appearance_writes is not None:
-            self.appearance_writes.save(Appearance(color_scheme=scheme))
+            self.appearance_writes.save(appearance)
 
     def _appearance_not_saved(self) -> None:
         self.settings_dialog.status.setText(
-            "The colours couldn't be saved. They stay until MailBrief closes."
+            "The appearance couldn't be saved. It stays until MailBrief closes."
         )
 
     def _request_save_preferences(self, preferences: DesktopPreferences) -> None:

@@ -2,8 +2,9 @@
 
 import contextlib
 import dataclasses
+import gc
 import string
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QColor, QFont, QPalette
@@ -81,6 +82,23 @@ def current_tokens() -> Tokens:
 def set_current_tokens(tokens: Tokens) -> None:
     global _current
     _current = tokens
+
+
+@contextlib.contextmanager
+def paused_collection() -> Iterator[None]:
+    """No automatic garbage collection inside the block.
+
+    Qt copies its list of every widget, then visits each one, sending events that run
+    Python code (``follow_theme``). A collection there can free a window Python no longer
+    references, and Qt then visits its freed widgets and crashes. Wrap any work that makes
+    Qt walk every widget: setting the style, palette or stylesheet, or repainting all."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
 
 
 def current_scheme() -> ColorScheme:
@@ -201,31 +219,32 @@ def apply_theme(
     global _style, _cache_hooked, _scheme, _mode
     stylesheet, palette, font = app.styleSheet(), app.palette(), app.font()
     replaced: str | None = None  # The style's name, when this call replaces it.
-    try:
-        tokens = tokens_for(mode, scheme)
-        # A stylesheet wraps the style in a proxy that hides its name; clear it first.
-        app.setStyleSheet("")
-        if not isinstance(app.style(), ThemeStyle):
-            current = app.style()
-            base = current.baseStyle() if isinstance(current, QProxyStyle) else current
-            replaced = base.name()
-            _style = ThemeStyle(QStyleFactory.create("Fusion"))
-            app.setStyle(_style)
-        if register_fonts():
-            app.setFont(ui_font(TEXT_PX))
-        # Before the palette: widgets following the theme read the tokens as it changes.
-        set_current_tokens(tokens)
-        previous, _scheme = _scheme, scheme
-        previous_mode, _mode = _mode, mode
+    with paused_collection():
         try:
-            app.setPalette(build_palette(tokens))
-            app.setStyleSheet(build_stylesheet(tokens))
+            tokens = tokens_for(mode, scheme)
+            # A stylesheet wraps the style in a proxy that hides its name; clear it first.
+            app.setStyleSheet("")
+            if not isinstance(app.style(), ThemeStyle):
+                current = app.style()
+                base = current.baseStyle() if isinstance(current, QProxyStyle) else current
+                replaced = base.name()
+                _style = ThemeStyle(QStyleFactory.create("Fusion"))
+                app.setStyle(_style)
+            if register_fonts():
+                app.setFont(ui_font(TEXT_PX))
+            # Before the palette: widgets following the theme read the tokens as it changes.
+            set_current_tokens(tokens)
+            previous, _scheme = _scheme, scheme
+            previous_mode, _mode = _mode, mode
+            try:
+                app.setPalette(build_palette(tokens))
+                app.setStyleSheet(build_stylesheet(tokens))
+            except BaseException:
+                _scheme, _mode = previous, previous_mode
+                raise
         except BaseException:
-            _scheme, _mode = previous, previous_mode
+            _restore(app, stylesheet, palette, font, replaced)
             raise
-    except BaseException:
-        _restore(app, stylesheet, palette, font, replaced)
-        raise
     if not _cache_hooked:
         # Release the cached icon pixmaps, fonts and metrics while Qt can still free them.
         app.aboutToQuit.connect(release_icon_cache)

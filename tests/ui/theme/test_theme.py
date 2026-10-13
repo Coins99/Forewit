@@ -1,12 +1,14 @@
 """Design tokens, palette, stylesheet and bundled assets."""
 
 import dataclasses
+import gc
 import re
+from collections.abc import Callable
 
 import pytest
 from PySide6.QtCore import QMetaMethod
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QFontMetrics, QPalette
-from PySide6.QtWidgets import QApplication, QStyle
+from PySide6.QtWidgets import QApplication, QLabel, QStyle, QWidget
 
 from mailbrief.ui.theme import (
     DARK,
@@ -20,6 +22,7 @@ from mailbrief.ui.theme import (
     current_mode,
     current_scheme,
     current_tokens,
+    follow_theme,
     icon_pixmap,
     register_fonts,
     release_font_cache,
@@ -264,3 +267,37 @@ def test_the_mode_follows_the_applied_theme_and_a_failure(
     assert current_mode() is ThemeMode.LIGHT
     assert current_tokens() == tokens_for(ThemeMode.LIGHT, ColorScheme.SAGE)
     assert current_scheme() is ColorScheme.SAGE
+
+
+def test_a_theme_change_never_lets_a_collection_free_a_widget_qt_is_visiting(
+    qapp: QApplication, themed: None
+) -> None:
+    """Qt copies its list of every widget, then visits each one. Windows here can only be
+    freed by Python's cycle collector, and the first theme follower Qt reaches sets a
+    collection off mid-walk; without the pause, Qt then visits freed widgets and crashes."""
+    apply_theme(qapp)
+    threshold = gc.get_threshold()
+
+    def follower(label: QLabel) -> Callable[[], None]:
+        def follow() -> None:
+            gc.set_threshold(1)  # From here, an allocation may collect…
+            label.setText(" ".join([label.text()]))  # …and this one allocates.
+
+        return follow
+
+    gc.set_threshold(1_000_000)  # Nothing collects the orphans before the walk.
+    try:
+        for _ in range(20):
+            orphan = QWidget()
+            orphan.cycle = orphan  # type: ignore[attr-defined]  # Only the collector frees it.
+            label = QLabel("orphan", orphan)
+            label.ensurePolished()  # Qt restyles, and so sends events to, polished widgets.
+            follow_theme(label, follower(label))
+        del orphan, label
+        gc.set_threshold(1_000_000)  # follow_theme ran each follower once.
+        apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.PLUM)
+    finally:
+        gc.set_threshold(*threshold)
+    gc.collect()
+    assert current_scheme() is ColorScheme.PLUM
+    assert gc.isenabled()

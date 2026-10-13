@@ -20,6 +20,7 @@ from mailbrief.ui.theme.style import (
     current_tokens,
     follow_theme,
     palette_tokens,
+    paused_collection,
     set_current_tokens,
 )
 from mailbrief.ui.theme.tokens import (
@@ -78,6 +79,7 @@ __all__ = [
     "icon",
     "icon_pixmap",
     "palette_tokens",
+    "paused_collection",
     "register_fonts",
     "release_font_cache",
     "set_current_tokens",

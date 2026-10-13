@@ -111,8 +111,20 @@ them.
   - **Where:** the header's Sync and review (primary) and Cancel, and the Today page's
     card and footer buttons.
 - **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
-  reduced motion that widgets read at paint time. Defaults until the system settings are
-  wired in.
+  reduced motion that widgets read at paint time. `effective_preferences` sets them from:
+  - the system (`system.py`): Increase contrast (Qt's `contrastPreference`, or macOS
+    NSWorkspace), Reduce transparency (NSWorkspace, or Windows' `EnableTransparency`),
+    and Reduce motion (NSWorkspace, or Windows' `SPI_GETCLIENTAREAANIMATION`). A failed
+    read is no preference.
+  - the owner's choices in Settings > Appearance: Glass (Follow the system, or Always
+    solid) and Motion (Follow the system, or Reduce motion). They can add solid glass or
+    stillness but never undo the system's, and increased contrast always wins.
+- **`GlassAccessibility`** (`accessibility.py`, in `MainWindow`) applies them at once and
+  again whenever MailBrief becomes the active app (after System Settings, say) or Qt
+  reports a contrast change. It connects to the application's signals; a filter on the
+  application would see every event of every object. A change repaints every widget
+  inside `paused_collection()`.
+- **The Appearance tab** shows a note when the system makes glass solid or still.
 - **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
   `test_glass.py` proves contrast over. It also measures text contrast on painted pixels
   over each backdrop's darkest and brightest spots, rims at 1x and 2x, and the renderer's
