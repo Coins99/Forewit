@@ -4,6 +4,7 @@ from datetime import date
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -26,6 +28,7 @@ from mailbrief.domain.actions import (
     ACTION_NOTES_MAX_CHARS,
     ACTION_STEP_MAX_CHARS,
     ACTION_TITLE_MAX_CHARS,
+    ESTIMATE_MAX_MINUTES,
     MAX_ACTION_STEPS,
     TARGET_REASON_TEXT,
     Action,
@@ -43,6 +46,33 @@ _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
     (ActionEffort.DAYS, "Days"),
 )
 _STEP_ID = Qt.ItemDataRole.UserRole
+
+
+class EstimateBox(QSpinBox):
+    """The owner's estimate in minutes, in 15-minute steps; 0 reads "Not set" and means none.
+    Like the event editor's fields, the wheel changes it only while it has focus, so
+    scrolling over the dialog never changes an estimate."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("taskEstimate")
+        self.setAccessibleName("Estimated minutes")
+        self.setRange(0, ESTIMATE_MAX_MINUTES)
+        self.setSingleStep(15)
+        self.setSuffix(" min")
+        self.setSpecialValueText("Not set")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Tab and click; not the wheel.
+
+    def minutes(self) -> int | None:
+        return self.value() or None
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if not self.hasFocus():
+            event.ignore()
+        elif event.phase() == Qt.ScrollPhase.ScrollMomentum:
+            event.accept()  # Coasting after the fingers lift moves nothing.
+        else:
+            super().wheelEvent(event)
 
 
 def _plain(text: str) -> QLabel:
@@ -117,6 +147,8 @@ class ActionEditor(QDialog):
         for _effort, name in _EFFORTS:
             self.effort.addItem(name)
         form.addRow("Eff&ort", self.effort)
+        self.estimate = EstimateBox()
+        form.addRow("E&stimate", self.estimate)
         self.has_target = QCheckBox("Target &date")
         self.target = QDateEdit()
         self.target.setCalendarPopup(True)
@@ -173,6 +205,7 @@ class ActionEditor(QDialog):
             self.title.text(),
             self.owner.currentIndex(),
             self.effort.currentIndex(),
+            self.estimate.value(),
             (picked.year(), picked.month(), picked.day()) if self.has_target.isChecked() else None,
             self.notes.toPlainText(),
             tuple(self._current_steps()),
@@ -197,6 +230,7 @@ class ActionEditor(QDialog):
         self._fill_projects(None if action.project is None else action.project.public_id)
         self.owner.setCurrentIndex([value for value, _ in _OWNERS].index(action.ownership))
         self.effort.setCurrentIndex([value for value, _ in _EFFORTS].index(action.effort))
+        self.estimate.setValue(action.estimate_minutes or 0)
         self.has_target.setChecked(action.target_date is not None)
         self.target.setEnabled(action.target_date is not None)
         shown = action.target_date or action.suggested_target_date or today
@@ -236,6 +270,7 @@ class ActionEditor(QDialog):
         self._fill_projects(None)
         self.owner.setCurrentIndex(0)
         self.effort.setCurrentIndex(0)
+        self.estimate.setValue(0)
         self.has_target.setChecked(False)
         self.target.setEnabled(False)
         self.target.setDate(QDate(today.year, today.month, today.day))
@@ -382,6 +417,7 @@ class ActionEditor(QDialog):
             title=title,
             ownership=_OWNERS[self.owner.currentIndex()][0],
             effort=_EFFORTS[self.effort.currentIndex()][0],
+            estimate_minutes=self.estimate.minutes(),
             target_date=(
                 date(picked.year(), picked.month(), picked.day())
                 if self.has_target.isChecked()

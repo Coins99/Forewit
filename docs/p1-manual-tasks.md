@@ -46,6 +46,18 @@ completion timestamps that earlier versions erased. Restoring a legacy deleted t
 restoration, without claiming to undo a migration-era completion. Only a known deletion
 event at the previous revision can be referenced as an undo of deletion.
 
+## Estimates
+
+A task can carry the owner's own estimate (B07 in the [feature
+inventory](future-feature-inventory.md)): **Estimate** in the editor, in whole minutes from 1
+to 6,000 (100 hours), stepped by 15 minutes, or **Not set**. The detail pane shows it under the
+target as "Estimate 1 h 30 min". It sits beside the AI's coarse effort (minutes, hours or
+days) and is never derived from it: accepting a suggestion leaves the estimate unset, and
+AI runs, proposals and adding an email never change it. Saving it is an ordinary edit, one
+revision with its activity record. Additive migration `20261014_0019` adds
+`actions.estimate_minutes` (NULL for existing tasks) with a CHECK on its range; backups,
+restore and the writing export carry it.
+
 ## Acceptance
 
 Automated synthetic tests cover manual and email-derived tasks through create/accept,

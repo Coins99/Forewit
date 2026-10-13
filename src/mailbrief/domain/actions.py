@@ -27,6 +27,8 @@ ACTION_TITLE_MAX_CHARS: Final = 200
 ACTION_STEP_MAX_CHARS: Final = 500
 MAX_ACTION_STEPS: Final = 30
 ACTION_NOTES_MAX_CHARS: Final = 10_000
+# The owner's own estimate, in whole minutes up to 100 hours; never derived from the AI's effort.
+ESTIMATE_MAX_MINUTES: Final = 6_000
 PUBLIC_ID_CHARS: Final = 36  # A UUID in its canonical text form.
 
 TARGET_REASON_TEXT: Final[dict[TargetReason, str]] = {
@@ -245,6 +247,7 @@ class Action(DomainModel):
     ownership: ActionOwnership
     status: ActionStatus
     effort: ActionEffort | None = None
+    estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
     deadline_text: str | None = Field(
         default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
     )
@@ -339,6 +342,7 @@ class ActionEdit(DomainModel):
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     effort: ActionEffort | None
+    estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
     target_date: date | None
     notes: str = Field(max_length=ACTION_NOTES_MAX_CHARS, repr=False)
 

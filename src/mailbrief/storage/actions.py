@@ -264,6 +264,7 @@ def action_from_rows(
         ownership=ActionOwnership(row.ownership),
         status=ActionStatus(row.status),
         effort=None if row.effort is None else ActionEffort(row.effort),
+        estimate_minutes=row.estimate_minutes,
         deadline_text=row.deadline_text,
         deadline_precision=DeadlinePrecision(row.deadline_precision),
         deadline_date=row.deadline_date,

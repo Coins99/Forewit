@@ -129,6 +129,7 @@ def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
     row.title = edit.title
     row.ownership = edit.ownership.value
     row.effort = None if edit.effort is None else edit.effort.value
+    row.estimate_minutes = edit.estimate_minutes
     row.target_date = edit.target_date
     row.notes = edit.notes
 

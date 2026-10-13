@@ -22,6 +22,7 @@ class ActionDetails:
     target: date | None
     target_reason: str | None
     due: str | None
+    estimate: str | None
     steps_done: int
     steps: int
     waiting: bool
@@ -63,6 +64,7 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         target=action.target_date,
         target_reason=TARGET_REASON_TEXT[reason] if keeps_reason and reason is not None else None,
         due=deadline_text(action, zone, today=today),
+        estimate=estimate_text(action.estimate_minutes),
         steps_done=sum(step.done for step in action.steps),
         steps=len(action.steps),
         waiting=is_open and action.ownership is ActionOwnership.WAITING_FOR,
@@ -76,6 +78,15 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         completed=None if completed is None else completed.astimezone(zone).date(),
         today=today,
     )
+
+
+def estimate_text(minutes: int | None) -> str | None:
+    """The owner's estimate as "Estimate 45 min", "Estimate 2 h" or "Estimate 1 h 30 min"."""
+    if minutes is None:
+        return None
+    hours, rest = divmod(minutes, 60)
+    parts = ([f"{hours} h"] if hours else []) + ([f"{rest} min"] if rest else [])
+    return "Estimate " + " ".join(parts)
 
 
 def target_text(details: ActionDetails, *, reason: bool = True) -> str | None:
