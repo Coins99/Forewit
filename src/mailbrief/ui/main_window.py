@@ -151,7 +151,13 @@ from mailbrief.ui.actions_view import (
     SEEN,
     ActionsPanel,
 )
-from mailbrief.ui.appearance import Appearance, AppearanceStore, AppearanceWriter
+from mailbrief.ui.appearance import (
+    Appearance,
+    AppearanceStore,
+    AppearanceWriter,
+    ModeChoice,
+    theme_mode,
+)
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
@@ -185,7 +191,7 @@ from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
-from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
+from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
@@ -205,7 +211,9 @@ from mailbrief.ui.theme import (
     ColorScheme,
     ThemeMode,
     apply_theme,
+    current_mode,
     current_scheme,
+    system_mode,
 )
 from mailbrief.ui.today_view import DayPanel
 from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
@@ -486,7 +494,7 @@ def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
     caption = plain_label(step, tone="muted", px=CAPTION_PX)
     caption.setObjectName("stepCaption")
     layout.addWidget(caption)
-    heading = plain_label(title, px=TITLE_PX, medium=True)
+    heading = plain_label(title, px=TITLE_PX, semibold=True)
     heading.setObjectName("stepTitle")
     layout.addWidget(heading)
 
@@ -744,6 +752,11 @@ class MainWindow(QMainWindow):
         )
         appearance_panel = self.settings_dialog.appearance_panel
         appearance_panel.scheme_chosen.connect(self._change_scheme)
+        appearance_panel.mode_chosen.connect(self._change_mode)
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            # A slot of the window: Qt drops the connection when it is destroyed.
+            application.styleHints().colorSchemeChanged.connect(self._system_mode_changed)
         appearance_panel.transparency_chosen.connect(self._change_transparency)
         appearance_panel.motion_chosen.connect(self._change_motion)
         # How glass is drawn: the system's accessibility settings and the owner's choices.
@@ -766,7 +779,12 @@ class MainWindow(QMainWindow):
         sidebar = workspace.sidebar
         # The header: when Gmail was last checked, then Sync and review and Cancel.
         self.generate_button = outline_button(
-            "&Sync and review", "generateButton", mnemonic=True, glass=True, primary=True
+            "&Sync and review",
+            "generateButton",
+            mnemonic=True,
+            glass=True,
+            primary=True,
+            icon_name="refresh",
         )
         self.generate_button.setToolTip("Refresh today's Inbox or retry an incomplete run.")
         self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True, glass=True)
@@ -896,7 +914,7 @@ class MainWindow(QMainWindow):
         run_content.setObjectName("runContent")
         # A centred column, at most _RUN_WIDTH wide.
         centred = QHBoxLayout(run_content)
-        centred.setContentsMargins(16, 14, 16, 14)
+        centred.setContentsMargins(24, 20, 24, 20)
         column = QWidget()
         column.setObjectName("runColumn")
         column.setMaximumWidth(_RUN_WIDTH)
@@ -959,9 +977,10 @@ class MainWindow(QMainWindow):
         strip = QWidget()
         strip.setObjectName("statusStrip")
         strip.setAccessibleName("Status")
-        strip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         strip_layout = QHBoxLayout(strip)
-        strip_layout.setContentsMargins(12, 6, 12, 6)
+        # On the glass under the sheet: in line with the header's title and the sheet's
+        # right edge.
+        strip_layout.setContentsMargins(16, 6, 8, 6)
         strip_layout.setSpacing(8)
         self.status = wrap_label("Loading saved brief…", tone="secondary", px=SMALL_PX)
         self.status.setObjectName("statusText")
@@ -977,8 +996,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(workspace, 1)
-        layout.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
-        layout.addWidget(strip)
+        workspace.footer_bar.set_strip(strip)
         self.setCentralWidget(central)
         # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
         # closeEvent on macOS (a modal dialog's AppKit session drops them).
@@ -2779,6 +2797,7 @@ class MainWindow(QMainWindow):
         self.settings_dialog.set_preferences(preferences)
         appearance_panel = self.settings_dialog.appearance_panel
         appearance_panel.set_scheme(current_scheme())
+        appearance_panel.set_mode(self.appearance.mode)
         appearance_panel.set_choices(self.appearance.transparency, self.appearance.motion)
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
@@ -2845,19 +2864,46 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     def _change_scheme(self, scheme: ColorScheme) -> None:
-        """Apply the owner's colours at once, whatever else is running, then save them."""
+        """Apply the owner's colours at once, whatever else is running, in the mode in
+        effect, then save them."""
+        if self._retheme(scheme, current_mode()):
+            self._save_appearance(self.appearance.model_copy(update={"color_scheme": scheme}))
+
+    def _change_mode(self, choice: ModeChoice) -> None:
+        """Apply light, dark or the system's mode at once, then save the choice."""
+        if self._retheme(current_scheme(), self._theme_mode(choice)):
+            self._save_appearance(self.appearance.model_copy(update={"mode": choice}))
+
+    def _system_mode_changed(self, scheme: Qt.ColorScheme) -> None:
+        """The system went light or dark: follow it, unless the owner keeps one mode."""
+        if self.appearance.mode is ModeChoice.SYSTEM:
+            self._retheme(current_scheme(), self._theme_mode(ModeChoice.SYSTEM))
+
+    def _theme_mode(self, choice: ModeChoice) -> ThemeMode:
+        application = QApplication.instance()
+        system = (
+            system_mode(application) if isinstance(application, QApplication) else current_mode()
+        )
+        return theme_mode(choice, system)
+
+    def _retheme(self, scheme: ColorScheme, mode: ThemeMode) -> bool:
+        """Apply ``scheme`` in ``mode``; False, with the panel showing what is in effect,
+        when it fails (apply_theme has put back what was there)."""
         application = QApplication.instance()
         if not isinstance(application, QApplication):
-            return
+            return False
+        if scheme is current_scheme() and mode is current_mode():
+            return True
         try:
-            apply_theme(application, ThemeMode.DARK, scheme)
+            apply_theme(application, mode, scheme)
         except Exception as exc:
-            # apply_theme has put back what was there.
             log_failure(exc)
-            self.settings_dialog.appearance_panel.set_scheme(current_scheme())
+            panel = self.settings_dialog.appearance_panel
+            panel.set_scheme(current_scheme())
+            panel.set_mode(self.appearance.mode)
             self.settings_dialog.status.setText("The colours couldn't be changed.")
-            return
-        self._save_appearance(self.appearance.model_copy(update={"color_scheme": scheme}))
+            return False
+        return True
 
     def _change_transparency(self, transparency: Transparency) -> None:
         self.glass_accessibility.set_choices(transparency, self.appearance.motion)

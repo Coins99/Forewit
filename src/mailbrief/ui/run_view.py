@@ -12,8 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
@@ -37,8 +37,9 @@ from mailbrief.ui.brief_list import (
     row_height,
     with_address,
 )
-from mailbrief.ui.hairline import hairline_pen, paint_focus_ring
-from mailbrief.ui.theme import TEXT_PX, Tokens, current_tokens, ui_metrics
+from mailbrief.ui.hairline import paint_focus_ring
+from mailbrief.ui.theme import TEXT_PX, current_tokens, ui_metrics
+from mailbrief.ui.theme.indicators import paint_check_box
 
 # The item's own ID stays under Qt.UserRole; the row to paint sits beside it.
 ROW_ROLE: Final = Qt.ItemDataRole.UserRole + 1
@@ -49,15 +50,10 @@ EXCLUDED: Final = "Excluded in Settings"
 IMPORTANT: Final = "Important sender"
 
 _CHECK_GAP: Final = 10
-# The check box: its corner radius and the check mark's stroke (logical px).
-_BOX_RADIUS: Final = 3
 # A cut address with neither its local part nor its domain's start; how many 1 px
 # shrinks a cut line gets to fit once joined.
 _CUT_AT: Final = "…@"
 _FIT_TRIES: Final = 8
-_MARK_WIDTH: Final = 1.5
-# No fill and no mark: an unchecked box is only its outline.
-NONE: Final = "transparent"
 
 _Index = QModelIndex | QPersistentModelIndex
 
@@ -160,41 +156,9 @@ def sender_line(metrics: QFontMetrics, name: str | None, address: str, width: in
     return cut_address(metrics, address, width) if line is None else line
 
 
-def indicator_colors(checked: bool, tokens: Tokens) -> tuple[str, str, str]:
-    """The check box's (border, fill, mark): an outlined square when unchecked, an accent
-    square with a check mark when checked."""
-    if checked:
-        return tokens.accent_border, tokens.accent_bg, tokens.accent_fg
-    return tokens.border_strong, NONE, NONE
-
-
 def paint_indicator(painter: QPainter, rect: QRect, *, checked: bool) -> None:
-    """A rounded check box in ``rect`` with a one-device-pixel outline, and a check mark
-    when ``checked``."""
-    border, fill, mark = indicator_colors(checked, current_tokens())
-    painter.save()
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    # Half a device pixel puts the outline on pixel centres, so it stays crisp.
-    inset = 0.5 / painter.device().devicePixelRatioF()
-    box = QRectF(rect).adjusted(inset, inset, -inset, -inset)
-    painter.setPen(hairline_pen(border))
-    painter.setBrush(QColor(fill))
-    painter.drawRoundedRect(box, _BOX_RADIUS, _BOX_RADIUS)
-    if checked:
-        pen = QPen(QColor(mark), _MARK_WIDTH)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        left, top, width, height = box.left(), box.top(), box.width(), box.height()
-        painter.drawPolyline(
-            [
-                QPointF(left + 0.26 * width, top + 0.52 * height),
-                QPointF(left + 0.43 * width, top + 0.69 * height),
-                QPointF(left + 0.75 * width, top + 0.33 * height),
-            ]
-        )
-    painter.restore()
+    """A row's check box in ``rect``, drawn as the theme draws every check box."""
+    paint_check_box(painter, QRectF(rect), current_tokens(), checked=checked)
 
 
 class ShortlistDelegate(QStyledItemDelegate):

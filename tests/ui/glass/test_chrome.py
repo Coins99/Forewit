@@ -2,11 +2,12 @@
 raised pill, and the sidebar's muted text raised to secondary on glass."""
 
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QAbstractAnimation, QPoint
 from PySide6.QtGui import QImage, QPalette
 from PySide6.QtWidgets import QApplication, QLabel
 from pytestqt.qtbot import QtBot
 
+from mailbrief.ui.glass.motion import GLIDE_MS
 from mailbrief.ui.glass.painter import GlassMode
 from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
 from mailbrief.ui.theme import (
@@ -47,7 +48,7 @@ def test_the_backdrop_follows_the_size_and_scheme(
     backdrop = workspace.backdrop
     assert backdrop is not None
     assert (backdrop.key.width, backdrop.key.height) == (workspace.width(), workspace.height())
-    assert backdrop.key.scheme is ColorScheme.SLATE and backdrop.key.mode is ThemeMode.DARK
+    assert backdrop.key.scheme is ColorScheme.STUDIO and backdrop.key.mode is ThemeMode.DARK
     workspace.resize(700, 540)
     assert workspace.backdrop is not None and workspace.backdrop.key.width == 700
     apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.PLUM)
@@ -56,7 +57,10 @@ def test_the_backdrop_follows_the_size_and_scheme(
     assert workspace.backdrop.key.mode is ThemeMode.LIGHT
 
 
-def test_the_header_and_sidebar_are_glass(workspace: ThreePaneWorkspace) -> None:
+def test_the_header_and_sidebar_are_glass(
+    workspace: ThreePaneWorkspace, qapp: QApplication
+) -> None:
+    apply_theme(qapp, ThemeMode.DARK, ColorScheme.SLATE)  # A scheme with streaks.
     tokens = current_tokens()
     header = workspace.header.grab().toImage()
     sidebar = workspace.sidebar.grab().toImage()
@@ -65,6 +69,23 @@ def test_the_header_and_sidebar_are_glass(workspace: ThreePaneWorkspace) -> None
     assert not set(row) & {tokens.canvas, tokens.panel}
     assert at(sidebar, 64, workspace.sidebar.height() - 140) not in (tokens.canvas, tokens.panel)
     assert len(set(row)) > 1  # The streaks vary across it.
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_studio_glass_shows_its_colour_field(
+    workspace: ThreePaneWorkspace, qapp: QApplication, mode: ThemeMode
+) -> None:
+    """Studio's glass is calm (a flat backdrop with no streaks) but not empty: its pools of
+    colour show through the header and the sidebar, and differ from one to the other."""
+    apply_theme(qapp, mode, ColorScheme.STUDIO)
+    glass = glass_for(mode, ColorScheme.STUDIO)
+    assert glass.backdrop_top == glass.backdrop_bottom and glass.streak.alpha == 0
+    header = workspace.header.grab().toImage()
+    sidebar = workspace.sidebar.grab().toImage()
+    row = header_row(header)
+    assert len(set(row)) > 1  # The field flows across the header.
+    assert at(sidebar, 64, workspace.sidebar.height() - 20) not in row
+    assert glass.opaque not in row  # It isn't the solid fallback.
 
 
 @pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])
@@ -103,3 +124,22 @@ def test_muted_text_in_the_sidebar_shows_as_secondary(workspace: ThreePaneWorksp
     elsewhere = workspace.coverage
     assert isinstance(elsewhere, QLabel)
     assert elsewhere.palette().color(QPalette.ColorRole.WindowText).name() == tokens.text_muted
+
+
+def test_the_selected_page_glides_to_the_next(workspace: ThreePaneWorkspace, qtbot: QtBot) -> None:
+    """The raised pill moves from the old page to the new one on the fluid curve rather
+    than jumping; with motion reduced it is there at once."""
+    nav = workspace.sidebar.nav
+    model = nav.model()
+    start = nav.shown_pill()
+    assert start is not None
+    nav.setCurrentIndex(model.index(2, 0))
+    assert nav.glide.state() is QAbstractAnimation.State.Running
+    assert nav.glide.duration() == GLIDE_MS
+    end = nav.pill_rect(model.index(2, 0))
+    qtbot.waitUntil(lambda: nav.glide.state() is QAbstractAnimation.State.Stopped, timeout=3000)
+    assert nav.shown_pill() == end
+    set_glass_preferences(GlassPreferences(reduce_motion=True))
+    nav.setCurrentIndex(model.index(0, 0))
+    assert nav.glide.state() is QAbstractAnimation.State.Stopped
+    assert nav.shown_pill() == nav.pill_rect(model.index(0, 0))

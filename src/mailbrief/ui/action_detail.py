@@ -137,8 +137,8 @@ class ActionDetailPane(QScrollArea):
         # A readable measure on wide windows; the scroll area keeps it at the left.
         content.setMaximumWidth(DETAIL_MAX_WIDTH)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 20, 16, 20)
+        layout.setSpacing(10)
         # K: the window's Sync and review already takes S.
         self.seen_button = outline_button("Mar&k seen", "seenButton", mnemonic=True)
         self.seen_button.setToolTip("Clear the new-in-thread and you-replied notes.")
@@ -224,7 +224,7 @@ class ActionDetailPane(QScrollArea):
         """Show ``action``; another action than the one shown starts at the top."""
         details = action_details(action, today=today, zone=zone, now=now)
         self.empty.hide()
-        self.title = wrap_label(action.title, px=TITLE_PX, medium=True)
+        self.title = wrap_label(action.title, px=TITLE_PX, semibold=True)
         self.title.setObjectName("actionTitle")
         state = wrap_label(state_text(action, details), tone="secondary", px=TEXT_PX)
         state.setObjectName("actionState")

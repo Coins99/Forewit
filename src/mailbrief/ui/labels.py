@@ -16,11 +16,16 @@ from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
 from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.theme.assets import icon, ui_font
-from mailbrief.ui.theme.style import current_tokens, follow_theme
+from mailbrief.ui.theme.style import current_glass, current_tokens, follow_theme
 
 
 def plain_label(
-    text: str = "", *, tone: str | None = None, px: int | None = None, medium: bool = False
+    text: str = "",
+    *,
+    tone: str | None = None,
+    px: int | None = None,
+    medium: bool = False,
+    semibold: bool = False,
 ) -> QLabel:
     """Mail-derived text must never become rich text or an automatic hyperlink."""
     label = QLabel(text)
@@ -29,12 +34,17 @@ def plain_label(
     if tone is not None:
         label.setProperty("tone", tone)
     if px is not None:
-        label.setFont(ui_font(px, medium=medium))
+        label.setFont(ui_font(px, medium=medium, semibold=semibold))
     return label
 
 
 def wrap_label(
-    text: str = "", *, tone: str | None = None, px: int | None = None, medium: bool = False
+    text: str = "",
+    *,
+    tone: str | None = None,
+    px: int | None = None,
+    medium: bool = False,
+    semibold: bool = False,
 ) -> "WrapLabel":
     """Like ``plain_label``, but a long unbroken token wraps instead of widening its
     container."""
@@ -42,7 +52,7 @@ def wrap_label(
     if tone is not None:
         label.setProperty("tone", tone)
     if px is not None:
-        label.setFont(ui_font(px, medium=medium))
+        label.setFont(ui_font(px, medium=medium, semibold=semibold))
     return label
 
 
@@ -129,12 +139,15 @@ def outline_button(
     if accessible_name is not None:
         button.setAccessibleName(accessible_name)
     if px is not None:
-        button.setFont(ui_font(px))
+        button.setFont(ui_font(px, medium=glass))
     if icon_name is not None:
         glyph = icon_name  # Narrowed for the lambda.
-        follow_theme(
-            button, lambda: button.setIcon(icon(glyph, current_tokens().text, OUTLINE_ICON_PX))
-        )
+
+        def tint() -> None:
+            color = current_glass().primary_text if primary else current_tokens().text
+            button.setIcon(icon(glyph, color, OUTLINE_ICON_PX))
+
+        follow_theme(button, tint)
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))
     return button
 

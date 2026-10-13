@@ -19,19 +19,26 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QPushButton, QStyleOptionButton
 
-from mailbrief.ui.glass.painter import GlassMode, paint_glow, paint_pill, paint_specular
+from mailbrief.ui.glass.painter import (
+    GlassMode,
+    paint_glow,
+    paint_liquid_pill,
+    paint_pill,
+    paint_specular,
+)
 from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import keyboard_focus
-from mailbrief.ui.theme import current_glass, current_tokens
+from mailbrief.ui.theme import TEXT_PX, current_glass, current_tokens, ui_font
 
-# The outline button's box: text plus 14 px each side and 6 px above and below.
-PAD_X: Final = 14
+# The pill's box: its label plus 10 px each side and 6 px above and below.
+PAD_X: Final = 10
 PAD_Y: Final = 6
 ICON_GAP: Final = 6
-# Room the button keeps round its pill, each side, for the pill to grow into on hover.
+# Room the button keeps round its pill, each side, for the pill to grow into on hover and
+# for its shadow.
 ROOM_X: Final = 3
-ROOM_Y: Final = 1
+ROOM_Y: Final = 3
 # How far a hovered pill grows, each side; the hover spring overshoots by about a tenth,
 # still inside the room.
 GROW_X: Final = 2.4
@@ -60,6 +67,7 @@ class GlassButton(QPushButton):
     def __init__(self, text: str, *, primary: bool = False) -> None:
         super().__init__(text)
         self.primary = primary
+        self.setFont(ui_font(TEXT_PX, medium=True))
         self.setProperty("variant", "glass")
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
@@ -95,12 +103,18 @@ class GlassButton(QPushButton):
         """The text as painted: mnemonic markers dropped and ``&&`` shown as ``&``."""
         return self.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
 
-    def sizeHint(self) -> QSize:
-        metrics = QFontMetricsF(self.font())
-        width = metrics.horizontalAdvance(self._shown_text()) + 2 * PAD_X
+    def _content_width(self) -> float:
+        """The pill's width for its content: the padding, the icon and the label."""
+        text = QFontMetricsF(self.font()).horizontalAdvance(self._shown_text())
+        width = text + 2 * PAD_X
         if not self.icon().isNull():
             width += self.iconSize().width() + ICON_GAP
+        return width
+
+    def sizeHint(self) -> QSize:
+        metrics = QFontMetricsF(self.font())
         height = metrics.height() + 2 * PAD_Y
+        width = self._content_width()
         return QSize(math.ceil(width + 2 * ROOM_X), math.ceil(height + 2 * ROOM_Y))
 
     def minimumSizeHint(self) -> QSize:
@@ -208,7 +222,20 @@ class GlassButton(QPushButton):
         rect = self._pill()
         if not self.isEnabled():
             painter.setOpacity(DISABLED_OPACITY)
-        paint_pill(painter, rect, glass, primary=self.primary, mode=preferences.mode)
+        hover = self._hover if self.isEnabled() else 0.0
+        if glass.highlight.alpha > 0:
+            paint_liquid_pill(
+                painter,
+                rect,
+                glass,
+                primary=self.primary,
+                mode=preferences.mode,
+                hover=hover,
+            )
+        else:
+            paint_pill(
+                painter, rect, glass, primary=self.primary, mode=preferences.mode, hover=hover
+            )
         normal = preferences.mode is GlassMode.NORMAL
         light_at = self._light_at
         if normal and self.isEnabled() and self._hover > 0 and light_at is not None:
@@ -222,9 +249,16 @@ class GlassButton(QPushButton):
             inset = FOCUS_WIDTH / 2
             inner = rect.adjusted(inset, inset, -inset, -inset)
             ring.addRoundedRect(inner, inner.height() / 2, inner.height() / 2)
-            painter.setPen(QPen(QColor(tokens.accent_fg), FOCUS_WIDTH))
+            # The accent would vanish on a solid primary fill, so its ring takes the label's
+            # colour, which is proven against the fill.
+            ring_color = glass.primary_text if self.primary else tokens.accent_fg
+            painter.setPen(QPen(QColor(ring_color), FOCUS_WIDTH))
             painter.drawPath(ring)
-        self._paint_label(painter, rect, tokens.text if self.isEnabled() else tokens.text_muted)
+        if not self.isEnabled():
+            text_color = tokens.text_muted
+        else:
+            text_color = glass.primary_text if self.primary else tokens.text
+        self._paint_label(painter, rect, text_color)
         painter.end()
 
     def _paint_label(self, painter: QPainter, rect: QRectF, text_color: str) -> None:

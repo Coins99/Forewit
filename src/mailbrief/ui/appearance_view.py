@@ -1,5 +1,5 @@
-"""The Settings Appearance tab: the owner's colour scheme and how glass is drawn, applied
-at once."""
+"""The Settings Appearance tab: the owner's colour scheme, light or dark mode and how
+glass is drawn, applied at once."""
 
 from collections.abc import Mapping
 from enum import StrEnum
@@ -10,18 +10,33 @@ from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QButtonGroup, QRadioButton, QVBoxLayout, QWidget
 
+from mailbrief.ui.appearance import ModeChoice
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.glass.system import SystemAccessibility
 from mailbrief.ui.labels import plain_label
-from mailbrief.ui.theme import TEXT_PX, ColorScheme, ThemeMode, tokens_for
+from mailbrief.ui.theme import (
+    DEFAULT_SCHEME,
+    TEXT_PX,
+    ColorScheme,
+    ThemeMode,
+    current_mode,
+    follow_theme,
+    tokens_for,
+)
 
 SCHEME_NAMES: Final = {
-    ColorScheme.SLATE: "Slate (grey-blue, default)",
+    ColorScheme.STUDIO: "Studio (white and grey, default)",
+    ColorScheme.SLATE: "Slate (grey-blue)",
     ColorScheme.GRAPHITE: "Graphite (warm grey)",
     ColorScheme.OCEAN: "Ocean (teal)",
     ColorScheme.SAGE: "Sage (green)",
     ColorScheme.PLUM: "Plum (purple)",
     ColorScheme.ROSE: "Rose (pink)",
+}
+MODE_NAMES: Final = {
+    ModeChoice.SYSTEM: "Follow the system",
+    ModeChoice.LIGHT: "Light",
+    ModeChoice.DARK: "Dark",
 }
 TRANSPARENCY_NAMES: Final = {
     Transparency.SYSTEM: "Follow the system",
@@ -34,9 +49,9 @@ MOTION_NAMES: Final = {
 SWATCH_PX: Final = 18
 
 
-def swatch(scheme: ColorScheme, dpr: float = 2.0) -> QPixmap:
-    """A dot of the scheme's dark panel, ringed with its accent."""
-    tokens = tokens_for(ThemeMode.DARK, scheme)
+def swatch(scheme: ColorScheme, dpr: float = 2.0, mode: ThemeMode = ThemeMode.DARK) -> QPixmap:
+    """A dot of the scheme's panel in ``mode``, ringed with its accent."""
+    tokens = tokens_for(mode, scheme)
     pixmap = QPixmap(round(SWATCH_PX * dpr), round(SWATCH_PX * dpr))
     pixmap.setDevicePixelRatio(dpr)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -70,11 +85,12 @@ def _check_quietly(button: QRadioButton) -> None:
 
 
 class AppearancePanel(QWidget):
-    """Three sets of radio buttons: the colour scheme, glass and motion; arrow keys move
-    within a set. A choice emits ``scheme_chosen``, ``transparency_chosen`` or
-    ``motion_chosen``; the window applies and saves it."""
+    """Four sets of radio buttons: the colour scheme, mode, glass and motion; arrow keys
+    move within a set. A choice emits ``scheme_chosen``, ``mode_chosen``,
+    ``transparency_chosen`` or ``motion_chosen``; the window applies and saves it."""
 
     scheme_chosen = Signal(object)
+    mode_chosen = Signal(object)
     transparency_chosen = Signal(object)
     motion_chosen = Signal(object)
 
@@ -85,8 +101,10 @@ class AppearancePanel(QWidget):
         self._layout = QVBoxLayout(self)
         self.buttons = self._choices("Colour", "scheme", SCHEME_NAMES)
         for scheme, button in self.buttons.items():
-            button.setIcon(QIcon(swatch(scheme)))
+            # Each swatch shows its scheme in the mode in effect.
+            follow_theme(button, partial(self._paint_swatch, button, scheme))
             button.setIconSize(QSize(SWATCH_PX, SWATCH_PX))
+        self.mode_buttons = self._choices("Mode", "mode", MODE_NAMES, qualify=True)
         # Both sets offer "Follow the system", so screen readers hear the heading too.
         self.transparency_buttons = self._choices(
             "Glass", "glass", TRANSPARENCY_NAMES, qualify=True
@@ -102,8 +120,13 @@ class AppearancePanel(QWidget):
             )
         )
         self._layout.addStretch(1)
-        self.set_scheme(ColorScheme.SLATE)
+        self.set_scheme(DEFAULT_SCHEME)
+        self.set_mode(ModeChoice.SYSTEM)
         self.set_choices(Transparency.SYSTEM, Motion.SYSTEM)
+
+    @staticmethod
+    def _paint_swatch(button: QRadioButton, scheme: ColorScheme) -> None:
+        button.setIcon(QIcon(swatch(scheme, mode=current_mode())))
 
     def _choices[Choice: StrEnum](
         self,
@@ -133,6 +156,8 @@ class AppearancePanel(QWidget):
             return
         if isinstance(choice, ColorScheme):
             self.scheme_chosen.emit(choice)
+        elif isinstance(choice, ModeChoice):
+            self.mode_chosen.emit(choice)
         elif isinstance(choice, Transparency):
             self.transparency_chosen.emit(choice)
         else:
@@ -141,6 +166,10 @@ class AppearancePanel(QWidget):
     def set_scheme(self, scheme: ColorScheme) -> None:
         """Show ``scheme`` as chosen without emitting ``scheme_chosen``."""
         _check_quietly(self.buttons[scheme])
+
+    def set_mode(self, choice: ModeChoice) -> None:
+        """Show the mode choice without emitting ``mode_chosen``."""
+        _check_quietly(self.mode_buttons[choice])
 
     def set_choices(self, transparency: Transparency, motion: Motion) -> None:
         """Show the glass and motion choices without emitting."""
@@ -154,6 +183,9 @@ class AppearancePanel(QWidget):
 
     def chosen(self) -> ColorScheme:
         return next(scheme for scheme, button in self.buttons.items() if button.isChecked())
+
+    def chosen_mode(self) -> ModeChoice:
+        return next(m for m, button in self.mode_buttons.items() if button.isChecked())
 
     def chosen_transparency(self) -> Transparency:
         return next(t for t, button in self.transparency_buttons.items() if button.isChecked())

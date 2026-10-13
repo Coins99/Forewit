@@ -7,7 +7,10 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEvent,
     QModelIndex,
+    QObject,
     QPersistentModelIndex,
     QPoint,
     QPointF,
@@ -16,6 +19,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import (
@@ -24,7 +28,9 @@ from PySide6.QtGui import (
     QKeyEvent,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPaintEvent,
+    QRegion,
     QResizeEvent,
     QStandardItem,
     QStandardItemModel,
@@ -48,22 +54,26 @@ from mailbrief.domain.actions import ActionProposal, ThreadLink
 from mailbrief.domain.digests import DailyDigest, DigestItem, DigestStatus, SavedBriefSummary
 from mailbrief.services.history import coverage_line, outside_count
 from mailbrief.ui.brief_detail import BriefDetailPane
-from mailbrief.ui.brief_list import BriefListView, build_rows
+from mailbrief.ui.brief_list import ROW_PAD_H, BriefListView, build_rows
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
 from mailbrief.ui.glass.backdrop import Backdrop, BackdropKey, BackdropRenderer
 from mailbrief.ui.glass.backdrop import color as tint_color
+from mailbrief.ui.glass.motion import GLIDE_MS, fluid_curve
 from mailbrief.ui.glass.painter import paint_panel, paint_raised
 from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import (
-    HairlineDivider,
     HairlineSplitter,
+    crisp_fill_rect,
+    crisp_rect,
     hairline_pen,
     paint_focus_ring,
 )
 from mailbrief.ui.labels import ElidedLabel, button_label, plain_label
 from mailbrief.ui.theme import (
     CAPTION_PX,
+    HEADING_PX,
+    SHEET_RADIUS,
     SIDEBAR_WIDTH,
     SMALL_PX,
     TEXT_PX,
@@ -78,6 +88,10 @@ from mailbrief.ui.theme import (
 
 # How strongly a hovered or focused sidebar button shows the raised fill.
 ACTIVE_RAISE: Final = 0.6
+# The app's name in the header, Semibold.
+TITLE_BAR_PX: Final = 15
+# The glass between the sheet and the window's right edge (logical px).
+SHEET_GUTTER: Final = 8
 
 # Ordered as Gmail and Outlook order theirs: the daily home first (their Inbox), the
 # mailbox, flagged and deferred work (Starred, Snoozed), Drafts, then history (All Mail,
@@ -100,9 +114,9 @@ KEY_ROLE: Final = Qt.ItemDataRole.UserRole + 1
 ICON_ROLE: Final = Qt.ItemDataRole.UserRole + 2
 COUNT_ROLE: Final = Qt.ItemDataRole.UserRole + 3
 
-_NAV_ROW: Final = 31
+_NAV_ROW: Final = 32
 _GROUP_GAP: Final = 12  # Above a page that starts a group.
-_ICON_PX: Final = 14
+_ICON_PX: Final = 16
 _ICON_X: Final = 10
 _LABEL_X: Final = _ICON_X + _ICON_PX + 10
 
@@ -218,15 +232,80 @@ class GlassChrome(QWidget):
         painter.end()
 
 
+class ContentSheet(GlassChrome):
+    """The pages on a rounded sheet of the panel colour, floating on the glass with a
+    gutter at its right, so no pane meets the chrome at a sharp corner. The pages fill the
+    sheet just inside its hairline, masked to its rounded corners: their own square
+    corners never show."""
+
+    def __init__(self, pages: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        _styled(self, "contentSheet")
+        self.pages = pages
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(1, 1, SHEET_GUTTER + 1, 1)  # Inside the hairline.
+        layout.setSpacing(0)
+        layout.addWidget(pages)
+        pages.installEventFilter(self)
+
+    def sheet_rect(self) -> QRectF:
+        return QRectF(self.rect()).adjusted(0, 0, -SHEET_GUTTER, 0)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.pages and event.type() == QEvent.Type.Resize:
+            self._mask_pages()
+        return False
+
+    def _mask_pages(self) -> None:
+        """Round the pages' corners. A mask is aliased, so it follows a corner one pixel
+        smaller than the sheet's: its steps fall on the sheet's own antialiased fill."""
+        path = QPainterPath()
+        radius = SHEET_RADIUS - 1
+        path.addRoundedRect(QRectF(self.pages.rect()), radius, radius)
+        self.pages.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)  # The glass around the sheet.
+        tokens = current_tokens()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Its edge on device pixel centres, so the hairline stays crisp at any scale, and
+        # the fill out to those pixels' outer edges.
+        edge = crisp_rect(painter, self.sheet_rect())
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(tokens.panel))
+        fill = crisp_fill_rect(painter, self.sheet_rect())
+        painter.drawRoundedRect(fill, SHEET_RADIUS, SHEET_RADIUS)
+        painter.setPen(hairline_pen(tokens.hairline))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(edge, SHEET_RADIUS, SHEET_RADIUS)
+        painter.end()
+
+
+class FooterBar(GlassChrome):
+    """The glass under the sheet, for the window's status strip (``set_strip``)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        _styled(self, "footerBar")
+        self.setAccessibleName("Status bar")
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+
+    def set_strip(self, strip: QWidget) -> None:
+        self._layout.addWidget(strip)
+
+
 class HeaderBar(GlassChrome):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         _styled(self, "headerBar")
         self.setAccessibleName("MailBrief status")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(6)
-        title = plain_label("MailBrief", px=TEXT_PX, medium=True)
+        title = plain_label("MailBrief", px=TITLE_BAR_PX, semibold=True)
         title.setWordWrap(False)
         layout.addWidget(title)
         layout.addStretch(1)
@@ -282,13 +361,7 @@ class _NavDelegate(QStyledItemDelegate):
                 QPointF(rect.left() + _ICON_X, middle), QPointF(rect.right() - 10, middle)
             )
             rect = rect.adjusted(0, _GROUP_GAP, 0, 0)
-        if selected:  # A raised pill on the glass.
-            paint_raised(
-                painter,
-                QRectF(rect).adjusted(1, 2, -1, -2),
-                current_glass(),
-                glass_preferences().mode,
-            )
+        # The selected page's raised pill is the list's: it glides between rows.
         name = index.data(ICON_ROLE)
         color = tokens.text if selected else tokens.text_secondary
         if isinstance(name, str):
@@ -307,7 +380,7 @@ class _NavDelegate(QStyledItemDelegate):
         if isinstance(count, int):
             painter.setPen(QColor(tokens.text_secondary))
             painter.drawText(label, flags | int(Qt.AlignmentFlag.AlignRight), str(count))
-        paint_focus_ring(painter, rect, state, tokens.accent_fg)
+        paint_focus_ring(painter, rect, state, tokens.accent_fg, inset=(1, 2), radius=None)
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
@@ -317,9 +390,60 @@ class _NavDelegate(QStyledItemDelegate):
 
 class _NavList(QListView):
     """Return and Enter request the current page once and are consumed. A click in the gap
-    above a group (the divider) chooses nothing."""
+    above a group (the divider) chooses nothing.
+
+    It paints the selected page's raised pill itself, under the rows, so the pill can
+    glide from the old page to the new one on the fluid curve (`GLIDE_MS`), as Liquid
+    Glass morphs between states; with motion reduced it moves at once."""
 
     page_activated = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.glide = QVariantAnimation(self)
+        self.glide.setDuration(GLIDE_MS)
+        self.glide.setEasingCurve(fluid_curve())
+        self.glide.valueChanged.connect(lambda _value: self.viewport().update())
+
+    def pill_rect(self, index: QModelIndex | QPersistentModelIndex) -> QRectF:
+        """Where the raised pill sits on ``index``'s row, below a group's gap."""
+        rect = QRectF(self.visualRect(index)).adjusted(1, 2, -1, -2)
+        if index.data(KEY_ROLE) in GROUP_STARTS:
+            rect.setTop(rect.top() + _GROUP_GAP)
+        return rect
+
+    def shown_pill(self) -> QRectF | None:
+        """The raised pill as painted now: on its way while gliding, else on the current
+        row."""
+        if self.glide.state() is QAbstractAnimation.State.Running:
+            value = self.glide.currentValue()
+            if isinstance(value, QRectF):
+                return value
+        index = self.currentIndex()
+        return self.pill_rect(index) if index.isValid() else None
+
+    def currentChanged(
+        self,
+        current: QModelIndex | QPersistentModelIndex,
+        previous: QModelIndex | QPersistentModelIndex,
+    ) -> None:
+        start = self.shown_pill() if previous.isValid() else None
+        super().currentChanged(current, previous)
+        self.glide.stop()
+        if start is None or not current.isValid() or glass_preferences().reduce_motion:
+            self.viewport().update()
+            return
+        self.glide.setStartValue(start)
+        self.glide.setEndValue(self.pill_rect(current))
+        self.glide.start()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        pill = self.shown_pill()
+        if pill is not None:
+            painter = QPainter(self.viewport())
+            paint_raised(painter, pill, current_glass(), glass_preferences().mode)
+            painter.end()
+        super().paintEvent(event)
 
     def _in_gap(self, event: QMouseEvent) -> bool:
         point = event.position().toPoint()
@@ -426,7 +550,7 @@ class SidebarNav(GlassChrome):
         self.setAccessibleName("Pages")
         self.setFixedWidth(SIDEBAR_WIDTH)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 10, 6, 10)
+        layout.setContentsMargins(8, 12, 8, 12)
         layout.setSpacing(2)
         self.pages = QStandardItemModel(self)
         for key, label, icon_name in PAGES:
@@ -521,9 +645,9 @@ class BriefHeading(QWidget):
         self.setObjectName("briefHeading")
         self.setAccessibleName("Brief")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 4)
+        layout.setContentsMargins(ROW_PAD_H, 16, ROW_PAD_H, 4)
         layout.setSpacing(2)
-        self.title = plain_label("", px=TEXT_PX, medium=True)
+        self.title = plain_label("", px=HEADING_PX, semibold=True)
         self.title.setObjectName("briefHeadingTitle")
         layout.addWidget(self.title)
         self.meta = ElidedLabel(tone="muted", px=CAPTION_PX)
@@ -547,15 +671,15 @@ class ThreePaneWorkspace(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        # One sheet of glass (header, sidebar, the gutter round the pages and the footer)
+        # with the pages on a rounded sheet: no hairline meets another at a sharp corner.
         self.header = HeaderBar()
         outer.addWidget(self.header)
-        outer.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
         self.sidebar = SidebarNav()
         body.addWidget(self.sidebar)
-        body.addWidget(HairlineDivider(Qt.Orientation.Vertical))
         self.pages = QStackedWidget()
         self.pages.setObjectName("workspacePages")
         self._pages: dict[str, QWidget] = {}
@@ -581,7 +705,7 @@ class ThreePaneWorkspace(QWidget):
         self.brief_list = BriefListView()
         list_layout.addWidget(self.brief_list, 1)
         self.coverage = ElidedLabel(tone="muted", px=CAPTION_PX)
-        self.coverage.setContentsMargins(12, 10, 12, 10)
+        self.coverage.setContentsMargins(ROW_PAD_H, 10, ROW_PAD_H, 10)
         list_layout.addWidget(self.coverage)
         list_pane.setMinimumWidth(220)
         self.detail = BriefDetailPane()
@@ -595,8 +719,11 @@ class ThreePaneWorkspace(QWidget):
         self.splitter.setChildrenCollapsible(False)
         today_layout.addWidget(self.splitter, 1)
         self.add_page("today", today)
-        body.addWidget(self.pages, 1)
+        self.sheet = ContentSheet(self.pages)
+        body.addWidget(self.sheet, 1)
         outer.addLayout(body, 1)
+        self.footer_bar = FooterBar()
+        outer.addWidget(self.footer_bar)
         self._digest: DailyDigest | None = None
         self._links: Mapping[str, Sequence[ThreadLink]] = {}
         self._proposals: Mapping[str, Sequence[ActionProposal]] = {}
@@ -606,12 +733,16 @@ class ThreePaneWorkspace(QWidget):
         self._owner_zone: ZoneInfo | None = None
         self._today: date | None = None
         self.brief_list.item_selected.connect(self._show_item)
-        self.detail.verticalScrollBar().rangeChanged.connect(self._restore_scroll)
+        detail_bar = self.detail.verticalScrollBar()
+        detail_bar.rangeChanged.connect(self._restore_scroll)
+        # Scrolling by hand ends a restore still waiting for the layout.
+        detail_bar.actionTriggered.connect(self._drop_pending_scroll)
         # The backdrop the header's and sidebar's glass shows, for this size and theme.
         self.backdrop: Backdrop | None = None
         self.backdrop_renders = BackdropRenderer(self)
         self.backdrop_renders.ready.connect(self._backdrop_ready)
-        self.header.workspace = self.sidebar.workspace = self
+        for chrome in (self.header, self.sidebar, self.sheet, self.footer_bar):
+            chrome.workspace = self
         follow_theme(self, self._request_backdrop)
 
     def _backdrop_key(self) -> BackdropKey:
@@ -628,8 +759,8 @@ class ThreePaneWorkspace(QWidget):
 
     def _show_backdrop(self, backdrop: Backdrop) -> None:
         self.backdrop = backdrop
-        self.header.update()
-        self.sidebar.update()
+        for chrome in (self.header, self.sidebar, self.sheet, self.footer_bar):
+            chrome.update()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -699,10 +830,17 @@ class ThreePaneWorkspace(QWidget):
             )
 
     def _restore_scroll(self) -> None:
+        """Scroll back as far as the range allows. The new content's wrapped labels can
+        grow the range over several layout passes, so the position waits until one reaches
+        it."""
         bar = self.detail.verticalScrollBar()
         if self._pending_scroll is not None and bar.maximum() > 0:
             bar.setValue(min(self._pending_scroll, bar.maximum()))
-            self._pending_scroll = None
+            if bar.maximum() >= self._pending_scroll:
+                self._pending_scroll = None
+
+    def _drop_pending_scroll(self, action: int) -> None:
+        self._pending_scroll = None
 
     def clear(self, message: str) -> None:
         """Show no brief, only ``message``."""

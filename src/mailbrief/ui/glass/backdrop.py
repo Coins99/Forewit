@@ -14,8 +14,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Final
 
-from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
+from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRadialGradient
 
 from mailbrief.ui.diagnostics import log_failure
 from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, Tint, glass_for
@@ -35,6 +35,15 @@ STREAKS: Final = (
     (980, 60, 0.85),
 )
 STREAK_ANGLE: Final = -14  # Degrees from vertical, leaning right as they rise.
+# The colour field's pools of light: (token, centre x and y as shares of the window, radius
+# as a share of its longer side). They sit where the chrome shows them: sage at the top
+# left (header and sidebar), amber at the right (header and gutter), rose low down
+# (sidebar and footer).
+POOLS: Final = (
+    ("pool_a", 0.1, 0.15, 0.55),
+    ("pool_b", 0.9, 0.35, 0.6),
+    ("pool_c", 0.3, 1.0, 0.6),
+)
 CACHE_SIZE: Final = 4
 
 
@@ -80,8 +89,24 @@ def paint_backdrop(key: BackdropKey) -> QImage:
     base.setColorAt(1.0, QColor(glass.backdrop_bottom))
     painter.fillRect(image.rect(), base)
     _paint_streaks(painter, glass, width, height)
+    _paint_pools(painter, glass, width, height)
     painter.end()
     return image
+
+
+def _paint_pools(painter: QPainter, glass: GlassTokens, width: int, height: int) -> None:
+    """Soft pools of colour, each fading from its token's alpha at its centre to clear, so
+    the blurred field flows from one colour into the next like light on liquid."""
+    reach = max(width, height)
+    for name, x, y, share in POOLS:
+        tint: Tint = getattr(glass, name)
+        if tint.alpha <= 0:
+            continue
+        pool = QRadialGradient(QPointF(width * x, height * y), reach * share)
+        pool.setColorAt(0.0, color(tint))
+        pool.setColorAt(0.55, color(tint, 0.45))
+        pool.setColorAt(1.0, color(tint, 0.0))
+        painter.fillRect(QRectF(0, 0, width, height), pool)
 
 
 def _paint_streaks(painter: QPainter, glass: GlassTokens, width: int, height: int) -> None:

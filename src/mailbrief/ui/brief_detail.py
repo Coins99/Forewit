@@ -41,6 +41,7 @@ from mailbrief.ui.labels import (
 )
 from mailbrief.ui.proposals_view import effect_text
 from mailbrief.ui.theme import (
+    READING_PX,
     SMALL_PX,
     TEXT_PX,
     TITLE_PX,
@@ -115,8 +116,8 @@ class BriefDetailPane(QScrollArea):
         # A readable measure on wide windows; the scroll area keeps it at the left.
         content.setMaximumWidth(DETAIL_MAX_WIDTH)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 20, 16, 20)
+        layout.setSpacing(10)
         self.setWidget(content)  # Deletes the previous content.
         return layout
 
@@ -144,12 +145,12 @@ class BriefDetailPane(QScrollArea):
     ) -> None:
         zone = ZoneInfo(timezone_name)
         layout = self._fresh()
-        self.title = wrap_label(item.subject or NO_SUBJECT, px=TITLE_PX, medium=True)
+        self.title = wrap_label(item.subject or NO_SUBJECT, px=TITLE_PX, semibold=True)
         layout.addWidget(self.title)
         sender = wrap_label(sender_with_address(item.sender), tone="secondary", px=TEXT_PX)
         sender.setObjectName("detailSender")
         layout.addWidget(sender)
-        layout.addWidget(wrap_label(item.summary, px=TEXT_PX))
+        layout.addWidget(wrap_label(item.summary, px=READING_PX))
         if item.action_text and item.action_text != item.summary:
             layout.addWidget(wrap_label(item.action_text, tone="secondary", px=TEXT_PX))
         due = item_deadline_text(item, zone, today=today)

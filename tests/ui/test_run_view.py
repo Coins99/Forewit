@@ -31,17 +31,16 @@ from mailbrief.ui.run_view import (
     EXCLUDED,
     IMPORTANT,
     LEFT_OUT,
-    NONE,
     ROW_ROLE,
     TRACKED_REPLY,
     ShortlistDelegate,
     ShortlistRow,
     cut_address,
-    indicator_colors,
     sender_line,
     shortlist_row,
 )
 from mailbrief.ui.theme import DARK, LIGHT, TEXT_PX, ThemeMode, Tokens, apply_theme, ui_font
+from mailbrief.ui.theme.indicators import NONE, indicator_colors
 from tests.factories import make_message
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend
@@ -340,7 +339,7 @@ async def test_a_long_list_fills_the_page_and_scrolls(
     assert page.verticalScrollBar().maximum() == 0
     button = window.review_button
     button_bottom = button.mapTo(page.viewport(), QPoint(0, button.height())).y()
-    assert page.viewport().height() - button_bottom <= 14  # The list fills the page.
+    assert page.viewport().height() - button_bottom <= 20  # The list fills the page.
     assert_no_sideways_scrolling(window)
     window.resize(window.width() - 100, window.height())  # Narrower than at layout.
     QApplication.processEvents()
@@ -364,8 +363,8 @@ def test_indicator_colors_follow_the_state_and_theme(tokens: Tokens) -> None:
     assert indicator_colors(False, tokens) == (tokens.border_strong, NONE, NONE)
     assert indicator_colors(True, tokens) == (
         tokens.accent_border,
-        tokens.accent_bg,
-        tokens.accent_fg,
+        tokens.primary_fill,
+        tokens.on_primary,
     )
 
 

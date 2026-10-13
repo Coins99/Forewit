@@ -61,7 +61,14 @@ def test_no_backdrop_pixel_leaves_the_proven_range(
         assert max(values) <= brightest + tolerance, (scheme, mode)
     glass = glass_for(mode, scheme)
     lighter = max(luminance(rgb(glass.backdrop_top)), luminance(rgb(glass.backdrop_bottom)))
-    assert max(luminance(c) for c in pixels(sharp)) > lighter  # The streaks show.
+    pooled = any(pool.alpha > 0 for pool in (glass.pool_a, glass.pool_b, glass.pool_c))
+    values = [luminance(c) for c in pixels(sharp)]
+    if glass.streak.alpha > 0:
+        assert max(values) > lighter  # The streaks show.
+    elif pooled:  # A colour field: it varies, within the proven range checked above.
+        assert max(values) - min(values) > tolerance
+    else:  # A calm scheme with no pools: one flat colour.
+        assert max(values) <= lighter + tolerance
 
 
 def test_blurring_smooths_the_streaks(qapp: QApplication) -> None:

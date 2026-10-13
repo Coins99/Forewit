@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
@@ -17,6 +17,8 @@ from mailbrief.ui.appearance import (
     Appearance,
     AppearanceStore,
     AppearanceWriter,
+    ModeChoice,
+    theme_mode,
 )
 from mailbrief.ui.appearance_view import SWATCH_PX, AppearancePanel, swatch
 from mailbrief.ui.glass.preferences import Transparency
@@ -26,8 +28,10 @@ from mailbrief.ui.theme import (
     ColorScheme,
     ThemeMode,
     apply_theme,
+    current_mode,
     current_scheme,
     current_tokens,
+    system_mode,
     tokens_for,
 )
 from tests.ui.test_workflow import FakeBackend, finish
@@ -39,14 +43,14 @@ def broken_stylesheet(*args: object) -> str:
 
 def test_a_missing_file_gives_the_default(tmp_path: Path) -> None:
     assert AppearanceStore(tmp_path / APPEARANCE_FILE).load() == Appearance()
-    assert Appearance().color_scheme is ColorScheme.SLATE
+    assert Appearance().color_scheme is ColorScheme.STUDIO
 
 
 @pytest.mark.parametrize("raw", ["not json", '{"color_scheme": "neon"}', "\udcff"])
 def test_an_unreadable_or_unknown_choice_gives_the_default(tmp_path: Path, raw: str) -> None:
     path = tmp_path / APPEARANCE_FILE
     path.write_bytes(raw.encode("utf-8", "surrogateescape"))
-    assert AppearanceStore(path).load().color_scheme is ColorScheme.SLATE
+    assert AppearanceStore(path).load().color_scheme is ColorScheme.STUDIO
 
 
 def test_a_saved_choice_reads_back_and_unknown_fields_are_ignored(tmp_path: Path) -> None:
@@ -127,7 +131,7 @@ def test_the_panel_offers_every_scheme_and_emits_only_on_a_choice(qtbot: QtBot) 
     panel = AppearancePanel()
     qtbot.addWidget(panel)
     assert list(panel.buttons) == list(ColorScheme)
-    assert panel.chosen() is ColorScheme.SLATE
+    assert panel.chosen() is ColorScheme.STUDIO
     for scheme, button in panel.buttons.items():
         assert button.objectName() == f"scheme-{scheme.value}"
         assert button.accessibleName() == button.text()
@@ -145,10 +149,10 @@ def test_arrow_keys_move_between_schemes(qtbot: QtBot) -> None:
     with qtbot.waitActive(panel, timeout=5000):  # Focus needs an active window.
         panel.show()
         panel.activateWindow()
-    panel.buttons[ColorScheme.SLATE].setFocus()
+    panel.buttons[ColorScheme.STUDIO].setFocus()
     with qtbot.waitSignal(panel.scheme_chosen) as blocker:
-        QTest.keyClick(panel.buttons[ColorScheme.SLATE], Qt.Key.Key_Down)
-    assert blocker.args == [ColorScheme.GRAPHITE]
+        QTest.keyClick(panel.buttons[ColorScheme.STUDIO], Qt.Key.Key_Down)
+    assert blocker.args == [ColorScheme.SLATE]
 
 
 @pytest.mark.parametrize("scheme", list(ColorScheme))
@@ -193,7 +197,7 @@ async def test_choosing_a_scheme_recolours_the_app_and_saves_it(
     assert window.appearance_writes is not None
     await window.appearance_writes.drain()
     assert store.load().color_scheme is ColorScheme.PLUM
-    panel.set_scheme(ColorScheme.SLATE)  # Opening Settings shows the scheme in effect.
+    panel.set_scheme(ColorScheme.STUDIO)  # Opening Settings shows the scheme in effect.
     window.settings_button.click()
     await finish(window)
     assert panel.chosen() is ColorScheme.PLUM
@@ -213,9 +217,9 @@ async def test_a_failed_scheme_keeps_the_colours_and_saves_nothing(
     monkeypatch.setattr("mailbrief.ui.theme.style.build_stylesheet", broken_stylesheet)
     panel = window.settings_dialog.appearance_panel
     panel.buttons[ColorScheme.ROSE].click()
-    assert current_scheme() is ColorScheme.SLATE
+    assert current_scheme() is ColorScheme.STUDIO
     assert current_tokens() == tokens_for(ThemeMode.DARK)
-    assert panel.chosen() is ColorScheme.SLATE
+    assert panel.chosen() is ColorScheme.STUDIO
     assert window.settings_dialog.status.text() == "The colours couldn't be changed."
     assert window.appearance_writes is not None
     await window.appearance_writes.drain()
@@ -251,28 +255,37 @@ async def test_without_a_store_a_scheme_applies_unsaved(
 
 
 def test_startup_applies_the_saved_scheme(qapp: QApplication, themed: None, tmp_path: Path) -> None:
-    apply_theme(qapp)
+    system = system_mode(qapp)
+    apply_theme(qapp, system)
     store = AppearanceStore(tmp_path / APPEARANCE_FILE)
     apply_saved_scheme(store.load(), themed=True)  # Nothing saved: the default stays.
-    assert current_scheme() is ColorScheme.SLATE
+    assert current_scheme() is ColorScheme.STUDIO and current_mode() is system
     store.save(Appearance(color_scheme=ColorScheme.GRAPHITE))
     apply_saved_scheme(store.load(), themed=False)  # An unthemed app stays unthemed.
-    assert current_scheme() is ColorScheme.SLATE
+    assert current_scheme() is ColorScheme.STUDIO
     apply_saved_scheme(store.load(), themed=True)
     assert current_scheme() is ColorScheme.GRAPHITE
-    assert current_tokens() == tokens_for(ThemeMode.DARK, ColorScheme.GRAPHITE)
+    assert current_tokens() == tokens_for(system, ColorScheme.GRAPHITE)
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_startup_applies_a_kept_mode(qapp: QApplication, themed: None, mode: ThemeMode) -> None:
+    apply_theme(qapp, system_mode(qapp))
+    apply_saved_scheme(Appearance(mode=ModeChoice(mode.value)), themed=True)
+    assert current_mode() is mode and current_scheme() is ColorScheme.STUDIO
+    assert current_tokens() == tokens_for(mode)
 
 
 def test_startup_survives_a_scheme_that_fails(
     qapp: QApplication, themed: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    apply_theme(qapp)
+    apply_theme(qapp, system_mode(qapp))
     store = AppearanceStore(tmp_path / APPEARANCE_FILE)
     store.save(Appearance(color_scheme=ColorScheme.ROSE))
     monkeypatch.setattr("mailbrief.ui.theme.style.build_stylesheet", broken_stylesheet)
     apply_saved_scheme(store.load(), themed=True)
-    assert current_scheme() is ColorScheme.SLATE
-    assert current_tokens() == tokens_for(ThemeMode.DARK)
+    assert current_scheme() is ColorScheme.STUDIO
+    assert current_tokens() == tokens_for(system_mode(qapp))
 
 
 async def test_a_window_uses_the_appearance_startup_read(
@@ -291,3 +304,118 @@ async def test_a_window_uses_the_appearance_startup_read(
     )
     qtbot.addWidget(window)
     assert window.appearance is saved
+
+
+def test_the_mode_choice_reads_back_and_an_unknown_one_follows_the_system(
+    tmp_path: Path,
+) -> None:
+    store = AppearanceStore(tmp_path / APPEARANCE_FILE)
+    assert Appearance().mode is ModeChoice.SYSTEM
+    store.save(Appearance(mode=ModeChoice.DARK))
+    assert store.load().mode is ModeChoice.DARK
+    store.path.write_text('{"color_scheme": "plum", "mode": "dusk"}', "utf-8")
+    loaded = store.load()
+    assert loaded.mode is ModeChoice.SYSTEM and loaded.color_scheme is ColorScheme.PLUM
+
+
+@pytest.mark.parametrize("system", list(ThemeMode))
+def test_the_theme_mode_is_the_kept_one_or_the_system_s(system: ThemeMode) -> None:
+    assert theme_mode(ModeChoice.SYSTEM, system) is system
+    assert theme_mode(ModeChoice.LIGHT, system) is ThemeMode.LIGHT
+    assert theme_mode(ModeChoice.DARK, system) is ThemeMode.DARK
+
+
+def test_the_panel_offers_the_modes_and_emits_only_on_a_choice(qtbot: QtBot) -> None:
+    panel = AppearancePanel()
+    qtbot.addWidget(panel)
+    assert list(panel.mode_buttons) == list(ModeChoice)
+    assert panel.chosen_mode() is ModeChoice.SYSTEM
+    for choice, button in panel.mode_buttons.items():
+        assert button.objectName() == f"mode-{choice.value}"
+        assert button.accessibleName() == f"Mode: {button.text()}"
+    with qtbot.assertNotEmitted(panel.mode_chosen):
+        panel.set_mode(ModeChoice.LIGHT)
+    assert panel.chosen_mode() is ModeChoice.LIGHT
+    with qtbot.waitSignal(panel.mode_chosen) as blocker:
+        panel.mode_buttons[ModeChoice.DARK].click()
+    assert blocker.args == [ModeChoice.DARK]
+
+
+def test_a_swatch_follows_the_mode_in_effect(qapp: QApplication, themed: None) -> None:
+    panel = AppearancePanel()
+    apply_theme(qapp, ThemeMode.LIGHT)
+    centre = SWATCH_PX  # At 2x.
+    size = QSize(SWATCH_PX, SWATCH_PX)
+    light = panel.buttons[ColorScheme.STUDIO].icon().pixmap(size, 2.0).toImage()
+    assert light.pixelColor(centre, centre).name() == tokens_for(ThemeMode.LIGHT).panel
+    apply_theme(qapp, ThemeMode.DARK)
+    dark = panel.buttons[ColorScheme.STUDIO].icon().pixmap(size, 2.0).toImage()
+    assert dark.pixelColor(centre, centre).name() == tokens_for(ThemeMode.DARK).panel
+    panel.deleteLater()
+
+
+async def test_choosing_a_mode_applies_it_keeps_the_scheme_and_saves_it(
+    qtbot: QtBot, qapp: QApplication, themed: None, tmp_path: Path
+) -> None:
+    apply_theme(qapp, ThemeMode.DARK, ColorScheme.SAGE)
+    store = AppearanceStore(tmp_path / APPEARANCE_FILE)
+    window = MainWindow(
+        FakeBackend(), appearance=store, saved_appearance=Appearance(color_scheme=ColorScheme.SAGE)
+    )
+    qtbot.addWidget(window)
+    panel = window.settings_dialog.appearance_panel
+    panel.mode_buttons[ModeChoice.LIGHT].click()
+    assert current_mode() is ThemeMode.LIGHT and current_scheme() is ColorScheme.SAGE
+    assert current_tokens() == tokens_for(ThemeMode.LIGHT, ColorScheme.SAGE)
+    panel.buttons[ColorScheme.OCEAN].click()  # A new scheme keeps the mode.
+    assert current_tokens() == tokens_for(ThemeMode.LIGHT, ColorScheme.OCEAN)
+    assert window.appearance_writes is not None
+    await window.appearance_writes.drain()
+    saved = store.load()
+    assert saved.mode is ModeChoice.LIGHT and saved.color_scheme is ColorScheme.OCEAN
+    panel.set_mode(ModeChoice.DARK)  # Opening Settings shows the choice in effect.
+    window.settings_button.click()
+    await finish(window)
+    assert panel.chosen_mode() is ModeChoice.LIGHT
+
+
+async def test_the_window_follows_the_system_unless_a_mode_is_kept(
+    qtbot: QtBot, qapp: QApplication, themed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = ThemeMode.LIGHT
+    monkeypatch.setattr("mailbrief.ui.main_window.system_mode", lambda application: system)
+    apply_theme(qapp, ThemeMode.LIGHT)
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    system = ThemeMode.DARK
+    window._system_mode_changed(Qt.ColorScheme.Dark)
+    assert current_mode() is ThemeMode.DARK
+    window.settings_dialog.appearance_panel.mode_buttons[ModeChoice.LIGHT].click()
+    assert current_mode() is ThemeMode.LIGHT
+    window._system_mode_changed(Qt.ColorScheme.Dark)  # Kept light: the system is ignored.
+    assert current_mode() is ThemeMode.LIGHT
+    window.settings_dialog.appearance_panel.mode_buttons[ModeChoice.SYSTEM].click()
+    assert current_mode() is ThemeMode.DARK
+    await window.shutdown()
+
+
+async def test_a_failed_mode_keeps_the_colours_and_saves_nothing(
+    qtbot: QtBot,
+    qapp: QApplication,
+    themed: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    store = AppearanceStore(tmp_path / APPEARANCE_FILE)
+    window = MainWindow(FakeBackend(), appearance=store)
+    qtbot.addWidget(window)
+    monkeypatch.setattr("mailbrief.ui.theme.style.build_stylesheet", broken_stylesheet)
+    panel = window.settings_dialog.appearance_panel
+    panel.mode_buttons[ModeChoice.DARK].click()
+    assert current_mode() is ThemeMode.LIGHT
+    assert panel.chosen_mode() is ModeChoice.SYSTEM
+    assert window.settings_dialog.status.text() == "The colours couldn't be changed."
+    assert window.appearance_writes is not None
+    await window.appearance_writes.drain()
+    assert not store.path.exists()

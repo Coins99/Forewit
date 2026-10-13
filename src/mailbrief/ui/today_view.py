@@ -12,7 +12,7 @@ from datetime import date
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -31,7 +31,7 @@ from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.events import ActionMarker, CalendarEvent
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
-from mailbrief.ui.brief_list import ROW_ROLE, SINGLE_LINE, elided, paint_selection
+from mailbrief.ui.brief_list import ROW_PAD_H, ROW_ROLE, SINGLE_LINE, elided, paint_selection
 from mailbrief.ui.calendar_view import day_rows, entry_key, event_when
 from mailbrief.ui.deadline_text import day_text, deadline_text
 from mailbrief.ui.hairline import HairlineFrame, paint_focus_ring
@@ -48,11 +48,17 @@ NO_ATTENTION: Final = "Nothing due or planned for today."
 NO_EVENTS: Final = "No events today."
 NO_REPLIES: Final = "No new replies on your actions."
 # A row's padding, the gap between its title and note, and the share of its width a long
-# title keeps (logical px and a fraction).
-_PAD_H: Final = 6
-_PAD_V: Final = 5
+# title keeps (logical px and a fraction). The text sits clear of the rounded selection.
+_PAD_H: Final = ROW_PAD_H
+_PAD_V: Final = 6
 _GAP: Final = 12
 _TITLE_SHARE: Final = 0.4
+# A status dot before a due or newsy row's note, as a dashboard marks state: its diameter
+# and the gap after it (logical px).
+DOT_PX: Final = 6
+_DOT_GAP: Final = 6
+# A card's count, as a dashboard's figure (logical px, Semibold).
+COUNT_PX: Final = 22
 # What each row opens: an action (its ID, and whether it waits for others), or an event.
 _TARGET: Final = Qt.ItemDataRole.UserRole
 
@@ -62,11 +68,13 @@ _Index = QModelIndex | QPersistentModelIndex
 @dataclass(frozen=True)
 class DayRow:
     """What a row paints: its title at the left and a short note at the right, in the
-    warning colour when something is due or overdue."""
+    warning colour when something is due or overdue. A due row (``warning``) or one with
+    news (``accent``, a new reply) has a small dot of its colour before the note."""
 
     title: str
     note: str
     warning: bool = False
+    accent: bool = False
 
     def text(self) -> str:
         """The row as one line, for screen readers."""
@@ -105,7 +113,7 @@ def reply_row(action: Action) -> DayRow:
     thread = action.thread
     assert thread is not None
     sender = f" · {thread.latest_sender}" if thread.latest_sender else ""
-    return DayRow(action.title, f"{thread.new_messages} new{sender}")
+    return DayRow(action.title, f"{thread.new_messages} new{sender}", accent=True)
 
 
 class DayRowDelegate(QStyledItemDelegate):
@@ -127,11 +135,12 @@ class DayRowDelegate(QStyledItemDelegate):
         inner = rect.adjusted(_PAD_H, 0, -_PAD_H, 0)
         # The note takes the room the title doesn't need, but leaves the title at least
         # _TITLE_SHARE of the row when the title is longer than that.
+        dot = DOT_PX + _DOT_GAP if row.note and (row.warning or row.accent) else 0
         kept = min(metrics.horizontalAdvance(row.title), int(inner.width() * _TITLE_SHARE))
-        room = max(0, inner.width() - kept - _GAP)
+        room = max(0, inner.width() - kept - _GAP - dot)
         note = elided(row.note, metrics, room) if row.note else ""
         note_width = metrics.horizontalAdvance(note)
-        title_width = max(0, inner.width() - note_width - (_GAP if note else 0))
+        title_width = max(0, inner.width() - note_width - dot - (_GAP if note else 0))
         painter.setFont(ui_font(TEXT_PX))
         painter.setPen(QColor(tokens.text))
         painter.drawText(
@@ -146,6 +155,13 @@ class DayRowDelegate(QStyledItemDelegate):
                 SINGLE_LINE,
                 note,
             )
+        if note and dot:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.warning_fg if row.warning else tokens.accent_fg))
+            right = inner.right() - note_width - _DOT_GAP + 1
+            centre = QPointF(right - DOT_PX / 2, inner.center().y() + 0.5)
+            painter.drawEllipse(centre, DOT_PX / 2, DOT_PX / 2)
         paint_focus_ring(painter, rect, state, tokens.accent_fg)
         painter.restore()
 
@@ -164,12 +180,26 @@ class _Card(HairlineFrame):
         self.setAccessibleName(title)
         self._title = title
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 8, 6, 8)
+        # The layout's margins are the card's only padding: the rows' selection reaches
+        # near the card's edge, and their text lines up with the heading, inside the
+        # card's rounded corner.
+        self.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(4, 12, 4, 8)
         layout.setSpacing(4)
-        self.heading = plain_label(title, tone="secondary", px=SMALL_PX, medium=True)
+        # A dashboard's figure: the card's title at the left, its count large at the right.
+        top = QHBoxLayout()
+        top.setContentsMargins(_PAD_H, 0, _PAD_H, 0)  # In line with the rows' text.
+        top.setSpacing(8)
+        self.heading = plain_label(title, tone="secondary", px=SMALL_PX, semibold=True)
         self.heading.setObjectName(f"{name}Heading")
-        self.heading.setContentsMargins(_PAD_H, 0, _PAD_H, 0)  # In line with the rows' text.
-        layout.addWidget(self.heading)
+        self.heading.setWordWrap(False)
+        top.addWidget(self.heading, 1, Qt.AlignmentFlag.AlignBottom)
+        self.count = plain_label("0", tone="muted", px=COUNT_PX, semibold=True)
+        self.count.setObjectName(f"{name}Count")
+        self.count.setWordWrap(False)
+        self.count.setAccessibleName(f"{title}: 0")
+        top.addWidget(self.count, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addLayout(top)
         self.list = ActivatingList()
         self.list.setObjectName(f"{name}List")
         self.list.setAccessibleName(title)
@@ -193,7 +223,12 @@ class _Card(HairlineFrame):
             item.setData(ROW_ROLE, row)
             item.setData(_TARGET, target)
             self.list.addItem(item)
-        self.heading.setText(f"{self._title} · {len(rows)}" if rows else self._title)
+        self.count.setText(str(len(rows)))
+        self.count.setAccessibleName(f"{self._title}: {len(rows)}")
+        # A count of none is quiet; one with something in it reads at full strength.
+        self.count.setProperty("tone", None if rows else "muted")
+        self.count.style().unpolish(self.count)
+        self.count.style().polish(self.count)
         self.list.setVisible(bool(rows))
         self.empty.setVisible(not rows)
         if rows:
@@ -215,8 +250,8 @@ class DayPanel(QWidget):
         self.setObjectName("dayPanel")
         self.setAccessibleName("Your day")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 6)
+        layout.setSpacing(12)
         self.attention = _Card(ATTENTION, "dayAttention", NO_ATTENTION)
         self.agenda = _Card(AGENDA, "dayAgenda", NO_EVENTS)
         self.replies = _Card(REPLIES, "dayReplies", NO_REPLIES)

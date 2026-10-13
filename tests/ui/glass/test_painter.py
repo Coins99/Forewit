@@ -14,12 +14,14 @@ from mailbrief.ui.glass.painter import (
     GLOW_WIDTH,
     GlassMode,
     paint_glow,
+    paint_highlight,
+    paint_liquid_pill,
     paint_panel,
     paint_pill,
     paint_raised,
     paint_rim,
 )
-from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, glass_for, tokens_for
+from mailbrief.ui.theme import ColorScheme, GlassTokens, ThemeMode, Tint, glass_for, tokens_for
 from tests.ui.theme.test_glass import SETS, contrast, luminance
 
 WIDTH, HEIGHT = 440, 288
@@ -86,7 +88,7 @@ def test_text_on_painted_glass_meets_wcag_aa(
         ("panel", None, (tokens.text, tokens.text_secondary)),
         ("raised", lambda p, r: paint_raised(p, r, glass), (tokens.text,)),
         ("pill", lambda p, r: paint_pill(p, r, glass), (tokens.text,)),
-        ("primary", lambda p, r: paint_pill(p, r, glass, primary=True), (tokens.text,)),
+        ("primary", lambda p, r: paint_pill(p, r, glass, primary=True), (glass.primary_text,)),
     ]
     for spot in extreme_spots(backdrop):
         for source in (backdrop, None):  # Also before the backdrop is ready.
@@ -153,9 +155,9 @@ def test_increased_contrast_draws_solid_rims(qapp: QApplication) -> None:
 
 
 def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) -> None:
-    glass = glass_for(ThemeMode.DARK)
+    glass = glass_for(ThemeMode.DARK, ColorScheme.SLATE)
     picture = image(100, 40)
-    picture.fill(QColor(tokens_for(ThemeMode.DARK).panel))
+    picture.fill(QColor(tokens_for(ThemeMode.DARK, ColorScheme.SLATE).panel))
     painter = QPainter(picture)
     paint_pill(painter, QRectF(0, 0, 100, 40), glass)
     painter.end()
@@ -163,11 +165,22 @@ def test_a_normal_pill_is_lighter_on_top_and_shaded_below(qapp: QApplication) ->
     assert top > middle > bottom
 
 
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_calm_pill_is_flat(qapp: QApplication, mode: ThemeMode) -> None:
+    """Studio has no sheen or shade: a pill is one colour from top to bottom."""
+    picture = image(100, 40)
+    picture.fill(QColor(tokens_for(mode, ColorScheme.STUDIO).panel))
+    painter = QPainter(picture)
+    paint_pill(painter, QRectF(0, 0, 100, 40), glass_for(mode, ColorScheme.STUDIO))
+    painter.end()
+    assert len({picture.pixelColor(50, y).name() for y in (3, 20, 36)}) == 1
+
+
 def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> None:
     """Labels sit at least PAD_Y inside a pill, so a glow within GLOW_WIDTH of the edge
     never lies under text and its contrast stays proven."""
     assert GLOW_WIDTH < PAD_Y
-    glass = glass_for(ThemeMode.DARK)
+    glass = glass_for(ThemeMode.DARK, ColorScheme.SLATE)  # A scheme that glows.
     width, height = 120, 40
     radius = height / 2
     picture = image(width, height)
@@ -190,3 +203,94 @@ def test_the_hover_glow_stays_in_a_band_inside_the_edge(qapp: QApplication) -> N
             inside = radius - ((px - nearest_x) ** 2 + (py - radius) ** 2) ** 0.5
             assert inside <= GLOW_WIDTH + 1, (x, y, inside)
     assert lit > 0
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_every_pill_is_glass_at_rest_and_brightens_under_the_pointer(
+    qapp: QApplication, mode: ThemeMode
+) -> None:
+    """As the sidebar's Disconnect: glass at rest wherever it sits, its body brighter under
+    the pointer. The primary pill keeps its colour, so its white label keeps its
+    contrast."""
+    glass = glass_for(mode, ColorScheme.STUDIO)
+    card = tokens_for(mode, ColorScheme.STUDIO).card
+
+    def paint(primary: bool, hover: float) -> QImage:
+        picture = image(110, 50)
+        picture.fill(QColor(card))
+        painter = QPainter(picture)
+        paint_liquid_pill(painter, QRectF(5, 5, 100, 36), glass, primary=primary, hover=hover)
+        painter.end()
+        return picture
+
+    resting, hovered = paint(False, 0.0), paint(False, 1.0)
+    assert resting.pixelColor(55, 23).name() != card  # Glass at rest…
+    assert hovered.pixelColor(55, 23) != resting.pixelColor(55, 23)  # …brighter hovered.
+    assert paint(True, 0.0).pixelColor(55, 23) == paint(True, 1.0).pixelColor(55, 23)
+
+
+def test_light_enters_a_pill_along_its_long_edges(qapp: QApplication) -> None:
+    """As on a Liquid Glass tab: a crisp line of light along the top and an almost equal
+    one along the bottom, fading out round the ends."""
+    picture = image(120, 40)
+    picture.fill(QColor("#000000"))
+    painter = QPainter(picture)
+    paint_highlight(painter, QRectF(0, 0, 120, 40), Tint("#ffffff", 1.0))
+    painter.end()
+
+    def lit(x: int, y: int) -> int:
+        return max(
+            picture.pixelColor(x + dx, y + dy).lightness() for dx in (-1, 0, 1) for dy in (0, 1)
+        )
+
+    top, bottom, end = lit(60, 0), lit(60, 38), lit(1, 19)
+    assert top > 200 and bottom > 180  # Both long edges are lit…
+    assert top >= bottom
+    assert end < 40  # …and the light never reaches the ends' sides.
+
+
+def test_a_dark_glass_pill_matches_the_tab_it_is_measured_on(qapp: QApplication) -> None:
+    """On the tab's toolbar grey: a body a shade lighter, the light on both long edges
+    falling steeply into a faint lensed glow, no shadow above or below, and the ends
+    shaded darker than the toolbar."""
+    glass = glass_for(ThemeMode.DARK, ColorScheme.STUDIO)
+    picture = image(220, 60, 2.0)
+    picture.fill(QColor("#424448"))
+    painter = QPainter(picture)
+    paint_liquid_pill(painter, QRectF(10, 15, 195, 29), glass)
+    painter.end()
+    background = QColor("#424448").lightness()
+
+    def at(x: int, y: int) -> int:
+        return picture.pixelColor(x, y).lightness()
+
+    column = [at(215, y) for y in range(20, 100)]  # The middle, in device pixels.
+    body = at(215, 59)
+    assert 0 < body - background <= 10  # A body a shade lighter than the toolbar.
+    assert max(column) - body > 40  # A crisp line of light at an edge…
+    assert at(215, 36) - body < 6  # …that has faded into the body a few points in.
+    assert min(column) >= background - 2  # No shadow above or below.
+    end = min(at(x, 59) for x in range(16, 22))  # Round the left end's outer edge.
+    assert end < background - 8  # The ends are shaded darker than the toolbar.
+
+
+def test_a_calm_selected_pill_has_no_rim(qapp: QApplication) -> None:
+    """Studio's selected page is a soft grey capsule, as Apple's selected controls: its
+    edge is its fill, with no rim, except when contrast is increased."""
+    glass = glass_for(ThemeMode.LIGHT, ColorScheme.STUDIO)
+
+    def top_edge(mode: GlassMode) -> str:
+        picture = image(100, 40)
+        picture.fill(QColor("#ffffff"))
+        painter = QPainter(picture)
+        paint_raised(painter, QRectF(0, 0, 100, 40), glass, mode)
+        painter.end()
+        return picture.pixelColor(50, 0).name()
+
+    middle = image(100, 40)
+    middle.fill(QColor("#ffffff"))
+    painter = QPainter(middle)
+    paint_raised(painter, QRectF(0, 0, 100, 40), glass)
+    painter.end()
+    assert top_edge(GlassMode.NORMAL) == middle.pixelColor(50, 20).name()
+    assert top_edge(GlassMode.INCREASED_CONTRAST) == glass.rim_contrast

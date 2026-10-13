@@ -33,8 +33,10 @@ This page says what was built, why, and what it costs.
 
 ## Colour and contrast
 
-- **Schemes:** six, each with a dark and a light set: Slate (grey-blue, the default),
-  Graphite, Ocean, Sage, Plum and Rose. The owner picks one in Settings > Appearance.
+- **Schemes:** seven, each with a dark and a light set: Studio (the default, with calm
+  glass: a flat backdrop, no streaks or sheen, flat pills and a solid blue primary; see
+  `docs/ui/studio.md`), Slate (grey-blue), Graphite, Ocean, Sage, Plum and Rose. The
+  owner picks one in Settings > Appearance.
 - **Proof:** for every scheme and mode, `tests/ui/theme/test_glass.py` composites each
   glass surface over the backdrop's darkest and brightest pixels, under full sheen or
   shade. Text on glass must reach 4.5:1, and the focus ring 3:1 beside it.

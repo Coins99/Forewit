@@ -219,3 +219,20 @@ def test_accessibility_modes_paint_no_hover_light(
     set_glass_preferences(GlassPreferences())
     picture(button)
     assert painted == ["glow", "rim"]
+
+
+def test_a_glass_pill_s_icon_sits_beside_its_label(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    """A plain icon, in the label's colour, before the label: white on the primary."""
+    apply_theme(qapp)
+    made = outline_button("Open in Gmail", "openInGmailButton", glass=True, icon_name="mail")
+    qtbot.addWidget(made)
+    assert isinstance(made, GlassButton)
+    assert not made.icon().isNull()
+    assert (made.iconSize().width(), made.iconSize().height()) == (14, 14)
+    plain = outline_button("Open in Gmail", "plain", glass=True)
+    qtbot.addWidget(plain)
+    gap = glass_button.ICON_GAP
+    assert made.sizeHint().width() == plain.sizeHint().width() + 14 + gap
+    assert made.font().weight() == plain.font().weight()  # Both Medium.
