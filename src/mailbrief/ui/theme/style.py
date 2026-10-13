@@ -5,6 +5,7 @@ import dataclasses
 import string
 from collections.abc import Callable
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,8 +28,8 @@ from mailbrief.ui.theme.tokens import (
     ITEM_MARK_PX,
     ITEM_PAD_X,
     ITEM_PAD_Y,
-    LIGHT,
     TEXT_PX,
+    ColorScheme,
     ThemeMode,
     Tokens,
     tokens_for,
@@ -64,6 +65,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 """  # noqa: E501
 
 _current = DARK
+_scheme = ColorScheme.SLATE
 _cache_hooked = False
 
 
@@ -75,6 +77,30 @@ def current_tokens() -> Tokens:
 def set_current_tokens(tokens: Tokens) -> None:
     global _current
     _current = tokens
+
+
+def current_scheme() -> ColorScheme:
+    """The colour scheme of the applied theme."""
+    return _scheme
+
+
+class _ThemeFollower(QObject):
+    def __init__(self, widget: QWidget, apply: Callable[[], None]) -> None:
+        super().__init__(widget)
+        self._apply = apply
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        # A hidden widget gets only StyleChange: Qt resolves its palette once it shows.
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
+            self._apply()
+        return False
+
+
+def follow_theme(widget: QWidget, apply: Callable[[], None]) -> None:
+    """Run ``apply`` now and again whenever a new theme changes ``widget``'s palette, for
+    colours a widget keeps rather than reads at paint time, such as a tinted icon."""
+    apply()
+    widget.installEventFilter(_ThemeFollower(widget, apply))
 
 
 def build_palette(t: Tokens) -> QPalette:
@@ -132,22 +158,26 @@ _style: ThemeStyle | None = None
 def palette_tokens(application: QApplication) -> Tokens:
     """The tokens that suit the palette in effect: light on a light window colour."""
     window = application.palette().color(QPalette.ColorRole.Window)
-    return LIGHT if window.lightness() > 127 else DARK
+    return tokens_for(ThemeMode.LIGHT if window.lightness() > 127 else ThemeMode.DARK, _scheme)
 
 
-def apply_theme(app: QApplication, mode: ThemeMode = ThemeMode.DARK) -> Tokens:
+def apply_theme(
+    app: QApplication,
+    mode: ThemeMode = ThemeMode.DARK,
+    scheme: ColorScheme = ColorScheme.SLATE,
+) -> Tokens:
     """Apply Fusion (as ThemeStyle), the bundled font, the palette and the stylesheet for
-    ``mode``, all or nothing.
+    ``mode`` in ``scheme``, all or nothing.
 
     Without the bundled font the app keeps Qt's font; the colours still apply. If a step
     fails, the stylesheet, style, palette and font in effect before are put back, the
     tokens follow the restored palette, and the error is raised for the caller to log.
     """
-    global _style, _cache_hooked
+    global _style, _cache_hooked, _scheme
     stylesheet, palette, font = app.styleSheet(), app.palette(), app.font()
     replaced: str | None = None  # The style's name, when this call replaces it.
     try:
-        tokens = tokens_for(mode)
+        tokens = tokens_for(mode, scheme)
         # A stylesheet wraps the style in a proxy that hides its name; clear it first.
         app.setStyleSheet("")
         if not isinstance(app.style(), ThemeStyle):
@@ -158,9 +188,15 @@ def apply_theme(app: QApplication, mode: ThemeMode = ThemeMode.DARK) -> Tokens:
             app.setStyle(_style)
         if register_fonts():
             app.setFont(ui_font(TEXT_PX))
-        app.setPalette(build_palette(tokens))
-        app.setStyleSheet(build_stylesheet(tokens))
+        # Before the palette: widgets following the theme read the tokens as it changes.
         set_current_tokens(tokens)
+        previous, _scheme = _scheme, scheme
+        try:
+            app.setPalette(build_palette(tokens))
+            app.setStyleSheet(build_stylesheet(tokens))
+        except BaseException:
+            _scheme = previous
+            raise
     except BaseException:
         _restore(app, stylesheet, palette, font, replaced)
         raise

@@ -210,7 +210,12 @@ async def test_settings_show_the_owner_s_preferences(
     await finish(window)
 
     panel = window.settings_dialog.preferences_panel
-    assert window.settings_dialog.tabs.count() == 2
+    tabs = window.settings_dialog.tabs
+    assert [tabs.tabText(i) for i in range(tabs.count())] == [
+        "Co&nnection and AI",
+        "Pre&ferences",
+        "&Appearance",
+    ]
     assert panel.time_zone.currentText() == "America/Toronto"
     assert panel.shortlist_limit.value() == 3
     assert panel.time_zone.itemText(0).startswith("System time zone (")

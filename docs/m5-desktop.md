@@ -27,6 +27,10 @@ OAuth tokens remain exclusively in Windows Credential Manager or macOS Keychain.
 Vault and settings I/O run off the Qt thread. Closing during a settings write
 waits for the write to finish before disposing application resources.
 
+The colour scheme (Settings > Appearance: Slate, Graphite, Ocean, Sage, Plum or Rose)
+changes at once and is saved in its own `appearance.json` beside the database. A missing
+or unreadable file gives Slate, and a failed save keeps the colours until MailBrief closes.
+
 On first use, the two desktop fields inherit `MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH`
 and `MAILBRIEF_GROQ_MODEL` when present. Once saved, desktop settings override
 those environment values, including deliberately blank fields. Diagnostic CLIs

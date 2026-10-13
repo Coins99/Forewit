@@ -18,14 +18,15 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.providers.groq.credentials import GroqKeyError, parse_api_key
+from mailbrief.ui.appearance_view import AppearancePanel
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
 
 
 class SettingsDialog(QDialog):
-    """Two tabs: this device's connection and AI settings, and the owner's preferences,
-    which are saved in the database and shared with the CLI."""
+    """Three tabs: this device's connection and AI settings, the owner's preferences,
+    which are saved in the database and shared with the CLI, and this device's colours."""
 
     save_requested = Signal(object)
     key_requested = Signal(object)
@@ -87,6 +88,8 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(connection, "Co&nnection and AI")
         self.preferences_panel = PreferencesPanel()
         self.tabs.addTab(self.preferences_panel, "Pre&ferences")
+        self.appearance_panel = AppearancePanel()
+        self.tabs.addTab(self.appearance_panel, "&Appearance")
         layout.addWidget(self.tabs, 1)
         self.status = QLabel("")
         self.status.setWordWrap(True)

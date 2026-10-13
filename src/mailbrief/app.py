@@ -15,10 +15,11 @@ from qasync import QEventLoop
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
+from mailbrief.ui.appearance import APPEARANCE_FILE, AppearanceStore
 from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
-from mailbrief.ui.theme import ThemeMode, apply_theme
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_scheme
 
 
 def use_english_locale() -> None:
@@ -60,6 +61,21 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
     return application
 
 
+def apply_saved_scheme(store: AppearanceStore, *, themed: bool) -> None:
+    """The owner's colours, once the data folder is locked; the theme applied before
+    then uses the default scheme. Nothing changes when that theme failed."""
+    application = QApplication.instance()
+    if not themed or not isinstance(application, QApplication):
+        return
+    scheme = store.load().color_scheme
+    if scheme is current_scheme():
+        return
+    try:
+        apply_theme(application, ThemeMode.DARK, scheme)
+    except Exception as exc:
+        log_failure(exc)  # apply_theme has put back the default scheme.
+
+
 async def run_desktop(theme_failure: Exception | None = None) -> None:
     """Keep the loop alive until pending work and resources have shut down.
 
@@ -81,7 +97,13 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         handler = configure_logging(paths.data_dir)
         if theme_failure is not None:
             log_failure(theme_failure)
-        window = MainWindow(DesktopRuntime(paths.database_path), database_path=paths.database_path)
+        appearance = AppearanceStore(paths.data_dir / APPEARANCE_FILE)
+        apply_saved_scheme(appearance, themed=theme_failure is None)
+        window = MainWindow(
+            DesktopRuntime(paths.database_path),
+            database_path=paths.database_path,
+            appearance=appearance,
+        )
         closed = asyncio.Event()
         window.closing.connect(closed.set)
         application = QApplication.instance()
