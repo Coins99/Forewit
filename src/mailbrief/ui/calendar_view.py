@@ -272,6 +272,11 @@ class CalendarPanel(QWidget):
         """Select the owner's event on the first day it shows, when it's in the week."""
         self._select(("event", public_id), None)
 
+    def select_entry(self, key: tuple[str, ...], day: date | None = None) -> None:
+        """Select the entry with ``key`` (entry_key) on ``day`` if it shows there, else on
+        the first day it shows, when it's in the week."""
+        self._select(key, day)
+
     def _select(self, key: tuple[str, ...], day: date | None) -> None:
         found = [
             number

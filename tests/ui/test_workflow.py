@@ -61,6 +61,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage,
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.domain.search import SearchResults
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -94,8 +95,21 @@ class FakeBackend(FakeDrafts):
     async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
         return InboxPage(account_email=account_email, offset=offset)
 
+    async def search(self, text: str, account_email: str | None) -> SearchResults:
+        self.searches.append((text, account_email))
+        if self.search_fail is not None:
+            raise self.search_fail
+        return self.search_results
+
+    async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None:
+        return self.inbox_positions.get(provider_message_id)
+
     def __init__(self) -> None:
         super().__init__()
+        self.searches: list[tuple[str, str | None]] = []
+        self.search_results = SearchResults()
+        self.search_fail: Exception | None = None
+        self.inbox_positions: dict[str, int] = {}
         self.saved = DailyDigest(
             account_id="owner@example.com",
             local_date=date(2026, 9, 4),

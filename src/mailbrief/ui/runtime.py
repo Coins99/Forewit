@@ -48,6 +48,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.domain.search import SearchResults
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.providers.gcal.auth import forget_legacy_sign_in
@@ -97,6 +98,7 @@ from mailbrief.services.preferences import (
 )
 from mailbrief.services.projects import ProjectService
 from mailbrief.services.proposals import ProposalService
+from mailbrief.services.search import SearchService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
@@ -485,6 +487,27 @@ class DesktopRuntime:
                     for row in rows
                 ),
             )
+
+    async def search(self, text: str, account_email: str | None) -> SearchResults:
+        """The command palette's search: local records only, and mail only for
+        ``account_email``'s cached Gmail metadata."""
+        async with self._storage().session() as session:
+            return await SearchService(session).search(text, account_email=account_email)
+
+    async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None:
+        """Where a cached message is in the Inbox page's order, or None outside the Inbox."""
+        async with self._storage().session() as session:
+            account = next(
+                (
+                    a
+                    for a in await AccountRepository(session).list_all()
+                    if a.provider == ProviderKind.GMAIL.value and a.email_address == account_email
+                ),
+                None,
+            )
+            if account is None:
+                return None
+            return await MessageRepository(session).inbox_position(account.id, provider_message_id)
 
     async def cached_messages(self, account_id: int, day: date, offset: int = 0) -> CachedMailPage:
         try:

@@ -1,6 +1,7 @@
 """Current Inbox metadata across all received dates; no bodies or AI calls."""
 
 from datetime import datetime
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt, Signal
@@ -21,6 +22,9 @@ from mailbrief.ui.brief_list import ROW_ROLE
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.labels import outline_button, wrap_label
+
+# Messages per Inbox page; Previous and Next move by one page.
+INBOX_PAGE_SIZE: Final = 100
 
 
 class InboxPanel(QWidget):
@@ -125,6 +129,16 @@ class InboxPanel(QWidget):
         else:
             self.details.setText("No messages in the cached Inbox.")
         self.set_busy(False)
+
+    def select_message(self, provider_message_id: str) -> bool:
+        """Select the message on the page shown; False when it isn't there."""
+        if self._page is None:
+            return False
+        for index, message in enumerate(self._page.messages):
+            if message.provider_message_id == provider_message_id:
+                self.messages.setCurrentRow(index)
+                return True
+        return False
 
     def set_zone(self, zone: ZoneInfo) -> None:
         """Redraw the current detail without changing the selected row or page."""
