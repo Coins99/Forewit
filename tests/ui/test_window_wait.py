@@ -8,18 +8,25 @@ from collections.abc import Iterator
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from mailbrief.ui.main_window import MainWindow
 from tests.ui.window_wait import NEVER_READY, NEVER_VISIBLE, WindowWait
 
 # Ends a loop the wait failed to quit, so a broken wait fails the test instead of hanging.
-SAFETY_MS = 5000
+# Generous: a slow CI runner can stall a loop for seconds.
+SAFETY_MS = 30_000
 
 
 @pytest.fixture
 def loop(qapp: QApplication) -> Iterator[QEventLoop]:
+    # Finish what earlier tests left queued before the safety net is armed. Widgets they
+    # closed were deleted later, outside any event loop, and Qt deletes those only once a
+    # loop starts: inside this one. On Windows CI that can take over 5 s; the safety net then
+    # quits the loop before the wait's first attempt, and the wait never fails the test.
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()
     local = QEventLoop()
     QTimer.singleShot(SAFETY_MS, local.quit)
     yield local
