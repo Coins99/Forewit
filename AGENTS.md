@@ -178,8 +178,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
   glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
   `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
-  header, the sidebar footer and on the Today page; every other push button is drawn by
-  `ThemeStyle` as the same glass pill, so every button looks like the sidebar's
+  header, the sidebar footer, Settings' Account card and on the Today page; every other
+  push button is drawn by `ThemeStyle` as the same glass pill, so every button looks like
   Disconnect. Icons are plain, beside the label. `dialog.py` (`DialogSheet`) gives every
   dialog the home screen's glass round a rounded sheet. `motion.py` holds the fluid easing
   the sidebar's selection glides on. The header and sidebar are glass
@@ -206,7 +206,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace
   (`workspace.py`, with `hairline.py`, `brief_list.py` and `brief_detail.py`): the header
   (when Gmail was last checked, Sync and review, Cancel), the sidebar's pages and footer
-  (Saved mail, Data, Settings, the Gmail and AI lines, Connect and Disconnect), the Today,
+  (Saved mail, Data, Settings, and Google sign-in while signed out; the Gmail and AI lines
+  and Disconnect are in Settings' Account card), the Today,
   run (review and consent), Actions, Drafts and Briefs pages, and a status strip with
   Undo.
 - `src/mailbrief/app.py` owns the qasync loop, and `MailBriefApplication`, which lets the

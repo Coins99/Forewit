@@ -97,9 +97,9 @@ them.
   keyed by its size, scheme and mode, and repaints both when it arrives.
 - The selected page is `paint_raised`. A hovered or focused sidebar button gets the
   raised fill at `ACTIVE_RAISE` strength, with no rim.
-- Muted labels inside the sidebar (the note, and the Gmail and AI lines) take
-  `text_secondary`, because `text_muted` fails contrast on glass.
-- The sidebar's Google sign-in and Disconnect are glass pills.
+- Muted labels inside the sidebar (the note) take `text_secondary`, because `text_muted`
+  fails contrast on glass.
+- The sidebar's Google sign-in and Settings' Disconnect are glass pills.
 
 - **Backdrop** (`backdrop.py`): a diagonal gradient from `backdrop_top` to
   `backdrop_bottom`, under five streaks of light, then three pools of colour (`POOLS`:
@@ -138,7 +138,7 @@ them.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`).
-  Every button in MailBrief looks like the sidebar's Disconnect: a pill of glass at rest,
+  Every button in MailBrief looks like Settings' Disconnect: a pill of glass at rest,
   wherever it sits. A `GlassButton` paints itself; `ThemeStyle` draws every other push
   button as the same pill (see Buttons, lists and tabs).
   - **Size:** its label (and icon) plus `PAD_X` (10 px) each side and `PAD_Y` (6 px)
@@ -191,7 +191,8 @@ them.
   - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
     escaping.
   - **Where:** the header's Sync and review (primary) and Cancel, the sidebar's Google
-    sign-in and Disconnect, and the Today page's card and footer buttons. Every other
+    sign-in, Settings' Disconnect and Sign in with Google, and the Today page's card and
+    footer buttons. Every other
     button is a `ThemeStyle` pill that looks the same at rest.
 - **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
   reduced motion that widgets read at paint time. `effective_preferences` sets them from:
@@ -574,11 +575,27 @@ The brief list's chips keep their shorter forms (see Brief list).
   weekday labels) and, when it shows, the Briefs page, through `start()`. While another
   operation runs, that reload waits (`_day_refresh_pending`) and is retried each tick.
   `closeEvent` stops the timer.
-- Sidebar footer, top to bottom: Saved mail, Data, Settings, then the Gmail and AI lines
-  (11px muted `WrapLabel`s, inset 10 px to line up with the row icons, read by their
-  text), then outline Connect Gmail or Disconnect (12px): Connect shows only without a
-  connected account, Disconnect only with one. Rows and outline buttons are muted while
-  disabled.
+- Sidebar footer, top to bottom: Saved mail, Data, Settings, then Google sign-in (12px
+  glass pill, `connectButton`) only while no account is connected, and only once
+  `initialize()` has checked the saved session, so it never flashes at launch. A failed
+  check says why on the status line, since the Gmail line is in Settings. Rows and buttons
+  are muted while disabled.
+- Settings' Account card (`accountCard`, a `HairlineFrame` at the top of Connection and
+  AI): "Account" (13px Semibold), the Gmail line (`connectionStatus`, 13px `WrapLabel`,
+  the window's `connection`) and the AI line (`aiStatus`, 12px secondary, the window's
+  `ai`) at the left, read by their text; at the right, centred, D&isconnect
+  (`disconnectButton`, the window's `disconnect_button`) with an account, or Sign in with
+  &Google (`settingsSignInButton`) without one (`set_signed_in`). The window keeps owning
+  what they say and does what they ask; a long address wraps there, never widening the
+  dialog. Sign in with Google (`_sign_in_from_settings`) closes Settings as the sign-in
+  starts, so the status line and Cancel follow it, and with unsaved input it asks for a
+  save instead (`SIGN_IN_UNSAVED`). Settings opens even while an operation runs
+  (`_request_settings`): opening only reads, so it runs beside the operation (in
+  `_calendar_reads`, with the other reads, drained at shutdown) without touching the
+  status line; a second request while it opens does nothing (`_settings_opening`), and
+  nothing shows once quitting has begun. The dialog then says `BUSY`, and its fields,
+  Preferences, Disconnect and sign-in wait until the operation ends, while Appearance
+  works at once.
 - Cancel shows in the header only while an operation runs. `ThemeStyle`, Fusion behind a
   `QProxyStyle`, never underlines mnemonics; Alt and the letter still work.
 - Pages: `today` (the "Viewing the brief for …" banner and the retry row in `today_top`),
@@ -655,7 +672,7 @@ The brief list's chips keep their shorter forms (see Brief list).
   `_request_page` with today, actions, waiting, drafts, briefs and calendar (`PAGE_SHORTCUTS`,
   `page_shortcuts`), so Briefs refuses as the sidebar does.
 - Tab order (`_link_tab_order`, at startup and on each `rebuilt`): Sync and review,
-  Cancel, the sidebar's page list, Saved mail, Data, Settings, Connect or Disconnect, then
+  Cancel, the sidebar's page list, Saved mail, Data, Settings, Google sign-in, then
   the page (on Today: Back to latest, Retry, Your day's three lists, the brief list and the
   detail's buttons in display order), then Undo and back to Sync and review; hidden and
   disabled widgets are
@@ -836,7 +853,7 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
   button is drawn as a glass pill.
 - Every `QPushButton` that isn't a `GlassButton` (a plain `outline_button()`, a
   `variant="primary"` button, Qt's own in message boxes and button boxes) is drawn by
-  `ThemeStyle` as a glass pill, the same as the sidebar's Disconnect at rest. The
+  `ThemeStyle` as a glass pill, the same as Settings' Disconnect at rest. The
   stylesheet has no `QPushButton` rules except the sidebar's `[variant="nav"]` rows; never
   add any, or Qt draws the stylesheet's box instead of the pill.
   - `paint_button_pill` (`PE_PanelButtonCommand`) paints `paint_liquid_pill` (or

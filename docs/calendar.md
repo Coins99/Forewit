@@ -53,7 +53,8 @@ and when you open the page or move to a week the saved copy doesn't hold or that
 than 15 minutes old. **Cancel** at the top stops a refresh, or **Allow Google Calendar**
 while it waits for your browser; quitting stops them too. What was already read is kept.
 
-**Disconnect** in the sidebar forgets the one sign-in and the saved Google events. It does
+**Disconnect** (in **Settings**, under Account) forgets the one sign-in and the saved
+Google events. It does
 not revoke MailBrief's access in your Google account; do that at
 myaccount.google.com/permissions if you want to. The saved Google events also go when
 Google rejects the sign-in (it expired, or you revoked it), when Calendar access is taken
@@ -114,6 +115,6 @@ this too.
    calendar boxes. Find a repeating event and an all-day event in the right days.
 3. Choose Refresh; move nine weeks ahead and watch that week load.
 4. Run Sync and review: the line under the Calendar heading shows a new update time.
-5. Disconnect in the sidebar: Gmail disconnects and the Google rows disappear. Connect
-   Gmail again: Google asks once for Gmail and both calendar permissions, and the rows
+5. Disconnect in Settings (Account): Gmail disconnects and the Google rows disappear.
+   Sign in with Google again: Google asks once for Gmail and both calendar permissions, and the rows
    come back.

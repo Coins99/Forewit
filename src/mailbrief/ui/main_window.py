@@ -204,7 +204,7 @@ from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
-from mailbrief.ui.settings_view import SettingsDialog
+from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
 from mailbrief.ui.theme import (
     CAPTION_PX,
     SMALL_PX,
@@ -708,9 +708,11 @@ class MainWindow(QMainWindow):
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
-        # Reads of the week shown run beside start()'s operations: they change nothing. The
-        # newest read wins, and shutdown waits for them before closing the database.
+        # Reads run beside start()'s operations, since they change nothing: the week shown,
+        # a search, and Settings opening while an operation runs. The newest read of the
+        # week wins, and shutdown waits for them all before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
+        self._settings_opening: asyncio.Task[None] | None = None  # Until Settings shows.
         self._calendar_read = 0
         self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
@@ -796,11 +798,11 @@ class MainWindow(QMainWindow):
         self.cached_button = sidebar.saved_mail
         self.data_button = sidebar.data
         self.data_button.clicked.connect(lambda: self.start(self._open_data, cancellable=False))
-        # Wrapping labels, read by their whole text.
-        self.connection = wrap_label("Gmail: checking saved session…", tone="muted", px=CAPTION_PX)
-        self.connection.setObjectName("connectionStatus")
-        self.ai = wrap_label("AI: checking configuration…", tone="muted", px=CAPTION_PX)
-        self.ai.setObjectName("aiStatus")
+        # Who is signed in and what the AI may do live in Settings' Account card, with
+        # Disconnect; the sidebar offers only Google sign-in, and only while signed out.
+        self.connection = self.settings_dialog.gmail_status
+        self.ai = self.settings_dialog.ai_status
+        self.disconnect_button = self.settings_dialog.disconnect_button
         self.connect_button = outline_button(
             "&Google sign-in",
             "connectButton",
@@ -809,18 +811,7 @@ class MainWindow(QMainWindow):
             accessible_name="Sign in with Google",
             glass=True,
         )
-        self.disconnect_button = outline_button(
-            "&Disconnect",
-            "disconnectButton",
-            mnemonic=True,
-            px=SMALL_PX,
-            accessible_name="Disconnect Gmail",
-            glass=True,
-        )
-        for line in (self.connection, self.ai):
-            line.setContentsMargins(10, 0, 0, 0)  # In line with the rows' icons.
-        for widget in (self.connection, self.ai, self.connect_button, self.disconnect_button):
-            sidebar.footer.addWidget(widget)
+        sidebar.footer.addWidget(self.connect_button)
         # Today: the banner for a past brief and the retry row, above the brief.
         self.viewing = QWidget()
         self.viewing.setObjectName("viewingBanner")
@@ -1015,8 +1006,12 @@ class MainWindow(QMainWindow):
         self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
-        sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
+        # Google sign-in waits for initialize() to check the saved session, so it never
+        # shows for a moment at launch to an owner who is signed in.
+        self.connect_button.hide()
+        sidebar.settings_requested.connect(self._request_settings)
         self.connect_button.clicked.connect(lambda: self.start(self._connect))
+        self.settings_dialog.sign_in_button.clicked.connect(self._sign_in_from_settings)
         self.disconnect_button.clicked.connect(
             lambda: self.start(self._disconnect, cancellable=False)
         )
@@ -1041,7 +1036,7 @@ class MainWindow(QMainWindow):
 
     def _link_tab_order(self) -> None:
         """Tab runs from Sync and review through Cancel, the sidebar's pages, Saved mail,
-        Data, Settings, Connect or Disconnect, the page shown, then Undo and back to the
+        Data, Settings, Google sign-in (while signed out), the page shown, then Undo and back to the
         start. Hidden and disabled widgets are skipped.
 
         The chain starts at Undo, so every widget not named here (the other pages', in
@@ -1058,7 +1053,6 @@ class MainWindow(QMainWindow):
             self.data_button,
             self.settings_button,
             self.connect_button,
-            self.disconnect_button,
             self.latest_button,
             self.retry_button,
             self.day_panel.attention.list,
@@ -1075,7 +1069,7 @@ class MainWindow(QMainWindow):
         Disconnect only with one, and the Briefs page follows it."""
         self._account_email = email
         self.connect_button.setVisible(email is None)
-        self.disconnect_button.setVisible(email is not None)
+        self.settings_dialog.set_signed_in(email is not None)
         self.history_panel.set_account(email)
 
     def _set_busy(self, busy: bool) -> None:
@@ -1083,10 +1077,10 @@ class MainWindow(QMainWindow):
         self.retry_button.setEnabled(not busy)
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy)
+        self.settings_dialog.sign_in_button.setEnabled(not busy)
         self.generate_button.setEnabled(not busy and self._ready)
         self.cancel_button.setEnabled(busy and self._cancellable)
         self.cancel_button.setVisible(busy)
-        self.settings_button.setEnabled(not busy)
         self.settings_dialog.set_busy(busy)
         self.cached_button.setEnabled(not busy and self._ready)
         self.data_button.setEnabled(not busy and self.data_dialog is not None)
@@ -2791,7 +2785,36 @@ class MainWindow(QMainWindow):
         self.cached_dialog.show_page(await self.backend.cached_messages(account_id, day, offset))
         self.status.setText("Showing saved metadata. No mailbox connection or body retrieval used.")
 
-    async def _open_settings(self) -> None:
+    def _request_settings(self) -> None:
+        """Settings opens at once, even while an operation (a sync, say) runs: opening only
+        reads, and what changes settings waits in the dialog until the operation ends. A
+        second request while it is still opening (a double-click) does nothing."""
+        opening = self._settings_opening
+        if (
+            self._closing
+            or self.settings_dialog.isVisible()
+            or (opening is not None and not opening.done())
+        ):
+            return
+        if self.start(self._open_settings):
+            self._settings_opening = self.task
+            return
+
+        async def beside() -> None:
+            try:
+                await self._open_settings(beside=True)
+            except Exception as exc:  # Nothing else reports a read beside an operation.
+                log_failure(exc)
+                self.status.setText("Settings couldn't be opened just now. Try again.")
+
+        task = asyncio.get_running_loop().create_task(beside())
+        self._settings_opening = task
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    async def _open_settings(self, *, beside: bool = False) -> None:
+        """Read what Settings shows, then show it. ``beside`` another operation, the status
+        line keeps that operation's words, and the dialog waits for it to finish."""
         try:
             preferences = await self.backend.get_preferences()
         except ConfigurationError as exc:
@@ -2806,14 +2829,24 @@ class MainWindow(QMainWindow):
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
-        self.status.setText("Edit connection and AI settings, and your preferences.")
+        if not beside:
+            self.status.setText("Edit connection and AI settings, and your preferences.")
+        unavailable: str | None = None
         try:
             panel.set_preferences(await self.backend.get_owner_preferences())
         except PreferencesUnavailableError as exc:
             # Unreadable preferences stay repairable: the panel offers a reset.
             log_failure(exc)
             panel.set_unavailable()
-            self.status.setText(str(exc))
+            unavailable = str(exc)
+            if not beside:
+                self.status.setText(unavailable)
+        if beside:  # Loading cleared its status line; the operation may still be running.
+            self.settings_dialog.set_busy(self.task is not None and not self.task.done())
+            if unavailable is not None:  # In the dialog: the status line is the operation's.
+                self.settings_dialog.status.setText(unavailable)
+        if self._closing:
+            return  # Quitting while it read: there is nothing left to show it over.
         self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
@@ -2964,8 +2997,18 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             self.ai.setText("AI: configuration or secure key store unavailable.")
             self.draft_editor.set_ai_ready(False)
+            if not self.settings_dialog.isVisible():  # The AI line is in Settings.
+                self.status.setText(self.ai.text())
 
     async def initialize(self) -> None:
+        """Load what is saved, then check the saved Google session. Google sign-in shows in
+        the sidebar once that check is over, however it ended."""
+        try:
+            await self._load_and_connect()
+        finally:
+            self.connect_button.setVisible(self._account_email is None)
+
+    async def _load_and_connect(self) -> None:
         try:
             saved = await self.backend.load_saved()
         except asyncio.CancelledError:
@@ -3015,12 +3058,25 @@ class MainWindow(QMainWindow):
             await self._load_calendar_access()
             await self._refresh_calendar()
             self._launch_soon()
+            return
+        # The Gmail line is in Settings: the status line says why Gmail isn't connected.
+        self.status.setText(self.connection.text())
 
     def _launch_soon(self) -> None:
         """MailBrief has started and Gmail is connected: let the scheduler run the refresh the
         owner asked for on launch, once this operation has finished, so it isn't turned away
         as busy."""
         asyncio.get_running_loop().call_soon(self.scheduler.launched)
+
+    def _sign_in_from_settings(self) -> None:
+        """Settings' Sign in with Google signs in with the saved settings and closes
+        Settings, so the window's status line and Cancel follow the sign-in. A change not
+        yet saved there stops it, rather than being ignored or lost with the dialog."""
+        if self.settings_dialog.has_unsaved_input():
+            self.settings_dialog.status.setText(SIGN_IN_UNSAVED)
+            return
+        if self.start(self._connect):
+            self.settings_dialog.reject()
 
     async def _connect(self) -> None:
         origin = self.workspace.current_page()

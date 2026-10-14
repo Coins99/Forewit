@@ -63,7 +63,7 @@ selected rows and cards, in every scheme and mode.
 
 - **Cards** are a `card` fill with an 18 px radius (`CARD_RADIUS`) and no border or
   shadow. The guide's 28 px suits a web page's tall cards; MailBrief's are shorter.
-- **Buttons** are glass pills, every one like the sidebar's Disconnect (see Buttons like
+- **Buttons** are glass pills, every one like Disconnect in Settings (see Buttons like
   Disconnect). Each screen has at most one primary button, a solid `primary_fill` pill
   with `on_primary` text (Sync and review, Continue).
 - **Fields** (text, combo box, date, time and number) are rounded 8 px boxes with a
@@ -114,7 +114,7 @@ MailBrief draws each part with QPainter (`ui/glass/painter.py`):
 - **Glass at rest.** WWDC's controls lift up into glass when touched, and Studio's
   buttons in the content first did: outlines that turned to glass under the pointer. The
   owner chose glass at rest instead, so every button, in the chrome, the pages and the
-  dialogs, is the same frosted, lit pill as the sidebar's Disconnect. Under the pointer it
+  dialogs, is the same frosted, lit pill as Disconnect in Settings. Under the pointer it
   brightens, and a `GlassButton` swells on a spring, with the light starting under the
   pointer and spreading round the pill.
 - **Accessibility.** Reduce transparency makes the glass solid, Increase contrast draws
@@ -132,8 +132,8 @@ to a new page on monopo's expo-out curve, cubic-bezier(0.19, 1, 0.22, 1), in 420
 
 ## Buttons like Disconnect
 
-Every button looks like the sidebar's Disconnect, which the owner picked as the model on
-2026-10-13: a pill of Liquid Glass at rest, wherever it sits, with its label in Inter
+Every button looks like Disconnect (now in Settings' Account card), which the owner picked
+as the model on 2026-10-13: a pill of Liquid Glass at rest, wherever it sits, with its label in Inter
 Medium 13 px and 10 px of glass each side of it, lit as described above. The glass pills
 in the header, the sidebar and Today (`GlassButton`) also swell and light under the
 pointer; `ThemeStyle` draws every other button, Qt's own in message boxes included, as the

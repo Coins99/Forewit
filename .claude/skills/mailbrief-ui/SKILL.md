@@ -33,8 +33,8 @@ shadows), in the system's light or dark mode. Its approved renders are
   hidden). Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
   could otherwise widen the layout.
-- Every button is a glass pill that looks like the sidebar's Disconnect: frosted and lit at
-  rest, wherever it sits, brighter under the pointer. Make buttons with `outline_button()`
+- Every button is a glass pill that looks like Disconnect (in Settings' Account card):
+  frosted and lit at rest, wherever it sits, brighter under the pointer. Make buttons with `outline_button()`
   in ui/labels.py. `glass=True` makes a `GlassButton` (`ui/glass/button.py`, which adds the
   hover spring and light), and `primary=True` tints the one primary action of a screen.
   `ThemeStyle` draws every other `QPushButton` as the same pill: a plain

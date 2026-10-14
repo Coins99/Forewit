@@ -112,12 +112,13 @@ async def test_the_central_widget_is_the_workspace_with_the_status_strip_on_its_
     assert window.cached_button is sidebar.saved_mail
     assert window.data_button is sidebar.data
     footer = [sidebar.footer.itemAt(index) for index in range(sidebar.footer.count())]
-    assert [None if item is None else item.widget() for item in footer] == [
-        window.connection,
-        window.ai,
-        window.connect_button,
-        window.disconnect_button,
-    ]
+    # Only Google sign-in, while signed out: who is signed in, the AI line and Disconnect
+    # are in Settings' Account card.
+    assert [None if item is None else item.widget() for item in footer] == [window.connect_button]
+    card = window.settings_dialog.findChild(QWidget, "accountCard")
+    assert card is not None
+    for widget in (window.connection, window.ai, window.disconnect_button):
+        assert card.isAncestorOf(widget)
     assert not hasattr(window, "digest") and not hasattr(window, "briefs_button")
 
 
@@ -129,8 +130,7 @@ async def test_the_footer_buttons_fit_and_a_long_status_never_widens_the_window(
     qtbot.addWidget(window)
     sidebar = window.workspace.sidebar
     room = sidebar.contentsRect().width()
-    for footer_button in (window.connect_button, window.disconnect_button):
-        assert footer_button.sizeHint().width() <= room
+    assert window.connect_button.sizeHint().width() <= room
     assert window.connect_button.accessibleName() == "Sign in with Google"
     narrow = window.minimumSizeHint().width()
     assert narrow <= 900
@@ -636,7 +636,7 @@ async def test_startup_without_a_session_offers_connect(qtbot: QtBot) -> None:
     backend.connect_fail = AuthenticationRequiredError("none")
     window = MainWindow(backend)
     qtbot.addWidget(window)
-    assert accounts(window) == (True, False)
+    assert accounts(window) == (False, False)  # Not until the saved session is checked.
     window.start(window.initialize)
     await finish(window)
     assert accounts(window) == (True, False)
@@ -716,17 +716,26 @@ async def test_long_account_and_status_wrap_inside_the_window(
     window.resize(1100, 720)
     show(qtbot, window)
     narrow = window.minimumSizeHint().width()
+    dialog = window.settings_dialog
+    dialog_narrow = dialog.minimumSizeHint().width()
     email = f"{'z' * 48}@example.com"
     assert len(email) == 60
     window._set_account(email)
     window.connection.setText(f"Gmail: connected as {email}")
     window.status.setText("s" * 200)
-    lines = (window.connection, window.ai, window.status)
     # A new height reaches each enclosing layout in turn, over a few event-loop passes.
     qtbot.waitUntil(
-        lambda: all(line.height() >= line.heightForWidth(line.width()) for line in lines),
+        lambda: window.status.height() >= window.status.heightForWidth(window.status.width()),
         timeout=2000,
     )  # Nothing is clipped.
     assert window.minimumSizeHint().width() == narrow
     assert window.workspace.sidebar.width() == SIDEBAR_WIDTH
-    assert window.connection.contentsMargins().left() == 10
+    # The account lines live in Settings: a long address wraps there, never widening it.
+    window.dialog_guard.show_dialog(dialog)
+    lines = (window.connection, window.ai)
+    qtbot.waitUntil(
+        lambda: all(line.height() >= line.heightForWidth(line.width()) for line in lines),
+        timeout=2000,
+    )
+    assert dialog.minimumSizeHint().width() == dialog_narrow
+    dialog.reject()
