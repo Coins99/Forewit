@@ -630,7 +630,7 @@ async def test_startup_without_a_session_offers_connect(qtbot: QtBot) -> None:
     backend.connect_fail = AuthenticationRequiredError("none")
     window = MainWindow(backend)
     qtbot.addWidget(window)
-    assert accounts(window) == (True, False)
+    assert accounts(window) == (False, False)  # Not until the saved session is checked.
     window.start(window.initialize)
     await finish(window)
     assert accounts(window) == (True, False)

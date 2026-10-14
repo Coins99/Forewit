@@ -65,8 +65,9 @@ Since PR #21 the window is the three-pane workspace
   zone), then **Sync and review**, and **Cancel** while an operation runs.
 - The **sidebar** lists the pages **Today**, **Actions**, **Waiting**, **Drafts** and
   **Briefs**, with counts for actions, waiting actions and drafts. Its footer has **Saved
-  mail**, **Data** (Data and recovery) and **Settings**, the Gmail and AI status lines,
-  and **Connect Gmail** without a connected account or **Disconnect** with one.
+  mail**, **Data** (Data and recovery) and **Settings**, and **Google sign-in** only while
+  no account is connected. The Gmail and AI status lines and **Disconnect** are in
+  Settings' **Account** card.
 - **Today** shows the brief: the emails by section on the left and the selected email on
   the right. **Actions** and **Waiting** open the actions page on that tab, **Drafts**
   lists drafts and notes, and **Briefs** lists saved briefs and missed days.
@@ -119,8 +120,8 @@ daylight-saving boundaries.
 Keyboard navigation includes Space to toggle a focused review row. The shortlist is only
 as tall as its rows and scrolls on its own when they don't fit, so Continue stays in
 view; the run page scrolls when space is limited. Tab runs from **Sync and review**
-through **Cancel**, the sidebar's pages, **Saved mail**, **Data**, **Settings**, **Connect
-Gmail** or **Disconnect**, then the page shown (on Today, the brief list and the selected
+through **Cancel**, the sidebar's pages, **Saved mail**, **Data**, **Settings**, **Google
+sign-in** (while signed out), then the page shown (on Today, the brief list and the selected
 email's buttons in order), then **Undo**, and back to the start.
 
 ## Build and check packages

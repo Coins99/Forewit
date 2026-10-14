@@ -215,7 +215,7 @@ class ThemeStyle(QProxyStyle):
     as rounded fields, like the stylesheet's text fields, with thin chevrons in the
     secondary text colour (the stylesheet can't draw an arrow without an image file).
     Check boxes and radio buttons are drawn as in ``indicators``. Every push button is a
-    pill of glass, as the sidebar's Disconnect is (`paint_button_pill`), whoever made it:
+    pill of glass, as Disconnect in Settings is (`paint_button_pill`), whoever made it:
     the app's own, plain ones and Qt's own in message boxes and button rows; its label is
     Medium, and its size matches a `GlassButton`'s."""
 
@@ -429,7 +429,7 @@ def _pill_rect(option: QStyleOption) -> QRectF:
 
 
 def paint_button_pill(painter: QPainter, option: QStyleOption, widget: QWidget | None) -> None:
-    """A push button as a pill of glass, as the sidebar's Disconnect: brighter under the
+    """A push button as a pill of glass, as Disconnect in Settings: brighter under the
     pointer, a little smaller while pressed, at half strength while disabled. Glass is
     imported here: ui/glass imports this package."""
     from mailbrief.ui.glass.painter import paint_liquid_pill, paint_pill

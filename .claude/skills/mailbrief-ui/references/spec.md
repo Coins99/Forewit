@@ -553,8 +553,10 @@ The brief list's chips keep their shorter forms (see Brief list).
   operation runs, that reload waits (`_day_refresh_pending`) and is retried each tick.
   `closeEvent` stops the timer.
 - Sidebar footer, top to bottom: Saved mail, Data, Settings, then Google sign-in (12px
-  glass pill, `connectButton`) only while no account is connected. Rows and buttons are
-  muted while disabled.
+  glass pill, `connectButton`) only while no account is connected, and only once
+  `initialize()` has checked the saved session, so it never flashes at launch. A failed
+  check says why on the status line, since the Gmail line is in Settings. Rows and buttons
+  are muted while disabled.
 - Settings' Account card (`accountCard`, a `HairlineFrame` at the top of Connection and
   AI): "Account" (13px Semibold), the Gmail line (`connectionStatus`, 13px `WrapLabel`,
   the window's `connection`) and the AI line (`aiStatus`, 12px secondary, the window's
@@ -562,10 +564,15 @@ The brief list's chips keep their shorter forms (see Brief list).
   (`disconnectButton`, the window's `disconnect_button`) with an account, or Sign in with
   &Google (`settingsSignInButton`) without one (`set_signed_in`). The window keeps owning
   what they say and does what they ask; a long address wraps there, never widening the
-  dialog. Settings opens even while an operation runs (`_request_settings`): opening only
-  reads, so it runs beside the operation (`_settings_reads`, drained at shutdown) without
-  touching the status line; the dialog then says `BUSY`, and its fields, Preferences,
-  Disconnect and sign-in wait until the operation ends, while Appearance works at once.
+  dialog. Sign in with Google (`_sign_in_from_settings`) closes Settings as the sign-in
+  starts, so the status line and Cancel follow it, and with unsaved input it asks for a
+  save instead (`SIGN_IN_UNSAVED`). Settings opens even while an operation runs
+  (`_request_settings`): opening only reads, so it runs beside the operation (in
+  `_calendar_reads`, with the other reads, drained at shutdown) without touching the
+  status line; a second request while it opens does nothing (`_settings_opening`), and
+  nothing shows once quitting has begun. The dialog then says `BUSY`, and its fields,
+  Preferences, Disconnect and sign-in wait until the operation ends, while Appearance
+  works at once.
 - Cancel shows in the header only while an operation runs. `ThemeStyle`, Fusion behind a
   `QProxyStyle`, never underlines mnemonics; Alt and the letter still work.
 - Pages: `today` (the "Viewing the brief for …" banner and the retry row in `today_top`),

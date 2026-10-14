@@ -264,7 +264,7 @@ def paint_liquid_pill(
     enters along its long edges, as a crisp rim line along the top and the bottom with a
     glow fading into the body; shaded ends; and a soft shadow below.
 
-    Every pill is glass at rest, wherever it sits, as the sidebar's Disconnect is; under
+    Every pill is glass at rest, wherever it sits, as Disconnect in Settings is; under
     the pointer its body brightens with `pill_hover` at ``hover``'s strength (0 to 1). The
     primary pill's glow stays off its body, so its white label keeps its contrast. The
     solid modes keep the body but paint no light or shadow."""

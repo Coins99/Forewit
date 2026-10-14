@@ -169,6 +169,7 @@ async def test_the_account_card_signs_out_and_in_from_settings(qtbot: QtBot) -> 
     assert not window.connect_button.isHidden()  # Signed out: the sidebar offers sign-in.
 
     editor.sign_in_button.click()
+    assert not editor.isVisible()  # The status line and Cancel follow the sign-in.
     await finish(window)
     assert signed_in(window)
     assert not editor.disconnect_button.isHidden() and editor.sign_in_button.isHidden()
@@ -240,14 +241,14 @@ async def test_settings_open_while_mailbrief_is_busy(qtbot: QtBot) -> None:
     editor = window.settings_dialog
     assert window.settings_button.isEnabled()
     window.settings_button.click()
-    await window.drain_settings_reads()
+    await window.drain_calendar_reads()
     assert editor.isVisible()
     assert window.status.text() == "Syncing your full Gmail Inbox…"  # The sync's words stay.
     assert editor.status.text() == BUSY
     assert not editor.fields.isEnabled() and not editor.disconnect_button.isEnabled()
     assert editor.appearance_panel.isEnabled()  # Appearance works at once.
     window.settings_button.click()  # Already open: nothing reads again.
-    assert not window._settings_reads
+    assert not window._calendar_reads
 
     gate.set()
     await finish(window)
@@ -270,8 +271,126 @@ async def test_settings_opening_beside_an_operation_reports_a_failure(qtbot: QtB
 
     assert window.start(hold)
     window.settings_button.click()
-    await window.drain_settings_reads()
+    await window.drain_calendar_reads()
     assert not window.settings_dialog.isVisible()
     assert window.status.text() == "Settings couldn't be opened just now. Try again."
     gate.set()
     await finish(window)
+
+
+async def test_settings_open_once_however_often_they_are_asked_for(qtbot: QtBot) -> None:
+    class Backend(FakeBackend):
+        reads = 0
+
+        async def get_preferences(self) -> DesktopPreferences:
+            self.reads += 1
+            await asyncio.sleep(0)  # Still opening when the second click comes.
+            return await super().get_preferences()
+
+    backend = Backend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window.settings_button.click()
+    window.settings_button.click()  # A double-click: the second finds it opening.
+    await finish(window)
+    await window.drain_calendar_reads()
+    assert window.settings_dialog.isVisible() and backend.reads == 1
+    window.settings_dialog.reject()
+
+    gate = asyncio.Event()
+
+    async def hold() -> None:
+        await gate.wait()
+
+    assert window.start(hold)  # And beside an operation.
+    window.settings_button.click()
+    window.settings_button.click()
+    await window.drain_calendar_reads()
+    assert window.settings_dialog.isVisible() and backend.reads == 2
+    gate.set()
+    await finish(window)
+    window.settings_dialog.reject()
+
+
+async def test_sign_in_from_settings_asks_for_unsaved_changes_first(qtbot: QtBot) -> None:
+    from mailbrief.ui.settings_view import SIGN_IN_UNSAVED
+
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    window.settings_button.click()
+    await finish(window)
+    editor = window.settings_dialog
+    editor.disconnect_button.click()
+    await finish(window)
+    editor.oauth_path.setText("/tmp/client.json")  # Typed, not saved.
+    editor.sign_in_button.click()
+    assert editor.isVisible() and editor.status.text() == SIGN_IN_UNSAVED
+    assert window._account_email is None and (window.task is None or window.task.done())
+    editor.oauth_path.clear()
+    editor.sign_in_button.click()
+    assert not editor.isVisible()
+    await finish(window)
+    assert window._account_email == "owner@example.com"
+
+
+async def test_a_failed_session_check_says_why_and_then_offers_sign_in(qtbot: QtBot) -> None:
+    backend = FakeBackend()
+    backend.connect_fail = RuntimeError("synthetic")
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    assert window.connect_button.isHidden()  # Not before the saved session is checked.
+    window.start(window.initialize)
+    await finish(window)
+    assert not window.connect_button.isHidden()
+    assert window.status.text() == "Gmail: offline or unavailable. Saved brief available locally."
+
+
+async def test_settings_never_show_once_quitting_has_begun(qtbot: QtBot) -> None:
+    gate = asyncio.Event()
+
+    class Backend(FakeBackend):
+        async def get_preferences(self) -> DesktopPreferences:
+            await gate.wait()
+            return await super().get_preferences()
+
+    window = MainWindow(Backend())
+    qtbot.addWidget(window)
+    hold = asyncio.Event()
+
+    async def busy() -> None:
+        await hold.wait()
+
+    assert window.start(busy)
+    window.settings_button.click()  # Opens beside the operation, and waits on its read.
+    await asyncio.sleep(0)
+    window._closing = True
+    gate.set()
+    await window.drain_calendar_reads()
+    assert not window.settings_dialog.isVisible()
+    hold.set()
+    await finish(window)
+
+
+async def test_unreadable_preferences_beside_an_operation_are_said_in_settings(
+    qtbot: QtBot,
+) -> None:
+    from mailbrief.services.preferences import PreferencesUnavailableError
+
+    backend = FakeBackend()
+    backend.owner_fail = PreferencesUnavailableError()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    hold = asyncio.Event()
+
+    async def sync() -> None:
+        window.status.setText("Syncing your full Gmail Inbox…")
+        await hold.wait()
+
+    assert window.start(sync)
+    window.settings_button.click()
+    await window.drain_calendar_reads()
+    assert window.status.text() == "Syncing your full Gmail Inbox…"
+    assert window.settings_dialog.status.text() == str(PreferencesUnavailableError())
+    hold.set()
+    await finish(window)
+    window.settings_dialog.reject()

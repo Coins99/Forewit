@@ -203,7 +203,7 @@ from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
-from mailbrief.ui.settings_view import SettingsDialog
+from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
 from mailbrief.ui.theme import (
     CAPTION_PX,
     SMALL_PX,
@@ -707,12 +707,11 @@ class MainWindow(QMainWindow):
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
-        # Reads of the week shown run beside start()'s operations: they change nothing. The
-        # newest read wins, and shutdown waits for them before closing the database.
+        # Reads run beside start()'s operations, since they change nothing: the week shown,
+        # a search, and Settings opening while an operation runs. The newest read of the
+        # week wins, and shutdown waits for them all before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
-        # Settings opened while an operation runs: it only reads, so it runs beside it, and
-        # shutdown waits for it as for the calendar's reads.
-        self._settings_reads: set[asyncio.Task[None]] = set()
+        self._settings_opening: asyncio.Task[None] | None = None  # Until Settings shows.
         self._calendar_read = 0
         self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
@@ -1005,9 +1004,12 @@ class MainWindow(QMainWindow):
         self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
+        # Google sign-in waits for initialize() to check the saved session, so it never
+        # shows for a moment at launch to an owner who is signed in.
+        self.connect_button.hide()
         sidebar.settings_requested.connect(self._request_settings)
         self.connect_button.clicked.connect(lambda: self.start(self._connect))
-        self.settings_dialog.sign_in_button.clicked.connect(lambda: self.start(self._connect))
+        self.settings_dialog.sign_in_button.clicked.connect(self._sign_in_from_settings)
         self.disconnect_button.clicked.connect(
             lambda: self.start(self._disconnect, cancellable=False)
         )
@@ -2781,10 +2783,17 @@ class MainWindow(QMainWindow):
 
     def _request_settings(self) -> None:
         """Settings opens at once, even while an operation (a sync, say) runs: opening only
-        reads, and what changes settings waits in the dialog until the operation ends."""
-        if self._closing or self.settings_dialog.isVisible():
+        reads, and what changes settings waits in the dialog until the operation ends. A
+        second request while it is still opening (a double-click) does nothing."""
+        opening = self._settings_opening
+        if (
+            self._closing
+            or self.settings_dialog.isVisible()
+            or (opening is not None and not opening.done())
+        ):
             return
         if self.start(self._open_settings):
+            self._settings_opening = self.task
             return
 
         async def beside() -> None:
@@ -2795,13 +2804,9 @@ class MainWindow(QMainWindow):
                 self.status.setText("Settings couldn't be opened just now. Try again.")
 
         task = asyncio.get_running_loop().create_task(beside())
-        self._settings_reads.add(task)
-        task.add_done_callback(self._settings_reads.discard)
-
-    async def drain_settings_reads(self) -> None:
-        """Wait for Settings opening beside an operation."""
-        while pending := [task for task in self._settings_reads if not task.done()]:
-            await asyncio.gather(*pending, return_exceptions=True)
+        self._settings_opening = task
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
 
     async def _open_settings(self, *, beside: bool = False) -> None:
         """Read what Settings shows, then show it. ``beside`` another operation, the status
@@ -2822,15 +2827,22 @@ class MainWindow(QMainWindow):
         await self._show_auto_send()
         if not beside:
             self.status.setText("Edit connection and AI settings, and your preferences.")
+        unavailable: str | None = None
         try:
             panel.set_preferences(await self.backend.get_owner_preferences())
         except PreferencesUnavailableError as exc:
             # Unreadable preferences stay repairable: the panel offers a reset.
             log_failure(exc)
             panel.set_unavailable()
-            self.status.setText(str(exc))
+            unavailable = str(exc)
+            if not beside:
+                self.status.setText(unavailable)
         if beside:  # Loading cleared its status line; the operation may still be running.
             self.settings_dialog.set_busy(self.task is not None and not self.task.done())
+            if unavailable is not None:  # In the dialog: the status line is the operation's.
+                self.settings_dialog.status.setText(unavailable)
+        if self._closing:
+            return  # Quitting while it read: there is nothing left to show it over.
         self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
@@ -2981,8 +2993,18 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             self.ai.setText("AI: configuration or secure key store unavailable.")
             self.draft_editor.set_ai_ready(False)
+            if not self.settings_dialog.isVisible():  # The AI line is in Settings.
+                self.status.setText(self.ai.text())
 
     async def initialize(self) -> None:
+        """Load what is saved, then check the saved Google session. Google sign-in shows in
+        the sidebar once that check is over, however it ended."""
+        try:
+            await self._load_and_connect()
+        finally:
+            self.connect_button.setVisible(self._account_email is None)
+
+    async def _load_and_connect(self) -> None:
         try:
             saved = await self.backend.load_saved()
         except asyncio.CancelledError:
@@ -3032,12 +3054,25 @@ class MainWindow(QMainWindow):
             await self._load_calendar_access()
             await self._refresh_calendar()
             self._launch_soon()
+            return
+        # The Gmail line is in Settings: the status line says why Gmail isn't connected.
+        self.status.setText(self.connection.text())
 
     def _launch_soon(self) -> None:
         """MailBrief has started and Gmail is connected: let the scheduler run the refresh the
         owner asked for on launch, once this operation has finished, so it isn't turned away
         as busy."""
         asyncio.get_running_loop().call_soon(self.scheduler.launched)
+
+    def _sign_in_from_settings(self) -> None:
+        """Settings' Sign in with Google signs in with the saved settings and closes
+        Settings, so the window's status line and Cancel follow the sign-in. A change not
+        yet saved there stops it, rather than being ignored or lost with the dialog."""
+        if self.settings_dialog.has_unsaved_input():
+            self.settings_dialog.status.setText(SIGN_IN_UNSAVED)
+            return
+        if self.start(self._connect):
+            self.settings_dialog.reject()
 
     async def _connect(self) -> None:
         origin = self.workspace.current_page()
@@ -3702,9 +3737,6 @@ class MainWindow(QMainWindow):
             for read in self._calendar_reads:
                 read.cancel()
             await self.drain_calendar_reads()
-            for read in self._settings_reads:
-                read.cancel()
-            await self.drain_settings_reads()
             await self.draft_writes.drain()
             if self.appearance_writes is not None:
                 await self.appearance_writes.drain()

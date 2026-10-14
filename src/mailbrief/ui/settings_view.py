@@ -28,7 +28,11 @@ from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
 from mailbrief.ui.theme import SMALL_PX, TEXT_PX
 
-BUSY = "MailBrief is busy. Changes here wait until it finishes; Appearance works now."
+# While an operation runs, the owner's own change from here included.
+BUSY = "Working… Changes here wait until it finishes; Appearance works now."
+SIGN_IN_UNSAVED = (
+    "Save your changes here first: Sign in with Google uses the saved settings and closes Settings."
+)
 
 
 def _scrolling(page: QWidget, name: str, title: str) -> QScrollArea:
