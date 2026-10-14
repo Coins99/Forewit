@@ -1,23 +1,55 @@
-"""The Calendar page: a week of the owner's events, with open actions' dates beside them.
+"""The Calendar page: the owner's events, with open actions' dates beside them, as a week
+of hours, a month of days or a week of rows (``CalendarView``), as the owner chooses.
 
 Event titles are the owner's text and action titles may come from email, so rows are plain
-list-item text and never tooltips, which Qt may render as rich text. Deadlines and target
-dates are only shown here; they change on the action itself (ADR 0018).
+list-item text and the grids draw them with ``drawText``: never tooltips, which Qt may
+render as rich text. Deadlines and target dates are only shown here; they change on the
+action itself (ADR 0018).
 """
 
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QListWidgetItem,
+    QStackedWidget,
+    QTabBar,
+    QVBoxLayout,
+    QWidget,
+)
 
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
+from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange
 from mailbrief.domain.google_calendar import GoogleEvent
-from mailbrief.ui.deadline_text import day_text, month_day
-from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
+from mailbrief.ui.calendar_layout import (
+    CalendarView,
+    add_months,
+    clock,
+    entry_key,
+    marker_text,
+    month_start,
+    shown_month,
+)
+from mailbrief.ui.deadline_text import MONTH_NAMES, day_text, month_day
+from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.theme import TEXT_PX, TITLE_PX, ui_font
+
+__all__ = [
+    "CalendarPanel",
+    "CalendarView",
+    "day_heading",
+    "entry_key",
+    "event_when",
+    "marker_text",
+    "month_title",
+    "week_start",
+    "week_title",
+]
 
 NEW: Final = "new"
 OPEN: Final = "open"
@@ -31,6 +63,15 @@ GOOGLE_ON: Final = "on"
 WEEK_DAYS: Final = 7
 EMPTY: Final = "Nothing this week. Add an event with New event."
 MARKER_NOTE: Final = "Deadlines and targets come from your open actions; change them there."
+# The views, in the switcher's order, and what Previous, This and Next say in each.
+VIEW_NAMES: Final = {
+    CalendarView.WEEK: "Week",
+    CalendarView.MONTH: "Month",
+    CalendarView.LIST: "List",
+}
+_VIEWS: Final = tuple(VIEW_NAMES)
+_WEEK_STEPS: Final = ("&Previous week", "This wee&k", "Ne&xt week")
+_MONTH_STEPS: Final = ("&Previous month", "This mont&h", "Ne&xt month")
 
 Entry = CalendarEvent | GoogleEvent | ActionMarker
 Row = Entry | None  # None is a day's heading.
@@ -48,14 +89,15 @@ def week_title(first_day: date, today: date) -> str:
     return f"{month_day(first_day, today=today)} – {end}"
 
 
+def month_title(month: date) -> str:
+    """ "October 2026"."""
+    return f"{MONTH_NAMES[month.month - 1]} {month.year}"
+
+
 def day_heading(day: date, today: date) -> str:
     """ "Mon Oct 12", and "Today" on the owner's own day."""
     text = day_text(day, today=today)
     return f"{text} · Today" if day == today else text
-
-
-def _clock(moment: datetime, zone: ZoneInfo) -> str:
-    return f"{moment.astimezone(zone):%H:%M}"
 
 
 def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, today: date) -> str:
@@ -67,7 +109,7 @@ def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, to
         return "All day"
     assert event.starts_at_utc is not None and event.ends_at_utc is not None
     first, last = event.days(zone)
-    start, end = _clock(event.starts_at_utc, zone), _clock(event.ends_at_utc, zone)
+    start, end = clock(event.starts_at_utc, zone), clock(event.ends_at_utc, zone)
     if first != day:
         start = f"{month_day(first, today=today)} {start}"
     if last != day:
@@ -79,28 +121,6 @@ def event_text(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, to
     """A Google event names its calendar; the owner's own events need no label."""
     text = f"{event_when(event, day, zone, today)} · {event.title}"
     return f"{text} · {event.calendar_name}" if isinstance(event, GoogleEvent) else text
-
-
-def marker_text(marker: ActionMarker, zone: ZoneInfo) -> str:
-    """ "Deadline · Pay the invoice", "Deadline 17:00 · …" or "Target · …", and who does it
-    when someone else does."""
-    if marker.kind is MarkerKind.TARGET:
-        label = "Target"
-    elif marker.due_at_utc is None:
-        label = "Deadline"
-    else:
-        label = f"Deadline {_clock(marker.due_at_utc, zone)}"
-    waiting = " · waiting for others" if marker.waiting else ""
-    return f"{label} · {marker.action_title}{waiting}"
-
-
-def entry_key(entry: Entry) -> tuple[str, ...]:
-    """What stays the same about an entry from one read of the week to the next."""
-    if isinstance(entry, CalendarEvent):
-        return ("event", entry.public_id)
-    if isinstance(entry, GoogleEvent):
-        return ("google", entry.calendar_id, entry.event_id)
-    return ("marker", entry.kind.value, entry.action_public_id, entry.day.isoformat())
 
 
 def day_rows(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Entry]:
@@ -119,21 +139,26 @@ def day_rows(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Entry]:
 
 
 class CalendarPanel(QWidget):
-    """Shows one week and asks the window to act; it changes nothing itself.
+    """Shows the days asked for and asks the window to act; it changes nothing itself.
 
     ``event_requested(kind, value)`` carries NEW with the day to start on, or OPEN or DELETE
-    with the selected CalendarEvent. ``week_requested(first_day)`` asks for another week.
-    While another operation runs (``set_busy``), reading weeks, New event, Open, Open in
-    Google Calendar and Plan with AI still work, since they change nothing; Delete event,
-    Allow and Refresh wait.
+    with the selected CalendarEvent. ``week_requested(first_day)`` asks for another week
+    (the Week and List views), ``month_requested(first)`` for another month (the Month
+    view) and ``view_requested(view)`` for the days of a view the owner switched to, around
+    ``focus_day()``. The rows of the List view hold the selection for every view: the grids
+    show it and choose through it. While another operation runs (``set_busy``), reading
+    days, New event, Open, Open in Google Calendar and Plan with AI still work, since they
+    change nothing; Delete event, Allow and Refresh wait.
     """
 
     event_requested = Signal(str, object)
     week_requested = Signal(object)
+    month_requested = Signal(object)
+    view_requested = Signal(str)
     google_requested = Signal(str)
     plan_requested = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, view: CalendarView = CalendarView.WEEK) -> None:
         super().__init__()
         self._busy = False
         self._shown: CalendarRange | None = None
@@ -142,38 +167,59 @@ class CalendarPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
-        self.heading = plain_label("Calendar")
+        # It elides rather than widen the window: a month's name is long.
+        self.heading = ElidedLabel("Calendar", px=TITLE_PX)
         self.heading.setFont(ui_font(TITLE_PX, semibold=True))
         self.heading.setObjectName("calendarHeading")
-        self.heading.setWordWrap(False)
         top.addWidget(self.heading, 1)
-        self.previous_button = outline_button("&Previous week", "previousWeekButton", mnemonic=True)
-        self.this_week_button = outline_button("This wee&k", "thisWeekButton", mnemonic=True)
-        self.next_button = outline_button("Ne&xt week", "nextWeekButton", mnemonic=True)
+        self.previous_button = outline_button(_WEEK_STEPS[0], "previousWeekButton", mnemonic=True)
+        self.this_week_button = outline_button(_WEEK_STEPS[1], "thisWeekButton", mnemonic=True)
+        self.next_button = outline_button(_WEEK_STEPS[2], "nextWeekButton", mnemonic=True)
         for button in (self.previous_button, self.this_week_button, self.next_button):
             top.addWidget(button)
         layout.addLayout(top)
-        google = QHBoxLayout()
+        bar = QHBoxLayout()
+        self.views = QTabBar()
+        self.views.setObjectName("calendarViews")
+        self.views.setAccessibleName("Calendar views")
+        self.views.setDrawBase(False)
+        self.views.setExpanding(False)
+        self.views.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for shown_view in _VIEWS:
+            self.views.addTab(VIEW_NAMES[shown_view])
+        self.views.setCurrentIndex(_VIEWS.index(view))
+        bar.addWidget(self.views)
         self.google_status = plain_label("", tone="muted")
         self.google_status.setObjectName("googleStatus")
-        google.addWidget(self.google_status, 1)
+        bar.addWidget(self.google_status, 1)
         self.allow_button = outline_button(
             "Allow &Google Calendar", "allowCalendarButton", mnemonic=True
         )
         self.refresh_button = outline_button("Re&fresh", "refreshCalendarButton", mnemonic=True)
         for button, kind in ((self.allow_button, ALLOW), (self.refresh_button, REFRESH)):
-            google.addWidget(button)
+            bar.addWidget(button)
             button.clicked.connect(lambda _checked=False, chosen=kind: self._request_google(chosen))
-        layout.addLayout(google)
+        layout.addLayout(bar)
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("calendarStack")
+        self.week_grid = WeekGrid()
+        self.month_grid = MonthGrid()
+        list_page = QWidget()
+        list_page.setObjectName("calendarListPage")
+        list_layout = QVBoxLayout(list_page)
+        list_layout.setContentsMargins(0, 0, 0, 0)
         self.list = ActivatingList()
         self.list.setObjectName("calendarList")
         self.list.setAccessibleName("Calendar week")
-        self.list.currentRowChanged.connect(lambda _row: self._update_buttons())
+        self.list.currentRowChanged.connect(lambda _row: self._selection_moved())
         self.list.itemActivated.connect(lambda _item: self._request(OPEN))
-        layout.addWidget(self.list, 1)
+        list_layout.addWidget(self.list, 1)
         self.empty = plain_label(EMPTY, tone="muted")
         self.empty.setObjectName("calendarEmpty")
-        layout.addWidget(self.empty)
+        list_layout.addWidget(self.empty)
+        for page in (self.week_grid, self.month_grid, list_page):
+            self.stack.addWidget(page)
+        layout.addWidget(self.stack, 1)
         self.note = plain_label(MARKER_NOTE, tone="muted")
         self.note.setObjectName("calendarNote")
         layout.addWidget(self.note)
@@ -195,24 +241,62 @@ class CalendarPanel(QWidget):
             buttons.addWidget(button)
         buttons.addStretch(1)  # Buttons keep their own width.
         layout.addLayout(buttons)
-        self.previous_button.clicked.connect(lambda: self._request_week(-WEEK_DAYS))
-        self.next_button.clicked.connect(lambda: self._request_week(WEEK_DAYS))
-        self.this_week_button.clicked.connect(self._request_this_week)
+        self.previous_button.clicked.connect(lambda: self._request_period(-1))
+        self.next_button.clicked.connect(lambda: self._request_period(1))
+        self.this_week_button.clicked.connect(self._request_this_period)
         self.new_button.clicked.connect(self._request_new)
         self.open_button.clicked.connect(lambda: self._request(OPEN))
         self.delete_button.clicked.connect(lambda: self._request(DELETE))
         self.open_google_button.clicked.connect(self._request_open_google)
         self.plan_button.clicked.connect(self._request_plan)
+        self.views.currentChanged.connect(self._view_changed)
+        for grid in (self.week_grid, self.month_grid):
+            grid.chosen.connect(self._choose)
+            grid.activated.connect(self._activate)
+            grid.more_requested.connect(self._show_more)
+        self.month_grid.period_requested.connect(self._request_period)
         self._google_mode = GOOGLE_OFF
         self.set_google(GOOGLE_OFF, "")
         self.empty.hide()
         self.note.hide()
+        self._show_view()
         self._update_buttons()
 
     @property
     def first_day(self) -> date | None:
-        """The Monday of the week shown, or None before anything is shown."""
+        """The first day shown (a Monday), or None before anything is shown."""
         return None if self._shown is None else self._shown.first_day
+
+    def view(self) -> CalendarView:
+        return _VIEWS[max(0, self.views.currentIndex())]
+
+    def set_view(self, view: CalendarView) -> None:
+        """Show ``view`` without asking for its days: the window reads them next."""
+        self.views.blockSignals(True)
+        try:
+            self.views.setCurrentIndex(_VIEWS.index(view))
+        finally:
+            self.views.blockSignals(False)
+        self._show_view()
+
+    def set_clock(self, clock_now: Callable[[], datetime]) -> None:
+        """Where the week grid reads the time now, for its line across today."""
+        self.week_grid.clock = clock_now
+
+    def focus_day(self) -> date:
+        """The day another view should open on: the selected day, else today when it is
+        shown, else the 1st of the month shown (Month) or the first day shown."""
+        row = self.list.currentRow()
+        if 0 <= row < len(self._rows):
+            return self._rows[row][0]
+        shown, today = self._shown, self._today
+        if shown is not None and today is not None and shown.first_day <= today <= shown.last_day:
+            return today
+        if shown is not None:
+            if self.view() is CalendarView.MONTH:
+                return shown_month(shown.first_day)
+            return shown.first_day
+        return today if today is not None else date.today()
 
     def selected(self) -> CalendarEvent | None:
         """The selected event when it is the owner's; Google's can't be changed here."""
@@ -237,44 +321,53 @@ class CalendarPanel(QWidget):
         self._update_buttons()
 
     def show_range(self, shown: CalendarRange, zone: ZoneInfo, today: date) -> None:
-        """Replace the week, keeping the selection on the same entry when it remains: on the
+        """Replace the days, keeping the selection on the same entry when it remains: on the
         same day's row when the entry is still there, else on its first."""
         row = self.list.currentRow()
         previous = self._rows[row] if 0 <= row < len(self._rows) else None
         self._shown = shown
         self._today = today
         self._rows = []
-        self.list.clear()
-        self.heading.setText(f"Calendar · {week_title(shown.first_day, today)}")
-        day = shown.first_day
-        while day <= shown.last_day:
-            self._rows.append((day, None))
-            heading = QListWidgetItem(day_heading(day, today))
-            heading.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Read, but never selected.
-            heading.setFont(ui_font(TEXT_PX, medium=True))
-            self.list.addItem(heading)
-            for entry in day_rows(shown, day, zone):
-                self._rows.append((day, entry))
-                text = (
-                    marker_text(entry, zone)
-                    if isinstance(entry, ActionMarker)
-                    else event_text(entry, day, zone, today)
-                )
-                self.list.addItem(QListWidgetItem(text))
-            day += timedelta(days=1)
-        if previous is not None and previous[1] is not None:
-            self._select(entry_key(previous[1]), previous[0])
+        self.list.blockSignals(True)
+        try:
+            self.list.clear()
+            day = shown.first_day
+            while day <= shown.last_day:
+                self._rows.append((day, None))
+                heading = QListWidgetItem(day_heading(day, today))
+                heading.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Read, but never selected.
+                heading.setFont(ui_font(TEXT_PX, medium=True))
+                self.list.addItem(heading)
+                for entry in day_rows(shown, day, zone):
+                    self._rows.append((day, entry))
+                    text = (
+                        marker_text(entry, zone)
+                        if isinstance(entry, ActionMarker)
+                        else event_text(entry, day, zone, today)
+                    )
+                    self.list.addItem(QListWidgetItem(text))
+                day += timedelta(days=1)
+        finally:
+            self.list.blockSignals(False)
+        for grid in (self.week_grid, self.month_grid):
+            grid.show_range(shown, zone, today)
+        if previous is not None:
+            if previous[1] is not None:
+                self._select(entry_key(previous[1]), previous[0])
+            else:
+                self._select_day(previous[0])
         self.empty.setVisible(not shown.events and not shown.markers and not shown.google_events)
         self.note.setVisible(bool(shown.markers))
-        self._update_buttons()
+        self._show_heading()
+        self._selection_moved()
 
     def select_event(self, public_id: str) -> None:
-        """Select the owner's event on the first day it shows, when it's in the week."""
+        """Select the owner's event on the first day it shows, when it's shown."""
         self._select(("event", public_id), None)
 
     def select_entry(self, key: tuple[str, ...], day: date | None = None) -> None:
         """Select the entry with ``key`` (entry_key) on ``day`` if it shows there, else on
-        the first day it shows, when it's in the week."""
+        the first day it shows, when it's shown."""
         self._select(key, day)
 
     def _select(self, key: tuple[str, ...], day: date | None) -> None:
@@ -286,6 +379,82 @@ class CalendarPanel(QWidget):
         same_day = [number for number in found if self._rows[number][0] == day]
         if found:
             self.list.setCurrentRow((same_day or found)[0])
+
+    def _select_day(self, day: date) -> None:
+        """Make ``day``'s heading the current row: the day chosen, with no entry."""
+        number = next(
+            (n for n, (shown, entry) in enumerate(self._rows) if shown == day and entry is None),
+            None,
+        )
+        if number is not None:
+            self.list.setCurrentRow(number)
+
+    def _selection_moved(self) -> None:
+        """The list's current row moved: the grids show it, and the buttons follow."""
+        row = self.list.currentRow()
+        day, entry = self._rows[row] if 0 <= row < len(self._rows) else (None, None)
+        key = None if entry is None else entry_key(entry)
+        for grid in (self.week_grid, self.month_grid):
+            grid.set_selection(day, key)
+        self._update_buttons()
+
+    def _choose(self, day: object, entry: object) -> None:
+        """A grid chose a day, or an entry on it."""
+        if not isinstance(day, date):
+            return
+        if isinstance(entry, CalendarEvent | GoogleEvent | ActionMarker):
+            self._select(entry_key(entry), day)
+        else:
+            self._select_day(day)
+
+    def _activate(self, day: object, entry: object) -> None:
+        """A double-click or Return in a grid: an event opens (Google's in Google
+        Calendar), and an empty day asks for a new event on it."""
+        if not isinstance(day, date):
+            return
+        self._choose(day, entry)
+        if entry is None:
+            if self._shown is not None:
+                self.event_requested.emit(NEW, day)
+        elif isinstance(entry, CalendarEvent):
+            self._request(OPEN)
+        elif isinstance(entry, GoogleEvent):
+            self._request_open_google()
+
+    def _show_more(self, day: object) -> None:
+        """ "+N more": the List view, on that day's week, shows all of the day's entries."""
+        if isinstance(day, date):
+            self._select_day(day)
+            self.views.setCurrentIndex(_VIEWS.index(CalendarView.LIST))
+
+    def _view_changed(self, _index: int) -> None:
+        self._show_view()
+        self.view_requested.emit(self.view().value)
+
+    def _show_view(self) -> None:
+        view = self.view()
+        pages = {
+            CalendarView.WEEK: self.week_grid,
+            CalendarView.MONTH: self.month_grid,
+        }
+        page = pages.get(view)
+        self.stack.setCurrentIndex(2 if page is None else self.stack.indexOf(page))
+        steps = _MONTH_STEPS if view is CalendarView.MONTH else _WEEK_STEPS
+        for button, text in zip(
+            (self.previous_button, self.this_week_button, self.next_button), steps, strict=True
+        ):
+            button.setText(text)
+            button.setAccessibleName(text.replace("&", ""))
+        self._show_heading()
+
+    def _show_heading(self) -> None:
+        shown, today = self._shown, self._today
+        if shown is None or today is None:
+            self.heading.setText("Calendar")
+        elif self.view() is CalendarView.MONTH:
+            self.heading.setText(f"Calendar · {month_title(shown_month(shown.first_day))}")
+        else:
+            self.heading.setText(f"Calendar · {week_title(shown.first_day, today)}")
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -305,16 +474,27 @@ class CalendarPanel(QWidget):
         for button in (self.allow_button, self.refresh_button):
             button.setEnabled(not self._busy)
 
-    def _request_week(self, offset: int) -> None:
-        if self._shown is not None:
-            self.week_requested.emit(self._shown.first_day + timedelta(days=offset))
+    def _request_period(self, step: int) -> None:
+        """The week or month ``step`` before (negative) or after the one shown."""
+        shown = self._shown
+        if shown is None:
+            return
+        if self.view() is CalendarView.MONTH:
+            self.month_requested.emit(add_months(shown_month(shown.first_day), step))
+        else:
+            self.week_requested.emit(shown.first_day + timedelta(days=WEEK_DAYS * step))
 
-    def _request_this_week(self) -> None:
-        if self._today is not None:
+    def _request_this_period(self) -> None:
+        if self._today is None:
+            return
+        if self.view() is CalendarView.MONTH:
+            self.month_requested.emit(month_start(self._today))
+        else:
             self.week_requested.emit(week_start(self._today))
 
     def _request_new(self) -> None:
-        """A new event starts on the day selected, else today when shown, else Monday."""
+        """A new event starts on the day selected, else today when shown, else the first
+        day shown (the month's 1st in the Month view)."""
         if self._shown is None:
             return
         row = self.list.currentRow()
@@ -324,6 +504,8 @@ class CalendarPanel(QWidget):
             self._today is not None and self._shown.first_day <= self._today <= self._shown.last_day
         ):
             day = self._today
+        elif self.view() is CalendarView.MONTH:
+            day = shown_month(self._shown.first_day)
         else:
             day = self._shown.first_day
         self.event_requested.emit(NEW, day)

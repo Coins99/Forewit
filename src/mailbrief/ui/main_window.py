@@ -161,6 +161,7 @@ from mailbrief.ui.appearance import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
+from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start
 from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
 from mailbrief.ui.calendar_view import (
@@ -705,6 +706,8 @@ class MainWindow(QMainWindow):
         self._planning_cancel: asyncio.Event | None = None
         self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
+        # The 1st of the month the Month view shows; None follows today.
+        self._calendar_month: date | None = None
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
         # Reads of the week shown run beside start()'s operations: they change nothing. The
@@ -966,6 +969,10 @@ class MainWindow(QMainWindow):
             )
         )
         workspace.add_page("inbox", self.inbox_panel)
+        self.calendar_panel.set_view(self.appearance.calendar_view)  # As the owner last chose.
+        self.calendar_panel.set_clock(lambda: self.now())
+        self.calendar_panel.month_requested.connect(self._request_calendar_month)
+        self.calendar_panel.view_requested.connect(self._request_calendar_view)
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
@@ -1206,6 +1213,8 @@ class MainWindow(QMainWindow):
         await self._reload_history()
         if self._calendar_week is not None:
             self._show_calendar_week(self._calendar_week)  # Now this week: follow today.
+        if self._calendar_month is not None:
+            self._show_calendar_month(self._calendar_month)  # Now this month: follow today.
         await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
@@ -1761,9 +1770,9 @@ class MainWindow(QMainWindow):
     async def _refresh_calendar(self) -> None:
         self._calendar_read += 1
         read = self._calendar_read
-        first = self._calendar_week or week_start(self._local_today())
+        first, last = self._calendar_bounds()
         try:
-            shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
+            shown = await self.backend.calendar_range(first, last, self.zone)
         except Exception as exc:
             if read == self._calendar_read:
                 self._note_not_refreshed(exc)
@@ -1802,19 +1811,51 @@ class MainWindow(QMainWindow):
         if not isinstance(key, tuple):
             return
         today = self._local_today()
-        self._show_calendar_week(week_start(today))
+        self._show_calendar_day(today)
         self._show_page("calendar")
         self._read_calendar(select=key, day=today)
+
+    def _calendar_bounds(self) -> tuple[date, date]:
+        """The days the Calendar page shows: a week (Week and List views), or the six weeks
+        of the month's grid (Month view)."""
+        today = self._local_today()
+        if self.calendar_panel.view() is CalendarView.MONTH:
+            return month_days(self._calendar_month or today)
+        first = self._calendar_week or week_start(today)
+        return first, first + timedelta(days=6)
 
     def _show_calendar_week(self, monday: date) -> None:
         """Show the week of ``monday`` from now on; this week's follows today, so the page
         moves on by itself when a new week starts."""
         self._calendar_week = None if monday == week_start(self._local_today()) else monday
 
+    def _show_calendar_month(self, first: date) -> None:
+        """Show the month of ``first`` (its 1st) from now on; this month's follows today."""
+        self._calendar_month = None if first == month_start(self._local_today()) else first
+
+    def _show_calendar_day(self, day: date) -> None:
+        """Show ``day``: its week in the Week and List views, its month in the Month view."""
+        self._show_calendar_week(week_start(day))
+        self._show_calendar_month(month_start(day))
+
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
             self._show_calendar_week(first_day)
             self._read_calendar(sync=True)
+
+    def _request_calendar_month(self, first: object) -> None:
+        if isinstance(first, date):
+            self._show_calendar_month(month_start(first))
+            self._read_calendar(sync=True)
+
+    def _request_calendar_view(self, view: object) -> None:
+        """The owner switched views: show the new view around the day in focus, and keep the
+        choice on this device."""
+        chosen = CalendarView(str(view))
+        self._show_calendar_day(self.calendar_panel.focus_day())
+        if self.appearance.calendar_view is not chosen:
+            self._save_appearance(self.appearance.model_copy(update={"calendar_view": chosen}))
+        self._read_calendar(sync=True)
 
     def _read_calendar(
         self,
@@ -2002,7 +2043,7 @@ class MainWindow(QMainWindow):
             if hit.kind is SearchKind.EVENT
             else ("google", hit.calendar_id or "", hit.event_id or "")
         )
-        self._show_calendar_week(week_start(day))
+        self._show_calendar_day(day)
         self._show_page("calendar")
         self._read_calendar(select=key, day=day)
 
@@ -2045,7 +2086,7 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.event_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
-        self._show_calendar_week(week_start(saved.days(self.zone)[0]))  # Show where it went.
+        self._show_calendar_day(saved.days(self.zone)[0])  # Show where it went.
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
         self.calendar_panel.select_event(saved.public_id)
@@ -2167,7 +2208,7 @@ class MainWindow(QMainWindow):
 
     async def _sync_calendar(self, *, quiet: bool) -> None:
         """Read Google Calendar around the week shown; a quiet sync speaks only of trouble."""
-        around = self._calendar_week or week_start(self._local_today())
+        around = self._calendar_bounds()[0]
         try:
             result = await self.backend.sync_calendar(around, self.zone)
         except (asyncio.CancelledError, AuthenticationRequiredError):
@@ -2216,11 +2257,18 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _planning_first(self) -> date:
+        """The Monday Plan with AI starts on: the week shown, or in the Month view the week
+        of the day in focus."""
+        if self.calendar_panel.view() is CalendarView.MONTH:
+            return week_start(self.calendar_panel.focus_day())
+        return self._calendar_week or week_start(self._local_today())
+
     async def _prepare_planning(self, options: PlanningOptions) -> None:
         """Read Google first when its times are to be sent and the saved copy misses some of
         the four weeks; a failed read leaves what was saved, and the preview says which
         days it holds. Quitting stops it."""
-        first = self._calendar_week or week_start(self._local_today())
+        first = self._planning_first()
         if self._planning_google_due(options, first):
             self.planning_dialog.show_reading()
             try:

@@ -23,6 +23,8 @@ Two or more letters search your own records on this computer, once typing pauses
 | Google Calendar | event title (the only text MailBrief keeps) | its week on the Calendar page, with it selected |
 | Mail | the connected account's saved subject, sender and Gmail's short preview | the Inbox page at that email; an email no longer in the Inbox opens in Gmail |
 
+In the Calendar's Month view, an event opens on its month rather than its week.
+
 Every word must appear in a record, in any order. Letters A to Z match in either case;
 other letters match as typed. Each section shows its first 8 matches, open actions and the
 newest records first, and says when there are more: add a word to narrow it.

@@ -572,6 +572,39 @@ The brief list's chips keep their shorter forms (see Brief list).
   is being confirmed there, and reloads Briefs when it ends.
 - Drafts: with no drafts the list is hidden and `draftsEmpty`, a muted, centred, wrapping
   message, fills the page; with drafts the list shows and the message hides.
+- Calendar views (`CalendarView`, `ui/calendar_layout.py`): a `QTabBar` (`calendarViews`,
+  styled like the Actions tabs) under the heading switches Week, Month and List; the choice
+  is `Appearance.calendar_view` in appearance.json (default Week). The page's stack shows
+  `WeekGrid` (`calendarWeekGrid`), `MonthGrid` (`calendarMonthGrid`, `ui/calendar_grid.py`) or
+  the list. The list's rows hold the selection for every view: a grid's `chosen(day,
+  entry)` moves the list's current row (a day's heading for a day alone), and the grids show
+  the current row (`set_selection`); `activated` opens an event (Google's in Google
+  Calendar) or asks for a new event on an empty day; "+N more" opens the List view on that
+  day. The window reads the view's days (`_calendar_bounds`): a week, or the six weeks of
+  `month_days` (42, the most `list_range` reads); "This month" follows today as "This week"
+  does; a view switch opens around `focus_day()`. Previous, This and Next say week or
+  month by the view ("This mont&h"). The heading is an `ElidedLabel` ("Calendar · October
+  2026"), so a long month never widens the window. Colours are proven pairs only: the
+  owner's events accent_fg on accent_bg, Google's text on card (time text_secondary),
+  actions' dates warning_fg on warning_bg, today on_primary on primary_fill; the selected
+  entry has a 1.5 px accent_fg ring. No hairlines cross: the week grid draws hour lines
+  only, and month days are rounded `card` tiles (the month's own) with gaps.
+  - `WeekGrid`: day heads (`HEADER_H` 52; weekday 11px Semibold, date 14px Semibold in a
+    26px circle for today), an all-day strip (`LANE_H` 20, at most 3 lanes, else 2 and "+N
+    more"; "all-day" in the gutter), and the hours (`HOUR_PX` 48, 24 hours plus 8px pads,
+    `GUTTER` 52 for "09:00" labels, tabular) in a scroll area that first opens at 07:30 or
+    half an hour before the week's earliest start. Timed events under 24 hours are blocks
+    per day (`timed_part`: cut at midnight, at least 20 minutes), packed side by side
+    (`pack_columns`); longer ones and all-day events are bars (`bars`, `pack_lanes`).
+    Today's column is shaded `card` with an accent line at the time now (moved each
+    minute). Keys: Left/Right a day, Up/Down the day's entries, Return opens (or a new
+    event on an empty day), Page Up/Down scroll.
+  - `MonthGrid`: weekday names (24px), then 6 rows × 7 tiles (`TILE_GAP` 2, radius 8); day
+    numbers 12px Semibold, muted outside the month, today in a primary circle. Each week's
+    items in lanes: bars (merged across neighbouring days of a lane into one) and a line per
+    timed event per day (a 6px dot in its colour, its start on its first day, its title).
+    A tile shows `capacity()` lines; with more, one fewer and "+N more". Keys: arrows move
+    a day (Up/Down a week), Return opens or asks for a new event, Page Up/Down change month.
 - Calendar (ADR 0018, `ui/calendar_view.py`): a 20px Semibold heading "Calendar · Oct 12 –
   18" with outline Previous week, This week and Next week; one `ActivatingList` row per day
   heading (Medium, enabled but not selectable, "· Today" on the owner's day) followed by
