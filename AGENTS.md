@@ -328,9 +328,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   the macOS Keychain, chosen explicitly, with no plaintext or automatic fallback).
 - Configured packages may bundle the developer's registered Desktop OAuth client ID and
   native-app client secret (never user tokens or API keys). Custom client files remain an
-  explicit override. See `docs/google-signin-inbox.md`. The full Inbox sync reads metadata
-  across all dates, reconciles only after complete enumeration, and never advances the
-  daily-brief watermark or downloads bodies. The Inbox page is distinct from daily briefs.
+  explicit override. See `docs/google-signin-inbox.md`. Interactive Inbox browsing reads
+  one metadata page (50 initially, 100 on request), without a date cutoff; its all-mail
+  search is explicit and separate from the local command palette. Browsing never
+  reconciles absence across all dates, advances the daily-brief watermark or downloads
+  bodies. The separate full-scan service reconciles only after complete enumeration.
+  Browsing cursors live in memory, scoped to account and query; cached metadata persists.
 - The Groq API key lives only in that OS vault, under `MailBrief.Groq`.
 - Provider JSON stays inside its adapter; services and storage use domain models only.
 - Timestamps are timezone-aware UTC. Never use naive datetimes or `datetime.utcnow()`.

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,7 +58,7 @@ from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.ports.calendar import CalendarNotAllowedError
-from mailbrief.ports.errors import AuthenticationRequiredError
+from mailbrief.ports.errors import AuthenticationRequiredError, ProviderResponseError
 from mailbrief.providers.gcal.auth import forget_legacy_sign_in
 from mailbrief.providers.gcal.errors import NOT_ALLOWED
 from mailbrief.providers.gcal.factory import google_calendar
@@ -97,6 +98,7 @@ from mailbrief.services.drafts import DraftService
 from mailbrief.services.events import EventService
 from mailbrief.services.google_calendar import CalendarSyncService, forget_cache
 from mailbrief.services.history import BriefHistory, check_brief_date
+from mailbrief.services.inbox import InboxService
 from mailbrief.services.preferences import (
     PreferencesService,
     PreferencesUnavailableError,
@@ -162,6 +164,15 @@ async def _gmail_account(session: AsyncSession, account_email: str) -> AccountTa
     )
 
 
+@dataclass
+class InboxBrowse:
+    identifiers: set[str] = field(default_factory=set)
+    continuation: str | None = field(default=None, repr=False)
+    tokens: set[str] = field(default_factory=set, repr=False)
+    has_more: bool = True
+    error_code: str | None = None
+
+
 class DesktopRuntime:
     """Use the same settings, vault, migrations and services as the diagnostic CLI.
 
@@ -175,6 +186,8 @@ class DesktopRuntime:
         self._database: Database | None = None
         self._calendar_allowed: bool | None = None  # From this start's Google sign-in.
         self._legacy_checked = False
+        self._inbox_browse: dict[tuple[str, str], InboxBrowse] = {}
+        self._inbox_generation = 0
         self._preferences = PreferencesStore(database_path.parent / "desktop-settings.json")
 
     async def load_saved(self) -> DailyDigest | None:
@@ -212,6 +225,8 @@ class DesktopRuntime:
         """The one Google sign-in is gone, so its saved Google events go too: a schedule
         that can't be refreshed misleads (ADR 0018). A failure here is logged, never
         raised over the sign-in's own error."""
+        self._inbox_generation += 1
+        self._inbox_browse.clear()
         self._calendar_allowed = None
         if self._database is None:
             return
@@ -224,6 +239,9 @@ class DesktopRuntime:
     async def disconnect(self) -> None:
         """Forget the one Google sign-in, so Gmail and Google Calendar both disconnect, and
         the saved Google events with it (ADR 0019)."""
+
+        self._inbox_generation += 1
+        self._inbox_browse.clear()
 
         def clear() -> None:
             GmailCredentialStore().clear()
@@ -485,18 +503,116 @@ class DesktopRuntime:
                 progress=progress,
             )
 
-    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+    async def browse_inbox(
+        self,
+        account_email: str,
+        cancel: asyncio.Event,
+        *,
+        load_more: bool = False,
+        query: str = "",
+    ) -> InboxPage:
+        """One metadata page. Commit before advancing the in-memory browsing cursor."""
+        query = query.strip()
+        if len(query) > 1000:
+            raise ValueError("Mail search is limited to 1,000 characters.")
+        key = (account_email, query)
+        previous = self._inbox_browse.get(key)
+        if load_more and previous is not None and not previous.has_more:
+            return await self.inbox_messages(account_email, query=query)
+        state = InboxBrowse(
+            identifiers=set(previous.identifiers)
+            if previous and (load_more or not query)
+            else set(),
+            continuation=previous.continuation if load_more and previous else None,
+            tokens=set(previous.tokens) if load_more and previous else set(),
+        )
+        generation = self._inbox_generation
+        settings = (await self.get_preferences()).settings()
+        async with (
+            gmail_provider(settings, silent_only=True) as provider,
+            self._storage().session() as session,
+        ):
+            identity = await provider.connect()
+            if identity.email_address != account_email:
+                raise AuthenticationRequiredError(
+                    "The connected Gmail account changed. Sign in again."
+                )
+            account = await AccountRepository(session).upsert(identity)
+            await session.commit()
+            if not state.identifiers and not query:
+                rows, _ = await MessageRepository(session).get_inbox_page(account.id, page_size=50)
+                state.identifiers.update(row.provider_message_id for row in rows)
+            page = await InboxService(session, provider).load_page(
+                account.id,
+                cancel,
+                continuation=state.continuation,
+                page_size=100 if load_more and state.continuation is not None else 50,
+                query=query,
+            )
+            if generation != self._inbox_generation or cancel.is_set():
+                raise asyncio.CancelledError
+            if page.continuation is not None and page.continuation in state.tokens:
+                raise ProviderResponseError(
+                    "Gmail repeated a pagination cursor. Refresh to restart."
+                )
+            state.identifiers.update(message.provider_message_id for message in page.messages)
+            state.identifiers.difference_update(page.discarded_ids)
+            if previous is None and not query:
+                rows = await MessageRepository(session).get_by_provider_ids(
+                    account.id, state.identifiers
+                )
+                rows = [row for row in rows if row.is_in_inbox]
+                rows.sort(key=lambda row: (-row.received_at_utc.timestamp(), row.id))
+                state.identifiers = {row.provider_message_id for row in rows[:50]}
+            if page.failed:
+                # Retry this page rather than skip IDs whose metadata could not be read.
+                state.error_code = "METADATA_ITEMS_FAILED"
+            else:
+                state.continuation = page.continuation
+                state.has_more = page.continuation is not None
+                if page.continuation is not None:
+                    state.tokens.add(page.continuation)
+            if generation != self._inbox_generation or cancel.is_set():
+                raise asyncio.CancelledError
+            self._inbox_browse[key] = state
+        return await self.inbox_messages(account_email, query=query)
+
+    async def inbox_messages(
+        self, account_email: str, offset: int = 0, *, query: str = ""
+    ) -> InboxPage:
         async with self._storage().session() as session:
             account = await _gmail_account(session, account_email)
             if account is None:
                 return InboxPage(account_email=account_email)
             messages = MessageRepository(session)
-            rows, more = await messages.get_inbox_page(account.id, offset)
+            state = self._inbox_browse.get((account_email, query)) if offset == 0 else None
+            if state is not None:
+                rows = await messages.get_by_provider_ids(account.id, state.identifiers)
+                rows = [row for row in rows if query or row.is_in_inbox]
+                rows.sort(key=lambda row: (-row.received_at_utc.timestamp(), row.id))
+                more = state.has_more
+            else:
+                rows, more = await messages.get_inbox_page(
+                    account.id, offset, page_size=50 if offset == 0 else 100
+                )
+                if query:
+                    rows = []
+                if offset == 0:
+                    more = True  # Remote availability is unknown until a bounded request.
+                elif not query:
+                    # A palette jump loads an older cached page. Retain those rows when
+                    # the owner subsequently continues remote browsing.
+                    browsing = self._inbox_browse.setdefault((account_email, ""), InboxBrowse())
+                    browsing.identifiers.update(row.provider_message_id for row in rows)
+                    more = browsing.has_more
             since = datetime.now(UTC) - timedelta(days=WANTED_WINDOW_DAYS)
             return InboxPage(
                 account_email=account_email,
                 offset=offset,
                 has_more=more,
+                query=query,
+                cached=state is None,
+                error_code=state.error_code if state else None,
                 messages=tuple(
                     MessageRepository.to_domain(
                         row, account.provider_account_id, ProviderKind.GMAIL

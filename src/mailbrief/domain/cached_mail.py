@@ -33,6 +33,9 @@ class InboxPage(DomainModel):
     messages: tuple[NormalizedMessage, ...] = ()
     offset: int = Field(default=0, ge=0)
     has_more: bool = False
+    query: str = Field(default="", max_length=1000, repr=False)
+    cached: bool = True
+    error_code: str | None = None
     # The messages on this page the owner said belong in a brief (ADR 0020), and how many
     # messages they wanted in the last WANTED_WINDOW_DAYS that the review hadn't suggested.
     wanted_ids: frozenset[str] = frozenset()

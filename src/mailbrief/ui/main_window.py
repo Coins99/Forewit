@@ -223,7 +223,18 @@ class DesktopBackend(Protocol):
     async def sync_inbox(
         self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
     ) -> SyncResult: ...
-    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage: ...
+    async def inbox_messages(
+        self, account_email: str, offset: int = 0, *, query: str = ""
+    ) -> InboxPage: ...
+
+    async def browse_inbox(
+        self,
+        account_email: str,
+        cancel: asyncio.Event,
+        *,
+        load_more: bool = False,
+        query: str = "",
+    ) -> InboxPage: ...
     async def search(self, text: str, account_email: str | None) -> SearchResults: ...
     async def inbox_position(self, account_email: str, provider_message_id: str) -> int | None: ...
     async def set_wanted(
@@ -956,6 +967,10 @@ class MainWindow(QMainWindow):
         self.calendar_panel = CalendarPanel()
         self.inbox_panel = InboxPanel()
         self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
+        self.inbox_panel.load_more_requested.connect(lambda: self.start(self._load_more_inbox))
+        self.inbox_panel.search_requested.connect(
+            lambda query: self.start(lambda: self._refresh_inbox(query=query))
+        )
         self.inbox_panel.page_requested.connect(
             lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
         )
@@ -3063,21 +3078,53 @@ class MainWindow(QMainWindow):
             return
         await self.backend.set_wanted(self._account_email, message_id, wanted)
         page = self.inbox_panel.page
-        await self._load_inbox(0 if page is None else page.offset, select=message_id)
+        self.inbox_panel.show_page(
+            await self.backend.inbox_messages(
+                self._account_email,
+                0 if page is None else page.offset,
+                query=page.query if page else "",
+            ),
+            select=message_id,
+        )
         self.status.setText(
             "Marked: MailBrief counts this when ranking its sender's mail."
             if wanted
             else "Mark removed."
         )
 
-    async def _refresh_inbox(self, *, quiet: bool = False) -> None:
+    async def _load_more_inbox(self) -> None:
+        await self._refresh_inbox(load_more=True)
+
+    async def _refresh_inbox(
+        self,
+        *,
+        quiet: bool = False,
+        load_more: bool = False,
+        query: str | None = None,
+    ) -> None:
         previous_status = self.status.text()
-        if self._account_email is None:
+        email = self._account_email
+        if email is None:
             self.status.setText("Sign in with Google to refresh your Inbox.")
             return
-        self.status.setText("Syncing your full Gmail Inbox…")
+        current = self.inbox_panel.page
+        if query is None:
+            query = current.query if current is not None and not quiet else ""
+        show = not (quiet and current is not None and current.query)
+        if show and not load_more and not query:
+            await self._load_inbox()
+        self.inbox_panel.set_busy(True)
+        self.status.setText(
+            "Loading more mail…"
+            if load_more
+            else "Searching all mail…"
+            if query
+            else "Loading recent mail…"
+        )
         try:
-            result = await self.backend.sync_inbox(self._cancel, self._progress)
+            page = await self.backend.browse_inbox(
+                email, self._cancel, load_more=load_more, query=query
+            )
         except (ConfigurationError, AuthenticationRequiredError) as exc:
             self._set_account(None)
             self.inbox_panel.clear()
@@ -3090,19 +3137,24 @@ class MainWindow(QMainWindow):
             self.status.setText(guidance)
             self.inbox_panel.sync_status.setText(guidance)
             return
-        await self._load_inbox()
-        if result.status is SyncStatus.COMPLETE:
-            self.status.setText(f"Inbox synced: {result.message_count} messages across all dates.")
-        else:
-            self.status.setText("Inbox sync incomplete. Cached messages may be stale.")
-            if result.error_code:
-                self.status.setText(self.status.text() + " " + error_guidance(result.error_code))
-            if result.error_code == "AUTH_REQUIRED":
-                self._set_account(None)
-                self.inbox_panel.clear()
-                self.connection.setText("Gmail: session expired. Sign in with Google to continue.")
-        self.inbox_panel.sync_status.setText(self.status.text())
-        if quiet and result.status is SyncStatus.COMPLETE:
+        except ProviderError as exc:
+            log_failure(exc)
+            self.status.setText(
+                "Couldn't load mail. Showing saved messages. Retry, or Refresh to restart."
+            )
+            self.inbox_panel.sync_status.setText(self.status.text())
+            return
+        if email != self._account_email or self._cancel.is_set():
+            return
+        if show:
+            self.inbox_panel.show_page(page)
+            self.inbox_panel.sync_status.setText(
+                "Some messages couldn't be read. Retry this page."
+                if page.error_code
+                else "Recent metadata checked with Gmail."
+            )
+        self.status.setText(f"{len(page.messages)} messages loaded.")
+        if quiet:
             self.status.setText(previous_status)
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
@@ -3187,10 +3239,6 @@ class MainWindow(QMainWindow):
             self.scheduler.note_run(self.now())
 
     async def _generate_brief(self, local_date: date | None = None) -> None:
-        if local_date is None:
-            await self._refresh_inbox(quiet=True)
-            if self._cancel.is_set():
-                return
         self._offer_undo()  # A new brief replaces the suggestions that Undo would refer to.
         if local_date is None and self._shown is not None:
             self._set_shown(None)  # Sync and review returns to the latest brief.

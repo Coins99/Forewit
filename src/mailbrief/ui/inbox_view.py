@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QScrollArea,
@@ -44,7 +45,7 @@ def wanted_line(count: int) -> str:
     )
 
 
-# Messages per Inbox page; Previous and Next move by one page.
+# Cached page size used when the command palette locates an older saved message.
 INBOX_PAGE_SIZE: Final = 100
 
 
@@ -52,6 +53,8 @@ class InboxPanel(QWidget):
     """``wanted_requested(message_id, wanted)`` asks to mark or unmark the selected message."""
 
     refresh_requested = Signal()
+    load_more_requested = Signal()
+    search_requested = Signal(str)
     page_requested = Signal(int)
     source_requested = Signal(str)
     wanted_requested = Signal(str, bool)
@@ -62,8 +65,23 @@ class InboxPanel(QWidget):
         self.setAccessibleName("Gmail Inbox")
         self.zone = ZoneInfo("UTC")
         self._page: InboxPage | None = None
+        self._busy = False
         layout = QVBoxLayout(self)
-        self.status = wrap_label("Sign in with Google to sync your full Inbox.")
+        search_row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setObjectName("inboxSearch")
+        self.search.setAccessibleName("Search all Gmail mail")
+        self.search.setPlaceholderText("Search all mail")
+        self.search.setMaxLength(1000)
+        self.search_button = outline_button("Search", "searchInboxButton")
+        self.search_button.setAccessibleName("Search all mail in Gmail")
+        self.clear_search = outline_button("Back to Inbox", "clearInboxSearchButton")
+        self.clear_search.setAccessibleName("Clear mail search and return to Inbox")
+        search_row.addWidget(self.search, 1)
+        search_row.addWidget(self.search_button)
+        search_row.addWidget(self.clear_search)
+        layout.addLayout(search_row)
+        self.status = wrap_label("Sign in with Google to load your Inbox.")
         self.status.setObjectName("inboxStatus")
         layout.addWidget(self.status)
         self.sync_status = wrap_label("", tone="secondary")
@@ -105,19 +123,23 @@ class InboxPanel(QWidget):
         buttons = QHBoxLayout()
         self.refresh = outline_button("Refresh Inbox", "refreshInboxButton")
         self.previous = outline_button("Previous 100", "previousInboxButton")
-        self.next = outline_button("Next 100", "nextInboxButton")
+        self.previous.hide()  # Retained attribute for existing workspace integrations.
+        self.next = outline_button("Load 100 more", "nextInboxButton")
+        self.next.setAccessibleName("Load up to 100 more messages")
         self.source = outline_button("Open in Gmail", "inboxSourceButton")
         self.wanted = outline_button(WANT, "inboxWantedButton")
-        for button in (self.refresh, self.previous, self.next, self.source, self.wanted):
+        for button in (self.refresh, self.next, self.source):
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        mark_row = QHBoxLayout()
+        mark_row.addWidget(self.wanted)
+        mark_row.addStretch(1)
+        layout.addLayout(mark_row)
         self.refresh.clicked.connect(self.refresh_requested.emit)
-        self.previous.clicked.connect(
-            lambda: self.page_requested.emit(max(0, self._page.offset - 100) if self._page else 0)
-        )
-        self.next.clicked.connect(
-            lambda: self.page_requested.emit(self._page.offset + 100 if self._page else 0)
-        )
+        self.next.clicked.connect(self.load_more_requested.emit)
+        self.search.returnPressed.connect(self._search)
+        self.search_button.clicked.connect(self._search)
+        self.clear_search.clicked.connect(self._clear_search)
         self.messages.currentRowChanged.connect(self._select)
         self.source.clicked.connect(self._open_source)
         self.wanted.clicked.connect(self._toggle_wanted)
@@ -132,44 +154,85 @@ class InboxPanel(QWidget):
         self._page = None
         self.messages.clear()
         self.details.clear()
-        self.status.setText("Sign in with Google to sync your full Inbox.")
+        self.status.setText("Sign in with Google to load your Inbox.")
+        self.search.clear()
         self.sync_status.clear()
         self.wanted_status.clear()
         self.set_busy(False)
 
     def set_busy(self, busy: bool) -> None:
+        self._busy = busy
         self.refresh.setEnabled(not busy)
-        self.previous.setEnabled(not busy and self._page is not None and self._page.offset > 0)
         self.next.setEnabled(not busy and self._page is not None and self._page.has_more)
-        self.source.setEnabled(not busy and self.messages.currentRow() >= 0)
+        self.search.setEnabled(not busy)
+        self.search_button.setEnabled(not busy)
+        self.clear_search.setEnabled(not busy)
+        self.clear_search.setVisible(self._page is not None and bool(self._page.query))
+        self.source.setEnabled(self.messages.currentRow() >= 0)
         self.wanted.setEnabled(not busy and self.messages.currentRow() >= 0)
 
     def show_page(self, page: InboxPage, *, select: str | None = None) -> None:
         """Show ``page``, selecting the message ``select`` when it is there, else the first."""
+        if select is None and self._page is not None:
+            index = self.messages.currentRow()
+            if 0 <= index < len(self._page.messages):
+                select = self._page.messages[index].provider_message_id
+        scroll = self.messages.verticalScrollBar().value()
+        busy = self._busy
+        previous_query = self._page.query if self._page is not None else ""
         self._page = page
+        if previous_query != page.query:
+            self.search.setText(page.query)
+        self.messages.blockSignals(True)
         self.messages.clear()
         for message in page.messages:
             wanted = message.provider_message_id in page.wanted_ids
             text = f"{message.sender.address} — {message.subject or '(no subject)'}"
             item = QListWidgetItem(f"{text} — {WANTED}" if wanted else text)
-            chips = (Chip(WANTED, ChipTone.ACCENT),) if wanted else ()
+            chips: tuple[Chip, ...] = (Chip(WANTED, ChipTone.ACCENT),) if wanted else ()
+            if page.query and not message.is_in_inbox:
+                chips += (Chip("Outside Inbox", ChipTone.ACCENT),)
             item.setData(
                 ROW_ROLE,
                 ActionRow(message.subject or "(no subject)", message.sender.address, chips, False),
             )
             self.messages.addItem(item)
         self.status.setText(
-            f"{page.account_email} · Inbox across all dates · "
-            f"{len(page.messages)} {'message' if len(page.messages) == 1 else 'messages'} "
-            "on this page. Cached metadata; Refresh checks Gmail."
+            f"{page.account_email} · {'All-mail search' if page.query else 'Inbox'} · "
+            f"{len(page.messages)} messages loaded. "
+            + (
+                "Showing saved metadata. Refresh checks Gmail."
+                if page.cached
+                else "Older saved entries may be stale."
+                if page.has_more
+                else "End of available results; saved entries may be stale."
+            )
+        )
+        self.refresh.setText(button_label("Refresh search" if page.query else "Refresh Inbox"))
+        self.next.setText(button_label("Retry page" if page.error_code else "Load 100 more"))
+        self.next.setAccessibleName(
+            "Retry the current message page" if page.error_code else "Load up to 100 more messages"
         )
         self.wanted_status.setText(wanted_line(page.wanted_recently))
         if page.messages:
             ids = [message.provider_message_id for message in page.messages]
             self.messages.setCurrentRow(ids.index(select) if select in ids else 0)
         else:
-            self.details.setText("No messages in the cached Inbox.")
-        self.set_busy(False)
+            self.details.setText(
+                "No matching messages." if page.query else "No Inbox messages loaded."
+            )
+        self.messages.blockSignals(False)
+        if page.messages:
+            self._select(self.messages.currentRow())
+        self.messages.verticalScrollBar().setValue(scroll)
+        self.set_busy(busy)
+
+    def _search(self) -> None:
+        self.search_requested.emit(self.search.text().strip())
+
+    def _clear_search(self) -> None:
+        self.search.clear()
+        self.search_requested.emit("")
 
     def set_zone(self, zone: ZoneInfo) -> None:
         """Redraw the current detail without changing the selected row or page."""
@@ -197,7 +260,7 @@ class InboxPanel(QWidget):
             "Remove the should-have-been-in-my-brief mark" if wanted else WANT
         )
         self.source.setEnabled(True)
-        self.wanted.setEnabled(True)
+        self.wanted.setEnabled(not self._busy)
 
     def _toggle_wanted(self) -> None:
         index = self.messages.currentRow()

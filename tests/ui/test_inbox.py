@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +14,6 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.config import Settings
 from mailbrief.domain.cached_mail import InboxPage
-from mailbrief.domain.digests import SyncProgress, SyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.errors import AuthenticationRequiredError
@@ -68,13 +67,20 @@ async def test_signin_syncs_inbox_and_disconnect_clears_account(qtbot: QtBot) ->
     calls: list[str] = []
 
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
             calls.append("inbox")
-            return await super().sync_inbox(cancel, progress)
+            return await super().browse_inbox(account_email, cancel, query=query)
 
-        async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async def inbox_messages(
+            self, account_email: str, offset: int = 0, *, query: str = ""
+        ) -> InboxPage:
             calls.append(account_email)
             return InboxPage(
                 account_email=account_email,
@@ -92,7 +98,7 @@ async def test_signin_syncs_inbox_and_disconnect_clears_account(qtbot: QtBot) ->
     qtbot.addWidget(window)
     window.connect_button.click()
     await finish(window)
-    assert calls == ["inbox", "owner@example.com"]
+    assert calls == ["owner@example.com", "inbox", "owner@example.com"]
     assert window.workspace.current_page() == "inbox"
     assert "<b>Old message</b>" in window.inbox_panel.details.text()
     assert window.inbox_panel.messages.count() == 1
@@ -110,9 +116,14 @@ async def test_failed_setup_does_not_leave_a_connected_indicator(
     qtbot: QtBot, failure: Exception
 ) -> None:
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
             raise failure
 
     window = MainWindow(Backend())
@@ -251,7 +262,9 @@ def test_show_page_selects_the_message_asked_for(qtbot: QtBot) -> None:
 
 async def test_marking_a_message_saves_it_and_keeps_it_selected(qtbot: QtBot) -> None:
     class Backend(FakeBackend):
-        async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async def inbox_messages(
+            self, account_email: str, offset: int = 0, *, query: str = ""
+        ) -> InboxPage:
             marked = frozenset(key for _, key, wanted in self.wanted_marks if wanted)
             return two_messages(wanted=marked, count=len(marked)).model_copy(
                 update={"offset": offset}

@@ -74,14 +74,24 @@ class GmailClient:
         self._auth = auth
         self._sleep = sleep
 
-    async def list_messages(self, query: str, page_token: str | None) -> dict[str, object]:
+    async def list_messages(
+        self,
+        query: str,
+        page_token: str | None,
+        *,
+        max_results: int = 100,
+        inbox_only: bool = True,
+    ) -> dict[str, object]:
+        if not 1 <= max_results <= 100:
+            raise ValueError("Invalid Gmail page size.")
         params = {
-            "labelIds": "INBOX",
             "q": query,
-            "maxResults": "100",
+            "maxResults": str(max_results),
             "includeSpamTrash": "false",
             "fields": "messages(id),nextPageToken,resultSizeEstimate",
         }
+        if inbox_only:
+            params["labelIds"] = "INBOX"
         if page_token:
             params["pageToken"] = page_token
         result = await self._get(MESSAGES_URL, httpx.QueryParams(params), missing_ok=False)

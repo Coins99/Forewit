@@ -9,6 +9,7 @@ from typing import Protocol
 
 from mailbrief.domain.bodies import MessageBody
 from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.inbox import MailboxPage
 from mailbrief.domain.messages import AccountIdentity, MessagePage, NormalizedMessage, ProviderKind
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
@@ -151,6 +152,73 @@ class GmailProvider:
         """List only Inbox metadata, with no received-date restriction."""
         async for page in self._iter_pages("", continuation):
             yield page
+
+    async def fetch_mailbox_page(
+        self, *, continuation: str | None = None, page_size: int = 50, query: str = ""
+    ) -> MailboxPage:
+        """Read exactly one bounded provider page; never fill gaps with another page."""
+        if self._account is None:
+            raise AuthenticationRequiredError("Connect Gmail before reading mail.")
+        if not 1 <= page_size <= 100:
+            raise ValueError("Invalid mailbox page size.")
+        if continuation is not None and (not continuation or len(continuation) > 4096):
+            raise response_error("Invalid Gmail continuation token.")
+        account = self._account
+        page = await self._client.list_messages(
+            query, continuation, max_results=page_size, inbox_only=not query
+        )
+        raw_ids = page.get("messages", [])
+        token = page.get("nextPageToken")
+        if (
+            not isinstance(raw_ids, list)
+            or len(raw_ids) > page_size
+            or (
+                token is not None
+                and (
+                    not isinstance(token, str)
+                    or not token
+                    or len(token) > 4096
+                    or token == continuation
+                )
+            )
+        ):
+            raise response_error("Gmail returned an invalid mailbox page.")
+        identifiers: list[str] = []
+        for item in raw_ids:
+            if not isinstance(item, dict):
+                raise response_error("Gmail returned an invalid message list.")
+            identifier = message_id(item.get("id"))
+            if identifier not in identifiers:
+                identifiers.append(identifier)
+
+        async def fetch(identifier: str) -> NormalizedMessage | str | ProviderResponseError:
+            async with self._slots:
+                try:
+                    raw = await self._client.metadata(identifier)
+                    if raw is None or _DISCARDED_LABELS & _labels(raw):
+                        return identifier
+                    message = map_metadata(raw, account)
+                    if message.provider_message_id != identifier:
+                        raise response_error("Gmail returned mismatched message metadata.")
+                    return message
+                except ProviderResponseError as exc:
+                    return exc
+
+        tasks = [asyncio.create_task(fetch(identifier)) for identifier in identifiers]
+        try:
+            results = await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return MailboxPage(
+            messages=tuple(item for item in results if isinstance(item, NormalizedMessage)),
+            continuation=token,
+            attempted=len(identifiers),
+            failed=sum(isinstance(item, ProviderResponseError) for item in results),
+            discarded_ids=frozenset(item for item in results if isinstance(item, str)),
+        )
 
     async def _iter_pages(
         self,

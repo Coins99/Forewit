@@ -94,8 +94,20 @@ class FakeBackend(FakeDrafts):
             message_count=0,
         )
 
-    async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
-        return InboxPage(account_email=account_email, offset=offset)
+    async def inbox_messages(
+        self, account_email: str, offset: int = 0, *, query: str = ""
+    ) -> InboxPage:
+        return InboxPage(account_email=account_email, offset=offset, query=query)
+
+    async def browse_inbox(
+        self,
+        account_email: str,
+        cancel: asyncio.Event,
+        *,
+        load_more: bool = False,
+        query: str = "",
+    ) -> InboxPage:
+        return await self.inbox_messages(account_email, query=query)
 
     async def search(self, text: str, account_email: str | None) -> SearchResults:
         self.searches.append((text, account_email))
