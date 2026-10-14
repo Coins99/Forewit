@@ -308,6 +308,32 @@ def test_a_long_status_never_widens_the_header(qtbot: QtBot) -> None:
     assert added.parent() is header
 
 
+def test_the_header_alert_shows_once_and_never_widens_it(qtbot: QtBot) -> None:
+    workspace = build(qtbot)
+    header = workspace.header
+    empty = header.minimumSizeHint().width()
+    assert header.alert.isHidden()
+    whole = "Inbox sync incomplete. Cached messages may be stale. " * 8
+    header.set_alert("Inbox sync incomplete", whole)
+    assert not header.alert.isHidden()
+    assert header.alert.text.text() == "Inbox sync incomplete"
+    assert header.alert.text.property("tone") == "warning"  # Bare coloured text.
+    assert header.alert.toolTip() == header.alert.accessibleDescription() == whole
+    assert header.alert.accessibleName() == "Inbox sync incomplete"
+    # Only its icon holds room; the words elide rather than widen the window.
+    layout = header.layout()
+    assert layout is not None
+    alert_layout = header.alert.layout()
+    assert alert_layout is not None
+    least = header.alert.minimumSizeHint().width()
+    assert least <= header.alert.icon.sizeHint().width() + alert_layout.spacing()
+    assert header.minimumSizeHint().width() <= empty + least + layout.spacing()
+    order = [item.widget() for index in range(layout.count()) if (item := layout.itemAt(index))]
+    assert order.index(header.status) < order.index(header.alert)  # Check time, then alert.
+    header.set_alert("")
+    assert header.alert.isHidden() and not header.alert.toolTip()
+
+
 def test_sidebar_footer_order_and_mnemonics(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     sidebar = workspace.sidebar

@@ -45,10 +45,12 @@ def wrap_label(
     px: int | None = None,
     medium: bool = False,
     semibold: bool = False,
+    line_height: float | None = None,
 ) -> "WrapLabel":
     """Like ``plain_label``, but a long unbroken token wraps instead of widening its
-    container."""
-    label = WrapLabel(text)
+    container. ``line_height`` spaces its lines that many times the font's size apart, as
+    CSS does, for reading text; without it, lines sit at the font's own spacing."""
+    label = WrapLabel(text, line_height=line_height)
     if tone is not None:
         label.setProperty("tone", tone)
     if px is not None:
@@ -206,12 +208,14 @@ class WrapLabel(QLabel):
     its line, so no unbroken string (an address, a link, a long word) widens its
     container. Its height follows its width; its accessible name is the whole text; it
     has no tooltip and no links. Layouts are cached per width for the current text and
-    font."""
+    font. With a ``line_height``, each line takes that many times the font's size, its
+    text centred in it, but never less than the font's own line."""
 
-    def __init__(self, text: str = "") -> None:
+    def __init__(self, text: str = "", *, line_height: float | None = None) -> None:
         super().__init__()
         self._layouts: dict[float, tuple[QTextLayout, float, float]] = {}
         self._layout_key: tuple[str, str] | None = None
+        self._line_height = line_height
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setWordWrap(True)
         policy = self.sizePolicy()
@@ -252,8 +256,9 @@ class WrapLabel(QLabel):
             if not line.isValid():
                 break
             line.setLineWidth(width)
-            line.setPosition(QPointF(0, height))
-            height += line.height()
+            spacing = max(line.height(), self._spacing())
+            line.setPosition(QPointF(0, height + (spacing - line.height()) / 2))
+            height += spacing
             widest = max(widest, line.naturalTextWidth())
         layout.endLayout()
         if len(self._layouts) >= _LAYOUT_CACHE:
@@ -261,8 +266,16 @@ class WrapLabel(QLabel):
         self._layouts[width] = (layout, height, widest)
         return layout, height, widest
 
+    def _spacing(self) -> float:
+        """The space a line takes with a line height; 0 without one."""
+        if self._line_height is None:
+            return 0.0
+        font = self.font()
+        size = font.pixelSize() if font.pixelSize() > 0 else QFontMetricsF(font).height()
+        return size * self._line_height
+
     def _one_line(self) -> int:
-        return math.ceil(QFontMetricsF(self.font()).height())
+        return math.ceil(max(QFontMetricsF(self.font()).height(), self._spacing()))
 
     def hasHeightForWidth(self) -> bool:
         return True

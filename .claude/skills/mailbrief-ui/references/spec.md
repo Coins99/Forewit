@@ -49,7 +49,9 @@ ITEM_PAD_X 10 by ITEM_PAD_Y 5 with no selection mark (ITEM_MARK_PX 0).
 Fonts: bundled Inter 4.001 Regular, Medium and SemiBold (`ui_font(px, medium=...,
 semibold=...)`, never both). From 15 px up, `ui_font` tracks letters tighter by Inter's
 dynamic metrics (`tracking(px)`: −0.13 px at 15, −0.33 at 20), as Apple sets display
-type; text sizes keep Inter's own spacing.
+type; text sizes keep Inter's own spacing. `tabular=True` (in `ui_font` and `ui_metrics`)
+turns on Inter's tabular figures (`tnum`), so times and counts in a column line up: the
+Inbox's dates, its count and its "1–100 of 342".
 
 ### Glass tokens
 
@@ -148,6 +150,11 @@ them.
     tinted in `text` (through `follow_theme`), drawn at the leading end, then `ICON_GAP`
     (6) and the label. Never put an icon in a tile or square. Sync and review (refresh),
     Draft a reply (pencil) and Open in Gmail (external-link) have icons.
+  - **Icon alone:** `outline_button("", name, icon_name=..., accessible_name=...,
+    glass=True)` makes a circle (`is_round()`): as wide as it is tall, the icon centred
+    with no gap, growing evenly on hover (`GROW_ROUND`, 1.6 px each side). Give it an
+    accessible name and an app-text tooltip. The Inbox's Search, Refresh, Newer, Older and
+    Close are circles.
   - **Light:** with Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
     paints every pill as glass at rest, wherever it sits: frosted (`pill`) with its
     highlight, lens and shadow, and `pill_hover` over the body as the hover rises. Its
@@ -290,7 +297,9 @@ All read colours from `current_tokens()` at paint time.
   with no fill; a cosmetic hairline at the bottom, inset 14 to line up with the text;
   with focus, a 1px cosmetic accent_fg rect inset by 1. Title and sender elide to the row
   width minus 28.
-- Shared with the run page's shortlist and the Actions page's rows: `paint_selection`,
+- Shared with the run page's shortlist, the Actions page's rows and the Inbox's rows:
+  `paint_selection`, `paint_hover` (a hovered, unselected row's fill: the selection's,
+  at `HOVER_OPACITY` 0.5), `paint_header` and `header_height` (section header rows),
   `paint_lines` (a title and a `subtitle`: a sender or a meta line), `paint_chips`,
   `paint_separator`, `row_height`, `elided`, `flat`, `SINGLE_LINE`, `ROW_PAD_V`,
   `ROW_PAD_H`, `ELIDE_MARGIN`, `CHIP_GAP`, `SELECTION_INSET_X` and `SELECTION_INSET_Y`;
@@ -312,6 +321,9 @@ All read colours from `current_tokens()` at paint time.
 wraps instead of widening its container. Line breaks in the text are kept, and the layout
 (never `text()` or the accessible name) gets a zero-width space after every `@` and `/`,
 so an address wraps after its `@` and a path after a slash before anywhere else.
+With `line_height` (a multiple of the font's pixel size, as CSS's), each line takes that
+much room, its text centred in it, never less than the font's own line: the Inbox's
+preview uses 1.5 at `READING_PX`.
 `hasHeightForWidth()` is True and `heightForWidth(w)` includes the contents margins;
 `sizeHint()` is at most 40 average characters wide with its matching height;
 `minimumSizeHint()` is 0 wide and one line high. Layouts are cached per width for the
@@ -474,7 +486,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   The status is an `ElidedLabel` (12px, secondary, `headerStatus`): it asks for its text's
   width but shrinks to nothing, so a long status never widens the header; its accessible
   name is the whole text. `set_status(text)`; an empty status hides the refresh icon,
-  which keeps its space. `add_widget(widget)` appends widgets right of the status,
+  which keeps its space. Then `HeaderAlert` (`headerAlert`): a standing problem, shown
+  once, here and nowhere else on screen: a 14px alert-circle icon and a few words
+  (`headerAlertText`, 12px, `tone="warning"`: bare coloured text, never a filled chip),
+  eliding like the status, with the whole sentence as its tooltip and accessible
+  description. `set_alert(text, detail)`; an empty text hides it. The Inbox's "Inbox sync
+  incomplete" is the one alert. `add_widget(widget)` appends widgets right of the status,
   spacing 8.
 - `SidebarNav`: objectName `sidebar`, fixed width `SIDEBAR_WIDTH`, margins 8, 12, 8, 12,
   spacing 2. A fixed-height `QListView#sidebarNav` with pages in Gmail's and Outlook's
@@ -541,6 +558,12 @@ The brief list's chips keep their shorter forms (see Brief list).
   sits on the workspace's `footer_bar` glass under the sheet: the status (a 12px
   secondary `WrapLabel`) and an outline Undo. No outer scroll area; the window opens at 1100 × 720 and its minimum
   width stays at most 900 px with the theme applied.
+- Inbox refresh (`_refresh_inbox`): a sync that stops early sets the header alert ("Inbox
+  sync incomplete", the whole sentence with the error's guidance as its detail) until a
+  later sync completes, signing out or disconnecting clears it. A quiet refresh (at
+  launch, after a run) leaves the status strip as it was; one the owner asked for also
+  says what happened there. A lost sign-in clears the alert and says so in the Inbox's
+  empty state, the sidebar's Gmail line and the status strip.
 - Header: after a run whose Inbox sync was complete or partial, when that sync finished
   (when the review opened, else when the run ended), in the owner's zone: "Checked Gmail
   at HH:MM" that day, "Checked Gmail Oct 7 at HH:MM" on a later one (`_render_checked`).
@@ -641,6 +664,86 @@ The brief list's chips keep their shorter forms (see Brief list).
   (`nextInFocusChain()`, `previousInFocusChain()`): PySide re-parents the returned
   wrapper under the widget it was called on, and deleting that widget later invalidates
   the wrapper and all its children.
+
+## Inbox page (`ui/inbox_view.py`, `ui/inbox_list.py`, `ui/inbox_reader.py`)
+
+The cached Inbox across all dates, metadata only. It starts as a list across the page, as
+Gmail shows mail; opening a message splits it as Outlook does; Close or Escape goes back.
+`InboxPanel.mode()` is "list", "split" or "reader".
+
+- `InboxPanel` (`inboxPanel`, "Gmail Inbox"), added edge to edge (no page margins): a
+  `HairlineSplitter` (`inboxSplit`) holding the list column (`inboxListColumn`) and the
+  `InboxReader`. Its layout has no size constraint and `minimumSizeHint()` is
+  `READER_MIN` (360) wide: it never holds the window wider than the reading pane alone.
+  A splitter keeps a hidden pane's room, so `_arrange()` sets the sizes in every mode.
+  - **list**: the reader hidden, the list across the page in `WIDE` rows.
+  - **split**: the list `LIST_SHARE` (38%) of the page, within `LIST_MIN` 320 and
+    `LIST_MAX` 400 (once the owner drags the divider, their width, never squeezing the
+    reader under `READER_MIN`), in `COMPACT` rows; the reader takes the rest.
+  - **reader**: a page narrower than `LIST_MIN + READER_MIN` plus the handle: the reader
+    alone takes the whole page.
+  - Opening: a click on a row, or Return or Enter on the current row (once, consumed).
+    While a message is open the reader follows the list's current row. Escape (from the
+    list or the reader) and the reader's Close go back to the list, keeping the row
+    current; the list takes focus when focus was in the reader or the reader was alone.
+    Going to the Inbox from the sidebar (`_request_page`) closes the message first.
+  - `show_page(page, select=...)` opens `select` when the page holds it; otherwise the open
+    message stays open while the page holds it, and the list's place (current row, scroll)
+    is kept when the same page reloads. `set_zone` shows the page again.
+  - Header (`inboxHeader`, `BAR_HEIGHT` 40, margins 16, 0, 10, 0): `InboxTitle`
+    (`inboxTitle`): "Inbox" `HEADING_PX` Semibold and the cached count (`page.total`,
+    12px tabular, secondary) on one baseline, accessible name "Inbox, 342 messages"; then
+    round Search (`inboxSearchButton`, opens the command palette) and Refresh
+    (`refreshInboxButton`). No status paragraph: who is signed in shows in the sidebar,
+    a sync problem in the header alert.
+  - The list (`InboxListView`) or, with no page or no messages, `EmptyInbox`
+    (`inboxEmpty`): a 48px mail glyph in `text_muted` at 45% opacity over a 13px secondary
+    line ("Sign in with Google to sync your full Inbox.", a sign-in error's guidance, or
+    "No messages in your cached Inbox. Refresh checks Gmail."), centred.
+  - Footer (`inboxFooter`, 40, hidden without messages): the range ("1–100 of 342", 12px
+    tabular secondary, `range_text`), `WantedCount` (`inboxWantedStatus`: a 12px warning
+    flag and "2 missed by the review in 14 days", elided, the whole ADR 0020 journal
+    sentence `wanted_line` as its tooltip and accessible description), then round
+    Previous 100 and Next 100 (chevrons; tooltips "Newer" and "Older").
+- Rows (`inbox_list.py`): a section header (`paint_header`, `NoItemFlags`) whenever the
+  day's section changes, in the owner's zone: Today, Yesterday, Previous 7 days (2 to 6
+  days back), Previous 30 days (7 to 29), then the month this year ("September") and the
+  year before that ("2025"). Times (`list_time`): "14:30" today and yesterday, "Sat
+  14:30" up to 6 days back, else "Oct 3" ("Sep 30, 2025" in another year).
+  - `WIDE` (40px: 12 + line + 12): a 14px gutter with a 6px `accent_fg` dot when unread;
+    the sender (13px, Semibold when unread) in a column 20% of the row, 120 to 200 px;
+    the subject (13px, Semibold when unread) then " – " and Gmail's preview in
+    text_secondary, the preview only when the whole subject fits and a few letters
+    follow; the tray; the date (12px tabular secondary) right-aligned in a fixed column
+    (`date_width()`, the widest date written).
+  - `COMPACT` (8 + 12px line + 3 + 13px line + 8): the sender (12px secondary) and the
+    date at the right; then the dot, the subject and the tray at the right.
+  - The tray (`TRAY_W`): a 14px slot each, 4 apart, kept even when empty so each mark lines
+    up down the list: the wanted flag (`warning_fg`), an attachment (paperclip) and a star
+    (both text_secondary).
+  - Hover (`paint_hover`), selection, separators and the focus ring as in the brief list.
+    Accessible text: "{subject}, from {sender}, {time}", then "unread", "Wanted in brief",
+    "has attachments", "starred".
+- Reader (`inbox_reader.py`, `inboxReader`, "Open message"): no toolbar. A scrolling body
+  (`inboxReaderScroll`, `ClickFocus`) and a pinned footer, each in one column at most
+  `COLUMN_MAX` 640 wide, centred, at least `SIDE_MARGIN` 24 from the sides:
+  1. The subject (`HEADING_PX` Semibold `WrapLabel`, dropped `SUBJECT_DROP` 6 to centre on
+     the circle) and round Close (x, "Close message", tooltip "Close (Esc)").
+  2. `Monogram` (36px circle in `selection`, the sender's initials 13px Semibold in
+     text_secondary, drawn with `drawText`), beside the sender's name (13px Medium) over
+     "address · Tue Oct 13, 16:25" (12px secondary). When `shown_name` finds no name worth
+     showing (empty, the address, or holding "@"), the address alone, then the date: a
+     name never stands in for the address.
+  3. Gmail's preview, `READING_PX` with `line_height` 1.5 ("Gmail has no preview of this
+     email." in secondary without one), then "Gmail's short preview. Open in Gmail to read
+     the whole email." (12px secondary).
+  4. When marked, the Wanted in brief card (`HairlineFrame`): a 16px warning flag, "Wanted
+     in brief" 13px Medium and the note, 12px secondary.
+  5. Footer: a `HairlineDivider` across the column, then Open in Gmail (external-link,
+     `inboxSourceButton`) and Should have been in my brief / Remove mark
+     (`inboxWantedButton`), glass pills, side by side when they fit the column, else one
+     above the other (`_fit_actions`). Neither is primary: Sync and review is the
+     window's one primary.
 
 ## Your day (`ui/today_view.py`)
 

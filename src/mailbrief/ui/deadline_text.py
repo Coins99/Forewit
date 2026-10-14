@@ -28,6 +28,21 @@ MONTHS: Final = (
     "Nov",
     "Dec",
 )
+# Month names in full, for headings such as the Inbox's "September".
+MONTH_NAMES: Final = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 
 
 def weekday(day: date) -> str:

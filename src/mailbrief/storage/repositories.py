@@ -376,6 +376,15 @@ class MessageRepository:
         rows = list(result.all())
         return rows[:page_size], len(rows) > page_size
 
+    async def count_inbox(self, account_id: int) -> int:
+        """How many messages the account's cached Inbox holds, across all dates."""
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(MessageTable)
+            .where(MessageTable.account_id == account_id, MessageTable.is_in_inbox.is_(True))
+        )
+        return count or 0
+
     async def inbox_position(self, account_id: int, provider_message_id: str) -> int | None:
         """Where a message is in get_inbox_page's order (newest first, then by ID), counting
         from 0; None when it isn't in the cached Inbox."""

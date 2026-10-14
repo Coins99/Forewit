@@ -86,6 +86,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
   reference, in the system's light or dark mode unless Settings > Appearance keeps one.
   The Actions page follows it: painted action rows beside the selected action's detail.
+  The Inbox page starts as a list across the page, as Gmail's does, and opening a message
+  splits it into the list and a reading pane, as Outlook's does (the reading pane alone on
+  a narrow window); a sync that stops early shows once, as the header's alert.
 - Ranking signals (ADR 0020) implemented, awaiting live acceptance: Gmail's category tabs,
   stars and bulk-mail headers, important senders (Settings > Preferences, `preferences
   show`), and what the owner's own choices of the last 90 days say about each sender;
@@ -161,7 +164,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   choice is saved in `appearance.json` beside the database by `appearance.py`, never in
   `desktop-settings.json`, which older builds would refuse) and the Briefs page for saved briefs and missed
   days (`history_view.py`), the Proposals dialog for one action and the wording of a
-  proposal's effect (`proposals_view.py`); `lists.py` holds `ActivatingList`, where
+  proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
+  day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
+  `ActivatingList`, where
   Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
 - `ui/glass/`: Liquid Glass: `backdrop.py` paints the backdrop
@@ -445,9 +450,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Use the `/mailbrief-ui` skill (`.claude/skills/mailbrief-ui/`) for any change under
   `src/mailbrief/ui`.
 - Colours come only from `ui/theme/tokens.py`; mail and AI text only through
-  `plain_label()`, `wrap_label()`, a delegate's `drawText()` or a glass pill's label
-  (`GlassButton` paints its `button_label()` text with `drawText()`, plain, mnemonics
-  hidden); button text through `button_label()`.
+  `plain_label()`, `wrap_label()`, a delegate's or a painted widget's `drawText()` (the
+  Inbox's monogram) or a glass pill's label (`GlassButton` paints its `button_label()`
+  text with `drawText()`, plain, mnemonics hidden); button text through `button_label()`.
 - Render the screenshot gallery with
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
   and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
