@@ -219,6 +219,8 @@ class DesktopRuntime:
             await self._signed_out()  # Expired, revoked or never made: no Google data.
             raise
         await self._forget_legacy_calendar_sign_in()
+        self._inbox_generation += 1
+        self._inbox_browse.clear()
         return identity.email_address
 
     async def _signed_out(self) -> None:
@@ -528,54 +530,55 @@ class DesktopRuntime:
         )
         generation = self._inbox_generation
         settings = (await self.get_preferences()).settings()
-        async with (
-            gmail_provider(settings, silent_only=True) as provider,
-            self._storage().session() as session,
-        ):
-            identity = await provider.connect()
-            if identity.email_address != account_email:
-                raise AuthenticationRequiredError(
-                    "The connected Gmail account changed. Sign in again."
+        try:
+            async with (
+                gmail_provider(settings, silent_only=True) as provider,
+                self._storage().session() as session,
+            ):
+                identity = await provider.connect()
+                if identity.email_address != account_email:
+                    raise AuthenticationRequiredError(
+                        "The connected Gmail account changed. Sign in again."
+                    )
+                account = await AccountRepository(session).upsert(identity)
+                await session.commit()
+                page = await InboxService(session, provider).load_page(
+                    account.id,
+                    cancel,
+                    continuation=state.continuation,
+                    page_size=100 if load_more and state.continuation is not None else 50,
+                    query=query,
                 )
-            account = await AccountRepository(session).upsert(identity)
-            await session.commit()
-            if not state.identifiers and not query:
-                rows, _ = await MessageRepository(session).get_inbox_page(account.id, page_size=50)
-                state.identifiers.update(row.provider_message_id for row in rows)
-            page = await InboxService(session, provider).load_page(
-                account.id,
-                cancel,
-                continuation=state.continuation,
-                page_size=100 if load_more and state.continuation is not None else 50,
-                query=query,
-            )
-            if generation != self._inbox_generation or cancel.is_set():
-                raise asyncio.CancelledError
-            if page.continuation is not None and page.continuation in state.tokens:
-                raise ProviderResponseError(
-                    "Gmail repeated a pagination cursor. Refresh to restart."
-                )
-            state.identifiers.update(message.provider_message_id for message in page.messages)
-            state.identifiers.difference_update(page.discarded_ids)
-            if previous is None and not query:
-                rows = await MessageRepository(session).get_by_provider_ids(
-                    account.id, state.identifiers
-                )
-                rows = [row for row in rows if row.is_in_inbox]
-                rows.sort(key=lambda row: (-row.received_at_utc.timestamp(), row.id))
-                state.identifiers = {row.provider_message_id for row in rows[:50]}
-            if page.failed:
-                # Retry this page rather than skip IDs whose metadata could not be read.
-                state.error_code = "METADATA_ITEMS_FAILED"
-            else:
-                state.continuation = page.continuation
-                state.has_more = page.continuation is not None
-                if page.continuation is not None:
-                    state.tokens.add(page.continuation)
-            if generation != self._inbox_generation or cancel.is_set():
-                raise asyncio.CancelledError
-            self._inbox_browse[key] = state
-        return await self.inbox_messages(account_email, query=query)
+        except AuthenticationRequiredError:
+            await self._signed_out()
+            raise
+        if generation != self._inbox_generation or cancel.is_set():
+            raise asyncio.CancelledError
+        if page.failed and not page.messages:
+            raise ProviderResponseError("Gmail couldn't read this message page. Retry the page.")
+        if page.continuation is not None and page.continuation in state.tokens:
+            raise ProviderResponseError("Gmail repeated a pagination cursor. Refresh to restart.")
+        state.identifiers.update(message.provider_message_id for message in page.messages)
+        state.identifiers.difference_update(page.discarded_ids)
+        if page.failed:
+            # Retry this page rather than skip IDs whose metadata could not be read.
+            state.error_code = "METADATA_ITEMS_FAILED"
+        else:
+            state.continuation = page.continuation
+            state.has_more = page.continuation is not None
+            if page.continuation is not None:
+                state.tokens.add(page.continuation)
+        self._inbox_browse[key] = state
+        result = await self.inbox_messages(account_email, query=query)
+        if generation != self._inbox_generation or cancel.is_set():
+            raise asyncio.CancelledError
+        if query:
+            # Only Inbox and the active search need pagination history. Publish the new
+            # snapshot before dropping older search state, so failed reads remain retryable.
+            for saved_key in tuple(self._inbox_browse):
+                if saved_key[0] == account_email and saved_key[1] and saved_key != key:
+                    del self._inbox_browse[saved_key]
+        return result
 
     async def inbox_messages(
         self, account_email: str, offset: int = 0, *, query: str = ""

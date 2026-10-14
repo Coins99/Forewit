@@ -19,6 +19,7 @@ from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     ProviderContinuationError,
     ProviderError,
+    ProviderResponseError,
 )
 from mailbrief.providers.gmail.client import MESSAGES_URL, GmailClient
 from mailbrief.providers.gmail.provider import GmailProvider
@@ -343,6 +344,245 @@ async def test_initial_display_stays_50_with_large_cache_and_new_arrivals(
     older = await backend.inbox_messages("me@example.com", offset=100)
     assert len(older.messages) == 100 and older.has_more
     assert len((await backend.inbox_messages("me@example.com")).messages) == 150
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_stale_newer_cache_cannot_hide_fresh_first_page(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+    failed: bool,
+) -> None:
+    async with backend._storage().session() as session:
+        account = await AccountRepository(session).upsert(ACCOUNT)
+        await MessageRepository(session).upsert_messages(
+            account.id,
+            [make_message(provider_message_id=f"stale{i}", received_at_utc=NOW) for i in range(50)],
+        )
+        await session.commit()
+    listing = respx_mock.get(MESSAGES_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"messages": [{"id": "fresh"}], "nextPageToken": "older"}),
+            httpx.Response(200, json={"messages": [{"id": "fresh"}], "nextPageToken": "older"}),
+        ]
+    )
+    respx_mock.get(MESSAGES_URL + "/fresh").mock(
+        side_effect=[
+            httpx.Response(
+                200, json={} if failed else metadata("fresh", received=NOW - timedelta(days=90))
+            ),
+            httpx.Response(200, json=metadata("fresh", received=NOW - timedelta(days=90))),
+        ]
+    )
+    if failed:
+        with pytest.raises(ProviderResponseError):
+            await backend.browse_inbox("me@example.com", asyncio.Event())
+        first = await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=True)
+        assert "pageToken" not in listing.calls[1].request.url.params
+    else:
+        first = await backend.browse_inbox("me@example.com", asyncio.Event())
+    assert [message.provider_message_id for message in first.messages] == ["fresh"]
+    async with backend._storage().session() as session:
+        rows, more = await MessageRepository(session).get_inbox_page(account.id)
+        assert len(rows) == 51 and not more  # Cache retention is independent of display selection.
+
+
+async def test_empty_fresh_first_page_does_not_present_cached_ghosts_as_results(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+) -> None:
+    async with backend._storage().session() as session:
+        account = await AccountRepository(session).upsert(ACCOUNT)
+        await MessageRepository(session).upsert_messages(account.id, [make_message()])
+        await session.commit()
+    respx_mock.get(MESSAGES_URL).respond(json={"messages": []})
+    fresh = await backend.browse_inbox("me@example.com", asyncio.Event())
+    assert not fresh.messages and not fresh.has_more
+    async with backend._storage().session() as session:
+        rows, _ = await MessageRepository(session).get_inbox_page(account.id)
+        assert len(rows) == 1
+
+
+async def test_only_active_search_and_inbox_retain_pagination_history(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get(MESSAGES_URL).respond(json={"messages": []})
+    await backend.browse_inbox("me@example.com", asyncio.Event())
+    for query in ("first", "second", "third"):
+        await backend.browse_inbox("me@example.com", asyncio.Event(), query=query)
+        assert set(backend._inbox_browse) == {("me@example.com", ""), ("me@example.com", query)}
+    # A background Inbox refresh must retain the visible search's continuation.
+    await backend.browse_inbox("me@example.com", asyncio.Event())
+    assert ("me@example.com", "third") in backend._inbox_browse
+
+
+async def test_failed_search_can_return_to_inbox(qtbot: QtBot) -> None:
+    class Backend(FakeBackend):
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
+            if query:
+                raise ProviderError("synthetic failure")
+            return await super().browse_inbox(account_email, cancel)
+
+    window = MainWindow(Backend())
+    qtbot.addWidget(window)
+    window._set_account("owner@example.com")
+    window.inbox_panel.show_page(InboxPage(account_email="owner@example.com"))
+    window.inbox_panel.search.setText("invoice")
+    window.inbox_panel.search_button.click()
+    await finish(window)
+    assert "Couldn't load mail" in window.inbox_panel.sync_status.text()
+    assert not window.inbox_panel.clear_search.isHidden()
+    window.inbox_panel.clear_search.click()
+    await finish(window)
+    assert window.inbox_panel.search.text() == ""
+    assert window.inbox_panel.clear_search.isHidden()
+
+
+def test_clear_resets_search_and_retry_button_labels(qtbot: QtBot) -> None:
+    panel = InboxPanel()
+    qtbot.addWidget(panel)
+    panel.show_page(
+        InboxPage(
+            account_email="me@example.com",
+            query="invoice",
+            has_more=True,
+            error_code="METADATA_ITEMS_FAILED",
+        )
+    )
+    assert panel.refresh.text() == "Refresh search" and panel.next.text() == "Retry page"
+    panel.clear()
+    assert panel.refresh.text() == "Refresh Inbox" and panel.next.text() == "Load 100 more"
+    assert panel.clear_search.isHidden()
+
+
+async def test_reconnect_discards_old_browsing_cursors(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+) -> None:
+    listing = respx_mock.get(MESSAGES_URL).respond(
+        json={
+            "messages": [{"id": "a"}],
+            "nextPageToken": "older",
+        }
+    )
+    respx_mock.get(MESSAGES_URL + "/a").respond(json=metadata("a"))
+    await backend.browse_inbox("me@example.com", asyncio.Event())
+    generation = backend._inbox_generation
+    backend._legacy_checked = True  # Never touch the real OS vault in a test.
+    assert await backend.connect(silent_only=False) == "me@example.com"
+    assert not backend._inbox_browse and backend._inbox_generation > generation
+    await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=True)
+    assert "pageToken" not in listing.calls[1].request.url.params
+    assert listing.calls[1].request.url.params["maxResults"] == "50"
+
+
+async def test_authentication_loss_clears_runtime_browsing_and_calendar_access(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get(MESSAGES_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"messages": [{"id": "a"}], "nextPageToken": "older"}),
+            httpx.Response(401),
+            httpx.Response(401),
+        ]
+    )
+    respx_mock.get(MESSAGES_URL + "/a").respond(json=metadata("a"))
+    await backend.browse_inbox("me@example.com", asyncio.Event())
+    backend._calendar_allowed = True
+    with pytest.raises(AuthenticationRequiredError):
+        await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=True)
+    assert not backend._inbox_browse and await backend.calendar_allowed() is None
+    saved = await backend.inbox_messages("me@example.com")
+    assert saved.cached and len(saved.messages) == 1
+
+
+@pytest.mark.parametrize("operation", ["connect", "startup", "automatic"])
+async def test_workflows_stop_after_inbox_authentication_loss(qtbot: QtBot, operation: str) -> None:
+    class Backend(FakeBackend):
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
+            raise AuthenticationRequiredError("synthetic expiration")
+
+    backend = Backend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    if operation == "connect":
+        window.start(window._connect)
+    elif operation == "startup":
+        window.start(window.initialize)
+    else:
+        window._set_account("owner@example.com")
+        window.start(window._automatic_refresh)
+    await finish(window)
+    await window.drain_calendar_reads()
+    assert window._account_email is None
+    assert window._calendar_allowed is None
+    assert backend.automatic_calls == 0
+    assert not backend.permission_accounts
+    assert window.inbox_panel.messages.count() == 0
+
+
+@pytest.mark.parametrize("continuation", [False, True])
+async def test_all_metadata_failures_preserve_cached_display_and_retry_cursor(
+    backend: DesktopRuntime,
+    respx_mock: respx.MockRouter,
+    continuation: bool,
+) -> None:
+    async with backend._storage().session() as session:
+        account = await AccountRepository(session).upsert(ACCOUNT)
+        await MessageRepository(session).upsert_messages(
+            account.id, [make_message(provider_message_id="saved")]
+        )
+        await session.commit()
+    initial = {"messages": [{"id": "a"}], "nextPageToken": "older"}
+    subsequent = {"messages": [{"id": "b"}]}
+    listing = respx_mock.get(MESSAGES_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=initial),
+            httpx.Response(200, json=subsequent if continuation else initial),
+            *([httpx.Response(200, json=subsequent)] if continuation else []),
+        ]
+    )
+    respx_mock.get(MESSAGES_URL + "/a").mock(
+        side_effect=(
+            [httpx.Response(200, json=metadata("a"))]
+            if continuation
+            else [httpx.Response(200, json={}), httpx.Response(200, json=metadata("a"))]
+        )
+    )
+    if continuation:
+        respx_mock.get(MESSAGES_URL + "/b").mock(
+            side_effect=[
+                httpx.Response(200, json={}),
+                httpx.Response(200, json=metadata("b")),
+            ]
+        )
+        await backend.browse_inbox("me@example.com", asyncio.Event())
+    before = await backend.inbox_messages("me@example.com")
+    with pytest.raises(ProviderResponseError, match="Retry the page"):
+        await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=continuation)
+    assert await backend.inbox_messages("me@example.com") == before
+    retry = await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=True)
+    assert {message.provider_message_id for message in retry.messages} == (
+        {"a", "b"} if continuation else {"a"}
+    )
+    assert listing.calls[-1].request.url.params.get("pageToken") == (
+        "older" if continuation else None
+    )
 
 
 @pytest.mark.parametrize("mode", [ThemeMode.LIGHT, ThemeMode.DARK])

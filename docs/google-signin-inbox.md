@@ -13,6 +13,9 @@ when mail disappears or leaves the Inbox. Messages are displayed newest first am
 the loaded metadata. **Refresh Inbox** starts at the latest page, preserving already
 loaded entries and selection. Older saved entries may be stale.
 
+The first fresh provider page replaces the startup preview; it cannot be hidden by
+newer stale cached entries. Unobserved cache records are retained for Saved mail.
+
 **Search all mail** searches Gmail across dates, including mail outside the Inbox.
 Submit with Search or Enter; results have their own 50/100 limits and continuation.
 Outside-Inbox results are labelled. **Back to Inbox** clears the search. This requires
@@ -35,6 +38,10 @@ failures keep the current cursor for **Retry page**; request failures retain dis
 rows. An expired cursor can be restarted with Refresh. Browsing cursors are scoped
 to account and query in memory, so restart begins at the latest page. Metadata alone
 persists in SQLite. No new migration is needed.
+
+Reconnect resets browsing cursors. Authentication loss clears connected Google access
+and stops subsequent connection/automatic workflows. Each page fetch has a 180-second
+deadline, and metadata IDs must match the requested IDs before any cache removal.
 
 The existing full-scan service remains available separately. Only a complete,
 error-free full scan reconciles all-date membership; its persistent checkpoints

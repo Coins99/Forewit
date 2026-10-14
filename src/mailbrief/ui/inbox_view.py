@@ -140,6 +140,7 @@ class InboxPanel(QWidget):
         self.search.returnPressed.connect(self._search)
         self.search_button.clicked.connect(self._search)
         self.clear_search.clicked.connect(self._clear_search)
+        self.search.textChanged.connect(self._update_search_controls)
         self.messages.currentRowChanged.connect(self._select)
         self.source.clicked.connect(self._open_source)
         self.wanted.clicked.connect(self._toggle_wanted)
@@ -158,6 +159,9 @@ class InboxPanel(QWidget):
         self.search.clear()
         self.sync_status.clear()
         self.wanted_status.clear()
+        self.refresh.setText(button_label("Refresh Inbox"))
+        self.next.setText(button_label("Load 100 more"))
+        self.next.setAccessibleName("Load up to 100 more messages")
         self.set_busy(False)
 
     def set_busy(self, busy: bool) -> None:
@@ -167,7 +171,7 @@ class InboxPanel(QWidget):
         self.search.setEnabled(not busy)
         self.search_button.setEnabled(not busy)
         self.clear_search.setEnabled(not busy)
-        self.clear_search.setVisible(self._page is not None and bool(self._page.query))
+        self._update_search_controls()
         self.source.setEnabled(self.messages.currentRow() >= 0)
         self.wanted.setEnabled(not busy and self.messages.currentRow() >= 0)
 
@@ -199,7 +203,7 @@ class InboxPanel(QWidget):
             self.messages.addItem(item)
         self.status.setText(
             f"{page.account_email} · {'All-mail search' if page.query else 'Inbox'} · "
-            f"{len(page.messages)} messages loaded. "
+            f"{len(page.messages)} {'message' if len(page.messages) == 1 else 'messages'} loaded. "
             + (
                 "Showing saved metadata. Refresh checks Gmail."
                 if page.cached
@@ -229,6 +233,11 @@ class InboxPanel(QWidget):
 
     def _search(self) -> None:
         self.search_requested.emit(self.search.text().strip())
+
+    def _update_search_controls(self) -> None:
+        self.clear_search.setVisible(
+            bool(self.search.text().strip()) or (self._page is not None and bool(self._page.query))
+        )
 
     def _clear_search(self) -> None:
         self.search.clear()

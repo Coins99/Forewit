@@ -3023,6 +3023,8 @@ class MainWindow(QMainWindow):
             self._set_account(email)
             self.connection.setText(f"Gmail: connected as {email}")
             await self._refresh_inbox(quiet=True)
+            if self._account_email != email or self._cancel.is_set():
+                return
             await self._load_calendar_access()
             await self._refresh_calendar()
             self._launch_soon()
@@ -3043,6 +3045,8 @@ class MainWindow(QMainWindow):
         if origin == "today":
             self._show_page_unless_moved(origin, "inbox")
         await self._refresh_inbox()
+        if self._account_email != email or self._cancel.is_set():
+            return
         await self._load_calendar_access()
         await self._refresh_calendar()
         if self._calendar_allowed:
@@ -3128,6 +3132,8 @@ class MainWindow(QMainWindow):
         except (ConfigurationError, AuthenticationRequiredError) as exc:
             self._set_account(None)
             self.inbox_panel.clear()
+            self._calendar_allowed = None
+            self._read_calendar()
             guidance = (
                 configuration_guidance(exc)
                 if isinstance(exc, ConfigurationError)
@@ -3370,7 +3376,7 @@ class MainWindow(QMainWindow):
         self.status.setText(_AUTOMATIC + "checking Gmail…")
         try:
             await self._refresh_inbox(quiet=True)
-            if self._cancel.is_set():
+            if self._cancel.is_set() or self._account_email is None:
                 return
             result = await self.backend.generate_automatic(self._cancel, self._progress)
             await self._automatic_finished(result)

@@ -15,16 +15,23 @@ sync, without a preceding all-date Inbox scan.
   bounded reader. The Gmail adapter validates page size, IDs and cursor before reading
   metadata, keeping the existing five-request concurrency and cancellable retries.
 - `services/inbox.py` commits metadata and directly observed removals. It never
-  reconciles messages simply because they were absent from a limited page.
+  reconciles messages simply because they were absent from a limited page. The whole
+  page fetch has a 180-second deadline in addition to individual request limits.
 - `ui/runtime.py` advances the browsing cursor only after persistence succeeds.
   State is isolated by account and query. Failed metadata retries the same page;
-  repeated cursors are rejected. Generation guards discard results after sign-out.
+  repeated cursors are rejected. Generation guards discard results after sign-out,
+  and reconnect starts a new browsing session. Authentication loss clears Google
+  access and prevents downstream automatic or connection workflows from continuing.
+- The initial cached page is a preview: the first successful provider page replaces it
+  in the display, without deleting unobserved cached records. Newer stale cache entries
+  cannot crowd out older current-Inbox messages after the remote cursor advances.
 - The Inbox appends and deduplicates loaded entries, preserving selection and scroll.
   Refresh starts from the latest page while retaining previously loaded Inbox entries.
 - All-mail search submits an explicit Gmail query without the INBOX label restriction,
   with its own pagination state. Non-Inbox results are labelled. Trash/Spam metadata
   is discarded, and neither browsing nor search downloads bodies or attachments or
   calls AI. The existing command palette continues to search local saved records only.
+  Only Inbox and the active search retain browsing history in memory.
 
 Browsing state is deliberately in memory. SQLite already persists normalized metadata;
 restart displays its cached first page and refreshes from latest. Persisting a remote
@@ -76,3 +83,16 @@ Local validation on 2026-10-13:
 Run `uv sync --locked --all-groups` in this checkout for its own environment. When
 borrowing another checkout's Python environment, set `PYTHONPATH` to the absolute
 `src` directory here so subprocess checks use the same source as pytest.
+
+Review validation on 2026-10-14:
+
+- Full suite with the correct source path: 4,035 passed, four platform/intentional skips.
+- After the final total-metadata-failure guard, the affected desktop, runtime, provider
+  and sync tests passed: 270 tests. Cached display and the retry cursor remain intact
+  when every metadata request fails.
+- Combined coverage after the final rerun: 96.47%; all service modules meet 90%.
+- Ruff lint/format and Windows/macOS mypy checks pass.
+- Screenshot checks passed 126 tests with one intentional skip at each scale; Inbox,
+  all-mail search and workspace renders were inspected in light/dark at 1x and 2x.
+
+Findings and fixes are recorded in [the review](inbox-loading-review.md).

@@ -888,3 +888,28 @@ async def test_bounded_browsing_preserves_unobserved_cache_and_cancellation(
         assert {r.provider_message_id for r in rows} == {"unobserved", "new"}
         assert await repo.get_by_provider_message_id(test_account, "archived") is not None
         assert await repo.get_by_provider_message_id(test_account, "discarded") is None
+
+
+async def test_bounded_browsing_timeout_preserves_cache(
+    async_session: AsyncSession,
+    test_account: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mailbrief.services import inbox as inbox_module
+
+    monkeypatch.setattr(inbox_module, "MAX_RUN_WORK_SECONDS", 0)
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [make_message()])
+    await async_session.commit()
+
+    class Reader:
+        async def fetch_mailbox_page(
+            self, *, continuation: str | None = None, page_size: int = 50, query: str = ""
+        ) -> MailboxPage:
+            await asyncio.sleep(0)
+            return MailboxPage()
+
+    with pytest.raises(ProviderResponseError, match="timed out"):
+        await InboxService(async_session, Reader()).load_page(test_account, asyncio.Event())
+    rows, _ = await repo.get_inbox_page(test_account)
+    assert len(rows) == 1

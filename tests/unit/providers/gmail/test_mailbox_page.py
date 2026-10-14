@@ -122,3 +122,21 @@ async def test_cancellation_joins_metadata_tasks(respx_mock: respx.MockRouter) -
         with pytest.raises(asyncio.CancelledError):
             await task
         assert finished.is_set()
+
+
+@pytest.mark.parametrize("identifier", [None, "wrong"])
+@pytest.mark.parametrize("label", ["TRASH", "SPAM"])
+async def test_mismatched_discarded_metadata_cannot_delete_requested_cache_entry(
+    respx_mock: respx.MockRouter,
+    identifier: str | None,
+    label: str,
+) -> None:
+    respx_mock.get(MESSAGES_URL).respond(json={"messages": [{"id": "requested"}]})
+    respx_mock.get(MESSAGES_URL + "/requested").respond(
+        json={"id": identifier, "labelIds": [label]}
+    )
+    async with httpx.AsyncClient() as http:
+        provider = GmailProvider(FakeSession(), GmailClient(http, FakeSession()))
+        await provider.connect()
+        page = await provider.fetch_mailbox_page()
+    assert page.failed == 1 and not page.discarded_ids and not page.messages

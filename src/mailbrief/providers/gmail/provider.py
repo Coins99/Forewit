@@ -195,7 +195,11 @@ class GmailProvider:
             async with self._slots:
                 try:
                     raw = await self._client.metadata(identifier)
-                    if raw is None or _DISCARDED_LABELS & _labels(raw):
+                    if raw is None:
+                        return identifier
+                    if raw.get("id") != identifier:
+                        raise response_error("Gmail returned mismatched message metadata.")
+                    if _DISCARDED_LABELS & _labels(raw):
                         return identifier
                     message = map_metadata(raw, account)
                     if message.provider_message_id != identifier:
