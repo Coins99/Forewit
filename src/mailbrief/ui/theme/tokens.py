@@ -369,7 +369,7 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
     # Liquid Glass after WWDC25, over a fluid colour field after monopo saigon: three soft
     # pools of sage, amber and rose light behind frosted chrome, with no streak, sheen or
     # lit edge. Every pill, wherever it sits, is frosted at rest with a specular rim, a
-    # lensing band and a soft shadow, as the sidebar's Disconnect is. The selected page is
+    # lensing band and a soft shadow, as Disconnect in Settings is. The selected page is
     # a vibrant white fill with no rim (no glass on glass); the primary pill is solid blue
     # with white text.
     (ColorScheme.STUDIO, ThemeMode.DARK): GlassTokens(

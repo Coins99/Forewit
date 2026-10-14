@@ -90,6 +90,8 @@ from mailbrief.ui.theme import (
 ACTIVE_RAISE: Final = 0.6
 # The app's name in the header, Semibold.
 TITLE_BAR_PX: Final = 15
+# The header alert's icon (logical px).
+_ALERT_ICON_PX: Final = 14
 # The glass between the sheet and the window's right edge (logical px).
 SHEET_GUTTER: Final = 8
 
@@ -212,6 +214,42 @@ class _StatusLabel(ElidedLabel):
         return QSize(width + margins.left() + margins.right(), super().sizeHint().height())
 
 
+class HeaderAlert(QWidget):
+    """A standing problem, shown once, in the header: an alert icon and a few words in the
+    warning colour, as Studio shows status (bare coloured text, never a filled chip). The
+    whole sentence is its tooltip and accessible description. Hidden without one."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("headerAlert")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.icon = QLabel()
+        self.icon.setObjectName("headerAlertIcon")
+        follow_theme(
+            self.icon,
+            lambda: self.icon.setPixmap(
+                icon_pixmap("alert-circle", current_tokens().warning_fg, _ALERT_ICON_PX, 2.0)
+            ),
+        )
+        layout.addWidget(self.icon)
+        self.text = _StatusLabel(tone="warning", px=SMALL_PX)
+        self.text.setObjectName("headerAlertText")
+        layout.addWidget(self.text)
+        self.set_alert("")
+
+    def set_alert(self, text: str, detail: str = "") -> None:
+        """Show ``text``, with ``detail`` (else the text) as the whole sentence; an empty
+        text hides the alert."""
+        whole = detail or text
+        self.text.setText(text, whole)
+        self.setToolTip(whole)
+        self.setAccessibleName(text)
+        self.setAccessibleDescription(whole)
+        self.setVisible(bool(text))
+
+
 class GlassChrome(QWidget):
     """The header and sidebar: Liquid Glass over the part of ``workspace``'s backdrop that
     lies behind them. Their stylesheet background is transparent."""
@@ -327,6 +365,10 @@ class HeaderBar(GlassChrome):
         self.status = _StatusLabel(tone="secondary", px=SMALL_PX)
         self.status.setObjectName("headerStatus")
         layout.addWidget(self.status)
+        # After the check time and before the window's buttons, as the one place a standing
+        # problem shows.
+        self.alert = HeaderAlert()
+        layout.addWidget(self.alert)
         # Widgets the window adds, right of the status: 2 + the layout's 6 makes 8.
         self._slots = QHBoxLayout()
         self._slots.setContentsMargins(2, 0, 0, 0)
@@ -338,6 +380,11 @@ class HeaderBar(GlassChrome):
         """Show ``text``; the refresh icon shows only beside a status."""
         self.status.setText(text)
         self.refresh_icon.setVisible(bool(text))
+
+    def set_alert(self, text: str, detail: str = "") -> None:
+        """Show a standing problem in a few words, ``detail`` being the whole sentence; an
+        empty ``text`` clears it."""
+        self.alert.set_alert(text, detail)
 
     def add_widget(self, widget: QWidget) -> None:
         """Append ``widget`` right of the status."""

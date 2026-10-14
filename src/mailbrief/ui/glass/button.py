@@ -40,9 +40,10 @@ ICON_GAP: Final = 6
 ROOM_X: Final = 3
 ROOM_Y: Final = 3
 # How far a hovered pill grows, each side; the hover spring overshoots by about a tenth,
-# still inside the room.
+# still inside the room. An icon alone is a circle, and grows evenly.
 GROW_X: Final = 2.4
 GROW_Y: Final = 0.8
+GROW_ROUND: Final = 1.6
 FOCUS_WIDTH: Final = 2.0  # The focus ring, inside the pill's edge.
 PRESSED_SCALE: Final = 0.97
 DISABLED_OPACITY: Final = 0.5
@@ -53,7 +54,7 @@ HOVER_OUT_MS: Final = 200
 
 
 class GlassButton(QPushButton):
-    """A pill of glass with its text and icon centred.
+    """A pill of glass with its text and icon centred; an icon with no text makes a circle.
 
     Hovering animates in, as Apple's glass does: the pill grows a little on a spring, a
     glow starts inside its edge under the pointer and spreads round it, and its rim lights
@@ -103,19 +104,24 @@ class GlassButton(QPushButton):
         """The text as painted: mnemonic markers dropped and ``&&`` shown as ``&``."""
         return self.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
 
+    def is_round(self) -> bool:
+        """An icon with no text: the pill is a circle."""
+        return not self._shown_text() and not self.icon().isNull()
+
     def _content_width(self) -> float:
-        """The pill's width for its content: the padding, the icon and the label."""
+        """The pill's width for its content: the padding, the icon and the label, with the
+        gap between them only when there are both."""
         text = QFontMetricsF(self.font()).horizontalAdvance(self._shown_text())
         width = text + 2 * PAD_X
         if not self.icon().isNull():
-            width += self.iconSize().width() + ICON_GAP
+            width += self.iconSize().width() + (ICON_GAP if text else 0)
         return width
 
     def sizeHint(self) -> QSize:
         metrics = QFontMetricsF(self.font())
-        height = metrics.height() + 2 * PAD_Y
-        width = self._content_width()
-        return QSize(math.ceil(width + 2 * ROOM_X), math.ceil(height + 2 * ROOM_Y))
+        height = math.ceil(metrics.height() + 2 * PAD_Y)
+        width = height if self.is_round() else self._content_width()
+        return QSize(math.ceil(width + 2 * ROOM_X), height + 2 * ROOM_Y)
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
@@ -205,8 +211,9 @@ class GlassButton(QPushButton):
         while pressed."""
         rect = QRectF(self.rect()).adjusted(ROOM_X, ROOM_Y, -ROOM_X, -ROOM_Y)
         if self.isEnabled() and not glass_preferences().reduce_motion and self._hover:
-            grow_x = min(GROW_X * self._hover, ROOM_X)
-            grow_y = min(GROW_Y * self._hover, ROOM_Y)
+            round_ = self.is_round()
+            grow_x = min((GROW_ROUND if round_ else GROW_X) * self._hover, ROOM_X)
+            grow_y = min((GROW_ROUND if round_ else GROW_Y) * self._hover, ROOM_Y)
             rect.adjust(-grow_x, -grow_y, grow_x, grow_y)
         if self._scale != 1.0:
             centre = rect.center()
@@ -265,7 +272,7 @@ class GlassButton(QPushButton):
         metrics = QFontMetricsF(self.font())
         text_width = metrics.horizontalAdvance(self._shown_text())
         icon_width = 0 if self.icon().isNull() else self.iconSize().width()
-        gap = ICON_GAP if icon_width else 0
+        gap = ICON_GAP if icon_width and text_width else 0
         left = rect.center().x() - (icon_width + gap + text_width) / 2
         if icon_width:
             size = self.iconSize()

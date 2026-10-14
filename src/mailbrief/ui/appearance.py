@@ -1,4 +1,5 @@
-"""The owner's colour scheme, light or dark mode and glass choices, saved on this device.
+"""The owner's colour scheme, light or dark mode, glass choices and Calendar view, saved
+on this device.
 
 It lives in its own file rather than desktop-settings.json, whose model forbids unknown
 fields: an older build would refuse its whole settings file over a field it doesn't know.
@@ -24,6 +25,7 @@ from pydantic import (
 from PySide6.QtCore import QObject, Signal
 
 from mailbrief.infra.files import write_text_atomically
+from mailbrief.ui.calendar_layout import CalendarView
 from mailbrief.ui.diagnostics import log_failure
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.theme import DEFAULT_SCHEME, ColorScheme, ThemeMode
@@ -51,8 +53,9 @@ class Appearance(BaseModel):
     mode: ModeChoice = ModeChoice.SYSTEM
     transparency: Transparency = Transparency.SYSTEM
     motion: Motion = Motion.SYSTEM
+    calendar_view: CalendarView = CalendarView.WEEK  # How the Calendar page opens.
 
-    @field_validator("color_scheme", "mode", "transparency", "motion", mode="wrap")
+    @field_validator("color_scheme", "mode", "transparency", "motion", "calendar_view", mode="wrap")
     @classmethod
     def _default_when_unknown(
         cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo

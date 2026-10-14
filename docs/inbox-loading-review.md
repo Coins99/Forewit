@@ -50,9 +50,8 @@ Addressed the three Codex inline findings on 2026-10-14:
   starts at the top; explicit palette selection is brought into view. Tests cover
   Inbox-to-search, search-to-search, search-to-Inbox and same-query refresh.
 
-The branch also has existing conflicts with the subsequently merged Inbox reading-pane
-redesign on `main`. These review fixes retain PR #79's current UI; integrating that
-redesign remains separate work.
+The subsequently merged Inbox reading-pane redesign on `main` initially conflicted
+with this branch. The integration below resolves those conflicts.
 
 
 Follow-up validation: 97 affected Inbox, browsing, palette, data-control and source-rule
@@ -60,3 +59,33 @@ checks pass. The 1x workspace/layout/browsing run passed 137 tests with one inte
 render skip; selected 2x gallery checks passed 25 with the same skip. Light/dark search
 and workspace renders were inspected against the references. Ruff lint/format and
 mypy for both Windows and macOS pass. Tests use synthetic data and mocked providers.
+
+
+## Integration with main
+
+Merged `main` at `4f3b9e7`. The five textual conflicts came from PR #76's reading-pane
+redesign (`8a90ec2`): both branches changed `domain/cached_mail.py`, `ui/inbox_view.py`,
+`ui/main_window.py`, `ui/runtime.py` and `tests/ui/test_inbox.py`. PRs #77 (Calendar
+grids) and #78 (Settings Account card) also landed after the common base; their changes
+are retained.
+
+The integration keeps the new Inbox list, reader, date sections, compact layout and
+Settings/Calendar behavior. Gmail search has a separate field beneath the Inbox header;
+the header search icon still opens the local command palette. The footer loads another
+bounded page instead of replacing it. Partial and failed requests use the header alert,
+while the metadata note labels saved and potentially stale entries. The page model
+retains both the cached count and browsing/query state. All three Codex follow-up fixes
+and their regressions are adapted to the new list model and reading pane.
+
+
+Integration checks: 143 combined Inbox, browsing, palette, Settings, cleanup and keyboard
+tests pass. Layout/workspace/Inbox checks pass 164 tests at each of 1x and 2x, with one
+intentional render skip each. Ruff lint/format and mypy for Windows and macOS pass.
+Final Inbox/search renders were inspected in both modes and at both scales.
+
+
+Full merged regression validation: **4,109 passed**, four platform/intentional skips.
+Combined statement/branch coverage is **96.15%**, and every service meets the 90%
+gate. The final Inbox/search visual polish was followed by six passing gallery checks
+at each scale. Tests use synthetic data and mocked providers; live Gmail acceptance
+remains with the owner.

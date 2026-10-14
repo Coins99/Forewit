@@ -1,18 +1,40 @@
 # Calendar
 
-The **Calendar** page (sidebar, Ctrl+7) shows one week at a time: your own events, your
-open actions' deadlines and target dates, and, once you connect it, your Google Calendar.
-Decisions and limits are in [ADR 0018](adr/0018-calendar.md).
+The **Calendar** page (sidebar, Ctrl+7) shows your own events, your open actions' deadlines
+and target dates, and, once you connect it, your Google Calendar. Decisions and limits are
+in [ADR 0018](adr/0018-calendar.md).
+
+## Week, Month and List
+
+Choose how the page shows your days with the tabs under its title; MailBrief remembers
+your choice on this computer.
+
+- **Week**: a week of hours, as a calendar app shows it. Timed events are blocks in their
+  hours, side by side when they overlap; all-day events, events of a day or more and your
+  actions' dates run across the top. Today's column is shaded, with a line at the time now.
+- **Month**: six weeks of days around a month. Events of several days run across them as
+  one bar; timed events take a line each ("09:00 Dentist"). When a day holds more than its
+  square shows, **+N more** opens that week in the List view (the view you keep stays as
+  you chose it).
+- **List**: a week, day by day, as rows.
+
+**Previous** and **Next** move by a week, or by a month in the Month view, and **This week**
+or **This month** goes back to now. Click an event to select it and double-click it to
+open it (a Google event opens in Google Calendar); double-click an empty day or hour to add
+an event that day. In the grids, the arrow keys move between days, and Up and Down move
+through a day's events in the Week view (Alt+Up and Alt+Down, or Option on a Mac, in the
+Month view, including those behind **+N more**); Return opens the selected event, and in
+the Month view Page Up and Page Down change the month.
 
 ## Your own events
 
 **New event** adds a timed or all-day event; **Open** changes it and **Delete event**
 hides it, with Undo. Events are kept on this computer, in backups and in **Export all
 writing**. Deadlines and target dates come from your open actions and change only there.
-**This week** shows the current week from then on, so a new week moves the page on by
-itself. While MailBrief is busy with something else, such as a review waiting for you, you
-can still move between weeks and open or add events; Save and **Delete event** wait until
-it finishes.
+**This week** (or **This month**) shows the current week (or month) from then on, so a new
+week moves the page on by itself. While MailBrief is busy with something else, such as a
+review waiting for you, you can still move between weeks and months and open or add
+events; Save and **Delete event** wait until it finishes.
 
 Pick a time from the list (every 15 minutes) or type one as `HH:mm`. Up and Down move it to
 the next quarter hour, later or earlier, as they move a date; Page Up and Page Down (Fn+Up
@@ -53,7 +75,8 @@ and when you open the page or move to a week the saved copy doesn't hold or that
 than 15 minutes old. **Cancel** at the top stops a refresh, or **Allow Google Calendar**
 while it waits for your browser; quitting stops them too. What was already read is kept.
 
-**Disconnect** in the sidebar forgets the one sign-in and the saved Google events. It does
+**Disconnect** (in **Settings**, under Account) forgets the one sign-in and the saved
+Google events. It does
 not revoke MailBrief's access in your Google account; do that at
 myaccount.google.com/permissions if you want to. The saved Google events also go when
 Google rejects the sign-in (it expired, or you revoked it), when Calendar access is taken
@@ -114,6 +137,6 @@ this too.
    calendar boxes. Find a repeating event and an all-day event in the right days.
 3. Choose Refresh; move nine weeks ahead and watch that week load.
 4. Run Sync and review: the line under the Calendar heading shows a new update time.
-5. Disconnect in the sidebar: Gmail disconnects and the Google rows disappear. Connect
-   Gmail again: Google asks once for Gmail and both calendar permissions, and the rows
+5. Disconnect in Settings (Account): Gmail disconnects and the Google rows disappear.
+   Sign in with Google again: Google asks once for Gmail and both calendar permissions, and the rows
    come back.

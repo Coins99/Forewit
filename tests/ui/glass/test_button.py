@@ -236,3 +236,41 @@ def test_a_glass_pill_s_icon_sits_beside_its_label(
     gap = glass_button.ICON_GAP
     assert made.sizeHint().width() == plain.sizeHint().width() + 14 + gap
     assert made.font().weight() == plain.font().weight()  # Both Medium.
+
+
+def test_an_icon_alone_makes_a_centred_circle(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp)
+    round_ = outline_button(
+        "", "searchButton", icon_name="search", accessible_name="Search", glass=True
+    )
+    labelled = outline_button("Search", "labelled", icon_name="search", glass=True)
+    for made in (round_, labelled):
+        qtbot.addWidget(made)
+    assert isinstance(round_, GlassButton) and round_.is_round()
+    assert isinstance(labelled, GlassButton) and not labelled.is_round()
+    hint = round_.sizeHint()
+    assert hint.width() == hint.height()  # A circle, in the same room as a pill.
+    assert hint.height() == labelled.sizeHint().height()
+    assert round_.accessibleName() == "Search"
+    round_.resize(hint)
+    round_.show()
+    qtbot.waitExposed(round_)
+    # The icon sits in the middle: its ink is as far from the left as from the right.
+    image = picture(round_)
+    background = image.pixelColor(1, image.height() // 2)
+    inked = [
+        x
+        for x in range(image.width())
+        for y in range(image.height() // 2 - 3, image.height() // 2 + 4)
+        if image.pixelColor(x, y) != background
+    ]
+    assert inked
+    left, right = min(inked), image.width() - 1 - max(inked)
+    assert abs(left - right) <= 2
+    # Hovered, it grows evenly, so it stays a circle.
+    round_.hover_animation.stop()
+    round_._set_hover(1.0)
+    pill = round_._pill()
+    assert pill.width() == pytest.approx(pill.height())

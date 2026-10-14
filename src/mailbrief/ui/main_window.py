@@ -161,6 +161,7 @@ from mailbrief.ui.appearance import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
+from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start
 from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
 from mailbrief.ui.calendar_view import (
@@ -194,6 +195,7 @@ from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
+from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
@@ -203,7 +205,7 @@ from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
-from mailbrief.ui.settings_view import SettingsDialog
+from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
 from mailbrief.ui.theme import (
     CAPTION_PX,
     SMALL_PX,
@@ -718,11 +720,15 @@ class MainWindow(QMainWindow):
         self._planning_cancel: asyncio.Event | None = None
         self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
+        # The 1st of the month the Month view shows; None follows today.
+        self._calendar_month: date | None = None
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
         self._calendar_shown: CalendarRange | None = None
-        # Reads of the week shown run beside start()'s operations: they change nothing. The
-        # newest read wins, and shutdown waits for them before closing the database.
+        # Reads run beside start()'s operations, since they change nothing: the week shown,
+        # a search, and Settings opening while an operation runs. The newest read of the
+        # week wins, and shutdown waits for them all before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
+        self._settings_opening: asyncio.Task[None] | None = None  # Until Settings shows.
         self._calendar_read = 0
         self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
@@ -808,11 +814,11 @@ class MainWindow(QMainWindow):
         self.cached_button = sidebar.saved_mail
         self.data_button = sidebar.data
         self.data_button.clicked.connect(lambda: self.start(self._open_data, cancellable=False))
-        # Wrapping labels, read by their whole text.
-        self.connection = wrap_label("Gmail: checking saved session…", tone="muted", px=CAPTION_PX)
-        self.connection.setObjectName("connectionStatus")
-        self.ai = wrap_label("AI: checking configuration…", tone="muted", px=CAPTION_PX)
-        self.ai.setObjectName("aiStatus")
+        # Who is signed in and what the AI may do live in Settings' Account card, with
+        # Disconnect; the sidebar offers only Google sign-in, and only while signed out.
+        self.connection = self.settings_dialog.gmail_status
+        self.ai = self.settings_dialog.ai_status
+        self.disconnect_button = self.settings_dialog.disconnect_button
         self.connect_button = outline_button(
             "&Google sign-in",
             "connectButton",
@@ -821,18 +827,7 @@ class MainWindow(QMainWindow):
             accessible_name="Sign in with Google",
             glass=True,
         )
-        self.disconnect_button = outline_button(
-            "&Disconnect",
-            "disconnectButton",
-            mnemonic=True,
-            px=SMALL_PX,
-            accessible_name="Disconnect Gmail",
-            glass=True,
-        )
-        for line in (self.connection, self.ai):
-            line.setContentsMargins(10, 0, 0, 0)  # In line with the rows' icons.
-        for widget in (self.connection, self.ai, self.connect_button, self.disconnect_button):
-            sidebar.footer.addWidget(widget)
+        sidebar.footer.addWidget(self.connect_button)
         # Today: the banner for a past brief and the retry row, above the brief.
         self.viewing = QWidget()
         self.viewing.setObjectName("viewingBanner")
@@ -967,12 +962,13 @@ class MainWindow(QMainWindow):
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
         self.calendar_panel = CalendarPanel()
-        self.inbox_panel = InboxPanel()
+        self.inbox_panel = InboxPanel(clock=lambda: self.now())
         self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
         self.inbox_panel.load_more_requested.connect(lambda: self.start(self._load_more_inbox))
-        self.inbox_panel.search_requested.connect(
+        self.inbox_panel.mail_search_requested.connect(
             lambda query: self.start(lambda: self._refresh_inbox(query=query))
         )
+        self.inbox_panel.search_requested.connect(self._open_palette)
         self.inbox_panel.page_requested.connect(
             lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
         )
@@ -983,6 +979,10 @@ class MainWindow(QMainWindow):
             )
         )
         workspace.add_page("inbox", self.inbox_panel)
+        self.calendar_panel.set_view(self.appearance.calendar_view)  # As the owner last chose.
+        self.calendar_panel.set_clock(lambda: self.now())
+        self.calendar_panel.month_requested.connect(self._request_calendar_month)
+        self.calendar_panel.view_requested.connect(self._request_calendar_view)
         self.calendar_panel.event_requested.connect(self._request_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
@@ -1030,8 +1030,12 @@ class MainWindow(QMainWindow):
         self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
-        sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
+        # Google sign-in waits for initialize() to check the saved session, so it never
+        # shows for a moment at launch to an owner who is signed in.
+        self.connect_button.hide()
+        sidebar.settings_requested.connect(self._request_settings)
         self.connect_button.clicked.connect(lambda: self.start(self._connect))
+        self.settings_dialog.sign_in_button.clicked.connect(self._sign_in_from_settings)
         self.disconnect_button.clicked.connect(
             lambda: self.start(self._disconnect, cancellable=False)
         )
@@ -1056,7 +1060,7 @@ class MainWindow(QMainWindow):
 
     def _link_tab_order(self) -> None:
         """Tab runs from Sync and review through Cancel, the sidebar's pages, Saved mail,
-        Data, Settings, Connect or Disconnect, the page shown, then Undo and back to the
+        Data, Settings, Google sign-in (while signed out), the page shown, then Undo and back to the
         start. Hidden and disabled widgets are skipped.
 
         The chain starts at Undo, so every widget not named here (the other pages', in
@@ -1073,7 +1077,6 @@ class MainWindow(QMainWindow):
             self.data_button,
             self.settings_button,
             self.connect_button,
-            self.disconnect_button,
             self.latest_button,
             self.retry_button,
             self.day_panel.attention.list,
@@ -1090,7 +1093,7 @@ class MainWindow(QMainWindow):
         Disconnect only with one, and the Briefs page follows it."""
         self._account_email = email
         self.connect_button.setVisible(email is None)
-        self.disconnect_button.setVisible(email is not None)
+        self.settings_dialog.set_signed_in(email is not None)
         self.history_panel.set_account(email)
 
     def _set_busy(self, busy: bool) -> None:
@@ -1098,10 +1101,10 @@ class MainWindow(QMainWindow):
         self.retry_button.setEnabled(not busy)
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy)
+        self.settings_dialog.sign_in_button.setEnabled(not busy)
         self.generate_button.setEnabled(not busy and self._ready)
         self.cancel_button.setEnabled(busy and self._cancellable)
         self.cancel_button.setVisible(busy)
-        self.settings_button.setEnabled(not busy)
         self.settings_dialog.set_busy(busy)
         self.cached_button.setEnabled(not busy and self._ready)
         self.data_button.setEnabled(not busy and self.data_dialog is not None)
@@ -1156,6 +1159,8 @@ class MainWindow(QMainWindow):
 
     def _request_page(self, key: str) -> None:
         if key == "inbox":
+            # The Inbox opens on its list, as Gmail's does; a message opens on a click.
+            self.inbox_panel.close_message()
             self._show_page(key)
             self.start(self._load_inbox, cancellable=False)
             return
@@ -1223,6 +1228,8 @@ class MainWindow(QMainWindow):
         await self._reload_history()
         if self._calendar_week is not None:
             self._show_calendar_week(self._calendar_week)  # Now this week: follow today.
+        if self._calendar_month is not None:
+            self._show_calendar_month(self._calendar_month)  # Now this month: follow today.
         await self._refresh_calendar()
 
     def _set_counts(self, **counts: int | None) -> None:
@@ -1780,9 +1787,9 @@ class MainWindow(QMainWindow):
     async def _refresh_calendar(self) -> None:
         self._calendar_read += 1
         read = self._calendar_read
-        first = self._calendar_week or week_start(self._local_today())
+        first, last = self._calendar_bounds()
         try:
-            shown = await self.backend.calendar_range(first, first + timedelta(days=6), self.zone)
+            shown = await self.backend.calendar_range(first, last, self.zone)
         except Exception as exc:
             if read == self._calendar_read:
                 self._note_not_refreshed(exc)
@@ -1821,19 +1828,55 @@ class MainWindow(QMainWindow):
         if not isinstance(key, tuple):
             return
         today = self._local_today()
-        self._show_calendar_week(week_start(today))
+        self._show_calendar_day(today)
         self._show_page("calendar")
         self._read_calendar(select=key, day=today)
+
+    def _calendar_bounds(self) -> tuple[date, date]:
+        """The days the Calendar page shows: a week (Week and List views), or the six weeks
+        of the month's grid (Month view)."""
+        today = self._local_today()
+        if self.calendar_panel.view() is CalendarView.MONTH:
+            return month_days(self._calendar_month or today)
+        first = self._calendar_week or week_start(today)
+        return first, first + timedelta(days=6)
 
     def _show_calendar_week(self, monday: date) -> None:
         """Show the week of ``monday`` from now on; this week's follows today, so the page
         moves on by itself when a new week starts."""
         self._calendar_week = None if monday == week_start(self._local_today()) else monday
 
+    def _show_calendar_month(self, first: date) -> None:
+        """Show the month of ``first`` (its 1st) from now on; this month's follows today."""
+        self._calendar_month = None if first == month_start(self._local_today()) else first
+
+    def _show_calendar_day(self, day: date) -> None:
+        """Show ``day``: its week in the Week and List views, its month in the Month view."""
+        self._show_calendar_week(week_start(day))
+        self._show_calendar_month(month_start(day))
+
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
             self._show_calendar_week(first_day)
             self._read_calendar(sync=True)
+
+    def _request_calendar_month(self, first: object) -> None:
+        if isinstance(first, date):
+            self._show_calendar_month(month_start(first))
+            self._read_calendar(sync=True)
+
+    def _request_calendar_view(self, view: object, keep: object = True) -> None:
+        """The view switched: show it around the day in focus, and, with ``keep`` (the
+        owner chose it with the tabs, not through "+N more"), keep it on this device."""
+        chosen = CalendarView(str(view))
+        self._show_calendar_day(self._calendar_focus())
+        if keep is True and self.appearance.calendar_view is not chosen:
+            self._save_appearance(self.appearance.model_copy(update={"calendar_view": chosen}))
+        self._read_calendar(sync=True)
+
+    def _calendar_focus(self) -> date:
+        """The Calendar page's day in focus; the owner's today before it shows any days."""
+        return self.calendar_panel.focus_day() or self._local_today()
 
     def _read_calendar(
         self,
@@ -2021,7 +2064,7 @@ class MainWindow(QMainWindow):
             if hit.kind is SearchKind.EVENT
             else ("google", hit.calendar_id or "", hit.event_id or "")
         )
-        self._show_calendar_week(week_start(day))
+        self._show_calendar_day(day)
         self._show_page("calendar")
         self._read_calendar(select=key, day=day)
 
@@ -2070,7 +2113,7 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.event_editor.finish_saved()
         self._offer_undo()  # An edit has no undo; an older offer would refer to a past revision.
-        self._show_calendar_week(week_start(saved.days(self.zone)[0]))  # Show where it went.
+        self._show_calendar_day(saved.days(self.zone)[0])  # Show where it went.
         self.status.setText(f"Saved: {saved.title}.")
         await self._refresh_views()
         self.calendar_panel.select_event(saved.public_id)
@@ -2116,7 +2159,9 @@ class MainWindow(QMainWindow):
         if coverage is None:
             return f"Google Calendar: {account} · not loaded yet"
         if not coverage.covers(shown.first_day, shown.last_day):
-            return f"Google Calendar: {account} · this week isn't loaded yet"
+            week = shown.last_day - shown.first_day < timedelta(days=7)  # Else a month's grid.
+            days = "this week isn't" if week else "these six weeks aren't"
+            return f"Google Calendar: {account} · {days} loaded yet"
         today = self._local_today()
         synced = coverage.synced_at_utc.astimezone(self.zone)
         when = (
@@ -2192,7 +2237,7 @@ class MainWindow(QMainWindow):
 
     async def _sync_calendar(self, *, quiet: bool) -> None:
         """Read Google Calendar around the week shown; a quiet sync speaks only of trouble."""
-        around = self._calendar_week or week_start(self._local_today())
+        around = self._calendar_bounds()[0]
         try:
             result = await self.backend.sync_calendar(around, self.zone)
         except (asyncio.CancelledError, AuthenticationRequiredError):
@@ -2241,11 +2286,18 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _planning_first(self) -> date:
+        """The Monday Plan with AI starts on: the week shown, or in the Month view the week
+        of the day in focus."""
+        if self.calendar_panel.view() is CalendarView.MONTH:
+            return week_start(self._calendar_focus())
+        return self._calendar_week or week_start(self._local_today())
+
     async def _prepare_planning(self, options: PlanningOptions) -> None:
         """Read Google first when its times are to be sent and the saved copy misses some of
         the four weeks; a failed read leaves what was saved, and the preview says which
         days it holds. Quitting stops it."""
-        first = self._calendar_week or week_start(self._local_today())
+        first = self._planning_first()
         if self._planning_google_due(options, first):
             self.planning_dialog.show_reading()
             try:
@@ -2812,7 +2864,36 @@ class MainWindow(QMainWindow):
         self.cached_dialog.show_page(await self.backend.cached_messages(account_id, day, offset))
         self.status.setText("Showing saved metadata. No mailbox connection or body retrieval used.")
 
-    async def _open_settings(self) -> None:
+    def _request_settings(self) -> None:
+        """Settings opens at once, even while an operation (a sync, say) runs: opening only
+        reads, and what changes settings waits in the dialog until the operation ends. A
+        second request while it is still opening (a double-click) does nothing."""
+        opening = self._settings_opening
+        if (
+            self._closing
+            or self.settings_dialog.isVisible()
+            or (opening is not None and not opening.done())
+        ):
+            return
+        if self.start(self._open_settings):
+            self._settings_opening = self.task
+            return
+
+        async def beside() -> None:
+            try:
+                await self._open_settings(beside=True)
+            except Exception as exc:  # Nothing else reports a read beside an operation.
+                log_failure(exc)
+                self.status.setText("Settings couldn't be opened just now. Try again.")
+
+        task = asyncio.get_running_loop().create_task(beside())
+        self._settings_opening = task
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    async def _open_settings(self, *, beside: bool = False) -> None:
+        """Read what Settings shows, then show it. ``beside`` another operation, the status
+        line keeps that operation's words, and the dialog waits for it to finish."""
         try:
             preferences = await self.backend.get_preferences()
         except ConfigurationError as exc:
@@ -2827,14 +2908,24 @@ class MainWindow(QMainWindow):
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
-        self.status.setText("Edit connection and AI settings, and your preferences.")
+        if not beside:
+            self.status.setText("Edit connection and AI settings, and your preferences.")
+        unavailable: str | None = None
         try:
             panel.set_preferences(await self.backend.get_owner_preferences())
         except PreferencesUnavailableError as exc:
             # Unreadable preferences stay repairable: the panel offers a reset.
             log_failure(exc)
             panel.set_unavailable()
-            self.status.setText(str(exc))
+            unavailable = str(exc)
+            if not beside:
+                self.status.setText(unavailable)
+        if beside:  # Loading cleared its status line; the operation may still be running.
+            self.settings_dialog.set_busy(self.task is not None and not self.task.done())
+            if unavailable is not None:  # In the dialog: the status line is the operation's.
+                self.settings_dialog.status.setText(unavailable)
+        if self._closing:
+            return  # Quitting while it read: there is nothing left to show it over.
         self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
@@ -2944,9 +3035,16 @@ class MainWindow(QMainWindow):
             self.appearance_writes.save(appearance)
 
     def _appearance_not_saved(self) -> None:
+        """Said in Settings (opening it clears its line), and on the status line when
+        Settings is closed: a switch of the Calendar's view saves too."""
         self.settings_dialog.status.setText(
             "The appearance couldn't be saved. It stays until MailBrief closes."
         )
+        if not self.settings_dialog.isVisible():
+            self.status.setText(
+                "Your appearance and Calendar view couldn't be saved on this computer. They "
+                "stay until MailBrief closes."
+            )
 
     def _request_save_preferences(self, preferences: DesktopPreferences) -> None:
         self.start(lambda: self._save_preferences(preferences), cancellable=False)
@@ -2985,8 +3083,18 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             self.ai.setText("AI: configuration or secure key store unavailable.")
             self.draft_editor.set_ai_ready(False)
+            if not self.settings_dialog.isVisible():  # The AI line is in Settings.
+                self.status.setText(self.ai.text())
 
     async def initialize(self) -> None:
+        """Load what is saved, then check the saved Google session. Google sign-in shows in
+        the sidebar once that check is over, however it ended."""
+        try:
+            await self._load_and_connect()
+        finally:
+            self.connect_button.setVisible(self._account_email is None)
+
+    async def _load_and_connect(self) -> None:
         try:
             saved = await self.backend.load_saved()
         except asyncio.CancelledError:
@@ -3038,12 +3146,25 @@ class MainWindow(QMainWindow):
             await self._load_calendar_access()
             await self._refresh_calendar()
             self._launch_soon()
+            return
+        # The Gmail line is in Settings: the status line says why Gmail isn't connected.
+        self.status.setText(self.connection.text())
 
     def _launch_soon(self) -> None:
         """MailBrief has started and Gmail is connected: let the scheduler run the refresh the
         owner asked for on launch, once this operation has finished, so it isn't turned away
         as busy."""
         asyncio.get_running_loop().call_soon(self.scheduler.launched)
+
+    def _sign_in_from_settings(self) -> None:
+        """Settings' Sign in with Google signs in with the saved settings and closes
+        Settings, so the window's status line and Cancel follow the sign-in. A change not
+        yet saved there stops it, rather than being ignored or lost with the dialog."""
+        if self.settings_dialog.has_unsaved_input():
+            self.settings_dialog.status.setText(SIGN_IN_UNSAVED)
+            return
+        if self.start(self._connect):
+            self.settings_dialog.reject()
 
     async def _connect(self) -> None:
         origin = self.workspace.current_page()
@@ -3069,6 +3190,7 @@ class MainWindow(QMainWindow):
         await self.backend.disconnect()
         self._set_account(None)
         self.inbox_panel.clear()
+        self.workspace.header.set_alert("")
         self.connection.setText("Gmail: disconnected")
         self.status.setText("Local credentials removed. Saved briefs remain on this device.")
         self._calendar_allowed = None
@@ -3141,7 +3263,6 @@ class MainWindow(QMainWindow):
             )
         except (ConfigurationError, AuthenticationRequiredError) as exc:
             self._set_account(None)
-            self.inbox_panel.clear()
             self._calendar_allowed = None
             self._read_calendar()
             guidance = (
@@ -3149,29 +3270,31 @@ class MainWindow(QMainWindow):
                 if isinstance(exc, ConfigurationError)
                 else ("Sign in with Google to continue.")
             )
+            self.inbox_panel.clear(guidance)
+            self.workspace.header.set_alert("")
             self.connection.setText("Gmail: " + guidance)
             self.status.setText(guidance)
-            self.inbox_panel.sync_status.setText(guidance)
             return
         except ProviderError as exc:
             log_failure(exc)
             self.status.setText(
                 "Couldn't load mail. Showing saved messages. Retry, or Refresh to restart."
             )
-            self.inbox_panel.sync_status.setText(self.status.text())
+            self.workspace.header.set_alert(INBOX_INCOMPLETE, self.status.text())
             return
         if email != self._account_email or self._cancel.is_set():
             return
         if show:
             self.inbox_panel.show_page(page)
-            self.inbox_panel.sync_status.setText(
-                "Some messages couldn't be read. Retry this page."
-                if page.error_code
-                else "Recent metadata checked with Gmail."
+        if page.error_code:
+            text = "Some messages couldn't be read. Retry this page."
+            self.workspace.header.set_alert(INBOX_INCOMPLETE, text)
+            self.status.setText(previous_status if quiet else text)
+        else:
+            self.workspace.header.set_alert("")
+            self.status.setText(
+                previous_status if quiet else f"{len(page.messages)} messages loaded."
             )
-        self.status.setText(f"{len(page.messages)} messages loaded.")
-        if quiet:
-            self.status.setText(previous_status)
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
     # owner's explicit choice, one day at a time, for the connected account.

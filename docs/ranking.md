@@ -75,11 +75,12 @@ theirs.
 
 ## Should have been in my brief
 
-On the **Inbox** page, select an email and choose **Should have been in my brief** when the
-review should have suggested it. The row gets a **Wanted in brief** chip, its sender counts
-as wanted, and **Remove mark** takes it back. Gmail is never told. The line under the page's
-status counts the emails you wanted in the last 14 days that the review didn't suggest,
-whether you picked them in a review or marked them here: the "important mail missed" column
-of the [personal-use journal](m9-live-validation.md#personal-use-journal-714-days).
+On the **Inbox** page, open an email and choose **Should have been in my brief** when the
+review should have suggested it. Its row gets a flag, the open email a **Wanted in brief**
+note, its sender counts as wanted, and **Remove mark** takes it back. Gmail is never told.
+The flag in the page's footer counts the emails you wanted in the last 14 days that the
+review didn't suggest, whether you picked them in a review or marked them here: the
+"important mail missed" column of the
+[personal-use journal](m9-live-validation.md#personal-use-journal-714-days).
 
 Decisions are in [ADR 0020](adr/0020-ranking-signals.md).

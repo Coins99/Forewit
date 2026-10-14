@@ -436,7 +436,9 @@ async def test_mail_opens_on_its_inbox_page_or_in_gmail(
     await finish(window)
     assert window.workspace.current_page() == "inbox"
     assert pages[-1] == 100
-    assert window.inbox_panel.messages.currentRow() == 1
+    assert window.inbox_panel.open_id() == "m150"  # Open in the reading pane.
+    current = window.inbox_panel.messages.current_message()
+    assert current is not None and current.provider_message_id == "m150"
 
     window._open_hit(MAIL_HIT.model_copy(update={"message_id": "archived"}))
     await finish(window)

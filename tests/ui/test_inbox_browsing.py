@@ -183,16 +183,16 @@ async def test_cached_display_precedes_network_and_load_more_preserves_selection
     window._set_account("owner@example.com")
     assert window.start(window._refresh_inbox)
     await started.wait()
-    assert window.inbox_panel.messages.count() == 1
+    assert window.inbox_panel.messages.message_count() == 1
     assert not window.inbox_panel.next.isEnabled()
     release.set()
     await finish(window)
-    window.inbox_panel.messages.setCurrentRow(1)
+    window.inbox_panel.open_message("b")
     window.inbox_panel.next.click()
     await finish(window)
-    assert window.inbox_panel.messages.currentRow() == 1
+    assert window.inbox_panel.open_id() == "b"
     assert calls == [(False, ""), (True, "")]
-    window.inbox_panel.search.setText("from:old")
+    window.inbox_panel.mail_search.setText("from:old")
     window.inbox_panel.search_button.click()
     await finish(window)
     assert calls[-1] == (False, "from:old")
@@ -221,8 +221,8 @@ async def test_network_failure_keeps_rows(qtbot: QtBot) -> None:
     )
     window.inbox_panel.next.click()
     await finish(window)
-    assert window.inbox_panel.messages.count() == 1
-    assert "Couldn't load" in window.inbox_panel.sync_status.text()
+    assert window.inbox_panel.messages.message_count() == 1
+    assert "Couldn't load" in window.workspace.header.alert.accessibleDescription()
     assert window.inbox_panel.next.isEnabled()
 
 
@@ -237,7 +237,9 @@ def test_search_results_mark_non_inbox_and_render_plain_text(qtbot: QtBot) -> No
             messages=(make_message(subject="<b>Invoice</b>", is_in_inbox=False),),
         )
     )
-    assert "<b>Invoice</b>" in panel.details.text()
+    assert panel.open_message("message-1")
+    assert "<b>Invoice</b>" in panel.reader.subject.text()
+    assert any("Outside Inbox" in row.title for row in panel.messages.inbox_model.rows())
     assert not panel.next.isEnabled()
     assert not panel.clear_search.isHidden()
 
@@ -440,14 +442,14 @@ async def test_failed_search_can_return_to_inbox(qtbot: QtBot) -> None:
     qtbot.addWidget(window)
     window._set_account("owner@example.com")
     window.inbox_panel.show_page(InboxPage(account_email="owner@example.com"))
-    window.inbox_panel.search.setText("invoice")
+    window.inbox_panel.mail_search.setText("invoice")
     window.inbox_panel.search_button.click()
     await finish(window)
-    assert "Couldn't load mail" in window.inbox_panel.sync_status.text()
+    assert "Couldn't load mail" in window.workspace.header.alert.accessibleDescription()
     assert not window.inbox_panel.clear_search.isHidden()
     window.inbox_panel.clear_search.click()
     await finish(window)
-    assert window.inbox_panel.search.text() == ""
+    assert window.inbox_panel.mail_search.text() == ""
     assert window.inbox_panel.clear_search.isHidden()
 
 
@@ -462,9 +464,15 @@ def test_clear_resets_search_and_retry_button_labels(qtbot: QtBot) -> None:
             error_code="METADATA_ITEMS_FAILED",
         )
     )
-    assert panel.refresh.text() == "Refresh search" and panel.next.text() == "Retry page"
+    assert (
+        panel.refresh.accessibleName() == "Refresh search"
+        and panel.next.accessibleName() == "Retry page"
+    )
     panel.clear()
-    assert panel.refresh.text() == "Refresh Inbox" and panel.next.text() == "Load 100 more"
+    assert (
+        panel.refresh.accessibleName() == "Refresh Inbox"
+        and panel.next.accessibleName() == "Load 100 more"
+    )
     assert panel.clear_search.isHidden()
 
 
@@ -539,7 +547,7 @@ async def test_workflows_stop_after_inbox_authentication_loss(qtbot: QtBot, oper
     assert window._calendar_allowed is None
     assert backend.automatic_calls == 0
     assert not backend.permission_accounts
-    assert window.inbox_panel.messages.count() == 0
+    assert window.inbox_panel.messages.message_count() == 0
 
 
 @pytest.mark.parametrize("continuation", [False, True])
@@ -659,8 +667,9 @@ async def test_palette_jump_selects_actual_cached_message(
     await window._open_mail(f"m{position}", None)
     page = window.inbox_panel.page
     assert page is not None
-    selected = page.messages[window.inbox_panel.messages.currentRow()]
-    assert selected.provider_message_id == f"m{position}"
+    assert window.inbox_panel.open_id() == f"m{position}"
+    selected = window.inbox_panel.messages.current_message()
+    assert selected is not None and selected.provider_message_id == f"m{position}"
     assert len(page.messages) == (100 if position < 100 else 60)
     if browsed:
         assert backend._inbox_browse[("me@example.com", "")].continuation == "older"
@@ -715,15 +724,16 @@ def test_query_changes_reset_selection_and_scroll(qtbot: QtBot, queries: tuple[s
     panel.show()
     messages = tuple(make_message(provider_message_id=f"m{i}") for i in range(80))
     panel.show_page(InboxPage(account_email="me@example.com", query=queries[0], messages=messages))
-    panel.messages.setCurrentRow(70)
+    panel.open_message("m70")
     panel.messages.scrollToBottom()
     assert panel.messages.verticalScrollBar().value() > 0
     panel.show_page(InboxPage(account_email="me@example.com", query=queries[1], messages=messages))
-    assert panel.messages.currentRow() == 0
+    assert panel.open_id() is None
+    assert panel.messages.current_message() is None
     assert panel.messages.verticalScrollBar().value() == 0
-    panel.messages.setCurrentRow(50)
+    panel.open_message("m50")
     panel.messages.scrollToBottom()
     scroll = panel.messages.verticalScrollBar().value()
     panel.show_page(InboxPage(account_email="me@example.com", query=queries[1], messages=messages))
-    assert panel.messages.currentRow() == 50
+    assert panel.open_id() == "m50"
     assert panel.messages.verticalScrollBar().value() == scroll

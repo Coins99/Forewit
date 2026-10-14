@@ -626,6 +626,7 @@ class DesktopRuntime:
                 query=query,
                 cached=state is None,
                 error_code=state.error_code if state else None,
+                total=len(rows) if query else await messages.count_inbox(account.id),
                 messages=tuple(
                     MessageRepository.to_domain(
                         row, account.provider_account_id, ProviderKind.GMAIL

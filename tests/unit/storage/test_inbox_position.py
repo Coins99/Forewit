@@ -58,6 +58,9 @@ async def test_the_position_follows_the_inbox_page_order(session: AsyncSession) 
     positions = {key: await repository.inbox_position(account.id, key) for key in order}
 
     assert positions == {key: number for number, key in enumerate(order)}
+    # The page's count is the cached Inbox's, every page and date, without archived mail.
+    assert await repository.count_inbox(account.id) == len(order) == 4
+    assert await repository.count_inbox(account.id + 1) == 0
     assert order[:2] == ["newest", "tie-a"]  # Ties keep the page's order.
     assert await repository.inbox_position(account.id, "archived") is None
     assert await repository.inbox_position(account.id, "missing") is None

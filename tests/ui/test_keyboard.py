@@ -24,14 +24,14 @@ from tests.ui.test_main_window_layout import BUSY, NOW, finish, mockup_backend
 from tests.ui.test_workflow import FakeBackend
 from tests.ui.window_wait import show
 
-# Tab from Sync and review on Today, with the mockup brief's first email shown.
+# Tab from Sync and review on Today, with the mockup brief's first email shown. Signed in,
+# the sidebar ends at Settings: Disconnect is in Settings' Account card.
 HEADER_AND_SIDEBAR = [
     "generateButton",
     "sidebarNav",
     "savedMailButton",
     "dataButton",
     "settingsButton",
-    "disconnectButton",
 ]
 FIRST_EMAIL = [
     "briefList",
@@ -263,19 +263,19 @@ async def test_another_email_relinks_its_buttons(window: MainWindow) -> None:
     assert tab_chain(window, window.generate_button) == [*HEADER_AND_SIDEBAR, "briefList", *names]
 
 
-async def test_connect_takes_disconnects_place(window: MainWindow) -> None:
+async def test_google_sign_in_follows_settings_when_signed_out(window: MainWindow) -> None:
     window.start(window._disconnect)
     await finish(window)
     chain = tab_chain(window, window.generate_button)
-    assert chain[: len(HEADER_AND_SIDEBAR)] == [*HEADER_AND_SIDEBAR[:-1], "connectButton"]
+    assert chain[: len(HEADER_AND_SIDEBAR) + 1] == [*HEADER_AND_SIDEBAR, "connectButton"]
 
 
 async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> None:
     release = await hold(window)
     assert window.cancel_button.isVisible() and not window.generate_button.isEnabled()
     chain = tab_chain(window, window.cancel_button)
-    # Sync and review, Saved mail, Data, Settings and Disconnect wait while busy.
-    assert chain == ["cancelButton", "sidebarNav", *FIRST_EMAIL]
+    # Sync and review, Saved mail and Data wait while busy; Settings opens beside it.
+    assert chain == ["cancelButton", "sidebarNav", "settingsButton", *FIRST_EMAIL]
     release.set()
     await finish(window)
 
