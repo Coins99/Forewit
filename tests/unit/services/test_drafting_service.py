@@ -188,6 +188,7 @@ async def seed_action_note(
             title="Send the Q3 numbers",
             ownership=ActionOwnership.MINE,
             effort=None,
+            estimate_minutes=None,
             target_date=datetime(2026, 10, 1).date(),
             notes=notes,
         ),

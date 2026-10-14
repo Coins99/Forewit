@@ -338,6 +338,7 @@ def test_an_edit_carries_every_editable_field() -> None:
         title="Approve it",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        estimate_minutes=None,
         target_date=FRIDAY,
         notes="",
     )
@@ -413,7 +414,12 @@ def test_reprs_and_errors_leave_out_action_text() -> None:
         sources=(make_source(subject=MARKER),),
     )
     edit = ActionEdit(
-        title=MARKER, ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=MARKER
+        title=MARKER,
+        ownership=ActionOwnership.MINE,
+        effort=None,
+        estimate_minutes=None,
+        target_date=None,
+        notes=MARKER,
     )
     step_edit = StepEdit(step_id=None, text=MARKER, done=False)
 

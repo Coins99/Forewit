@@ -1,10 +1,12 @@
 """Edit one action: its own fields and its plan, saved together as one revision."""
 
-from datetime import date
+import re
+from datetime import date, timedelta
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QDate, Qt, Signal
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QValidator, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,6 +39,8 @@ from mailbrief.domain.actions import (
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
+from mailbrief.ui.deadline_text import length_text, parse_length
+from mailbrief.ui.fields import takes_wheel
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
 _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
@@ -46,32 +50,54 @@ _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
     (ActionEffort.DAYS, "Days"),
 )
 _STEP_ID = Qt.ItemDataRole.UserRole
+NO_ESTIMATE: Final = "Not set"
+BAD_ESTIMATE: Final = "Type an estimate like 45, 1.5h, 1h 30 or 1:30, or clear it."
+_QUARTER: Final = 15
+_TYPING_LENGTH: Final = re.compile(r"[\d\s.,:hoursminte]*", re.IGNORECASE)
 
 
 class EstimateBox(QSpinBox):
-    """The owner's estimate in minutes, in 15-minute steps; 0 reads "Not set" and means none.
-    Like the event editor's fields, the wheel changes it only while it has focus, so
-    scrolling over the dialog never changes an estimate."""
+    """The owner's estimate, typed as minutes ("90"), hours ("1.5h"), both ("1h 30") or h:mm,
+    and shown in the event editor's words ("1 hr 30 mins"). Arrow keys step to the next or
+    previous quarter hour. Cleared or 0, it reads "Not set" and means none. Like the event
+    editor's fields, the wheel changes it only while it has focus."""
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("taskEstimate")
         self.setAccessibleName("Estimated minutes")
         self.setRange(0, ESTIMATE_MAX_MINUTES)
-        self.setSingleStep(15)
-        self.setSuffix(" min")
-        self.setSpecialValueText("Not set")
+        self.setSpecialValueText(NO_ESTIMATE)
+        self.setKeyboardTracking(False)  # A typed estimate counts once it's finished.
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Tab and click; not the wheel.
 
     def minutes(self) -> int | None:
         return self.value() or None
 
+    def textFromValue(self, val: int, /) -> str:
+        return length_text(timedelta(minutes=val))
+
+    def valueFromText(self, text: str, /) -> int:
+        return parse_length(text) or 0  # Cleared, or "Not set": none.
+
+    def validate(self, input: str, pos: int, /) -> tuple[QValidator.State, str, int]:
+        text = input.strip()
+        minutes = 0 if text in ("", NO_ESTIMATE) else parse_length(text)
+        if minutes is None:  # Perhaps half typed, like "1." or "1:".
+            typing = _TYPING_LENGTH.fullmatch(text) is not None
+            return QValidator.State.Intermediate if typing else QValidator.State.Invalid, input, pos
+        fits = minutes <= self.maximum()
+        return QValidator.State.Acceptable if fits else QValidator.State.Invalid, input, pos
+
+    def stepBy(self, steps: int) -> None:
+        self.interpretText()  # From what is typed, as the arrows would without tracking off.
+        value = self.value()
+        quarters = value // _QUARTER if steps > 0 else -(-value // _QUARTER)
+        self.setValue((quarters + steps) * _QUARTER)
+        self.selectAll()
+
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if not self.hasFocus():
-            event.ignore()
-        elif event.phase() == Qt.ScrollPhase.ScrollMomentum:
-            event.accept()  # Coasting after the fingers lift moves nothing.
-        else:
+        if takes_wheel(self, event):
             super().wheelEvent(event)
 
 
@@ -205,7 +231,7 @@ class ActionEditor(QDialog):
             self.title.text(),
             self.owner.currentIndex(),
             self.effort.currentIndex(),
-            self.estimate.value(),
+            self.estimate.text(),
             (picked.year(), picked.month(), picked.day()) if self.has_target.isChecked() else None,
             self.notes.toPlainText(),
             tuple(self._current_steps()),
@@ -410,6 +436,10 @@ class ActionEditor(QDialog):
         if any(len(text) > ACTION_STEP_MAX_CHARS for _, text, _ in steps):
             self.status.setText(f"A step can be at most {ACTION_STEP_MAX_CHARS} characters.")
             return
+        if not self.estimate.hasAcceptableInput():
+            self.status.setText(BAD_ESTIMATE)
+            return
+        self.estimate.interpretText()  # Take what is typed, as leaving the field would.
         picked = self.target.date()
         project_id = self.project.currentData()
         edit = ActionEdit(

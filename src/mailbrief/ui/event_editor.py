@@ -41,6 +41,8 @@ from mailbrief.domain.events import (
     CalendarEvent,
     EventEdit,
 )
+from mailbrief.ui.deadline_text import length_text
+from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import plain_label
 
 DATE_FORMAT: Final = "yyyy-MM-dd"
@@ -108,15 +110,6 @@ def _exists(day: date, clock: time, zone: ZoneInfo) -> bool:
     return moment.replace(tzinfo=None) == datetime.combine(day, clock)
 
 
-def length_text(length: timedelta) -> str:
-    """How long an event lasts, in a list of end times: "45 mins", "1 hr", "2 hrs 15 mins"."""
-    hours, minutes = divmod(int(length.total_seconds()) // 60, 60)
-    parts = [f"{hours} hr" if hours == 1 else f"{hours} hrs"] if hours else []
-    if minutes or not hours:
-        parts.append(f"{minutes} mins")
-    return " ".join(parts)
-
-
 def day_times(day: date, zone: ZoneInfo) -> tuple[time, ...]:
     """The times of ``day`` in 15-minute steps, leaving out any a DST change skips."""
     steps = (datetime.combine(day, time()) + STEP * step for step in range(_STEPS_A_DAY))
@@ -179,11 +172,7 @@ class DateBox(QDateEdit):
         self.stepped.emit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if not self.hasFocus():
-            event.ignore()
-        elif event.phase() == Qt.ScrollPhase.ScrollMomentum:
-            event.accept()  # Coasting after the fingers lift moves nothing.
-        else:
+        if takes_wheel(self, event):
             super().wheelEvent(event)
 
 
@@ -271,12 +260,9 @@ class TimeBox(QComboBox):
         self.stepped.emit(steps)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if not self.hasFocus():
-            event.ignore()  # Scrolling over the dialog leaves the time alone.
-            return
+        if not takes_wheel(self, event):
+            return  # Scrolling over the dialog, or coasting, leaves the time alone.
         event.accept()
-        if event.phase() == Qt.ScrollPhase.ScrollMomentum:
-            return  # Coasting after the fingers lift moves nothing.
         self._wheel += event.angleDelta().y()
         notches = int(self._wheel / _WHEEL_NOTCH)  # Toward zero: half a notch waits.
         if notches:

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QDateTimeEdit, QDialogButtonBox, QWi
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.events import EventEdit
+from mailbrief.ui.deadline_text import length_text
 from mailbrief.ui.event_editor import (
     BAD_TIME,
     ENDS_FIRST,
@@ -19,7 +20,6 @@ from mailbrief.ui.event_editor import (
     EventEditor,
     TimeBox,
     day_times,
-    length_text,
     local_instant,
     parse_clock,
     stepped_wall,

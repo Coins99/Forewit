@@ -342,7 +342,8 @@ class ActionEdit(DomainModel):
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     effort: ActionEffort | None
-    estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
+    # Required like the rest: an edit that left it out would erase the owner's estimate.
+    estimate_minutes: int | None = Field(ge=1, le=ESTIMATE_MAX_MINUTES)
     target_date: date | None
     notes: str = Field(max_length=ACTION_NOTES_MAX_CHARS, repr=False)
 

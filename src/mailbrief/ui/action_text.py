@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from mailbrief.domain.actions import TARGET_REASON_TEXT, Action, ActionProposal, ActionStatus
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.ui.deadline_text import day_text, deadline_text, weekday
+from mailbrief.ui.deadline_text import day_text, deadline_text, length_text, weekday
 from mailbrief.ui.proposals_view import pending_proposals
 
 
@@ -81,12 +81,9 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
 
 
 def estimate_text(minutes: int | None) -> str | None:
-    """The owner's estimate as "Estimate 45 min", "Estimate 2 h" or "Estimate 1 h 30 min"."""
-    if minutes is None:
-        return None
-    hours, rest = divmod(minutes, 60)
-    parts = ([f"{hours} h"] if hours else []) + ([f"{rest} min"] if rest else [])
-    return "Estimate " + " ".join(parts)
+    """The owner's estimate as "Estimate 45 mins" or "Estimate 1 hr 30 mins", in the event
+    editor's words for a length."""
+    return None if minutes is None else "Estimate " + length_text(timedelta(minutes=minutes))
 
 
 def target_text(details: ActionDetails, *, reason: bool = True) -> str | None:

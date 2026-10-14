@@ -50,8 +50,10 @@ event at the previous revision can be referenced as an undo of deletion.
 
 A task can carry the owner's own estimate (B07 in the [feature
 inventory](future-feature-inventory.md)): **Estimate** in the editor, in whole minutes from 1
-to 6,000 (100 hours), stepped by 15 minutes, or **Not set**. The detail pane shows it under the
-target as "Estimate 1 h 30 min". It sits beside the AI's coarse effort (minutes, hours or
+to 6,000 (100 hours). Type minutes (`90`), hours (`1.5`, `1.5h`), both (`1h 30`) or `1:30`;
+the arrow keys step to the next quarter hour; clear it for **Not set**. Half-typed text is
+refused with the reason. The editor and the detail pane, under the target, read it in the
+event editor's words: "Estimate 1 hr 30 mins". It sits beside the AI's coarse effort (minutes, hours or
 days) and is never derived from it: accepting a suggestion leaves the estimate unset, and
 AI runs, proposals and adding an email never change it. Saving it is an ordinary edit, one
 revision with its activity record. Additive migration `20261014_0019` adds

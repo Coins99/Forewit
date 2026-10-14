@@ -809,7 +809,12 @@ def test_the_row_names_the_target_and_the_detail_gives_its_reason(panel: Actions
 
 @pytest.mark.parametrize(
     ("minutes", "shown"),
-    [(45, "Estimate 45 min"), (120, "Estimate 2 h"), (90, "Estimate 1 h 30 min")],
+    [
+        (1, "Estimate 1 min"),
+        (45, "Estimate 45 mins"),
+        (120, "Estimate 2 hrs"),
+        (90, "Estimate 1 hr 30 mins"),
+    ],
 )
 def test_the_detail_shows_the_owner_s_estimate_under_the_target(
     panel: ActionsPanel, minutes: int, shown: str
