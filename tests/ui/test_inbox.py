@@ -492,7 +492,9 @@ def test_the_owner_s_divider_position_is_kept(qtbot: QtBot) -> None:
     panel.show_page(two_messages())
     panel.open_message("one")
     default = panel.split.sizes()[0]
-    assert default == 400  # 38% of 1200 px, at most 400.
+    # 38% of the page, within 320 to 400: from the width the screen gave (CI's Mac is
+    # narrower than 1200 px).
+    assert default == max(LIST_MIN, min(400, round(panel.width() * 0.38)))
     panel.split.moveSplitter(560, 1)
     panel._divider_moved(560, 1)
     chosen = panel.split.sizes()[0]
