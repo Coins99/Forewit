@@ -1848,14 +1848,18 @@ class MainWindow(QMainWindow):
             self._show_calendar_month(month_start(first))
             self._read_calendar(sync=True)
 
-    def _request_calendar_view(self, view: object) -> None:
-        """The owner switched views: show the new view around the day in focus, and keep the
-        choice on this device."""
+    def _request_calendar_view(self, view: object, keep: object = True) -> None:
+        """The view switched: show it around the day in focus, and, with ``keep`` (the
+        owner chose it with the tabs, not through "+N more"), keep it on this device."""
         chosen = CalendarView(str(view))
-        self._show_calendar_day(self.calendar_panel.focus_day())
-        if self.appearance.calendar_view is not chosen:
+        self._show_calendar_day(self._calendar_focus())
+        if keep is True and self.appearance.calendar_view is not chosen:
             self._save_appearance(self.appearance.model_copy(update={"calendar_view": chosen}))
         self._read_calendar(sync=True)
+
+    def _calendar_focus(self) -> date:
+        """The Calendar page's day in focus; the owner's today before it shows any days."""
+        return self.calendar_panel.focus_day() or self._local_today()
 
     def _read_calendar(
         self,
@@ -2132,7 +2136,9 @@ class MainWindow(QMainWindow):
         if coverage is None:
             return f"Google Calendar: {account} · not loaded yet"
         if not coverage.covers(shown.first_day, shown.last_day):
-            return f"Google Calendar: {account} · this week isn't loaded yet"
+            week = shown.last_day - shown.first_day < timedelta(days=7)  # Else a month's grid.
+            days = "this week isn't" if week else "these six weeks aren't"
+            return f"Google Calendar: {account} · {days} loaded yet"
         today = self._local_today()
         synced = coverage.synced_at_utc.astimezone(self.zone)
         when = (
@@ -2261,7 +2267,7 @@ class MainWindow(QMainWindow):
         """The Monday Plan with AI starts on: the week shown, or in the Month view the week
         of the day in focus."""
         if self.calendar_panel.view() is CalendarView.MONTH:
-            return week_start(self.calendar_panel.focus_day())
+            return week_start(self._calendar_focus())
         return self._calendar_week or week_start(self._local_today())
 
     async def _prepare_planning(self, options: PlanningOptions) -> None:
@@ -2967,9 +2973,16 @@ class MainWindow(QMainWindow):
             self.appearance_writes.save(appearance)
 
     def _appearance_not_saved(self) -> None:
+        """Said in Settings (opening it clears its line), and on the status line when
+        Settings is closed: a switch of the Calendar's view saves too."""
         self.settings_dialog.status.setText(
             "The appearance couldn't be saved. It stays until MailBrief closes."
         )
+        if not self.settings_dialog.isVisible():
+            self.status.setText(
+                "Your appearance and Calendar view couldn't be saved on this computer. They "
+                "stay until MailBrief closes."
+            )
 
     def _request_save_preferences(self, preferences: DesktopPreferences) -> None:
         self.start(lambda: self._save_preferences(preferences), cancellable=False)

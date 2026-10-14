@@ -51,7 +51,7 @@ from mailbrief.ui.calendar_layout import (
     shown_month,
 )
 from mailbrief.ui.deadline_text import WEEKDAYS
-from mailbrief.ui.hairline import hairline_pen
+from mailbrief.ui.hairline import crisp_rect, hairline_pen
 from mailbrief.ui.theme import (
     CAPTION_PX,
     SMALL_PX,
@@ -129,6 +129,21 @@ def paint_ring(painter: QPainter, rect: QRectF, radius: float, color: str) -> No
     painter.restore()
 
 
+def paint_outline(
+    painter: QPainter, rect: QRectF, radius: float, entry: Entry, tokens: Tokens
+) -> None:
+    """Google's entries share the card fill of the month's own days and of today's column,
+    so a hairline in ``border_strong``, as a strong card has, keeps their shape there."""
+    if not isinstance(entry, GoogleEvent):
+        return
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(hairline_pen(tokens.border_strong))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(crisp_rect(painter, rect), radius, radius)
+    painter.restore()
+
+
 def paint_bar(
     painter: QPainter, rect: QRectF, entry: Entry, zone: ZoneInfo, tokens: Tokens, *, px: int
 ) -> None:
@@ -149,6 +164,7 @@ def paint_bar(
     area = rect.adjusted(EDGE_W + 5, 0, -4, 0)
     painter.drawText(area, _ALIGN_LEFT, _elided(entry_label(entry, zone), metrics, area.width()))
     painter.restore()
+    paint_outline(painter, rect, radius, entry, tokens)
 
 
 @dataclass(frozen=True)
@@ -161,6 +177,7 @@ class Hit:
     more: bool = False
     lane: int = 0  # In the month grid, the item's lane in its week.
     last_day: date | None = None  # A bar merged across days: its last day.
+    hidden: int = 0  # "+N more": how many of the day's items it stands for.
 
 
 class _Grid(QWidget):
@@ -181,16 +198,53 @@ class _Grid(QWidget):
         self._shown, self._zone, self._today = shown, zone, today
         self.relayout()
 
+    def clear(self) -> None:
+        """Show no days until the next ``show_range``: the window is reading another
+        view's, and the days held now are the wrong ones to draw in this grid."""
+        self._shown = None
+        self.relayout()
+
     def set_selection(self, day: date | None, key: Key | None) -> None:
         """Show ``day`` and the entry ``key`` on it as selected (None for neither)."""
+        changed = (day, key) != (self._day, self._key)
         self._day, self._key = day, key
-        self.relayout()
+        self.selection_shown(changed)
+
+    def selection_shown(self, changed: bool) -> None:
+        """The selection was set; ``changed`` when it differs from the one before."""
+        self.update()
 
     def selection(self) -> tuple[date | None, Key | None]:
         return self._day, self._key
 
     def relayout(self) -> None:
         self.update()
+
+    def _selected_entry(self) -> Entry | None:
+        """The selected entry, wherever it shows; None when nothing is selected."""
+        if self._key is None or self._shown is None:
+            return None
+        shown = self._shown
+        entries: list[Entry] = [*shown.events, *shown.google_events, *shown.markers]
+        return next((entry for entry in entries if entry_key(entry) == self._key), None)
+
+    def day_entries(self, day: date) -> list[Entry]:
+        """The day's entries in the order the keyboard steps through them."""
+        return []
+
+    def _step_entry(self, day: date, step: int) -> None:
+        """Choose the day's next (``step`` 1) or previous (-1) entry, or its first or last
+        when none of its entries is selected; a day with none is chosen itself."""
+        entries = self.day_entries(day)
+        if not entries:
+            self.chosen.emit(day, None)
+            return
+        keys = [entry_key(entry) for entry in entries]
+        if self._key in keys:
+            index = min(len(entries) - 1, max(0, keys.index(self._key) + step))
+        else:
+            index = 0 if step > 0 else len(entries) - 1
+        self.chosen.emit(day, entries[index])
 
     def _choose(self, hit: Hit | None, day: date | None) -> None:
         if hit is not None and hit.more:
@@ -261,6 +315,7 @@ class WeekGrid(_Grid):
         layout.addWidget(self.hours_area, 1)
         self._bars: list[Bar] = []
         self._lanes = 0
+        self._parts: list[list[Part]] = []  # Each day's timed blocks, in columns.
         self._placed = False  # Whether the hours were first scrolled for a week shown.
         # The line for the time now moves each minute while the grid shows.
         self.minute = QTimer(self)
@@ -292,18 +347,26 @@ class WeekGrid(_Grid):
         return days[min(WEEK_DAYS - 1, int((x - GUTTER) // width))]
 
     def relayout(self) -> None:
+        """Lay out the week shown, once per ``show_range``: its bars and each day's blocks."""
         shown = self._shown
         if shown is None:
-            self._bars, self._lanes = [], 0
+            self._bars, self._lanes, self._parts = [], 0, []
         else:
             last = shown.first_day + timedelta(days=WEEK_DAYS - 1)
             self._bars = pack_lanes(bars(shown, shown.first_day, last, self._zone))
             self._lanes = 1 + max((bar.lane for bar in self._bars), default=-1)
+            self._parts = [day_parts(shown, day, self._zone) for day in self.days()]
         rows = min(self._lanes, STRIP_LANES)
         self.strip.setFixedHeight(rows * (LANE_H + LANE_GAP) + 2 * STRIP_PAD if rows else 0)
         self.strip.setVisible(bool(rows))
         self._place_hours()
         self.update_parts()
+
+    def selection_shown(self, changed: bool) -> None:
+        """Paint the selection, and scroll a newly chosen block into view."""
+        self.update_parts()
+        if changed:
+            self._reveal()
 
     def update_parts(self) -> None:
         for part in (self.header, self.strip, self.hours):
@@ -318,32 +381,42 @@ class WeekGrid(_Grid):
         entry = self._selected_entry()
         return text if entry is None else f"{text}: {entry_label(entry, self._zone)}"
 
-    def _selected_entry(self) -> Entry | None:
-        if self._key is None or self._shown is None:
-            return None
-        shown = self._shown
-        entries: list[Entry] = [*shown.events, *shown.google_events, *shown.markers]
-        return next((entry for entry in entries if entry_key(entry) == self._key), None)
-
     def _place_hours(self) -> None:
         """The first time a week shows, open its hours at 07:30, or earlier when something
         starts earlier; later weeks keep where the owner scrolled."""
         if self._placed or self._shown is None or not self.isVisible():
             return
-        starts = [
-            part.start
-            for day in self.days()
-            for part in day_parts(self._shown, day, self._zone)
-            if part.start > 0
-        ]
+        starts = [part.start for parts in self._parts for part in parts if part.start > 0]
         hour = min([SCROLL_TO_HOUR, *(start / 60 - 0.5 for start in starts)])
         self.hours_area.verticalScrollBar().setValue(max(0, round(hour * HOUR_PX)))
         self._placed = True
+
+    def _reveal(self) -> None:
+        """Scroll the hours so the selected block shows whole, or from its start when it is
+        taller than the hours in view."""
+        days = self.days()
+        if not self.isVisible() or self._key is None or self._day not in days:
+            return
+        index = days.index(self._day)
+        part = next(
+            (part for part in self._parts[index] if entry_key(part.event) == self._key), None
+        )
+        if part is None:
+            return  # A bar in the strip, which never scrolls.
+        rect = self.block_rect(part, index)
+        scroll = self.hours_area.verticalScrollBar()
+        room = self.hours_area.viewport().height()
+        top, bottom = rect.top() - HOURS_PAD, rect.bottom() + HOURS_PAD
+        if top < scroll.value() or bottom - top > room:
+            scroll.setValue(max(0, round(top)))
+        elif bottom > scroll.value() + room:
+            scroll.setValue(round(bottom - room))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.minute.start()
         self._place_hours()
+        self._reveal()  # A block chosen in another view.
 
     def hideEvent(self, event: QHideEvent) -> None:
         self.minute.stop()
@@ -392,7 +465,7 @@ class WeekGrid(_Grid):
                 )
                 if hidden:
                     rect = QRectF(self.column_left(index) + 2, top, width - 4, LANE_H)
-                    found.append(Hit(rect, day, more=True))
+                    found.append(Hit(rect, day, more=True, hidden=hidden))
         return found
 
     def block_rect(self, part: Part, index: int) -> QRectF:
@@ -406,12 +479,10 @@ class WeekGrid(_Grid):
         return QRectF(left, top, max(4.0, share - 2), max(8.0, height))
 
     def _hour_hits(self) -> list[Hit]:
-        if self._shown is None:
-            return []
         return [
             Hit(self.block_rect(part, index), day, part.event)
-            for index, day in enumerate(self.days())
-            for part in day_parts(self._shown, day, self._zone)
+            for index, (day, parts) in enumerate(zip(self.days(), self._parts, strict=True))
+            for part in parts
         ]
 
     # Painting.
@@ -459,8 +530,8 @@ class WeekGrid(_Grid):
             if hit.more:
                 painter.setFont(ui_font(CAPTION_PX, semibold=True))
                 painter.setPen(QColor(tokens.text_secondary))
-                hidden = self._hidden_on(hit.day)
-                painter.drawText(hit.rect.adjusted(6, 0, 0, 0), _ALIGN_LEFT, more_text(hidden))
+                text = more_text(hit.hidden)
+                painter.drawText(hit.rect.adjusted(6, 0, 0, 0), _ALIGN_LEFT, text)
                 continue
             assert hit.entry is not None
             bar = next(bar for bar in self._bars if bar.entry is hit.entry)
@@ -475,17 +546,6 @@ class WeekGrid(_Grid):
             paint_bar(painter, rect, bar.entry, self._zone, tokens, px=SMALL_PX)
             if entry_key(bar.entry) == self._key:
                 paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
-
-    def _hidden_on(self, day: date) -> int:
-        days = self.days()
-        if day not in days:
-            return 0
-        index = days.index(day)
-        return sum(
-            1
-            for bar in self._bars
-            if bar.lane >= STRIP_LANES - 1 and bar.first <= index <= bar.last
-        )
 
     def _paint_hours(self, painter: QPainter, tokens: Tokens) -> None:
         width = self.column_width()
@@ -506,10 +566,9 @@ class WeekGrid(_Grid):
             if hour < 24:
                 painter.setPen(QColor(tokens.text_secondary))
                 painter.drawText(QRectF(0, y - 8, GUTTER - 8, 16), _ALIGN_RIGHT, f"{hour:02d}:00")
-        if self._shown is not None:
-            for index, day in enumerate(days):
-                for part in day_parts(self._shown, day, self._zone):
-                    self._paint_block(painter, self.block_rect(part, index), part, tokens)
+        for index, parts in enumerate(self._parts):
+            for part in parts:
+                self._paint_block(painter, self.block_rect(part, index), part, tokens)
         if self._today in days:
             self._paint_now(painter, days.index(self._today), tokens)
 
@@ -541,11 +600,14 @@ class WeekGrid(_Grid):
             below = QRectF(area.left(), line.bottom(), area.width(), when_metrics.height())
             painter.drawText(below, _ALIGN_LEFT, _elided(when, when_metrics, area.width()))
         painter.restore()
+        paint_outline(painter, rect, BLOCK_RADIUS, event, tokens)
         if entry_key(event) == self._key and part.day == self._day:
             paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
 
     def _paint_now(self, painter: QPainter, index: int, tokens: Tokens) -> None:
         now = self.clock().astimezone(self._zone)
+        if now.date() != self._today:
+            return  # Past midnight: today moves on when the window reads the days again.
         y = HOURS_PAD + (now.hour * 60 + now.minute) * HOUR_PX / 60
         left = self.column_left(index)
         painter.save()
@@ -570,7 +632,7 @@ class WeekGrid(_Grid):
         across = sorted(
             (bar for bar in self._bars if bar.first <= index <= bar.last), key=lambda bar: bar.lane
         )
-        timed = sorted(day_parts(self._shown, day, self._zone), key=lambda part: part.start)
+        timed = sorted(self._parts[index], key=lambda part: part.start)
         return [*(bar.entry for bar in across), *(part.event for part in timed)]
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -605,18 +667,6 @@ class WeekGrid(_Grid):
             (entry for entry in self.day_entries(day) if entry_key(entry) == self._key), None
         )
 
-    def _step_entry(self, day: date, step: int) -> None:
-        entries = self.day_entries(day)
-        if not entries:
-            self.chosen.emit(day, None)
-            return
-        keys = [entry_key(entry) for entry in entries]
-        if self._key in keys:
-            index = min(len(entries) - 1, max(0, keys.index(self._key) + step))
-        else:
-            index = 0 if step > 0 else len(entries) - 1
-        self.chosen.emit(day, entries[index])
-
     def sizeHint(self) -> QSize:
         return QSize(640, HEADER_H + 12 * HOUR_PX)
 
@@ -631,7 +681,8 @@ class MonthGrid(_Grid):
     """Six weeks of days around a month, as calendar apps show a month: a tile for each
     day, the month's own days filled; events of a day or more and the actions' dates as
     bars across their days, timed events as a line each, and "+N more" when a day holds more
-    than its tile shows. Page Up and Page Down ask for the month before and after."""
+    than its tile shows. The arrows move between days, Alt+Up and Alt+Down (Option on macOS)
+    through a day's items, and Page Up and Page Down ask for the month before and after."""
 
     period_requested = Signal(int)
 
@@ -641,6 +692,13 @@ class MonthGrid(_Grid):
         self.setAccessibleName("Calendar month")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumHeight(MONTH_HEADER_H + 6 * (NUMBER_H + LINE_H + 2 * TILE_GAP + 4))
+        self._weeks: list[list[Bar]] = []  # Each week's items in lanes, once per range.
+        self._hits: tuple[QSize, list[Hit]] | None = None  # And the size they were made at.
+
+    def relayout(self) -> None:
+        self._weeks = [] if self._shown is None else [self._week_items(row) for row in range(6)]
+        self._hits = None
+        self.update()
 
     def first_day(self) -> date | None:
         return None if self._shown is None else self._shown.first_day
@@ -707,25 +765,44 @@ class MonthGrid(_Grid):
         return pack_lanes(found)
 
     def hits(self) -> list[Hit]:
-        """Every painted item and "+N more", in the order painted."""
+        """Every painted item and "+N more", in the order painted; made once per size."""
+        if self._hits is None or self._hits[0] != self.size():
+            self._hits = (self.size(), self._make_hits())
+        return self._hits[1]
+
+    def _make_hits(self) -> list[Hit]:
         cells = self.cells()
         capacity = self.capacity()
         found: list[Hit] = []
-        for row in range(6):
-            items = self._week_items(row)
+        for row, items in enumerate(self._weeks):
             week = cells[row * WEEK_DAYS : (row + 1) * WEEK_DAYS]
             for offset, cell in enumerate(week):
                 here = [item for item in items if item.first <= offset <= item.last]
-                count = len(here)
-                shown_lanes = capacity if count <= capacity else max(0, capacity - 1)
+                # Lanes are the week's, so an item can sit below the tile's room on a day
+                # that holds few: a day overflows when any of its items does.
+                overflows = any(item.lane >= capacity for item in here)
+                shown_lanes = max(0, capacity - 1) if overflows else capacity
+                hidden = 0
                 for item in here:
                     if item.lane < shown_lanes:
                         rect = self._line_rect(cell, item.lane)
                         found.append(Hit(rect, cell.day, item.entry, lane=item.lane))
-                if count > shown_lanes and capacity:
+                    else:
+                        hidden += 1
+                if hidden and capacity:
                     rect = self._line_rect(cell, shown_lanes)
-                    found.append(Hit(rect, cell.day, more=True))
+                    found.append(Hit(rect, cell.day, more=True, hidden=hidden))
         return found
+
+    def day_entries(self, day: date) -> list[Entry]:
+        """The day's items in the order Alt+Up and Alt+Down visit them: by lane, as they
+        are painted, then those behind "+N more"."""
+        first = self.first_day()
+        if first is None or not 0 <= (day - first).days < len(self._weeks) * WEEK_DAYS:
+            return []
+        row, offset = divmod((day - first).days, WEEK_DAYS)
+        here = [item for item in self._weeks[row] if item.first <= offset <= item.last]
+        return [item.entry for item in sorted(here, key=lambda item: item.lane)]
 
     def _line_rect(self, cell: _Cell, lane: int) -> QRectF:
         top = cell.rect.top() + NUMBER_H + 1 + lane * (LINE_H + LINE_GAP)
@@ -812,9 +889,7 @@ class MonthGrid(_Grid):
         if hit.more:
             painter.setFont(ui_font(CAPTION_PX, semibold=True))
             painter.setPen(QColor(tokens.text_secondary))
-            painter.drawText(
-                hit.rect.adjusted(4, 0, 0, 0), _ALIGN_LEFT, more_text(self._more_on(hit))
-            )
+            painter.drawText(hit.rect.adjusted(4, 0, 0, 0), _ALIGN_LEFT, more_text(hit.hidden))
             return
         entry = hit.entry
         assert entry is not None
@@ -825,15 +900,6 @@ class MonthGrid(_Grid):
         last = hit.last_day or hit.day
         if entry_key(entry) == self._key and self._day is not None and hit.day <= self._day <= last:
             paint_ring(painter, hit.rect, BLOCK_RADIUS, tokens.accent_fg)
-
-    def _more_on(self, hit: Hit) -> int:
-        """How many of the day's items "+N more" stands for."""
-        cells = self.cells()
-        index = next(number for number, cell in enumerate(cells) if cell.day == hit.day)
-        row, offset = divmod(index, WEEK_DAYS)
-        here = [item for item in self._week_items(row) if item.first <= offset <= item.last]
-        capacity = self.capacity()
-        return len(here) - max(0, capacity - 1)
 
     def _paint_line(
         self, painter: QPainter, hit: Hit, event: CalendarEvent | GoogleEvent, tokens: Tokens
@@ -887,21 +953,15 @@ class MonthGrid(_Grid):
         day = self._day if self._day is not None and first <= self._day <= last else None
         if day is None:
             day = self._today if self._today is not None and first <= self._today <= last else first
-        if key in steps:
+        stepping = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        if stepping and key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self._step_entry(day, -1 if key == Qt.Key.Key_Up else 1)
+        elif key in steps:
             moved = day + timedelta(days=steps[Qt.Key(key)])
             self.chosen.emit(min(last, max(first, moved)), None)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            entry = next(
-                (
-                    hit.entry
-                    for hit in self.hits()
-                    if hit.day == day
-                    and hit.entry is not None
-                    and entry_key(hit.entry) == self._key
-                ),
-                None,
-            )
-            self.activated.emit(day, entry)
+            # The selection is on its day even behind "+N more", where nothing paints it.
+            self.activated.emit(day, self._selected_entry() if day == self._day else None)
         elif key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
             self.period_requested.emit(-1 if key == Qt.Key.Key_PageUp else 1)
         else:
@@ -911,6 +971,7 @@ class MonthGrid(_Grid):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self._hits = None
         self.update()
 
     def sizeHint(self) -> QSize:

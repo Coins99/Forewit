@@ -14,7 +14,7 @@ from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, 
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.ui.appearance import Appearance
-from mailbrief.ui.calendar_grid import HOUR_PX, HOURS_PAD
+from mailbrief.ui.calendar_grid import HOUR_PX, HOURS_PAD, MonthGrid
 from mailbrief.ui.calendar_layout import (
     CalendarView,
     Part,
@@ -27,7 +27,14 @@ from mailbrief.ui.calendar_layout import (
     shown_month,
     timed_part,
 )
-from mailbrief.ui.calendar_view import NEW, OPEN, CalendarPanel, month_title
+from mailbrief.ui.calendar_view import (
+    EMPTY_MONTH,
+    NEW,
+    OPEN,
+    CalendarPanel,
+    month_title,
+    week_start,
+)
 from mailbrief.ui.event_editor import local_instant
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import apply_theme
@@ -388,3 +395,121 @@ def test_the_view_is_kept_and_an_unknown_one_opens_the_week() -> None:
     # A view a newer build added gives the default, keeping the other choices.
     newer = Appearance.model_validate_json('{"calendar_view": "year", "mode": "dark"}')
     assert newer.calendar_view is CalendarView.WEEK and newer.mode.value == "dark"
+
+
+def test_a_month_day_never_hides_an_item_without_more(qtbot: QtBot) -> None:
+    # Lanes are the week's: a bar below a tile's room on a day that holds little else still
+    # shows there, or counts in its "+N more".
+    one = whole("One", MONDAY, MONDAY + timedelta(days=1))
+    two = whole("Two", MONDAY, MONDAY + timedelta(days=1))
+    later = whole("Later", MONDAY + timedelta(days=1), MONDAY + timedelta(days=3))
+    grid = MonthGrid()
+    qtbot.addWidget(grid)
+    grid.resize(700, 400)
+    first, last = month_days(TODAY)
+    shown = CalendarRange(first_day=first, last_day=last, events=(one, two, later), markers=())
+    grid.show_range(shown, TORONTO, TODAY)
+    assert grid.capacity() == 2
+    for offset in (1, 2, 3):
+        day = MONDAY + timedelta(days=offset)
+        here = [hit for hit in grid.hits() if hit.day == day]
+        painted = [hit.entry for hit in here if hit.entry is not None]
+        counted = sum(hit.hidden for hit in here if hit.more)
+        assert painted.count(later) + counted >= 1, day
+    tuesday = [hit for hit in grid.hits() if hit.day == MONDAY + timedelta(days=1)]
+    assert [hit.hidden for hit in tuesday if hit.more] == [2]
+    wednesday = [hit for hit in grid.hits() if hit.day == MONDAY + timedelta(days=2)]
+    assert [hit.hidden for hit in wednesday if hit.more] == [1]
+
+
+def test_the_month_grid_steps_to_and_opens_an_item_behind_more(panel: CalendarPanel) -> None:
+    panel.views.setCurrentIndex(1)
+    backend = FakeBackend()
+    fill(backend)
+    panel.show_range(backend._range(*month_days(TODAY), TORONTO), TORONTO, TODAY)
+    grid = panel.month_grid
+    entries = grid.day_entries(TODAY)
+    proposal = entries[-1]
+    assert isinstance(proposal, CalendarEvent) and proposal.title == "Write the proposal"
+    assert all(hit.entry != proposal for hit in grid.hits() if hit.day == TODAY)  # Hidden.
+    grid.setFocus()
+    QTest.keyClick(grid, Qt.Key.Key_Down, Qt.KeyboardModifier.AltModifier)
+    assert panel._entry() == entries[0]
+    QTest.keyClick(grid, Qt.Key.Key_Down, Qt.KeyboardModifier.AltModifier)
+    assert panel._entry() == entries[1]
+    asked: list[tuple[str, object]] = []
+    panel.event_requested.connect(lambda kind, value: asked.append((kind, value)))
+    panel.select_entry(entry_key(proposal), TODAY)
+    QTest.keyClick(grid, Qt.Key.Key_Return)  # Opens it, though nothing paints it.
+    assert asked == [(OPEN, proposal)]
+
+
+def test_the_week_grid_scrolls_a_chosen_block_into_view(panel: CalendarPanel) -> None:
+    panel.show_range(week_range(), TORONTO, TODAY)
+    grid = panel.week_grid
+    scroll = grid.hours_area.verticalScrollBar()
+    scroll.setValue(0)
+    proposal = next(
+        entry
+        for _day, entry in panel._rows
+        if isinstance(entry, CalendarEvent) and entry.title == "Write the proposal"
+    )
+    panel.select_entry(entry_key(proposal), TODAY)
+    block = next(hit for hit in grid.hits(grid.hours) if hit.entry == proposal)
+    room = grid.hours_area.viewport().height()
+    assert scroll.value() > 0
+    assert scroll.value() <= block.rect.top() and block.rect.bottom() <= scroll.value() + room
+    # The same selection, read again, keeps where the owner scrolled.
+    scroll.setValue(0)
+    panel.show_range(week_range(), TORONTO, TODAY)
+    assert scroll.value() == 0
+
+
+def test_nothing_is_in_focus_until_days_show_and_an_empty_month_says_so(
+    qtbot: QtBot,
+) -> None:
+    panel = CalendarPanel()
+    qtbot.addWidget(panel)
+    assert panel.focus_day() is None
+    panel.set_view(CalendarView.MONTH)
+    first, last = month_days(TODAY)
+    empty = CalendarRange(first_day=first, last_day=last, events=(), markers=())
+    panel.show_range(empty, TORONTO, TODAY)
+    assert panel.empty.text() == EMPTY_MONTH and not panel.empty.isHidden()
+    assert panel.focus_day() == TODAY
+
+
+async def test_more_opens_the_list_without_keeping_it(qtbot: QtBot) -> None:
+    window = await shown_window(qtbot, CalendarView.MONTH)
+    window.resize(1100, 720)
+    window.show()
+    qtbot.waitExposed(window)
+    panel = window.calendar_panel
+    grid = panel.month_grid
+    more = next(hit for hit in grid.hits() if hit.more)
+    QTest.mouseClick(
+        grid,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        more.rect.center().toPoint(),
+    )
+    await window.drain_calendar_reads()
+    assert panel.view() is CalendarView.LIST
+    assert window.appearance.calendar_view is CalendarView.MONTH  # A look at one day.
+    backend = window.backend
+    assert isinstance(backend, FakeBackend)
+    reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
+    monday = week_start(more.day)
+    assert reads[-1][1:] == (monday, monday + timedelta(days=6))
+    # Back to Month: until its days are read, its grid shows none of the week's.
+    panel.views.setCurrentIndex(1)
+    assert grid.first_day() is None and grid.hits() == []
+    await window.drain_calendar_reads()
+    assert grid.first_day() == month_days(more.day)[0]
+    assert window.appearance.calendar_view is CalendarView.MONTH
+
+
+async def test_a_view_that_isnt_saved_is_said_on_the_status_line(qtbot: QtBot) -> None:
+    window = await shown_window(qtbot, CalendarView.WEEK)
+    window._appearance_not_saved()
+    assert "Calendar view couldn't be saved" in window.status.text()

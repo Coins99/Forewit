@@ -26,7 +26,9 @@ from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
 from mailbrief.ui.calendar_layout import (
+    WEEK_DAYS,
     CalendarView,
+    Entry,
     add_months,
     clock,
     entry_key,
@@ -60,8 +62,8 @@ REFRESH: Final = "refresh"
 GOOGLE_OFF: Final = "off"  # Gmail isn't connected.
 GOOGLE_ASK: Final = "ask"  # Connected; the sign-in lacks the calendar permissions.
 GOOGLE_ON: Final = "on"
-WEEK_DAYS: Final = 7
 EMPTY: Final = "Nothing this week. Add an event with New event."
+EMPTY_MONTH: Final = "Nothing in these six weeks. Add an event with New event."
 MARKER_NOTE: Final = "Deadlines and targets come from your open actions; change them there."
 # The views, in the switcher's order, and what Previous, This and Next say in each.
 VIEW_NAMES: Final = {
@@ -73,7 +75,6 @@ _VIEWS: Final = tuple(VIEW_NAMES)
 _WEEK_STEPS: Final = ("&Previous week", "This wee&k", "Ne&xt week")
 _MONTH_STEPS: Final = ("&Previous month", "This mont&h", "Ne&xt month")
 
-Entry = CalendarEvent | GoogleEvent | ActionMarker
 Row = Entry | None  # None is a day's heading.
 
 
@@ -144,17 +145,19 @@ class CalendarPanel(QWidget):
     ``event_requested(kind, value)`` carries NEW with the day to start on, or OPEN or DELETE
     with the selected CalendarEvent. ``week_requested(first_day)`` asks for another week
     (the Week and List views), ``month_requested(first)`` for another month (the Month
-    view) and ``view_requested(view)`` for the days of a view the owner switched to, around
-    ``focus_day()``. The rows of the List view hold the selection for every view: the grids
-    show it and choose through it. While another operation runs (``set_busy``), reading
-    days, New event, Open, Open in Google Calendar and Plan with AI still work, since they
-    change nothing; Delete event, Allow and Refresh wait.
+    view) and ``view_requested(view, keep)`` for the days of a view switched to, around
+    ``focus_day()``: ``keep`` when the owner chose it with the tabs, so it is remembered,
+    and not when "+N more" opened the List view. The rows of the List view hold the
+    selection for every view: the grids show it and choose through it. While another
+    operation runs (``set_busy``), reading days, New event, Open, Open in Google Calendar
+    and Plan with AI still work, since they change nothing; Delete event, Allow and Refresh
+    wait.
     """
 
     event_requested = Signal(str, object)
     week_requested = Signal(object)
     month_requested = Signal(object)
-    view_requested = Signal(str)
+    view_requested = Signal(str, bool)
     google_requested = Signal(str)
     plan_requested = Signal()
 
@@ -162,6 +165,9 @@ class CalendarPanel(QWidget):
         super().__init__()
         self._busy = False
         self._shown: CalendarRange | None = None
+        # Whether the days shown are a month's grid: read for the Month view, while the view
+        # may already be another, until the window reads that view's days.
+        self._shown_month = False
         self._today: date | None = None
         self._rows: list[tuple[date, Row]] = []
         layout = QVBoxLayout(self)
@@ -214,12 +220,12 @@ class CalendarPanel(QWidget):
         self.list.currentRowChanged.connect(lambda _row: self._selection_moved())
         self.list.itemActivated.connect(lambda _item: self._request(OPEN))
         list_layout.addWidget(self.list, 1)
-        self.empty = plain_label(EMPTY, tone="muted")
-        self.empty.setObjectName("calendarEmpty")
-        list_layout.addWidget(self.empty)
         for page in (self.week_grid, self.month_grid, list_page):
             self.stack.addWidget(page)
         layout.addWidget(self.stack, 1)
+        self.empty = plain_label(EMPTY, tone="muted")  # Under every view.
+        self.empty.setObjectName("calendarEmpty")
+        layout.addWidget(self.empty)
         self.note = plain_label(MARKER_NOTE, tone="muted")
         self.note.setObjectName("calendarNote")
         layout.addWidget(self.note)
@@ -277,26 +283,25 @@ class CalendarPanel(QWidget):
             self.views.setCurrentIndex(_VIEWS.index(view))
         finally:
             self.views.blockSignals(False)
-        self._show_view()
+        self._switched()
 
     def set_clock(self, clock_now: Callable[[], datetime]) -> None:
         """Where the week grid reads the time now, for its line across today."""
         self.week_grid.clock = clock_now
 
-    def focus_day(self) -> date:
+    def focus_day(self) -> date | None:
         """The day another view should open on: the selected day, else today when it is
-        shown, else the 1st of the month shown (Month) or the first day shown."""
+        shown, else the 1st of the month when a month's grid is shown, else the first day
+        shown; None before anything is shown, when the window knows the owner's today."""
         row = self.list.currentRow()
         if 0 <= row < len(self._rows):
             return self._rows[row][0]
         shown, today = self._shown, self._today
-        if shown is not None and today is not None and shown.first_day <= today <= shown.last_day:
+        if shown is None or today is None:
+            return None
+        if shown.first_day <= today <= shown.last_day:
             return today
-        if shown is not None:
-            if self.view() is CalendarView.MONTH:
-                return shown_month(shown.first_day)
-            return shown.first_day
-        return today if today is not None else date.today()
+        return shown_month(shown.first_day) if self._shown_month else shown.first_day
 
     def selected(self) -> CalendarEvent | None:
         """The selected event when it is the owner's; Google's can't be changed here."""
@@ -326,6 +331,9 @@ class CalendarPanel(QWidget):
         row = self.list.currentRow()
         previous = self._rows[row] if 0 <= row < len(self._rows) else None
         self._shown = shown
+        # The window reads the days of the view shown, and a read started before a switch
+        # never shows: so these are the Month view's days when it is the view now.
+        self._shown_month = self.view() is CalendarView.MONTH
         self._today = today
         self._rows = []
         self.list.blockSignals(True)
@@ -356,6 +364,7 @@ class CalendarPanel(QWidget):
                 self._select(entry_key(previous[1]), previous[0])
             else:
                 self._select_day(previous[0])
+        self.empty.setText(EMPTY_MONTH if self._shown_month else EMPTY)
         self.empty.setVisible(not shown.events and not shown.markers and not shown.google_events)
         self.note.setVisible(bool(shown.markers))
         self._show_heading()
@@ -422,14 +431,24 @@ class CalendarPanel(QWidget):
             self._request_open_google()
 
     def _show_more(self, day: object) -> None:
-        """ "+N more": the List view, on that day's week, shows all of the day's entries."""
+        """ "+N more": the List view, on that day's week, shows all of the day's entries.
+        It's a look at one day, so the view the owner keeps stays as it was."""
         if isinstance(day, date):
             self._select_day(day)
-            self.views.setCurrentIndex(_VIEWS.index(CalendarView.LIST))
+            self.set_view(CalendarView.LIST)
+            self.view_requested.emit(CalendarView.LIST.value, False)
 
     def _view_changed(self, _index: int) -> None:
+        self._switched()
+        self.view_requested.emit(self.view().value, True)
+
+    def _switched(self) -> None:
+        """Show the view now chosen. Until the window reads its days, its grid shows none
+        rather than another view's: a week drawn as a month's grid, or the reverse."""
+        month = self.view() is CalendarView.MONTH
+        if self._shown is not None and month != self._shown_month:
+            (self.month_grid if month else self.week_grid).clear()
         self._show_view()
-        self.view_requested.emit(self.view().value)
 
     def _show_view(self) -> None:
         view = self.view()
@@ -451,7 +470,7 @@ class CalendarPanel(QWidget):
         shown, today = self._shown, self._today
         if shown is None or today is None:
             self.heading.setText("Calendar")
-        elif self.view() is CalendarView.MONTH:
+        elif self._shown_month:
             self.heading.setText(f"Calendar · {month_title(shown_month(shown.first_day))}")
         else:
             self.heading.setText(f"Calendar · {week_title(shown.first_day, today)}")
@@ -493,22 +512,11 @@ class CalendarPanel(QWidget):
             self.week_requested.emit(week_start(self._today))
 
     def _request_new(self) -> None:
-        """A new event starts on the day selected, else today when shown, else the first
-        day shown (the month's 1st in the Month view)."""
-        if self._shown is None:
-            return
-        row = self.list.currentRow()
-        if 0 <= row < len(self._rows):
-            day = self._rows[row][0]
-        elif (
-            self._today is not None and self._shown.first_day <= self._today <= self._shown.last_day
-        ):
-            day = self._today
-        elif self.view() is CalendarView.MONTH:
-            day = shown_month(self._shown.first_day)
-        else:
-            day = self._shown.first_day
-        self.event_requested.emit(NEW, day)
+        """A new event starts on the day in focus (``focus_day``): the day selected, else
+        today when shown, else the first day shown (the month's 1st in a month's grid)."""
+        day = self.focus_day()
+        if day is not None:
+            self.event_requested.emit(NEW, day)
 
     def _request_plan(self) -> None:
         if self._shown is not None:
