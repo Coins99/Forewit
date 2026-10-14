@@ -33,6 +33,9 @@ class InboxPage(DomainModel):
     messages: tuple[NormalizedMessage, ...] = ()
     offset: int = Field(default=0, ge=0)
     has_more: bool = False
+    query: str = Field(default="", max_length=1000, repr=False)
+    cached: bool = True
+    error_code: str | None = None
     # How many messages the cached Inbox holds in all, across every page.
     total: int = Field(default=0, ge=0)
     # The messages on this page the owner said belong in a brief (ADR 0020), and how many

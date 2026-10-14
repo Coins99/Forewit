@@ -14,6 +14,7 @@ from mailbrief.domain.digests import (
     SyncStage,
     SyncStatus,
 )
+from mailbrief.domain.inbox import MailboxPage
 from mailbrief.domain.messages import (
     AccountIdentity,
     MessagePage,
@@ -31,6 +32,7 @@ from mailbrief.ports.errors import (
 )
 from mailbrief.services import sync as sync_module
 from mailbrief.services.calendar import DayWindow
+from mailbrief.services.inbox import InboxService
 from mailbrief.services.sync import SyncService
 from mailbrief.storage.repositories import (
     AccountRepository,
@@ -831,3 +833,83 @@ async def test_inbox_checkpoint_survives_database_engine_shutdown(tmp_path: Path
             assert calls == [None, "next"]
     finally:
         await reopened.dispose()
+
+
+@pytest.mark.parametrize("cancel_at", ["never", "before", "after"])
+async def test_bounded_browsing_preserves_unobserved_cache_and_cancellation(
+    async_session: AsyncSession,
+    test_account: int,
+    cancel_at: str,
+) -> None:
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(
+        test_account,
+        [
+            make_message(provider_message_id="unobserved"),
+            make_message(provider_message_id="archived"),
+            make_message(provider_message_id="discarded"),
+        ],
+    )
+    await async_session.commit()
+    cancel = asyncio.Event()
+    if cancel_at == "before":
+        cancel.set()
+    calls = 0
+
+    class Reader:
+        async def fetch_mailbox_page(
+            self, *, continuation: str | None = None, page_size: int = 50, query: str = ""
+        ) -> MailboxPage:
+            nonlocal calls
+            calls += 1
+            if cancel_at == "after":
+                cancel.set()
+            return MailboxPage(
+                messages=(
+                    make_message(provider_message_id="new"),
+                    make_message(provider_message_id="archived", is_in_inbox=False),
+                ),
+                attempted=3,
+                discarded_ids=frozenset({"discarded"}),
+                continuation="older",
+            )
+
+    service = InboxService(async_session, Reader())
+    if cancel_at != "never":
+        with pytest.raises(asyncio.CancelledError):
+            await service.load_page(test_account, cancel)
+        rows, _ = await repo.get_inbox_page(test_account)
+        assert {r.provider_message_id for r in rows} == {"unobserved", "archived", "discarded"}
+        assert calls == int(cancel_at == "after")
+    else:
+        result = await service.load_page(test_account, cancel)
+        assert result.continuation == "older"
+        rows, _ = await repo.get_inbox_page(test_account)
+        assert {r.provider_message_id for r in rows} == {"unobserved", "new"}
+        assert await repo.get_by_provider_message_id(test_account, "archived") is not None
+        assert await repo.get_by_provider_message_id(test_account, "discarded") is None
+
+
+async def test_bounded_browsing_timeout_preserves_cache(
+    async_session: AsyncSession,
+    test_account: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mailbrief.services import inbox as inbox_module
+
+    monkeypatch.setattr(inbox_module, "MAX_RUN_WORK_SECONDS", 0)
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [make_message()])
+    await async_session.commit()
+
+    class Reader:
+        async def fetch_mailbox_page(
+            self, *, continuation: str | None = None, page_size: int = 50, query: str = ""
+        ) -> MailboxPage:
+            await asyncio.sleep(0)
+            return MailboxPage()
+
+    with pytest.raises(ProviderResponseError, match="timed out"):
+        await InboxService(async_session, Reader()).load_page(test_account, asyncio.Event())
+    rows, _ = await repo.get_inbox_page(test_account)
+    assert len(rows) == 1

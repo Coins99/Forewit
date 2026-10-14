@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QLineEdit,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -63,11 +64,11 @@ __all__ = [
     "wanted_short",
 ]
 
-SIGN_IN: Final = "Sign in with Google to sync your full Inbox."
+SIGN_IN: Final = "Sign in with Google to load your Inbox."
 NO_MESSAGES: Final = "No messages in your cached Inbox. Refresh checks Gmail."
 INCOMPLETE: Final = "Inbox sync incomplete"
 
-# Messages per Inbox page; Previous and Next move by one page.
+# Cached page size used for command-palette navigation.
 INBOX_PAGE_SIZE: Final = 100
 # The list's width beside the reading pane: this share of the page, within these bounds,
 # unless the owner drags the divider. Narrower than both minimums, the reader takes the page.
@@ -112,15 +113,21 @@ class InboxTitle(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("inboxTitle")
+        self._caption = "Inbox"
         self._count: int | None = None
         self.set_count(None)
 
     def count(self) -> int | None:
         return self._count
 
+    def set_search(self, search: bool) -> None:
+        self._caption = "All mail" if search else "Inbox"
+
     def set_count(self, count: int | None) -> None:
         self._count = count
-        self.setAccessibleName("Inbox" if count is None else f"Inbox, {count:,} messages")
+        self.setAccessibleName(
+            self._caption if count is None else f"{self._caption}, {count:,} messages"
+        )
         self.updateGeometry()
         self.update()
 
@@ -129,7 +136,7 @@ class InboxTitle(QWidget):
 
     def sizeHint(self) -> QSize:
         title = ui_metrics(HEADING_PX, semibold=True)
-        width = title.horizontalAdvance("Inbox")
+        width = title.horizontalAdvance(self._caption)
         if self._count is not None:
             count = ui_metrics(SMALL_PX, tabular=True)
             width += _TITLE_GAP + count.horizontalAdvance(self._count_text())
@@ -145,11 +152,11 @@ class InboxTitle(QWidget):
         painter = QPainter(self)
         painter.setFont(ui_font(HEADING_PX, semibold=True))
         painter.setPen(QColor(tokens.text))
-        painter.drawText(QPointF(0, baseline), "Inbox")
+        painter.drawText(QPointF(0, baseline), self._caption)
         if self._count is not None:
             painter.setFont(ui_font(SMALL_PX, tabular=True))
             painter.setPen(QColor(tokens.text_secondary))
-            left = title.horizontalAdvance("Inbox") + _TITLE_GAP
+            left = title.horizontalAdvance(self._caption) + _TITLE_GAP
             painter.drawText(QPointF(left, baseline), self._count_text())
         painter.end()
 
@@ -231,13 +238,16 @@ class EmptyInbox(QWidget):
 
 class InboxPanel(QWidget):
     """``wanted_requested(message_id, wanted)`` asks to mark or unmark the open message;
-    ``search_requested`` asks for the command palette's search."""
+    ``search_requested`` opens the local command palette; ``mail_search_requested``
+    searches Gmail separately."""
 
     refresh_requested = Signal()
     page_requested = Signal(int)
     source_requested = Signal(str)
     wanted_requested = Signal(str, bool)
     search_requested = Signal()
+    mail_search_requested = Signal(str)
+    load_more_requested = Signal()
 
     def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         super().__init__()
@@ -265,6 +275,11 @@ class InboxPanel(QWidget):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self._header())
+        column.addWidget(self._mail_search_row())
+        self.sync_status = ElidedLabel(tone="secondary", px=SMALL_PX)
+        self.sync_status.setObjectName("inboxSyncStatus")
+        self.sync_status.setContentsMargins(16, 0, 10, 4)
+        column.addWidget(self.sync_status)
         self.stack = QStackedWidget()
         self.stack.setObjectName("inboxStack")
         self.messages = InboxListView()
@@ -287,7 +302,7 @@ class InboxPanel(QWidget):
         self.refresh.clicked.connect(self.refresh_requested)
         self.search.clicked.connect(self.search_requested)
         self.previous.clicked.connect(self._previous_page)
-        self.next.clicked.connect(self._next_page)
+        self.next.clicked.connect(self.load_more_requested.emit)
         self.messages.opened.connect(self._open_row)
         self.messages.current_message_changed.connect(self._follow_current)
         self.reader.close_requested.connect(self.close_message)
@@ -295,6 +310,46 @@ class InboxPanel(QWidget):
         self.reader.wanted_requested.connect(self.wanted_requested)
         self.split.splitterMoved.connect(self._divider_moved)
         self.clear()
+
+    def _mail_search_row(self) -> QWidget:
+        search_row = QWidget()
+        search_row.setObjectName("inboxMailSearchRow")
+        layout = QHBoxLayout(search_row)
+        layout.setContentsMargins(10, 4, 10, 4)
+        self.mail_search = QLineEdit()
+        self.mail_search.setObjectName("inboxMailSearch")
+        self.mail_search.setAccessibleName("Search all Gmail mail")
+        self.mail_search.setPlaceholderText("Search all mail in Gmail")
+        self.mail_search.setMaxLength(1000)
+        self.search_button = outline_button(
+            "", "searchInboxButton", icon_name="search", accessible_name="Search all Gmail mail"
+        )
+        self.clear_search = outline_button(
+            "", "clearInboxSearchButton", icon_name="x", accessible_name="Back to Inbox"
+        )
+        self.search_button.setToolTip("Search all Gmail mail")
+        self.clear_search.setToolTip("Back to Inbox")
+        layout.addWidget(self.mail_search, 1)
+        layout.addWidget(self.search_button)
+        layout.addWidget(self.clear_search)
+        self.mail_search.returnPressed.connect(self._search_mail)
+        self.search_button.clicked.connect(self._search_mail)
+        self.clear_search.clicked.connect(self._clear_search)
+        self.mail_search.textChanged.connect(self._update_search_controls)
+        return search_row
+
+    def _search_mail(self) -> None:
+        self.mail_search_requested.emit(self.mail_search.text().strip())
+
+    def _clear_search(self) -> None:
+        self.mail_search.clear()
+        self.mail_search_requested.emit("")
+
+    def _update_search_controls(self) -> None:
+        self.clear_search.setVisible(
+            bool(self.mail_search.text().strip())
+            or (self._page is not None and bool(self._page.query))
+        )
 
     def _header(self) -> QWidget:
         header = QWidget()
@@ -347,14 +402,15 @@ class InboxPanel(QWidget):
             glass=True,
         )
         self.previous.setToolTip("Newer")
+        self.previous.hide()  # Remote browsing appends rather than replacing cached pages.
         self.next = outline_button(
             "",
             "nextInboxButton",
             icon_name="chevron-right",
-            accessible_name="Next 100",
+            accessible_name="Load 100 more",
             glass=True,
         )
-        self.next.setToolTip("Older")
+        self.next.setToolTip("Load up to 100 more messages")
         pager.addWidget(self.previous)
         pager.addWidget(self.next)
         row.addLayout(pager)
@@ -382,9 +438,16 @@ class InboxPanel(QWidget):
     def clear(self, message: str = SIGN_IN) -> None:
         """Show no page, only ``message``."""
         self._page = None
+        self.mail_search.clear()
+        self.sync_status.clear()
+        self.refresh.setAccessibleName("Refresh Inbox")
+        self.next.setAccessibleName("Load 100 more")
+        self.next.setToolTip("Load up to 100 more messages")
+        self._update_search_controls()
         self._open = None
         self.messages.show_rows([])
         self.reader.show_message(None)
+        self.title.set_search(False)
         self.title.set_count(None)
         self.range.clear()
         self.wanted_status.set_count(None)
@@ -404,6 +467,9 @@ class InboxPanel(QWidget):
         self.refresh.setEnabled(not busy)
         self.previous.setEnabled(not busy and page is not None and page.offset > 0)
         self.next.setEnabled(not busy and page is not None and page.has_more)
+        self.mail_search.setEnabled(not busy)
+        self.search_button.setEnabled(not busy)
+        self.clear_search.setEnabled(not busy)
         self.reader.set_busy(busy)
 
     def show_page(self, page: InboxPage, *, select: str | None = None) -> None:
@@ -411,34 +477,51 @@ class InboxPanel(QWidget):
         open message stays open while the page holds it, and the list has the page when it
         doesn't. Reloading the same page keeps the list where it was scrolled."""
         previous = self._page
-        same = (
+        same_query = (
             previous is not None
-            and previous.offset == page.offset
             and previous.account_email == page.account_email
+            and previous.query == page.query
         )
+        same = same_query and previous is not None and previous.offset == page.offset
         scroll = self.messages.verticalScrollBar().value() if same else 0
-        keep = self._open if select is None else select
+        keep = self._open if select is None and same_query else select
         current = self.messages.current_message()
         ids = {message.provider_message_id for message in page.messages}
         self._page = page
+        if previous is None or previous.query != page.query:
+            self.mail_search.setText(page.query)
+        self._update_search_controls()
+        self.refresh.setAccessibleName("Refresh search" if page.query else "Refresh Inbox")
+        self.next.setAccessibleName("Retry page" if page.error_code else "Load 100 more")
+        self.next.setToolTip(
+            "Retry the current message page" if page.error_code else "Load up to 100 more messages"
+        )
+        self.sync_status.setText(
+            "Showing saved metadata. Refresh checks Gmail."
+            if page.cached
+            else "Older saved entries may be stale."
+            if page.has_more
+            else "End of available results; saved entries may be stale."
+        )
         self._open = keep if keep in ids else None
         focus: str | None = self._open
         if focus is None and current is not None and same:
             focus = current.provider_message_id  # The list's place, without opening it.
         rows = build_inbox_rows(page.messages, page.wanted_ids, self.zone, self._today())
         self.messages.show_rows(rows, current=focus if focus in ids else None)
+        self.title.set_search(bool(page.query))
         self.title.set_count(max(page.total, page.offset + len(page.messages)))
         self.range.setText(range_text(page))
         self.wanted_status.set_count(page.wanted_recently)
         if page.messages:
             self.stack.setCurrentWidget(self.messages)
         else:
-            self.empty.set_message(NO_MESSAGES)
+            self.empty.set_message("No matching messages." if page.query else NO_MESSAGES)
             self.stack.setCurrentWidget(self.empty)
-        self.footer.setVisible(bool(page.messages) or page.offset > 0)
+        self.footer.setVisible(bool(page.messages) or page.offset > 0 or page.has_more)
         self._show_open()
         self._arrange()
-        if same and scroll and self._open is None:
+        if select is None:
             self.messages.doItemsLayout()
             self.messages.verticalScrollBar().setValue(scroll)
         self.set_busy(self._busy)

@@ -2,7 +2,7 @@
 across the page, the list beside the reading pane, and the reading pane alone."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -18,7 +18,6 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.config import Settings
 from mailbrief.domain.cached_mail import InboxPage
-from mailbrief.domain.digests import SyncProgress, SyncResult, SyncStatus
 from mailbrief.domain.messages import EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.errors import ConfigurationError
@@ -94,13 +93,20 @@ async def test_signin_syncs_inbox_and_disconnect_clears_account(qtbot: QtBot) ->
     calls: list[str] = []
 
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
             calls.append("inbox")
-            return await super().sync_inbox(cancel, progress)
+            return await self.inbox_messages(account_email, query=query)
 
-        async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async def inbox_messages(
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
+        ) -> InboxPage:
             calls.append(account_email)
             return InboxPage(
                 account_email=account_email,
@@ -119,7 +125,7 @@ async def test_signin_syncs_inbox_and_disconnect_clears_account(qtbot: QtBot) ->
     qtbot.addWidget(window)
     window.connect_button.click()
     await finish(window)
-    assert calls == ["inbox", "owner@example.com"]
+    assert calls == ["owner@example.com", "inbox", "owner@example.com"]
     assert window.workspace.current_page() == "inbox"
     panel = window.inbox_panel
     assert panel.mode() == "list"  # The Inbox starts on its list, nothing open.
@@ -143,9 +149,14 @@ async def test_failed_setup_does_not_leave_a_connected_indicator(
     qtbot: QtBot, failure: Exception
 ) -> None:
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
             raise failure
 
     window = MainWindow(Backend())
@@ -160,53 +171,46 @@ async def test_failed_setup_does_not_leave_a_connected_indicator(
     assert window.workspace.header.alert.isHidden()
 
 
-def incomplete(code: str | None) -> SyncResult:
-    return SyncResult(
-        account_id="owner@example.com",
-        range_start_utc=datetime(2026, 9, 1, tzinfo=UTC),
-        range_end_utc=datetime(2026, 10, 1, tzinfo=UTC),
-        status=SyncStatus.PARTIAL,
-        page_count=1,
-        message_count=0,
-        error_code=code,
-    )
-
-
-async def test_an_incomplete_sync_shows_once_in_the_header(qtbot: QtBot) -> None:
-    results = [incomplete("TIMEOUT"), incomplete("TIMEOUT")]
+async def test_an_incomplete_page_shows_once_in_the_header(qtbot: QtBot) -> None:
+    results = ["METADATA_ITEMS_FAILED", "METADATA_ITEMS_FAILED", None]
 
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
-            return results.pop(0) if results else await super().sync_inbox(cancel, progress)
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
+            return InboxPage(account_email=account_email, error_code=results.pop(0))
 
     window = MainWindow(Backend())
     qtbot.addWidget(window)
     window._set_account("owner@example.com")
     alert = window.workspace.header.alert
     window.status.setText("Ready.")
-
-    await window._refresh_inbox(quiet=True)  # At launch: the header alone says so.
+    await window._refresh_inbox(quiet=True)
     assert not alert.isHidden() and alert.text.text() == INCOMPLETE
-    assert alert.accessibleDescription().startswith("Inbox sync incomplete. Cached")
-    assert alert.toolTip() == alert.accessibleDescription()
+    assert alert.accessibleDescription() == "Some messages couldn't be read. Retry this page."
     assert window.status.text() == "Ready."
-
-    await window._refresh_inbox()  # The owner asked: the status strip answers too.
+    await window._refresh_inbox()
     assert window.status.text() == alert.accessibleDescription()
-
-    await window._refresh_inbox()  # Complete: the alert goes.
-    assert alert.isHidden()
-    assert window.status.text().startswith("Inbox synced:")
+    await window._refresh_inbox()
+    assert alert.isHidden() and window.status.text() == "0 messages loaded."
 
 
 async def test_a_lost_sign_in_clears_the_alert_and_says_so_in_the_page(qtbot: QtBot) -> None:
     class Backend(FakeBackend):
-        async def sync_inbox(
-            self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
-        ) -> SyncResult:
-            return incomplete("AUTH_REQUIRED")
+        async def browse_inbox(
+            self,
+            account_email: str,
+            cancel: asyncio.Event,
+            *,
+            load_more: bool = False,
+            query: str = "",
+        ) -> InboxPage:
+            raise AuthenticationRequiredError("synthetic")
 
     window = MainWindow(Backend())
     qtbot.addWidget(window)
@@ -215,10 +219,8 @@ async def test_a_lost_sign_in_clears_the_alert_and_says_so_in_the_page(qtbot: Qt
     await window._refresh_inbox(quiet=True)
     assert window._account_email is None
     assert window.workspace.header.alert.isHidden()
-    assert window.inbox_panel.empty_message() == (
-        "session expired. Sign in with Google to continue."
-    )
-    assert window.status.text().startswith("Inbox sync incomplete.")
+    assert window.inbox_panel.empty_message() == "Sign in with Google to continue."
+    assert window.status.text() == "Sign in with Google to continue."
 
 
 def gallery_mail(
@@ -559,17 +561,17 @@ def test_the_page_s_header_and_footer(qtbot: QtBot) -> None:
     qtbot.addWidget(panel)
     pages: list[int] = []
     searches: list[bool] = []
-    panel.page_requested.connect(pages.append)
+    panel.load_more_requested.connect(lambda: pages.append(200))
     panel.search_requested.connect(lambda: searches.append(True))
     panel.show_page(two_messages())
     assert panel.title.count() == 202
     assert panel.title.accessibleName() == "Inbox, 202 messages"
     assert panel.range.text() == "101–102 of 202"
     assert panel.previous.isEnabled() and panel.next.isEnabled()
-    panel.previous.click()
     panel.next.click()
     panel.search.click()
-    assert pages == [0, 200] and searches == [True]
+    assert panel.previous.isHidden()
+    assert pages == [200] and searches == [True]
     for button in (panel.search, panel.refresh, panel.previous, panel.next):
         assert button.text() == "" and button.accessibleName()  # Icons, named for readers.
 
@@ -612,7 +614,9 @@ def test_inbox_zone_changes_keep_the_open_message_and_page(qtbot: QtBot) -> None
 
 async def test_marking_a_message_saves_it_and_keeps_it_open(qtbot: QtBot) -> None:
     class Backend(FakeBackend):
-        async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async def inbox_messages(
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
+        ) -> InboxPage:
             marked = frozenset(key for _, key, wanted in self.wanted_marks if wanted)
             return two_messages(wanted=marked, count=len(marked)).model_copy(
                 update={"offset": offset}
@@ -642,7 +646,9 @@ async def test_marking_a_message_saves_it_and_keeps_it_open(qtbot: QtBot) -> Non
 
 async def test_going_to_the_inbox_starts_on_its_list(qtbot: QtBot) -> None:
     class Backend(FakeBackend):
-        async def inbox_messages(self, account_email: str, offset: int = 0) -> InboxPage:
+        async def inbox_messages(
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
+        ) -> InboxPage:
             return two_messages().model_copy(update={"offset": offset})
 
     window = MainWindow(Backend())

@@ -165,7 +165,8 @@ def build_inbox_rows(
         rows.append(
             InboxRow(
                 "message",
-                message.subject or NO_SUBJECT,
+                ("Outside Inbox: " if not message.is_in_inbox else "")
+                + (message.subject or NO_SUBJECT),
                 message,
                 sender_text(message.sender),
                 list_time(message.received_at_utc, zone, today),

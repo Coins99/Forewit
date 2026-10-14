@@ -559,9 +559,10 @@ The brief list's chips keep their shorter forms (see Brief list).
   sits on the workspace's `footer_bar` glass under the sheet: the status (a 12px
   secondary `WrapLabel`) and an outline Undo. No outer scroll area; the window opens at 1100 × 720 and its minimum
   width stays at most 900 px with the theme applied.
-- Inbox refresh (`_refresh_inbox`): a sync that stops early sets the header alert ("Inbox
-  sync incomplete", the whole sentence with the error's guidance as its detail) until a
-  later sync completes, signing out or disconnecting clears it. A quiet refresh (at
+- Inbox refresh (`_refresh_inbox`): read one bounded metadata page (50 IDs initially,
+  100 more on request). A failed or partial page sets the header alert ("Inbox sync
+  incomplete", with retry guidance) until a later page succeeds; signing out or
+  disconnecting clears it. A quiet refresh (at
   launch, after a run) leaves the status strip as it was; one the owner asked for also
   says what happened there. A lost sign-in clears the alert and says so in the Inbox's
   empty state, the sidebar's Gmail line and the status strip.
@@ -754,16 +755,24 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
     12px tabular, secondary) on one baseline, accessible name "Inbox, 342 messages"; then
     round Search (`inboxSearchButton`, opens the command palette) and Refresh
     (`refreshInboxButton`). No status paragraph: who is signed in shows in the sidebar,
-    a sync problem in the header alert.
+    a loading problem in the header alert. Beneath the header, `inboxMailSearchRow`
+    holds a separate Gmail search field (`inboxMailSearch`) with Search and Back to
+    Inbox icon buttons. It emits `mail_search_requested(query)`; the header icon
+    continues to emit `search_requested()` for the local command palette. An elided
+    `inboxSyncStatus` line labels saved metadata and potentially stale cache entries.
+    Search results use the title "All mail" and mark non-Inbox rows "Outside Inbox".
   - The list (`InboxListView`) or, with no page or no messages, `EmptyInbox`
     (`inboxEmpty`): a 48px mail glyph in `text_muted` at 45% opacity over a 13px secondary
-    line ("Sign in with Google to sync your full Inbox.", a sign-in error's guidance, or
+    line ("Sign in with Google to load your Inbox.", a sign-in error's guidance, or
     "No messages in your cached Inbox. Refresh checks Gmail."), centred.
-  - Footer (`inboxFooter`, 40, hidden without messages): the range ("1–100 of 342", 12px
+  - Footer (`inboxFooter`, 40, visible with messages or more results available): the range ("1–100 of 342", 12px
     tabular secondary, `range_text`), `WantedCount` (`inboxWantedStatus`: a 12px warning
     flag and "2 missed by the review in 14 days", elided, the whole ADR 0020 journal
     sentence `wanted_line` as its tooltip and accessible description), then round
-    Previous 100 and Next 100 (chevrons; tooltips "Newer" and "Older").
+    Load 100 more (chevron, or Retry page after partial metadata failure). Previous
+    remains hidden: browsing appends results. Palette jumps still load a cached
+    100-row page, including at offset zero. Query changes close the old reader and
+    reset scroll; appending or refreshing the same query preserves the open message.
 - Rows (`inbox_list.py`): a section header (`paint_header`, `NoItemFlags`) whenever the
   day's section changes, in the owner's zone: Today, Yesterday, Previous 7 days (2 to 6
   days back), Previous 30 days (7 to 29), then the month this year ("September") and the
