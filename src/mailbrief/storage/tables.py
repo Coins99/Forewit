@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from mailbrief.domain.actions import ESTIMATE_MAX_MINUTES
 from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX
 from mailbrief.domain.preferences import (
@@ -426,6 +427,10 @@ class ActionTable(Base):
         CheckConstraint(_OWNERSHIP_CHECK, name="ownership_known"),
         CheckConstraint(_PRECISION_CHECK, name="deadline_precision_known"),
         CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(
+            f"estimate_minutes IS NULL OR estimate_minutes BETWEEN 1 AND {ESTIMATE_MAX_MINUTES}",
+            name="estimate_minutes_range",
+        ),
         Index("ix_actions_status", "status"),
     )
 
@@ -438,6 +443,7 @@ class ActionTable(Base):
     ownership: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     effort: Mapped[str | None] = mapped_column(String(16))
+    estimate_minutes: Mapped[int | None] = mapped_column(Integer)  # The owner's, never the AI's.
     deadline_text: Mapped[str | None] = mapped_column(Text)
     deadline_precision: Mapped[str] = mapped_column(
         String(16),

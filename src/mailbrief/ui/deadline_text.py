@@ -1,8 +1,9 @@
-"""Dates and deadlines in a few words, in one style for the whole window: the brief, its
-suggestion and proposal lines, and the Actions page. The action editor's date fields stay
-ISO, since dates are typed there."""
+"""Dates, deadlines and lengths of time in a few words, in one style for the whole window:
+the brief, its suggestion and proposal lines, the Actions page and the editors' lengths. The
+action editor's date fields stay ISO, since dates are typed there."""
 
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -43,6 +44,40 @@ MONTH_NAMES: Final = (
     "November",
     "December",
 )
+
+# A length typed as h:mm ("1:30"), as a fraction of hours ("1.5"), or as hours, minutes or
+# both, each with or without its unit ("1.5h", "2 hrs", "90", "1h 30", "1 hr 30 mins").
+_CLOCK_LENGTH: Final = re.compile(r"(\d{1,3}):([0-5]\d)")
+_DECIMAL_HOURS: Final = re.compile(r"\d{1,3}[.,]\d+")
+_UNIT_LENGTH: Final = re.compile(
+    r"(?:(\d{1,3}(?:[.,]\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d{1,5})\s*(?:m(?:in(?:ute)?s?)?)?)?",
+    re.IGNORECASE,
+)
+
+
+def length_text(length: timedelta) -> str:
+    """A length of time: "1 min", "45 mins", "1 hr", "2 hrs 15 mins"."""
+    hours, minutes = divmod(int(length.total_seconds()) // 60, 60)
+    parts = [f"{hours} hr" if hours == 1 else f"{hours} hrs"] if hours else []
+    if minutes or not hours:
+        parts.append("1 min" if minutes == 1 else f"{minutes} mins")
+    return " ".join(parts)
+
+
+def parse_length(text: str) -> int | None:
+    """A typed length in whole minutes, as length_text writes it or more loosely: a whole
+    number is minutes ("90") and a fraction is hours ("1.5"), as are "1.5h", "1h 30" and
+    "1:30". None for anything else, an empty text included."""
+    text = text.strip()
+    if clock := _CLOCK_LENGTH.fullmatch(text):
+        return int(clock[1]) * 60 + int(clock[2])
+    if _DECIMAL_HOURS.fullmatch(text):
+        return round(float(text.replace(",", ".")) * 60)
+    unit = _UNIT_LENGTH.fullmatch(text)
+    if unit is None or not (unit[1] or unit[2]):
+        return None
+    hours = float(unit[1].replace(",", ".")) if unit[1] else 0.0
+    return round(hours * 60) + int(unit[2] or 0)
 
 
 def weekday(day: date) -> str:

@@ -13,6 +13,8 @@ later use after Microsoft Entra access is resolved.
   awaiting owner desktop acceptance. Unified Today's first slice is implemented, awaiting
   owner desktop acceptance: **Your day** on the Today page shows what needs attention,
   today's agenda and new replies, from local data only ([Today](today.md)).
+  Tasks can carry the owner's own estimate in minutes, separate from the AI's effort
+  ([estimates](p1-manual-tasks.md#estimates)), awaiting owner desktop acceptance.
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

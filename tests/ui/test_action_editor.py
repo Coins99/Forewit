@@ -5,9 +5,10 @@ from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialogButtonBox, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QLabel, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import Action, ActionEdit, ActionSource, ActionStep, StepEdit
@@ -17,12 +18,13 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
-from mailbrief.ui.action_editor import ActionEditor
+from mailbrief.ui.action_editor import BAD_ESTIMATE, ActionEditor
 from tests.factories import make_action
 
 ACTION = make_action(
     title="Send the Q3 deck",
     effort=ActionEffort.HOURS,
+    estimate_minutes=90,
     deadline_text="by Friday",
     deadline_precision=DeadlinePrecision.DATE,
     deadline_date=date(2026, 10, 2),
@@ -79,6 +81,7 @@ def save(editor: ActionEditor) -> None:
 def test_it_shows_the_action_as_plain_text(editor: ActionEditor) -> None:
     assert editor.title.text() == "Send the Q3 deck"
     assert (editor.owner.currentText(), editor.effort.currentText()) == ("Mine", "Hours")
+    assert editor.estimate.text() == "1 hr 30 mins"
     assert editor.has_target.isChecked() and editor.target.date() == QDate(2026, 10, 1)
     assert editor.deadline.text() == "2026-10-02 (date only)"
     assert editor.suggested.text() == "2026-10-01, one working day before the deadline"
@@ -96,6 +99,7 @@ def test_saving_without_plan_changes_sends_no_steps(editor: ActionEditor) -> Non
     editor.title.setText("  Send the final Q3 deck  ")
     editor.owner.setCurrentIndex(1)
     editor.effort.setCurrentIndex(0)
+    editor.estimate.setValue(0)  # "Not set" clears the estimate.
     editor.has_target.setChecked(False)
 
     save(editor)
@@ -106,6 +110,7 @@ def test_saving_without_plan_changes_sends_no_steps(editor: ActionEditor) -> Non
         title="Send the final Q3 deck",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        estimate_minutes=None,
         target_date=None,
         notes="Ask Sam.",
     )
@@ -180,6 +185,7 @@ def test_each_edit_starts_from_the_new_action(editor: ActionEditor) -> None:
     editor.edit(make_action(title="Another action"), TODAY)
 
     assert editor.title.text() == "Another action"
+    assert editor.estimate.text() == "Not set"
     assert editor.steps.count() == 0
     assert editor.sources.text() == "no source"
     assert editor.suggested.text() == "no target was suggested"
@@ -428,7 +434,117 @@ def test_unsaved_input_is_noticed(editor: ActionEditor) -> None:
     assert not editor.has_unsaved_input()
     editor.has_target.setChecked(not editor.has_target.isChecked())
     assert editor.has_unsaved_input()
+    editor.edit(ACTION, TODAY)
+    editor.estimate.stepUp()
+    assert editor.has_unsaved_input()
     editor.new_task(TODAY)
     assert not editor.has_unsaved_input()
+    assert editor.estimate.text() == "Not set"
     editor.title.setText("Call the bank")
     assert editor.has_unsaved_input()
+
+
+def test_an_estimate_is_saved_in_whole_minutes_and_stepped_by_quarter_hours(
+    editor: ActionEditor,
+) -> None:
+    requests = saved(editor)
+    assert (editor.estimate.objectName(), editor.estimate.accessibleName()) == (
+        "taskEstimate",
+        "Estimated minutes",
+    )
+    editor.estimate.stepUp()
+    assert editor.estimate.text() == "1 hr 45 mins"
+    editor.estimate.setValue(10_000)  # Clamped to 100 hours.
+    assert editor.estimate.value() == 6_000
+
+    save(editor)
+
+    ((_, edit, _),) = requests
+    assert edit.estimate_minutes == 6_000
+    assert edit.effort is ActionEffort.HOURS  # The AI's effort stays as it was, separately.
+
+
+def test_the_wheel_leaves_an_unfocused_estimate_alone(editor: ActionEditor, qtbot: QtBot) -> None:
+    editor.show()
+    qtbot.waitExposed(editor)
+    editor.title.setFocus()
+    QTest.qWait(0)
+    assert not editor.estimate.hasFocus()
+    center = editor.estimate.rect().center()
+    event = QWheelEvent(
+        QPointF(center),
+        QPointF(editor.estimate.mapToGlobal(center)),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+    QApplication.sendEvent(editor.estimate, event)
+
+    assert editor.estimate.value() == 90
+
+
+def type_estimate(editor: ActionEditor, text: str) -> None:
+    editor.estimate.lineEdit().selectAll()
+    QTest.keyClicks(editor.estimate.lineEdit(), text)
+
+
+def test_a_cleared_estimate_saves_as_not_set_and_counts_as_unsaved(editor: ActionEditor) -> None:
+    requests = saved(editor)
+    editor.estimate.lineEdit().clear()  # As the owner deleting it; nothing leaves the field.
+    assert editor.has_unsaved_input()
+
+    save(editor)
+
+    ((_, edit, _),) = requests
+    assert edit.estimate_minutes is None
+
+
+@pytest.mark.parametrize(
+    ("typed", "minutes"),
+    [
+        ("45", 45),
+        ("1h", 60),
+        ("1.5", 90),
+        ("1,5h", 90),
+        ("1h 30", 90),
+        ("1:30", 90),
+        ("2 hrs", 120),
+    ],
+)
+def test_hours_typed_in_the_estimate_count_as_hours(
+    editor: ActionEditor, typed: str, minutes: int
+) -> None:
+    requests = saved(editor)
+    type_estimate(editor, typed)  # Saved without leaving the field, as a click on macOS does.
+
+    save(editor)
+
+    ((_, edit, _),) = requests
+    assert edit.estimate_minutes == minutes
+
+
+def test_a_half_typed_estimate_is_refused_with_the_reason(editor: ActionEditor) -> None:
+    requests = saved(editor)
+    type_estimate(editor, "1:")
+
+    save(editor)
+
+    assert requests == []
+    assert editor.status.text() == BAD_ESTIMATE
+    assert editor.estimate.lineEdit().text() == "1:"  # Kept, to finish typing.
+
+
+@pytest.mark.parametrize(
+    ("start", "steps", "shown"),
+    [(7, 1, 15), (22, -1, 15), (15, -1, 0), (0, 2, 30), (5_990, 1, 6_000)],
+)
+def test_arrows_step_to_the_next_quarter_hour(
+    editor: ActionEditor, start: int, steps: int, shown: int
+) -> None:
+    editor.estimate.setValue(start)
+    editor.estimate.stepBy(steps)
+    assert editor.estimate.value() == shown
