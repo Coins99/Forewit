@@ -57,26 +57,40 @@ later use after Microsoft Entra access is resolved.
 - Search and commands implemented, awaiting owner desktop acceptance: **Go to or search**
   (Ctrl+K) goes to pages, starts a task, event or note, and searches local records only
   ([Go to or search](search.md)).
+- Inbox reading pane implemented, awaiting owner desktop acceptance (PR #76): the **Inbox**
+  page starts as a list across the page, by day, as Gmail's does, and opening an email
+  shows it in a reading pane beside the list, as Outlook's does (on a narrow window the
+  reading pane takes the page). It shows the full Inbox's saved metadata, with no bodies or
+  AI calls ([Google sign-in and the full Inbox](google-signin-inbox.md)).
 - Calendar phase 1 implemented, awaiting live acceptance: a **Calendar** page with your
   own events (timed or all-day, with Undo) and your open actions' deadlines and target
   dates. Google Calendar, read-only (phase 2), implemented, awaiting live acceptance:
   with one Google sign-in shared with Gmail (ADR 0019), Google events show on the Calendar
-  page and refresh with every Sync and review. AI-proposed changes
-  are a later phase. See [Calendar](calendar.md) and [ADR 0018](adr/0018-calendar.md).
+  page and refresh with every Sync and review. **Plan with AI** (phase 3) implemented,
+  awaiting live acceptance: Groq proposes changes to your own events, and nothing changes
+  until you apply them. Week and Month grids beside the List implemented, awaiting owner
+  desktop acceptance (PR #77): the page shows a **Week** of hours, a **Month** of six weeks
+  or the week's **List** of rows, chosen by tabs and remembered on this computer
+  ([Week, Month and List](calendar.md#week-month-and-list)).
+  See [Calendar](calendar.md) and [ADR 0018](adr/0018-calendar.md).
 
 ## The desktop window
 
 ![MailBrief in its dark theme: the header, the sidebar, the brief and the selected email](ui/workspace-dark.png)
 
+The screenshot is from before Studio (PR #74) and the Account card (PR #78);
+[Studio](ui/studio.md) shows the current look.
+
 MailBrief is one window with three panes (PR #21):
 
 - **Header**: when Gmail was last checked, then **Sync and review**, and **Cancel** while
   something runs.
-- **Sidebar**: the pages **Today**, **Actions**, **Waiting**, **Drafts**, **Briefs** and
-  **Calendar**, with counts for actions, waiting actions and drafts. Below them,
-  **Saved mail** (the offline browser of cached metadata), **Data** (backup, exports and
-  recovery) and **Settings**, the Gmail and AI status, and **Connect Gmail** or
-  **Disconnect**.
+- **Sidebar**: the pages **Today**, **Inbox**, **Actions**, **Waiting**, **Drafts**,
+  **Briefs** and **Calendar**, with counts for actions, waiting actions and drafts. Below
+  them, **Saved mail** (the offline browser of cached metadata), **Data** (backup, exports
+  and recovery) and **Settings**, and **Google sign-in** only while no account is
+  connected. The Gmail and AI status and **Disconnect** are in Settings' **Account** card
+  (PR #78).
 - **Today**: the brief's emails by section, and the selected email with its summary,
   deadline, suggested actions, proposed updates, **Draft a reply** and **Open in Gmail**.
 - **Status strip**: the latest status along the bottom, with **Undo** after a change you
@@ -90,7 +104,9 @@ Ctrl+K (Cmd+K on macOS) opens **Go to or search**: commands, and a local search 
 actions, drafts, notes, events and saved mail ([Go to or search](search.md)).
 Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting, Drafts,
 Briefs and Calendar, in the sidebar's order. Tab runs from Sync and review through the sidebar and the page to Undo.
-The theme is dark only for now.
+The look is Studio (PR #74): white and Studio Mist grey with one blue, in the system's
+light or dark mode. Settings > Appearance offers six other colour schemes (Slate,
+Graphite, Ocean, Sage, Plum and Rose) and can keep Light or Dark ([Studio](ui/studio.md)).
 
 ## Start here
 
