@@ -22,8 +22,11 @@ from PySide6.QtWidgets import (
 from mailbrief.providers.groq.credentials import GroqKeyError, parse_api_key
 from mailbrief.ui.appearance_view import AppearancePanel
 from mailbrief.ui.dialog_guard import DialogGuard
+from mailbrief.ui.hairline import HairlineFrame
+from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
+from mailbrief.ui.theme import SMALL_PX, TEXT_PX
 
 
 def _scrolling(page: QWidget, name: str, title: str) -> QScrollArea:
@@ -43,8 +46,13 @@ def _scrolling(page: QWidget, name: str, title: str) -> QScrollArea:
 
 
 class SettingsDialog(QDialog):
-    """Three tabs: this device's connection and AI settings, the owner's preferences,
-    which are saved in the database and shared with the CLI, and this device's colours."""
+    """Three tabs: this device's account, connection and AI settings, the owner's
+    preferences, which are saved in the database and shared with the CLI, and this device's
+    colours.
+
+    The Account card at the top of the first tab holds the window's Gmail and AI status
+    lines (``gmail_status``, ``ai_status``) and Disconnect, or Sign in with Google while
+    signed out; the window owns what they say and does what they ask."""
 
     save_requested = Signal(object)
     key_requested = Signal(object)
@@ -61,6 +69,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         connection = QWidget()
         connection_layout = QVBoxLayout(connection)
+        connection_layout.addWidget(self._account_card())
         self.fields = QWidget()
         form = QFormLayout(self.fields)
         self.oauth_path = QLineEdit()
@@ -127,6 +136,51 @@ class SettingsDialog(QDialog):
         self.preferences_panel.status_changed.connect(self.status.setText)
         self._picker: QFileDialog | None = None
         self._loaded_input = self._input()
+
+    def _account_card(self) -> HairlineFrame:
+        """Who is signed in and what the AI may do, at the left, with Disconnect, or Sign in
+        with Google, at the right."""
+        card = HairlineFrame()
+        card.setObjectName("accountCard")
+        card.setAccessibleName("Account")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        lines = QVBoxLayout()
+        lines.setSpacing(4)
+        title = plain_label("Account", px=TEXT_PX, semibold=True)
+        title.setObjectName("accountTitle")
+        lines.addWidget(title)
+        # Wrapping labels, read by their whole text; an address never widens the dialog.
+        self.gmail_status = wrap_label("Gmail: checking saved session…", px=TEXT_PX)
+        self.gmail_status.setObjectName("connectionStatus")
+        lines.addWidget(self.gmail_status)
+        self.ai_status = wrap_label("AI: checking configuration…", tone="secondary", px=SMALL_PX)
+        self.ai_status.setObjectName("aiStatus")
+        lines.addWidget(self.ai_status)
+        row.addLayout(lines, 1)
+        self.disconnect_button = outline_button(
+            "D&isconnect",
+            "disconnectButton",
+            mnemonic=True,
+            accessible_name="Disconnect Gmail",
+            glass=True,
+        )
+        self.sign_in_button = outline_button(
+            "Sign in with &Google",
+            "settingsSignInButton",
+            mnemonic=True,
+            accessible_name="Sign in with Google",
+            glass=True,
+        )
+        for button in (self.disconnect_button, self.sign_in_button):
+            row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        return card
+
+    def set_signed_in(self, signed_in: bool) -> None:
+        """Disconnect while an account is connected; Sign in with Google while none is."""
+        self.disconnect_button.setVisible(signed_in)
+        self.sign_in_button.setVisible(not signed_in)
 
     def _input(self) -> tuple[str, ...]:
         """The connection fields and a typed key, to tell whether any of it is unsaved."""

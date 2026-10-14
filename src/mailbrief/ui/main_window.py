@@ -795,11 +795,11 @@ class MainWindow(QMainWindow):
         self.cached_button = sidebar.saved_mail
         self.data_button = sidebar.data
         self.data_button.clicked.connect(lambda: self.start(self._open_data, cancellable=False))
-        # Wrapping labels, read by their whole text.
-        self.connection = wrap_label("Gmail: checking saved session…", tone="muted", px=CAPTION_PX)
-        self.connection.setObjectName("connectionStatus")
-        self.ai = wrap_label("AI: checking configuration…", tone="muted", px=CAPTION_PX)
-        self.ai.setObjectName("aiStatus")
+        # Who is signed in and what the AI may do live in Settings' Account card, with
+        # Disconnect; the sidebar offers only Google sign-in, and only while signed out.
+        self.connection = self.settings_dialog.gmail_status
+        self.ai = self.settings_dialog.ai_status
+        self.disconnect_button = self.settings_dialog.disconnect_button
         self.connect_button = outline_button(
             "&Google sign-in",
             "connectButton",
@@ -808,18 +808,7 @@ class MainWindow(QMainWindow):
             accessible_name="Sign in with Google",
             glass=True,
         )
-        self.disconnect_button = outline_button(
-            "&Disconnect",
-            "disconnectButton",
-            mnemonic=True,
-            px=SMALL_PX,
-            accessible_name="Disconnect Gmail",
-            glass=True,
-        )
-        for line in (self.connection, self.ai):
-            line.setContentsMargins(10, 0, 0, 0)  # In line with the rows' icons.
-        for widget in (self.connection, self.ai, self.connect_button, self.disconnect_button):
-            sidebar.footer.addWidget(widget)
+        sidebar.footer.addWidget(self.connect_button)
         # Today: the banner for a past brief and the retry row, above the brief.
         self.viewing = QWidget()
         self.viewing.setObjectName("viewingBanner")
@@ -1015,6 +1004,7 @@ class MainWindow(QMainWindow):
         self._set_account(None)
         sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
         self.connect_button.clicked.connect(lambda: self.start(self._connect))
+        self.settings_dialog.sign_in_button.clicked.connect(lambda: self.start(self._connect))
         self.disconnect_button.clicked.connect(
             lambda: self.start(self._disconnect, cancellable=False)
         )
@@ -1039,7 +1029,7 @@ class MainWindow(QMainWindow):
 
     def _link_tab_order(self) -> None:
         """Tab runs from Sync and review through Cancel, the sidebar's pages, Saved mail,
-        Data, Settings, Connect or Disconnect, the page shown, then Undo and back to the
+        Data, Settings, Google sign-in (while signed out), the page shown, then Undo and back to the
         start. Hidden and disabled widgets are skipped.
 
         The chain starts at Undo, so every widget not named here (the other pages', in
@@ -1056,7 +1046,6 @@ class MainWindow(QMainWindow):
             self.data_button,
             self.settings_button,
             self.connect_button,
-            self.disconnect_button,
             self.latest_button,
             self.retry_button,
             self.day_panel.attention.list,
@@ -1073,7 +1062,7 @@ class MainWindow(QMainWindow):
         Disconnect only with one, and the Briefs page follows it."""
         self._account_email = email
         self.connect_button.setVisible(email is None)
-        self.disconnect_button.setVisible(email is not None)
+        self.settings_dialog.set_signed_in(email is not None)
         self.history_panel.set_account(email)
 
     def _set_busy(self, busy: bool) -> None:
@@ -1081,6 +1070,7 @@ class MainWindow(QMainWindow):
         self.retry_button.setEnabled(not busy)
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy)
+        self.settings_dialog.sign_in_button.setEnabled(not busy)
         self.generate_button.setEnabled(not busy and self._ready)
         self.cancel_button.setEnabled(busy and self._cancellable)
         self.cancel_button.setVisible(busy)

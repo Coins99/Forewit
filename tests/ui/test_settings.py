@@ -138,3 +138,86 @@ def test_no_settings_tab_squeezes_its_rows_into_each_other(
     preferences = dialog.tabs.widget(1)
     assert isinstance(preferences, QScrollArea)
     assert preferences.verticalScrollBar().maximum() > 0  # Taller than the dialog.
+
+
+def signed_in(window: MainWindow) -> bool:
+    return window._account_email is not None
+
+
+async def test_the_account_card_signs_out_and_in_from_settings(qtbot: QtBot) -> None:
+    backend = FakeBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)  # Connected silently at startup.
+    editor = window.settings_dialog
+    sidebar = window.workspace.sidebar
+    assert window.connection.text().startswith("Gmail: connected as")
+    assert window.ai.text().startswith("AI:")
+    assert not editor.disconnect_button.isHidden() and editor.sign_in_button.isHidden()
+    assert window.connect_button.isHidden()  # Signed in: the sidebar offers nothing.
+    assert not sidebar.isAncestorOf(window.connection)
+
+    window.settings_button.click()
+    await finish(window)
+    assert editor.isVisible()
+    editor.disconnect_button.click()
+    await finish(window)
+    assert not signed_in(window)
+    assert window.connection.text() == "Gmail: disconnected"
+    assert editor.disconnect_button.isHidden() and not editor.sign_in_button.isHidden()
+    assert not window.connect_button.isHidden()  # Signed out: the sidebar offers sign-in.
+
+    editor.sign_in_button.click()
+    await finish(window)
+    assert signed_in(window)
+    assert not editor.disconnect_button.isHidden() and editor.sign_in_button.isHidden()
+    window.start(lambda: asyncio.sleep(0))
+    assert not editor.sign_in_button.isEnabled() and not editor.disconnect_button.isEnabled()
+    await finish(window)
+    editor.reject()
+
+
+def test_settings_mnemonics_stay_unique(qtbot: QtBot) -> None:
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    editor = window.settings_dialog
+    texts = [
+        button.text()
+        for button in (
+            editor.browse_button,
+            editor.save_button,
+            editor.key_button,
+            editor.remove_key_button,
+            editor.revoke_button,
+            editor.close_button,
+            editor.disconnect_button,
+            editor.sign_in_button,
+        )
+    ]
+    letters = [text[text.index("&") + 1].casefold() for text in texts]
+    assert len(set(letters)) == len(letters)
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+async def test_account_card_gallery(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: str
+) -> None:
+    from mailbrief.ui.theme.tokens import ThemeMode
+    from tests.ui.test_main_window_layout import save_shot
+
+    apply_theme(qapp, mode=ThemeMode(mode))
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)
+    window.resize(1100, 720)
+    window.show()
+    qtbot.waitExposed(window)
+    save_shot(window.grab(), f"window-account-{mode}")
+    window.settings_button.click()
+    await finish(window)
+    dialog = window.settings_dialog
+    qtbot.waitExposed(dialog)
+    save_shot(dialog.grab(), f"dialog-settings-{mode}")
+    dialog.reject()
