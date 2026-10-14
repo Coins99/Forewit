@@ -3,7 +3,7 @@ date, or the phrase, with the year only when it isn't the owner's."""
 
 import locale
 from collections.abc import Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -14,8 +14,10 @@ from mailbrief.ui.brief_list import deadline_chip
 from mailbrief.ui.deadline_text import (
     day_text,
     deadline_text,
+    length_text,
     moment_text,
     month_day,
+    parse_length,
     weekday,
 )
 from tests.factories import make_action, make_digest_item, make_suggestion
@@ -150,3 +152,35 @@ def test_dates_stay_english_whatever_the_system_language(french_dates: None) -> 
         deadline_at_utc=None,
     )
     assert chip_text(dated) == "Due Feb 9"
+
+
+@pytest.mark.parametrize(
+    ("typed", "minutes"),
+    [
+        ("90", 90),
+        ("1 min", 1),
+        ("45 mins", 45),
+        ("1h", 60),
+        ("1.5", 90),
+        ("1,5", 90),
+        ("1.5h", 90),
+        ("2 hrs", 120),
+        ("1h 30", 90),
+        ("1 hr 30 mins", 90),
+        ("2 hours 15 minutes", 135),
+        ("1:30", 90),
+        (" 0 ", 0),
+    ],
+)
+def test_a_typed_length_reads_as_minutes(typed: str, minutes: int) -> None:
+    assert parse_length(typed) == minutes
+
+
+@pytest.mark.parametrize("typed", ["", "Not set", "1.", "1:", "1:75", "h", "abc", "1 day"])
+def test_anything_else_is_not_a_length(typed: str) -> None:
+    assert parse_length(typed) is None
+
+
+def test_lengths_read_back_as_they_are_written() -> None:
+    for minutes in (1, 15, 60, 90, 135, 6_000):
+        assert parse_length(length_text(timedelta(minutes=minutes))) == minutes

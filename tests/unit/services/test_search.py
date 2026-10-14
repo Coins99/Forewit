@@ -67,7 +67,12 @@ async def add_task(
 ) -> str:
     action = await ActionService(session).create(
         ActionEdit(
-            title=title, ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=notes
+            title=title,
+            ownership=ActionOwnership.MINE,
+            effort=None,
+            estimate_minutes=None,
+            target_date=None,
+            notes=notes,
         ),
         tuple(StepEdit(step_id=None, text=step, done=False) for step in steps),
     )

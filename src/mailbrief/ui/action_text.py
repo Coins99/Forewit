@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from mailbrief.domain.actions import TARGET_REASON_TEXT, Action, ActionProposal, ActionStatus
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.ui.deadline_text import day_text, deadline_text, weekday
+from mailbrief.ui.deadline_text import day_text, deadline_text, length_text, weekday
 from mailbrief.ui.proposals_view import pending_proposals
 
 
@@ -22,6 +22,7 @@ class ActionDetails:
     target: date | None
     target_reason: str | None
     due: str | None
+    estimate: str | None
     steps_done: int
     steps: int
     waiting: bool
@@ -63,6 +64,7 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         target=action.target_date,
         target_reason=TARGET_REASON_TEXT[reason] if keeps_reason and reason is not None else None,
         due=deadline_text(action, zone, today=today),
+        estimate=estimate_text(action.estimate_minutes),
         steps_done=sum(step.done for step in action.steps),
         steps=len(action.steps),
         waiting=is_open and action.ownership is ActionOwnership.WAITING_FOR,
@@ -76,6 +78,12 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         completed=None if completed is None else completed.astimezone(zone).date(),
         today=today,
     )
+
+
+def estimate_text(minutes: int | None) -> str | None:
+    """The owner's estimate as "Estimate 45 mins" or "Estimate 1 hr 30 mins", in the event
+    editor's words for a length."""
+    return None if minutes is None else "Estimate " + length_text(timedelta(minutes=minutes))
 
 
 def target_text(details: ActionDetails, *, reason: bool = True) -> str | None:

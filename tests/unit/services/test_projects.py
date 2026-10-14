@@ -26,6 +26,7 @@ TASK = ActionEdit(
     title="Finish proposal",
     ownership=ActionOwnership.MINE,
     effort=None,
+    estimate_minutes=None,
     target_date=None,
     notes="Owner plan",
 )

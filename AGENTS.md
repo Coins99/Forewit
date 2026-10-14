@@ -74,6 +74,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Archived projects retain tasks; removing an area detaches projects and keeps work.
   New activity snapshots retain project/area IDs. Migration 0016 follows task history 0015.
   See `docs/p1-projects-life-areas.md`.
+- P1 estimates implemented, awaiting owner desktop acceptance: an optional owner estimate
+  (`estimate_minutes`, 1–6,000) in the task editor and detail, migration 0019. It is never
+  derived from the AI's coarse effort, and AI runs and proposals never write it. See
+  `docs/p1-manual-tasks.md#estimates`.
 - Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,

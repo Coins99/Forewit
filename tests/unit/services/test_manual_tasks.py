@@ -28,6 +28,7 @@ EDIT = ActionEdit(
     title="Plan the week",
     ownership=ActionOwnership.MINE,
     effort=None,
+    estimate_minutes=90,
     target_date=date(2026, 10, 12),
     notes="Owner notes",
 )
@@ -81,6 +82,7 @@ async def test_full_workflow_survives_restart_backup_restore_and_export(
     exported = tmp_path / "writing.json"
     await export_writing(restarted, exported)
     payload = json.loads(exported.read_text(encoding="utf-8"))
+    assert [item["estimate_minutes"] for item in payload["records"]["actions"]] == [90]
     assert [item["kind"] for item in payload["records"]["action_activity"]] == [
         event.kind.value for event in final.activity
     ]
@@ -283,4 +285,34 @@ async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path:
     await export_writing(database, exported)
     payload = json.loads(exported.read_text(encoding="utf-8"))
     assert len(payload["records"]["action_activity"]) == 33
+    await database.dispose()
+
+
+async def test_an_estimate_is_set_changed_and_cleared_one_revision_at_a_time(
+    tmp_path: Path,
+) -> None:
+    database = Database.from_path(tmp_path / "estimate.sqlite3")
+    await database.create_schema_for_tests()
+    async with database.session() as session:
+        service = ActionService(session)
+        created = await service.create(EDIT)
+        assert (created.estimate_minutes, created.revision) == (90, 1)
+        changed = await service.save(
+            created.public_id, 1, EDIT.model_copy(update={"estimate_minutes": 6_000})
+        )
+        assert (changed.estimate_minutes, changed.revision) == (6_000, 2)
+        with pytest.raises(ActionConflictError):  # A stale screen never overwrites it.
+            await service.save(
+                created.public_id, 1, EDIT.model_copy(update={"estimate_minutes": 5})
+            )
+        cleared = await service.save(
+            created.public_id, 2, EDIT.model_copy(update={"estimate_minutes": None})
+        )
+        assert (cleared.estimate_minutes, cleared.revision) == (None, 3)
+        assert [event.kind for event in cleared.activity] == [
+            Kind.CREATED,
+            Kind.EDITED,
+            Kind.EDITED,
+        ]
+        assert await service.get(created.public_id) == cleared
     await database.dispose()

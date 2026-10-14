@@ -237,6 +237,7 @@ async def test_accept_copies_the_suggestion_its_steps_and_a_source_snapshot(
         ActionStatus.OPEN,
     )
     assert action.effort is ActionEffort.HOURS
+    assert action.estimate_minutes is None  # An AI effort is never turned into minutes.
     assert (action.deadline_precision, action.deadline_date, action.deadline_text) == (
         DeadlinePrecision.DATE,
         date(2026, 10, 2),
@@ -516,6 +517,7 @@ async def test_a_manual_edit_survives_reanalysis_with_different_suggestions(
             title="Send the final Q3 deck",
             ownership=ActionOwnership.MINE,
             effort=ActionEffort.DAYS,
+            estimate_minutes=150,
             target_date=date(2026, 9, 30),
             notes="Ask Sam for the churn slide.",
         ),
@@ -560,13 +562,23 @@ async def test_a_stale_revision_conflicts_and_changes_nothing(
         first.public_id,
         1,
         ActionEdit(
-            title="Renamed", ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=""
+            title="Renamed",
+            ownership=ActionOwnership.MINE,
+            effort=None,
+            estimate_minutes=None,
+            target_date=None,
+            notes="",
         ),
     )
     other = await seed(session, (suggestion(0, "Other"),), message="msg-2")
     stale = 1
     lost = ActionEdit(
-        title="Lost", ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=""
+        title="Lost",
+        ownership=ActionOwnership.MINE,
+        effort=None,
+        estimate_minutes=None,
+        target_date=None,
+        notes="",
     )
     calls: dict[str, Any] = {
         "save": lambda: service.save(first.public_id, stale, lost),
@@ -609,7 +621,12 @@ async def test_a_second_save_from_the_same_revision_conflicts_and_keeps_the_firs
 
     def edit(title: str, notes: str) -> ActionEdit:
         return ActionEdit(
-            title=title, ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=notes
+            title=title,
+            ownership=ActionOwnership.MINE,
+            effort=None,
+            estimate_minutes=None,
+            target_date=None,
+            notes=notes,
         )
 
     first = await service.save(action.public_id, 1, edit("From one screen", "First"))
@@ -649,7 +666,12 @@ async def test_unaccept_is_refused_once_the_action_changed_or_has_two_sources(
         edited.public_id,
         1,
         ActionEdit(
-            title="Edited", ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=""
+            title="Edited",
+            ownership=ActionOwnership.MINE,
+            effort=None,
+            estimate_minutes=None,
+            target_date=None,
+            notes="",
         ),
     )
     with pytest.raises(ActionConflictError):
@@ -729,6 +751,7 @@ def plan(action: Action) -> ActionEdit:
         title=action.title,
         ownership=action.ownership,
         effort=action.effort,
+        estimate_minutes=action.estimate_minutes,
         target_date=action.target_date,
         notes=action.notes,
     )
@@ -892,6 +915,7 @@ async def test_lists_filter_by_view_and_order_by_target_then_due_then_creation(
             "title": title,
             "ownership": ActionOwnership.MINE,
             "effort": None,
+            "estimate_minutes": None,
             "target_date": None,
             "notes": "",
         }
@@ -1392,6 +1416,7 @@ async def test_save_applies_an_edit_and_a_new_plan_as_one_revision(
         title="Send the final deck",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        estimate_minutes=None,
         target_date=None,
         notes="",
     )
@@ -1423,6 +1448,7 @@ async def test_save_changes_nothing_when_its_plan_is_rejected(
         title="Should not stick",
         ownership=ActionOwnership.MINE,
         effort=None,
+        estimate_minutes=None,
         target_date=None,
         notes="",
     )
@@ -1490,3 +1516,21 @@ async def test_the_completed_list_shows_the_newest_200_and_counts_the_rest(
     assert len(await service.list_actions(ActionFilter.COMPLETED, limit=5)) == 5
     rows = await ActionRepository(session).list_rows(ActionFilter.COMPLETED, limit=None)
     assert len(rows) == 202  # Storage lists them all when asked without a cap.
+
+
+async def test_adding_an_email_and_undoing_it_keep_the_owner_s_estimate(
+    session: AsyncSession, service: ActionService
+) -> None:
+    first = await seed(session)
+    second = await seed(session, (suggestion(0, "Send the deck, again"),), message="msg-2")
+    accepted = await service.accept(first.suggestion_ids[0])
+    estimated = await service.save(
+        accepted.public_id, 1, plan(accepted).model_copy(update={"estimate_minutes": 90})
+    )
+
+    added = await service.accept_into(second.suggestion_ids[0], estimated.public_id, 2)
+    undone = await service.undo_accept_into(
+        second.suggestion_ids[0], estimated.public_id, 3, True, previous=added.previous
+    )
+
+    assert (added.action.estimate_minutes, undone.estimate_minutes) == (90, 90)

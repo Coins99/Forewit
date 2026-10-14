@@ -338,6 +338,7 @@ def test_an_edit_carries_every_editable_field() -> None:
         title="Approve it",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        estimate_minutes=None,
         target_date=FRIDAY,
         notes="",
     )
@@ -345,9 +346,24 @@ def test_an_edit_carries_every_editable_field() -> None:
     assert edit.ownership is ActionOwnership.WAITING_FOR
     with pytest.raises(ValidationError):
         ActionEdit.model_validate({"title": "Approve it", "ownership": "mine"})
-    for bad in ({"title": "t" * 201}, {"notes": "n" * 10_001}, {"title": ""}):
+    assert edit.estimate_minutes is None
+    for bad in (
+        {"title": "t" * 201},
+        {"notes": "n" * 10_001},
+        {"title": ""},
+        {"estimate_minutes": 0},
+        {"estimate_minutes": 6_001},
+    ):
         with pytest.raises(ValidationError):
             ActionEdit.model_validate({**edit.model_dump(), **bad})
+
+
+@pytest.mark.parametrize("minutes", [None, 1, 6_000])
+def test_an_estimate_is_whole_minutes_up_to_100_hours(minutes: int | None) -> None:
+    assert make_action(estimate_minutes=minutes).estimate_minutes == minutes
+    for bad in (0, -15, 6_001):
+        with pytest.raises(ValidationError):
+            make_action(estimate_minutes=bad)
 
 
 def test_a_step_edit_without_an_id_is_new() -> None:
@@ -398,7 +414,12 @@ def test_reprs_and_errors_leave_out_action_text() -> None:
         sources=(make_source(subject=MARKER),),
     )
     edit = ActionEdit(
-        title=MARKER, ownership=ActionOwnership.MINE, effort=None, target_date=None, notes=MARKER
+        title=MARKER,
+        ownership=ActionOwnership.MINE,
+        effort=None,
+        estimate_minutes=None,
+        target_date=None,
+        notes=MARKER,
     )
     step_edit = StepEdit(step_id=None, text=MARKER, done=False)
 

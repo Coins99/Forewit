@@ -707,6 +707,7 @@ async def test_undo_is_refused_once_the_action_changed(
             title="Send the deck",
             ownership=ActionOwnership.WAITING_FOR,
             effort=None,
+            estimate_minutes=None,
             target_date=applied.target_date,
             notes="Moved.",
         ),
@@ -783,3 +784,16 @@ async def test_pending_proposals_are_listed_by_message_for_open_actions_only(
     assert await service.pending() == ()
     with pytest.raises(ValueError):
         await service.pending(0)
+
+
+@pytest.mark.parametrize("kind", [FollowUpKind.NEW_DEADLINE, FollowUpKind.CANCELLED])
+async def test_applying_and_undoing_keep_the_owner_s_estimate(
+    session: AsyncSession, service: ProposalService, kind: FollowUpKind
+) -> None:
+    _, _, _ = await scene(session, service, kind, estimate_minutes=90)
+    proposal_id = await only(service)
+
+    applied = await service.apply(proposal_id, 1)
+    undone = await service.undo_apply(proposal_id, 2)
+
+    assert (applied.estimate_minutes, undone.estimate_minutes) == (90, 90)

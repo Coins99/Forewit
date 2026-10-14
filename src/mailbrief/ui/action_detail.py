@@ -301,6 +301,10 @@ class ActionDetailPane(QScrollArea):
             label = wrap_label(target, tone="secondary", px=TEXT_PX)
             label.setObjectName("actionTarget")
             widgets.append(label)
+        if details.estimate is not None:
+            label = wrap_label(details.estimate, tone="secondary", px=TEXT_PX)
+            label.setObjectName("actionEstimate")
+            widgets.append(label)
         return widgets
 
     def _plan(self, action: Action, details: ActionDetails) -> list[QWidget | int]:

@@ -107,6 +107,7 @@ async def test_the_runtime_accepts_edits_completes_and_restores_actions(tmp_path
                 title="Approve the final budget",
                 ownership=ActionOwnership.MINE,
                 effort=None,
+                estimate_minutes=None,
                 target_date=date(2026, 10, 1),
                 notes="Ask Sam first.",
             ),
@@ -147,6 +148,7 @@ async def test_saving_an_edit_without_a_plan_leaves_the_steps_unchanged(tmp_path
             title="Approve the final budget",
             ownership=ActionOwnership.MINE,
             effort=None,
+            estimate_minutes=None,
             target_date=None,
             notes="",
         )

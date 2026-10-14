@@ -807,6 +807,28 @@ def test_the_row_names_the_target_and_the_detail_gives_its_reason(panel: Actions
     assert "Target Fri Oct 2, one working day before the deadline" in detail_texts(panel)
 
 
+@pytest.mark.parametrize(
+    ("minutes", "shown"),
+    [
+        (1, "Estimate 1 min"),
+        (45, "Estimate 45 mins"),
+        (120, "Estimate 2 hrs"),
+        (90, "Estimate 1 hr 30 mins"),
+    ],
+)
+def test_the_detail_shows_the_owner_s_estimate_under_the_target(
+    panel: ActionsPanel, minutes: int, shown: str
+) -> None:
+    show(
+        panel, ActionFilter.OPEN, action(1, target_date=date(2026, 10, 2), estimate_minutes=minutes)
+    )
+
+    texts = detail_texts(panel)
+    assert texts[texts.index("Target Fri Oct 2") + 1] == shown
+    label = panel.detail.findChild(QLabel, "actionEstimate")
+    assert label is not None and label.text() == shown
+
+
 def test_dates_in_another_year_name_it(panel: ActionsPanel) -> None:
     january = date(2027, 1, 8)
     old = action(

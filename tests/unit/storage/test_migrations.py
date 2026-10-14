@@ -571,6 +571,7 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
         "ck_actions_ownership_known",
         "ck_actions_deadline_precision_known",
         "ck_actions_revision_positive",
+        "ck_actions_estimate_minutes_range",
     }
     assert created_schema["action_suggestions"]["unique"] == {
         frozenset({"analysis_id", "position"}),
@@ -1244,8 +1245,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261013_0018"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0018",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0019"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0019",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1412,7 +1413,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261013_0018",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0019",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")
@@ -1447,9 +1448,49 @@ def test_ranking_signals_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path
     assert _query(
         path, "SELECT excluded_senders_json, important_senders_json FROM owner_preferences"
     ) == [('["@news.example.com"]', "[]")]
-    command.check(config)
 
     command.downgrade(config, "20261012_0017")
+
+    assert _rows(path, kept) == before
+    assert _schema(path) == _schema(fresh)
+
+
+def test_task_estimates_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path: Path) -> None:
+    """0019 adds the owner's estimate to actions, NULL for existing tasks, bounded 1–6,000."""
+    path = tmp_path / "estimates.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261013_0018")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        action_id = connection.execute(
+            "INSERT INTO actions(public_id,title,ownership,status,effort,created_at_utc,"
+            "updated_at_utc) VALUES('0c5e2c1d-6b8e-4f55-9d0e-2a7f3b9c1e44','Plan it','mine',"
+            "'open','hours','2026-10-13 00:00:00','2026-10-13 00:00:00')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO action_steps(action_id,position,text) VALUES(?,0,'Start')", (action_id,)
+        )
+        connection.commit()
+    kept = ("actions", "action_steps")
+    before = _rows(path, kept)
+    fresh = tmp_path / "fresh-0018.sqlite3"
+    command.upgrade(_alembic_config(fresh), "20261013_0018")
+
+    command.upgrade(config, "20261014_0019")
+
+    assert _earlier_columns(_rows(path, kept), before) == before
+    # An existing task has no estimate, whatever its effort: effort is never converted.
+    assert _query(path, "SELECT effort, estimate_minutes FROM actions") == [("hours", None)]
+    with closing(sqlite3.connect(path)) as connection:
+        for minutes in (1, 6000):
+            connection.execute("UPDATE actions SET estimate_minutes=?", (minutes,))
+        for minutes in (0, 6001):
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+                connection.execute("UPDATE actions SET estimate_minutes=?", (minutes,))
+        connection.commit()
+    command.check(config)
+
+    command.downgrade(config, "20261013_0018")
 
     assert _rows(path, kept) == before
     assert _schema(path) == _schema(fresh)
