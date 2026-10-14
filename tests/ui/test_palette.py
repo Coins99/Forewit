@@ -415,7 +415,9 @@ async def test_mail_opens_on_its_inbox_page_or_in_gmail(
     monkeypatch.setattr(QDesktopServices, "openUrl", open_url)
     pages: list[int] = []
 
-    async def inbox_messages(account_email: str, offset: int = 0, *, query: str = "") -> InboxPage:
+    async def inbox_messages(
+        account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
+    ) -> InboxPage:
         pages.append(offset)
         return InboxPage(
             account_email=account_email,

@@ -79,7 +79,7 @@ async def test_signin_syncs_inbox_and_disconnect_clears_account(qtbot: QtBot) ->
             return await super().browse_inbox(account_email, cancel, query=query)
 
         async def inbox_messages(
-            self, account_email: str, offset: int = 0, *, query: str = ""
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
         ) -> InboxPage:
             calls.append(account_email)
             return InboxPage(
@@ -263,7 +263,7 @@ def test_show_page_selects_the_message_asked_for(qtbot: QtBot) -> None:
 async def test_marking_a_message_saves_it_and_keeps_it_selected(qtbot: QtBot) -> None:
     class Backend(FakeBackend):
         async def inbox_messages(
-            self, account_email: str, offset: int = 0, *, query: str = ""
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
         ) -> InboxPage:
             marked = frozenset(key for _, key, wanted in self.wanted_marks if wanted)
             return two_messages(wanted=marked, count=len(marked)).model_copy(

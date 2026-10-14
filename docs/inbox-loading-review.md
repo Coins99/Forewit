@@ -31,3 +31,32 @@ The final total-metadata-failure guard was followed by 270 passing affected test
 Combined coverage is 96.47%, and every service meets the 90% gate. Ruff, platform type
 checks and the required UI renders pass. Details are recorded with the implementation
 and in the pull request.
+
+
+## PR #79 follow-up review
+
+Addressed the three Codex inline findings on 2026-10-14:
+
+- Palette navigation explicitly requests a 100-row cached page, including at offset
+  zero, bypassing the active browsing subset. Regression cases cover positions 0, 49,
+  50, 99, 100 and 150 with and without existing browsing state. Palette navigation
+  retains the remote continuation and scrolls the selected message into view.
+- After committed Data and recovery cleanup, clear browsing result IDs, search
+  histories and continuations before refreshing views. Advance the generation so an
+  in-flight page cannot publish old state, and clear the displayed Inbox. Tests cover
+  cache/account removal, subsequent Inbox/search continuation attempts starting from
+  the first 50 IDs, and a failed view reload after cleanup.
+- Preserve selection and scroll only for the same account and query. A changed query
+  starts at the top; explicit palette selection is brought into view. Tests cover
+  Inbox-to-search, search-to-search, search-to-Inbox and same-query refresh.
+
+The branch also has existing conflicts with the subsequently merged Inbox reading-pane
+redesign on `main`. These review fixes retain PR #79's current UI; integrating that
+redesign remains separate work.
+
+
+Follow-up validation: 97 affected Inbox, browsing, palette, data-control and source-rule
+checks pass. The 1x workspace/layout/browsing run passed 137 tests with one intentional
+render skip; selected 2x gallery checks passed 25 with the same skip. Light/dark search
+and workspace renders were inspected against the references. Ruff lint/format and
+mypy for both Windows and macOS pass. Tests use synthetic data and mocked providers.

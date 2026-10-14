@@ -220,11 +220,13 @@ from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
+    def reset_inbox_browsing(self) -> None: ...
+
     async def sync_inbox(
         self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
     ) -> SyncResult: ...
     async def inbox_messages(
-        self, account_email: str, offset: int = 0, *, query: str = ""
+        self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
     ) -> InboxPage: ...
 
     async def browse_inbox(
@@ -1261,8 +1263,10 @@ class MainWindow(QMainWindow):
         self.close()
 
     async def _refresh_data(self) -> None:
+        self.backend.reset_inbox_browsing()
         if self._closing:
             return
+        self.inbox_panel.clear()
         self._offer_undo()
         self._shown = None
         self.viewing.hide()
@@ -2026,12 +2030,18 @@ class MainWindow(QMainWindow):
         Inbox no longer has it."""
         email = self._account_email
         position = None if email is None else await self.backend.inbox_position(email, message_id)
-        if position is None:
+        if position is None or email is None:
             if link is not None:
                 self._open_source(link)
             return
         self._show_page("inbox")
-        await self._load_inbox(position - position % INBOX_PAGE_SIZE, select=message_id)
+        self.inbox_panel.zone = self.zone
+        self.inbox_panel.show_page(
+            await self.backend.inbox_messages(
+                email, position - position % INBOX_PAGE_SIZE, cached_page=True
+            ),
+            select=message_id,
+        )
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):

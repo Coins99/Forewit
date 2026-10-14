@@ -95,7 +95,7 @@ class FakeBackend(FakeDrafts):
         )
 
     async def inbox_messages(
-        self, account_email: str, offset: int = 0, *, query: str = ""
+        self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
     ) -> InboxPage:
         return InboxPage(account_email=account_email, offset=offset, query=query)
 
@@ -237,6 +237,9 @@ class FakeBackend(FakeDrafts):
             page_count=1,
             message_count=1,
         )
+
+    def reset_inbox_browsing(self) -> None:
+        pass
 
     async def load_saved(self) -> DailyDigest:
         self.loads += 1

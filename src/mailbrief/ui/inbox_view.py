@@ -177,11 +177,17 @@ class InboxPanel(QWidget):
 
     def show_page(self, page: InboxPage, *, select: str | None = None) -> None:
         """Show ``page``, selecting the message ``select`` when it is there, else the first."""
-        if select is None and self._page is not None:
+        same_query = (
+            self._page is not None
+            and self._page.query == page.query
+            and self._page.account_email == page.account_email
+        )
+        explicit_selection = select is not None
+        if select is None and same_query and self._page is not None:
             index = self.messages.currentRow()
             if 0 <= index < len(self._page.messages):
                 select = self._page.messages[index].provider_message_id
-        scroll = self.messages.verticalScrollBar().value()
+        scroll = self.messages.verticalScrollBar().value() if same_query else 0
         busy = self._busy
         previous_query = self._page.query if self._page is not None else ""
         self._page = page
@@ -228,7 +234,10 @@ class InboxPanel(QWidget):
         self.messages.blockSignals(False)
         if page.messages:
             self._select(self.messages.currentRow())
-        self.messages.verticalScrollBar().setValue(scroll)
+        if explicit_selection:
+            self.messages.scrollToItem(self.messages.currentItem())
+        else:
+            self.messages.verticalScrollBar().setValue(scroll)
         self.set_busy(busy)
 
     def _search(self) -> None:

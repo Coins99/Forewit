@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -147,7 +148,7 @@ async def test_cached_display_precedes_network_and_load_more_preserves_selection
 
     class Backend(FakeBackend):
         async def inbox_messages(
-            self, account_email: str, offset: int = 0, *, query: str = ""
+            self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
         ) -> InboxPage:
             return InboxPage(
                 account_email=account_email,
@@ -286,9 +287,11 @@ async def test_commit_failure_cannot_advance_cursor(
     assert all("pageToken" not in call.request.url.params for call in listing.calls)
 
 
-async def test_signout_during_fetch_cannot_restore_browsing_state(
+@pytest.mark.parametrize("cleanup", [False, True])
+async def test_reset_during_fetch_cannot_restore_browsing_state(
     backend: DesktopRuntime,
     respx_mock: respx.MockRouter,
+    cleanup: bool,
 ) -> None:
     started = asyncio.Event()
     release = asyncio.Event()
@@ -302,7 +305,10 @@ async def test_signout_during_fetch_cannot_restore_browsing_state(
     respx_mock.get(MESSAGES_URL + "/a").mock(side_effect=hold)
     task = asyncio.create_task(backend.browse_inbox("me@example.com", asyncio.Event()))
     await started.wait()
-    await backend._signed_out()
+    if cleanup:
+        backend.reset_inbox_browsing()
+    else:
+        await backend._signed_out()
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -621,3 +627,103 @@ def test_mail_search_gallery(qtbot: QtBot, themed: None, mode: ThemeMode) -> Non
         assert window.grab().save(
             str(target / f"mail-search-{mode}-{window.devicePixelRatioF():g}x.png")
         )
+
+
+@pytest.mark.parametrize("position", [0, 49, 50, 99, 100, 150])
+@pytest.mark.parametrize("browsed", [False, True])
+async def test_palette_jump_selects_actual_cached_message(
+    backend: DesktopRuntime,
+    qtbot: QtBot,
+    position: int,
+    browsed: bool,
+) -> None:
+    async with backend._storage().session() as session:
+        account = await AccountRepository(session).upsert(ACCOUNT)
+        await MessageRepository(session).upsert_messages(
+            account.id,
+            [
+                make_message(
+                    provider_message_id=f"m{i}", received_at_utc=NOW - timedelta(minutes=i)
+                )
+                for i in range(160)
+            ],
+        )
+        await session.commit()
+    if browsed:
+        backend._inbox_browse[("me@example.com", "")] = runtime.InboxBrowse(
+            identifiers={"m159"}, continuation="older"
+        )
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window._set_account("me@example.com")
+    await window._open_mail(f"m{position}", None)
+    page = window.inbox_panel.page
+    assert page is not None
+    selected = page.messages[window.inbox_panel.messages.currentRow()]
+    assert selected.provider_message_id == f"m{position}"
+    assert len(page.messages) == (100 if position < 100 else 60)
+    if browsed:
+        assert backend._inbox_browse[("me@example.com", "")].continuation == "older"
+
+
+@pytest.mark.parametrize("kind", ["all-cache", "account"])
+@pytest.mark.parametrize("refresh_fails", [False, True])
+async def test_live_cleanup_restarts_inbox_and_search_from_first_provider_page(
+    backend: DesktopRuntime,
+    qtbot: QtBot,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    refresh_fails: bool,
+) -> None:
+    listing = respx_mock.get(MESSAGES_URL).respond(
+        json={"messages": [{"id": "a"}], "nextPageToken": "old-cursor"}
+    )
+    respx_mock.get(MESSAGES_URL + "/a").respond(json=metadata("a"))
+    for query in ("", "invoice"):
+        await backend.browse_inbox("me@example.com", asyncio.Event(), query=query)
+    window = MainWindow(backend, database_path=backend._path)
+    qtbot.addWidget(window)
+    window._set_account("me@example.com")
+    window.inbox_panel.show_page(await backend.inbox_messages("me@example.com"))
+    window._ready = True
+    await window._open_data()
+    dialog = window.data_dialog
+    assert dialog is not None
+    dialog.kind.setCurrentIndex(dialog.kind.findData(kind))
+    monkeypatch.setattr(dialog, "confirm", AsyncMock(return_value=True))
+    if refresh_fails:
+        monkeypatch.setattr(backend, "load_saved", AsyncMock(side_effect=RuntimeError("synthetic")))
+    generation = backend._inbox_generation
+    await dialog.cleanup()
+    assert not backend._inbox_browse
+    assert backend._inbox_generation > generation
+    assert window.inbox_panel.page is None
+    for query in ("", "invoice"):
+        await backend.browse_inbox("me@example.com", asyncio.Event(), load_more=True, query=query)
+    for call in listing.calls[-2:]:
+        assert "pageToken" not in call.request.url.params
+        assert call.request.url.params["maxResults"] == "50"
+    dialog.reject()
+
+
+@pytest.mark.parametrize("queries", [("", "invoice"), ("invoice", "receipt"), ("invoice", "")])
+def test_query_changes_reset_selection_and_scroll(qtbot: QtBot, queries: tuple[str, str]) -> None:
+    panel = InboxPanel()
+    qtbot.addWidget(panel)
+    panel.resize(700, 500)
+    panel.show()
+    messages = tuple(make_message(provider_message_id=f"m{i}") for i in range(80))
+    panel.show_page(InboxPage(account_email="me@example.com", query=queries[0], messages=messages))
+    panel.messages.setCurrentRow(70)
+    panel.messages.scrollToBottom()
+    assert panel.messages.verticalScrollBar().value() > 0
+    panel.show_page(InboxPage(account_email="me@example.com", query=queries[1], messages=messages))
+    assert panel.messages.currentRow() == 0
+    assert panel.messages.verticalScrollBar().value() == 0
+    panel.messages.setCurrentRow(50)
+    panel.messages.scrollToBottom()
+    scroll = panel.messages.verticalScrollBar().value()
+    panel.show_page(InboxPage(account_email="me@example.com", query=queries[1], messages=messages))
+    assert panel.messages.currentRow() == 50
+    assert panel.messages.verticalScrollBar().value() == scroll

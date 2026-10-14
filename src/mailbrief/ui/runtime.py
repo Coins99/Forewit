@@ -505,6 +505,11 @@ class DesktopRuntime:
                 progress=progress,
             )
 
+    def reset_inbox_browsing(self) -> None:
+        """Forget cursors and result IDs after saved cache data changes."""
+        self._inbox_generation += 1
+        self._inbox_browse.clear()
+
     async def browse_inbox(
         self,
         account_email: str,
@@ -581,14 +586,19 @@ class DesktopRuntime:
         return result
 
     async def inbox_messages(
-        self, account_email: str, offset: int = 0, *, query: str = ""
+        self, account_email: str, offset: int = 0, *, query: str = "", cached_page: bool = False
     ) -> InboxPage:
+        """Read displayed results, or a full 100-row cache page for palette navigation."""
         async with self._storage().session() as session:
             account = await _gmail_account(session, account_email)
             if account is None:
                 return InboxPage(account_email=account_email)
             messages = MessageRepository(session)
-            state = self._inbox_browse.get((account_email, query)) if offset == 0 else None
+            state = (
+                self._inbox_browse.get((account_email, query))
+                if offset == 0 and not cached_page
+                else None
+            )
             if state is not None:
                 rows = await messages.get_by_provider_ids(account.id, state.identifiers)
                 rows = [row for row in rows if query or row.is_in_inbox]
@@ -596,13 +606,13 @@ class DesktopRuntime:
                 more = state.has_more
             else:
                 rows, more = await messages.get_inbox_page(
-                    account.id, offset, page_size=50 if offset == 0 else 100
+                    account.id, offset, page_size=50 if offset == 0 and not cached_page else 100
                 )
                 if query:
                     rows = []
                 if offset == 0:
                     more = True  # Remote availability is unknown until a bounded request.
-                elif not query:
+                if not query and (offset > 0 or cached_page):
                     # A palette jump loads an older cached page. Retain those rows when
                     # the owner subsequently continues remote browsing.
                     browsing = self._inbox_browse.setdefault((account_email, ""), InboxBrowse())
