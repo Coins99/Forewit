@@ -99,6 +99,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   **Should have been in my brief** on the Inbox page. Migration 0018 follows 0017. See
   `docs/ranking.md`.
 
+- Calendar views implemented, awaiting owner desktop acceptance: Week (a week of hours),
+  Month (six weeks of days) and List (the week's rows), chosen by tabs and remembered in
+  appearance.json (`ui/calendar_grid.py`, `ui/calendar_layout.py`). See `docs/calendar.md`.
 - Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
   the owner's events, revisioned with Undo, and open actions' deadlines and target dates
   as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
