@@ -29,6 +29,21 @@ MONTHS: Final = (
     "Nov",
     "Dec",
 )
+# Month names in full, for headings such as the Inbox's "September".
+MONTH_NAMES: Final = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 
 # A length typed as h:mm ("1:30"), as a fraction of hours ("1.5"), or as hours, minutes or
 # both, each with or without its unit ("1.5h", "2 hrs", "90", "1h 30", "1 hr 30 mins").

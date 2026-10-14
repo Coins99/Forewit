@@ -81,8 +81,8 @@ QLineEdit#paletteField { border-color: $border_strong; border-radius: ${pill_rad
 QLineEdit#paletteField:focus { border-color: $accent_fg; }
 QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled { color: $text_muted; }
 QComboBox QLineEdit, QAbstractSpinBox QLineEdit { border: none; border-radius: 0; padding: 0; background: transparent; }
-QListView#briefList, QListView#actionList { background: $panel; border: none; outline: 0; padding: 0; }
-QScrollArea#briefDetail, QScrollArea#actionDetail { background: $panel; border: none; }
+QListView#briefList, QListView#actionList, QListView#inboxList { background: $panel; border: none; outline: 0; padding: 0; }
+QScrollArea#briefDetail, QScrollArea#actionDetail, QScrollArea#inboxReaderScroll { background: $panel; border: none; }
 QListWidget::item { padding: ${item_pad_y}px ${item_pad_x}px; border: none; border-radius: ${radius}px; }
 QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; }
 QTabWidget::pane { border: none; }

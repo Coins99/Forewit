@@ -305,6 +305,20 @@ def paint_selection(
         painter.restore()
 
 
+# A hovered row's fill: the selection's colour at this opacity, so hovering never reads as
+# choosing.
+HOVER_OPACITY: Final = 0.5
+
+
+def paint_hover(painter: QPainter, rect: QRect, state: QStyle.StateFlag, tokens: Tokens) -> None:
+    """A hovered row's fill, shaped like the selection's, fainter; none on a selected row."""
+    if state & QStyle.StateFlag.State_MouseOver and not state & QStyle.StateFlag.State_Selected:
+        painter.save()
+        painter.setOpacity(HOVER_OPACITY)
+        paint_selection(painter, rect, state | QStyle.StateFlag.State_Selected, tokens)
+        painter.restore()
+
+
 def paint_lines(
     painter: QPainter,
     left: int,
@@ -334,6 +348,22 @@ def paint_lines(
     return top + subtitle_metrics.height()
 
 
+def header_height() -> int:
+    """A section header row's height: the space above, its title and the space below."""
+    return _HEADER_ABOVE + ui_metrics(SMALL_PX, semibold=True).height() + _HEADER_BELOW
+
+
+def paint_header(painter: QPainter, rect: QRect, title: str, tokens: Tokens) -> None:
+    """A section header row: its title, 12 px Semibold in text_secondary, at the rows' text
+    inset."""
+    painter.setFont(ui_font(SMALL_PX, semibold=True))
+    painter.setPen(QColor(tokens.text_secondary))
+    height = ui_metrics(SMALL_PX, semibold=True).height()
+    target = QRect(rect.left() + ROW_PAD_H, rect.top() + _HEADER_ABOVE, 0, height)
+    target.setRight(rect.right() - ROW_PAD_H)
+    painter.drawText(target, SINGLE_LINE, title)
+
+
 def paint_separator(painter: QPainter, rect: QRect, tokens: Tokens) -> None:
     """The cosmetic hairline along a row's bottom edge, inset to line up with its text."""
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
@@ -356,12 +386,7 @@ class BriefItemDelegate(QStyledItemDelegate):
         state: QStyle.StateFlag = option.state
         painter.save()
         if row.kind == "header":
-            painter.setFont(ui_font(SMALL_PX, semibold=True))
-            painter.setPen(QColor(tokens.text_secondary))
-            height = ui_metrics(SMALL_PX, semibold=True).height()
-            target = QRect(rect.left() + ROW_PAD_H, rect.top() + _HEADER_ABOVE, 0, height)
-            target.setRight(rect.right() - ROW_PAD_H)
-            painter.drawText(target, SINGLE_LINE, row.title)
+            paint_header(painter, rect, row.title, tokens)
             painter.restore()
             return
         paint_selection(painter, rect, state, tokens)
@@ -389,8 +414,7 @@ class BriefItemDelegate(QStyledItemDelegate):
         if not isinstance(row, BriefRow):
             return QSize(width, 0)
         if row.kind == "header":
-            height = ui_metrics(SMALL_PX, semibold=True).height()
-            return QSize(width, _HEADER_ABOVE + height + _HEADER_BELOW)
+            return QSize(width, header_height())
         return QSize(width, row_height(bool(row.chips)))
 
 

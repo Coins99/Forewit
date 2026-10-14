@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QStyle, QWidget
 
 from mailbrief.ui.theme import (
     DARK,
+    ICON_NAMES,
     LIGHT,
     ColorScheme,
     ThemeMode,
@@ -149,6 +150,22 @@ def test_icon_pixmap_renders_at_device_pixel_ratio(qapp: QApplication) -> None:
     assert pixmap.devicePixelRatio() == 2.0
     assert pixmap.width() == 32
     assert pixmap.toImage().pixelColor(0, 0).alpha() == 0
+
+
+def test_every_bundled_icon_renders(qapp: QApplication) -> None:
+    for name in ICON_NAMES:
+        image = icon_pixmap(name, DARK.text, 16, 2.0).toImage()
+        assert any(
+            image.pixelColor(x, y).alpha() for x in range(image.width()) for y in (12, 16, 20)
+        ), name
+
+
+def test_tabular_figures_line_digits_up(qapp: QApplication) -> None:
+    register_fonts()
+    tabular = ui_metrics(12, tabular=True)
+    assert tabular.horizontalAdvance("11:11") == tabular.horizontalAdvance("00:00")
+    assert ui_font(12, tabular=True).isFeatureSet(QFont.Tag("tnum"))
+    assert not ui_font(12).isFeatureSet(QFont.Tag("tnum"))
 
 
 def test_unknown_icon_is_refused(qapp: QApplication) -> None:

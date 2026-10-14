@@ -194,6 +194,7 @@ from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
+from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
@@ -954,8 +955,9 @@ class MainWindow(QMainWindow):
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
         self.calendar_panel = CalendarPanel()
-        self.inbox_panel = InboxPanel()
+        self.inbox_panel = InboxPanel(clock=lambda: self.now())
         self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
+        self.inbox_panel.search_requested.connect(self._open_palette)
         self.inbox_panel.page_requested.connect(
             lambda offset: self.start(lambda: self._load_inbox(offset), cancellable=False)
         )
@@ -1139,6 +1141,8 @@ class MainWindow(QMainWindow):
 
     def _request_page(self, key: str) -> None:
         if key == "inbox":
+            # The Inbox opens on its list, as Gmail's does; a message opens on a click.
+            self.inbox_panel.close_message()
             self._show_page(key)
             self.start(self._load_inbox, cancellable=False)
             return
@@ -3040,6 +3044,7 @@ class MainWindow(QMainWindow):
         await self.backend.disconnect()
         self._set_account(None)
         self.inbox_panel.clear()
+        self.workspace.header.set_alert("")
         self.connection.setText("Gmail: disconnected")
         self.status.setText("Local credentials removed. Saved briefs remain on this device.")
         self._calendar_allowed = None
@@ -3071,6 +3076,9 @@ class MainWindow(QMainWindow):
         )
 
     async def _refresh_inbox(self, *, quiet: bool = False) -> None:
+        """Sync the full Inbox and show it. A sync that stops early leaves one alert in the
+        header until a later one completes; a quiet refresh (at launch or after a run)
+        narrates nothing else in the status strip unless the sign-in was lost."""
         previous_status = self.status.text()
         if self._account_email is None:
             self.status.setText("Sign in with Google to refresh your Inbox.")
@@ -3080,30 +3088,38 @@ class MainWindow(QMainWindow):
             result = await self.backend.sync_inbox(self._cancel, self._progress)
         except (ConfigurationError, AuthenticationRequiredError) as exc:
             self._set_account(None)
-            self.inbox_panel.clear()
             guidance = (
                 configuration_guidance(exc)
                 if isinstance(exc, ConfigurationError)
                 else ("Sign in with Google to continue.")
             )
+            self.inbox_panel.clear(guidance)
+            self.workspace.header.set_alert("")
             self.connection.setText("Gmail: " + guidance)
             self.status.setText(guidance)
-            self.inbox_panel.sync_status.setText(guidance)
             return
         await self._load_inbox()
         if result.status is SyncStatus.COMPLETE:
-            self.status.setText(f"Inbox synced: {result.message_count} messages across all dates.")
-        else:
-            self.status.setText("Inbox sync incomplete. Cached messages may be stale.")
-            if result.error_code:
-                self.status.setText(self.status.text() + " " + error_guidance(result.error_code))
-            if result.error_code == "AUTH_REQUIRED":
-                self._set_account(None)
-                self.inbox_panel.clear()
-                self.connection.setText("Gmail: session expired. Sign in with Google to continue.")
-        self.inbox_panel.sync_status.setText(self.status.text())
-        if quiet and result.status is SyncStatus.COMPLETE:
-            self.status.setText(previous_status)
+            self.workspace.header.set_alert("")
+            self.status.setText(
+                previous_status
+                if quiet
+                else f"Inbox synced: {result.message_count} messages across all dates."
+            )
+            return
+        text = "Inbox sync incomplete. Cached messages may be stale."
+        if result.error_code:
+            text += " " + error_guidance(result.error_code)
+        if result.error_code == "AUTH_REQUIRED":
+            expired = "Gmail: session expired. Sign in with Google to continue."
+            self._set_account(None)
+            self.inbox_panel.clear(expired.removeprefix("Gmail: "))
+            self.workspace.header.set_alert("")
+            self.connection.setText(expired)
+            self.status.setText(text)
+            return
+        self.workspace.header.set_alert(INBOX_INCOMPLETE, text)
+        self.status.setText(previous_status if quiet else text)
 
     # Saved briefs by day. Opening one needs no connection; briefing a past day is the
     # owner's explicit choice, one day at a time, for the connected account.

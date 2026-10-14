@@ -251,3 +251,21 @@ def test_outline_button_takes_a_size_and_an_icon(qtbot: QtBot) -> None:
 def test_a_shortened_outline_button_can_t_carry_a_mnemonic() -> None:
     with pytest.raises(ValueError):
         outline_button("&Open", "x", mnemonic=True, shorten=True)
+
+
+def test_a_line_height_spaces_reading_text(qtbot: QtBot) -> None:
+    text = "One line of reading text that wraps onto a second and a third line here."
+    plain = wrap_label(text, px=14)
+    spaced = wrap_label(text, px=14, line_height=1.5)
+    for label in (plain, spaced):
+        qtbot.addWidget(label)
+    width = 160
+    lines = round(plain.heightForWidth(width) / plain.fontMetrics().height())
+    assert lines >= 3
+    # Each line takes 1.5 times the font's 14 px; never less than the font's own line.
+    assert spaced.heightForWidth(width) == pytest.approx(lines * 21, abs=1)
+    assert spaced.heightForWidth(width) > plain.heightForWidth(width)
+    assert spaced.minimumSizeHint().height() >= 21
+    tight = wrap_label(text, px=14, line_height=0.5)
+    qtbot.addWidget(tight)
+    assert tight.heightForWidth(width) == plain.heightForWidth(width)

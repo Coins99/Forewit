@@ -88,8 +88,14 @@ async def test_the_central_widget_is_the_workspace_with_the_status_strip_on_its_
     assert layout is not None and layout.count() == 1
     item = layout.itemAt(0)
     assert item is not None and item.widget() is window.workspace
-    # No hairline crosses the window: the strip sits on the glass under the sheet.
-    assert not central.findChildren(HairlineDivider)
+    # No hairline crosses the window: the strip sits on the glass under the sheet. (A page
+    # may rule off its own content inside the sheet, as the Inbox's reading pane does.)
+    sheet = window.workspace.sheet
+    assert not [
+        divider
+        for divider in central.findChildren(HairlineDivider)
+        if not sheet.isAncestorOf(divider)
+    ]
     strip = window.findChild(QWidget, "statusStrip")
     assert strip is not None and strip.parent() is window.workspace.footer_bar
     assert window.status.parent() is strip and window.undo_button.parent() is strip

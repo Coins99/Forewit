@@ -25,6 +25,14 @@ ICON_NAMES: Final = frozenset(
         "external-link",
         "mail",
         "database",
+        "search",
+        "x",
+        "chevron-left",
+        "chevron-right",
+        "paperclip",
+        "star",
+        "flag",
+        "alert-circle",
     }
 )
 
@@ -69,32 +77,43 @@ def _weight(medium: bool, semibold: bool) -> QFont.Weight:
     return QFont.Weight.Medium if medium else QFont.Weight.Normal
 
 
+# Inter's tabular figures: every digit as wide as the others, so times and counts line up.
+_TABULAR: Final = QFont.Tag("tnum")
+
+
 @functools.cache
-def _font(px: int, weight: QFont.Weight) -> QFont:
+def _font(px: int, weight: QFont.Weight, tabular: bool = False) -> QFont:
     font = QFont(FONT_FAMILY)
     font.setPixelSize(px)
     font.setWeight(weight)
     spacing = tracking(px)
     if spacing:
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, spacing)
+    if tabular:
+        font.setFeature(_TABULAR, 1)
     return font
 
 
-def ui_font(px: int, *, medium: bool = False, semibold: bool = False) -> QFont:
+def ui_font(
+    px: int, *, medium: bool = False, semibold: bool = False, tabular: bool = False
+) -> QFont:
     """Inter at a pixel size; point sizes would scale differently on each platform. Medium
-    is for emphasis in text, SemiBold for titles. A copy, so a caller that changes it never
-    changes the cached font."""
-    return QFont(_font(px, _weight(medium, semibold)))
+    is for emphasis in text, SemiBold for titles, and ``tabular`` gives equal-width digits
+    for times and counts in columns. A copy, so a caller that changes it never changes the
+    cached font."""
+    return QFont(_font(px, _weight(medium, semibold), tabular))
 
 
 @functools.cache
-def _metrics(px: int, weight: QFont.Weight) -> QFontMetrics:
-    return QFontMetrics(_font(px, weight))
+def _metrics(px: int, weight: QFont.Weight, tabular: bool = False) -> QFontMetrics:
+    return QFontMetrics(_font(px, weight, tabular))
 
 
-def ui_metrics(px: int, *, medium: bool = False, semibold: bool = False) -> QFontMetrics:
-    """The metrics of ``ui_font(px, ...)``, built once per size and weight."""
-    return _metrics(px, _weight(medium, semibold))
+def ui_metrics(
+    px: int, *, medium: bool = False, semibold: bool = False, tabular: bool = False
+) -> QFontMetrics:
+    """The metrics of ``ui_font(px, ...)``, built once per size, weight and figure style."""
+    return _metrics(px, _weight(medium, semibold), tabular)
 
 
 def release_font_cache() -> None:

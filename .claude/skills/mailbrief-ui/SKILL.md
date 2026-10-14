@@ -27,7 +27,8 @@ shadows), in the system's light or dark mode. Its approved renders are
   before losing it.
 - Mail and AI text reaches the screen only through `plain_label()` (`ui/labels.py`, plain
   text, word wrap), `wrap_label()` (plain text that also wraps inside a long unbroken
-  token), a delegate's `drawText()` or a glass pill's label (`GlassButton` paints the
+  token), a delegate's or a painted widget's `drawText()` (the Inbox's monogram) or a
+  glass pill's label (`GlassButton` paints the
   `button_label()` text `outline_button` gave it with `drawText()`: plain text, mnemonics
   hidden). Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
@@ -51,7 +52,8 @@ shadows), in the system's light or dark mode. Its approved renders are
   `HairlineFrame`s: a `card` fill, no border. Combo boxes, date, time and number fields,
   check boxes and radio buttons are drawn by `ThemeStyle`; don't style them in QSS.
 - Icons are plain: a button's icon (`icon_name`) is drawn in the label's colour beside
-  the label, never in a tile or square behind it.
+  the label, never in a tile or square behind it. An icon with no label makes a round
+  glass button; give it an accessible name and a tooltip.
 - Glass panels are the chrome only: the header, sidebar, gutter, status strip and a
   dialog's frame. Pages and a dialog's content sit on a white sheet, and the selected
   page is a fill, never a second layer of glass.

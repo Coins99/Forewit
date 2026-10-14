@@ -497,6 +497,7 @@ class DesktopRuntime:
                 account_email=account_email,
                 offset=offset,
                 has_more=more,
+                total=await messages.count_inbox(account.id),
                 messages=tuple(
                     MessageRepository.to_domain(
                         row, account.provider_account_id, ProviderKind.GMAIL
