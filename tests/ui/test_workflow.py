@@ -21,6 +21,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     SuggestionState,
     ThreadLink,
+    tag_key,
 )
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.briefs import (
@@ -148,6 +149,7 @@ class FakeBackend(FakeDrafts):
         self.list_calls = 0
         self.list_fail: Exception | None = None
         self.projects: tuple[Project, ...] = ()
+        self.tags: tuple[str, ...] = ()
         self.areas: tuple[LifeArea, ...] = ()
         self.actions: dict[ActionFilter, tuple[Action, ...]] = {}
         self.day_calls: list[date] = []
@@ -336,6 +338,9 @@ class FakeBackend(FakeDrafts):
     async def list_areas(self) -> tuple[LifeArea, ...]:
         return self.areas
 
+    async def list_tags(self) -> tuple[str, ...]:
+        return self.tags
+
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
     ) -> Project | LifeArea:
@@ -396,6 +401,7 @@ class FakeBackend(FakeDrafts):
                 and action.project is not None
                 and action.project.area_public_id == group_id
             )
+            or (group == "tag" and any(tag_key(tag) == group_id for tag in action.tags))
         )
 
     async def count_grouped_actions(

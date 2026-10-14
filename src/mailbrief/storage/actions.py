@@ -18,6 +18,7 @@ from mailbrief.domain.actions import (
     ActionActivity,
     ActionActivityKind,
     ActionFilter,
+    ActionPriority,
     ActionProposal,
     ActionSource,
     ActionStatus,
@@ -25,6 +26,7 @@ from mailbrief.domain.actions import (
     SuggestionState,
     SuggestionView,
     ThreadActivity,
+    tag_key,
 )
 from mailbrief.domain.analysis import (
     ActionEffort,
@@ -45,6 +47,7 @@ from mailbrief.storage.tables import (
     ActionStepTable,
     ActionSuggestionTable,
     ActionTable,
+    ActionTagTable,
     AnalysisTable,
     MessageTable,
     ProjectTable,
@@ -254,6 +257,7 @@ def action_from_rows(
     proposals: Sequence[ActionProposal] = (),
     activity: Sequence[ActionActivity] = (),
     project: Project | None = None,
+    tags: Sequence[str] = (),
 ) -> Action:
     """Rebuild an action; each source pairs its snapshot with the cached Inbox state, if any,
     ``thread`` is its derived thread activity, and ``proposals`` its pending proposals."""
@@ -263,6 +267,8 @@ def action_from_rows(
         title=row.title,
         ownership=ActionOwnership(row.ownership),
         status=ActionStatus(row.status),
+        priority=None if row.priority is None else ActionPriority(row.priority),
+        tags=tuple(sorted(tags, key=tag_key)),
         effort=None if row.effort is None else ActionEffort(row.effort),
         estimate_minutes=row.estimate_minutes,
         deadline_text=row.deadline_text,
@@ -647,6 +653,65 @@ class ActionRepository:
             found.extend(ThreadLinkRow(*row) for row in result.tuples())
         return found
 
+    async def tag_rows(self, action_id: int) -> list[ActionTagTable]:
+        result = await self._session.scalars(
+            select(ActionTagTable)
+            .where(ActionTagTable.action_id == action_id)
+            .order_by(ActionTagTable.id)
+        )
+        return list(result.all())
+
+    async def set_tags(self, action_id: int, names: Sequence[str]) -> None:
+        """Give the action exactly these tags (already normalized, one per key), keeping the
+        rows of tags it already has and their spelling unless it changed."""
+        wanted = {tag_key(name): name for name in names}
+        for row in await self.tag_rows(action_id):
+            name = wanted.pop(row.name_key, None)
+            if name is None:
+                await self._session.delete(row)
+            elif row.name != name:
+                row.name = name
+        for key, name in wanted.items():
+            self._session.add(ActionTagTable(action_id=action_id, name=name, name_key=key))
+
+    async def tag_spellings(self, keys: Iterable[str], *, besides: int | None) -> dict[str, str]:
+        """How live tasks other than ``besides`` already spell each tag key: the spelling on
+        its earliest row, so one tag reads the same on every task."""
+        first = (
+            select(ActionTagTable.name_key, func.min(ActionTagTable.id).label("first_id"))
+            .join(ActionTable, ActionTagTable.action_id == ActionTable.id)
+            .where(ActionTable.deleted_at_utc.is_(None))
+            .group_by(ActionTagTable.name_key)
+        )
+        if besides is not None:
+            first = first.where(ActionTagTable.action_id != besides)
+        spellings: dict[str, str] = {}
+        for chunk in sorted_batches(keys):
+            earliest = first.where(ActionTagTable.name_key.in_(chunk)).subquery()
+            result = await self._session.execute(
+                select(ActionTagTable.name_key, ActionTagTable.name).join(
+                    earliest, ActionTagTable.id == earliest.c.first_id
+                )
+            )
+            spellings.update(result.tuples().all())
+        return spellings
+
+    async def tag_names(self) -> tuple[str, ...]:
+        """Every tag on a live task, once each in its earliest spelling, sorted by key."""
+        earliest = (
+            select(func.min(ActionTagTable.id).label("first_id"))
+            .join(ActionTable, ActionTagTable.action_id == ActionTable.id)
+            .where(ActionTable.deleted_at_utc.is_(None))
+            .group_by(ActionTagTable.name_key)
+            .subquery()
+        )
+        result = await self._session.scalars(
+            select(ActionTagTable.name)
+            .join(earliest, ActionTagTable.id == earliest.c.first_id)
+            .order_by(ActionTagTable.name_key)
+        )
+        return tuple(result.all())
+
     @staticmethod
     def _in_view(view: ActionFilter) -> list[ColumnElement[bool]]:
         """The conditions for a live action to appear in ``view``."""
@@ -676,7 +741,15 @@ class ActionRepository:
                     select(ProjectTable.public_id).where(ProjectTable.area_public_id == public_id)
                 )
             ]
-        raise ValueError("Choose a project, life area or unassigned tasks.")
+        if kind == "tag" and public_id is not None:
+            return [
+                ActionTable.id.in_(
+                    select(ActionTagTable.action_id).where(
+                        ActionTagTable.name_key == tag_key(public_id)
+                    )
+                )
+            ]
+        raise ValueError("Choose a project, life area, tag or unassigned tasks.")
 
     async def list_rows(
         self,
@@ -710,8 +783,8 @@ class ActionRepository:
         return count or 0
 
     async def load(self, rows: Sequence[ActionTable]) -> list[Action]:
-        """Domain actions for rows, reading steps, sources and pending proposals with one
-        chunked query each, and thread activity with a fixed number more."""
+        """Domain actions for rows, reading recent activity, tags, steps, sources and pending
+        proposals with one chunked query each, and thread activity with a fixed number more."""
         projects = (
             {
                 project.public_id: project
@@ -763,6 +836,15 @@ class ActionRepository:
                         legacy=record.legacy,
                     )
                 )
+        tags: dict[int, list[str]] = {}
+        for chunk in sorted_batches(ids):
+            tag_result = await self._session.execute(
+                select(ActionTagTable.action_id, ActionTagTable.name)
+                .where(ActionTagTable.action_id.in_(chunk))
+                .order_by(ActionTagTable.action_id, ActionTagTable.id)
+            )
+            for action_id, name in tag_result.tuples():
+                tags.setdefault(action_id, []).append(name)
         steps: dict[int, list[ActionStepTable]] = {}
         for chunk in sorted_batches(ids):
             step_result = await self._session.scalars(
@@ -799,6 +881,7 @@ class ActionRepository:
                 ],
                 activity.get(row.id, ()),
                 projects.get(row.project_public_id or ""),
+                tags.get(row.id, ()),
             )
             for row in rows
         ]

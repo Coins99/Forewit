@@ -29,6 +29,8 @@ from mailbrief.ui.action_text import (
     action_details,
     completed_text,
     gmail_source,
+    priority_text,
+    tags_text,
     target_text,
 )
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
@@ -238,6 +240,12 @@ class ActionDetailPane(QScrollArea):
                 organization += " · Archived"
             label = wrap_label(organization, tone="secondary", px=TEXT_PX)
             label.setObjectName("actionProject")
+            top.append(label)
+        labels = [text for text in (priority_text(action.priority), tags_text(action.tags)) if text]
+        if labels:
+            # Tags are the owner's text: plain, and wrapped inside a long unbroken one.
+            label = wrap_label(" · ".join(labels), tone="secondary", px=TEXT_PX)
+            label.setObjectName("actionPriorityTags")
             top.append(label)
         top += self._plan(action, details)
         if action.notes.strip():

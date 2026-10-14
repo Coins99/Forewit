@@ -309,6 +309,7 @@ class DesktopBackend(Protocol):
     async def unaccept_action(self, public_id: str, revision: int) -> None: ...
     async def list_projects(self) -> tuple[Project, ...]: ...
     async def list_areas(self) -> tuple[LifeArea, ...]: ...
+    async def list_tags(self) -> tuple[str, ...]: ...
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
     ) -> Project | LifeArea: ...
@@ -1359,9 +1360,11 @@ class MainWindow(QMainWindow):
         try:
             projects = await self.backend.list_projects()
             areas = await self.backend.list_areas()
+            tags = await self.backend.list_tags()
             self._projects, self._areas = projects, areas
             self.action_editor.set_projects(self._projects)
-            self.actions_panel.show_groups(self._projects, self._areas)
+            self.action_editor.set_tags(tags)
+            self.actions_panel.show_groups(self._projects, self._areas, tags)
             group, group_id = self.actions_panel.grouping()
             for view in ActionFilter:
                 actions = (

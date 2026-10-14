@@ -825,6 +825,10 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await ProjectService(session).list_areas()
 
+    async def list_tags(self) -> tuple[str, ...]:
+        async with self._storage().session() as session:
+            return await ActionService(session).list_tags()
+
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
     ) -> Project | LifeArea:

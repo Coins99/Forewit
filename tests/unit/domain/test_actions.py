@@ -7,10 +7,13 @@ import pytest
 from pydantic import ValidationError
 
 from mailbrief.domain.actions import (
+    MAX_ACTION_TAGS,
+    PRIORITY_RANK,
     TARGET_REASON_TEXT,
     Action,
     ActionEdit,
     ActionFilter,
+    ActionPriority,
     ActionProposal,
     ActionSource,
     ActionStatus,
@@ -20,6 +23,8 @@ from mailbrief.domain.actions import (
     SuggestionState,
     SuggestionView,
     ThreadActivity,
+    normalize_tags,
+    tag_key,
 )
 from mailbrief.domain.analysis import (
     ActionOwnership,
@@ -338,6 +343,8 @@ def test_an_edit_carries_every_editable_field() -> None:
         title="Approve it",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        priority=None,
+        tags=(),
         estimate_minutes=None,
         target_date=FRIDAY,
         notes="",
@@ -364,6 +371,64 @@ def test_an_estimate_is_whole_minutes_up_to_100_hours(minutes: int | None) -> No
     for bad in (0, -15, 6_001):
         with pytest.raises(ValidationError):
             make_action(estimate_minutes=bad)
+
+
+def test_priority_and_tags_are_required_in_an_edit() -> None:
+    """Like the estimate: an edit that left them out would erase the owner's choice."""
+    edit = ActionEdit(
+        title="Book flights",
+        ownership=ActionOwnership.MINE,
+        effort=None,
+        priority=ActionPriority.HIGH,
+        tags=("Travel", "#admin", "travel"),
+        estimate_minutes=None,
+        target_date=None,
+        notes="",
+    )
+    assert (edit.priority, edit.tags) == (ActionPriority.HIGH, ("admin", "Travel"))
+    fields = edit.model_dump()
+    for missing in ("priority", "tags"):
+        with pytest.raises(ValidationError):
+            ActionEdit.model_validate({k: v for k, v in fields.items() if k != missing})
+    with pytest.raises(ValidationError):
+        ActionEdit.model_validate({**fields, "priority": "urgent"})
+    assert make_action().priority is None and make_action().tags == ()
+
+
+def test_tags_are_cleaned_once_each_and_sorted_by_key() -> None:
+    assert normalize_tags(["  Home  ", "#errands", "HOME", "", " # ", "Big	day​"]) == (
+        "Big day",
+        "errands",
+        "Home",
+    )
+    assert tag_key("Ｈｏｍｅ") == tag_key("HOME") == "home"  # Width and case fold away.
+    assert tag_key("Straße") == "strasse"
+    assert tag_key(tag_key("ℌome")) == tag_key("ℌome")
+
+
+@pytest.mark.parametrize(
+    ("tags", "message"),
+    [
+        (["a,b"], "comma"),
+        (["x" * 41], "at most 40"),
+        ([f"tag {number}" for number in range(MAX_ACTION_TAGS + 1)], "at most 10 tags"),
+    ],
+)
+def test_bad_tags_are_refused_without_naming_them(tags: list[str], message: str) -> None:
+    with pytest.raises(ValueError, match=message) as raised:
+        normalize_tags(tags)
+    assert tags[0] not in str(raised.value)
+    assert len(normalize_tags(["x" * 40, *[f"t{n}" for n in range(MAX_ACTION_TAGS - 1)]])) == 10
+
+
+def test_priorities_rank_high_first_and_none_last() -> None:
+    assert [item.value for item in ActionPriority] == ["high", "medium", "low"]
+    assert sorted(PRIORITY_RANK, key=PRIORITY_RANK.__getitem__) == [
+        ActionPriority.HIGH,
+        ActionPriority.MEDIUM,
+        ActionPriority.LOW,
+        None,
+    ]
 
 
 def test_a_step_edit_without_an_id_is_new() -> None:
@@ -417,6 +482,8 @@ def test_reprs_and_errors_leave_out_action_text() -> None:
         title=MARKER,
         ownership=ActionOwnership.MINE,
         effort=None,
+        priority=None,
+        tags=(),
         estimate_minutes=None,
         target_date=None,
         notes=MARKER,

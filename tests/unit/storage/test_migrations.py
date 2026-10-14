@@ -572,6 +572,13 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
         "ck_actions_deadline_precision_known",
         "ck_actions_revision_positive",
         "ck_actions_estimate_minutes_range",
+        "ck_actions_priority_known",
+    }
+    assert created_schema["action_tags"]["constraints"] == {
+        "pk_action_tags",
+        "uq_action_tags_name",
+        "ck_action_tags_name_length",
+        "fk_action_tags_action_id_actions",
     }
     assert created_schema["action_suggestions"]["unique"] == {
         frozenset({"analysis_id", "position"}),
@@ -1245,8 +1252,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0019"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0019",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0020"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0020",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1413,7 +1420,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0019",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0020",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")
@@ -1488,9 +1495,88 @@ def test_task_estimates_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path:
             with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
                 connection.execute("UPDATE actions SET estimate_minutes=?", (minutes,))
         connection.commit()
+    command.upgrade(config, "head")  # The ORM is at head, so check the schema there.
     command.check(config)
 
     command.downgrade(config, "20261013_0018")
 
     assert _rows(path, kept) == before
     assert _schema(path) == _schema(fresh)
+
+
+def test_priorities_and_tags_upgrade_keeps_every_row_and_downgrades_cleanly(
+    tmp_path: Path,
+) -> None:
+    """0020 adds the owner's priority to actions (NULL for existing tasks) and their tags,
+    which go with their task."""
+    path = tmp_path / "priorities.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261014_0019")
+    with closing(sqlite3.connect(path)) as connection:
+        action_id = connection.execute(
+            "INSERT INTO actions(public_id,title,ownership,status,effort,estimate_minutes,"
+            "created_at_utc,updated_at_utc) VALUES('5b1d0d0e-3f4c-4a3e-8f5e-0c6b8f7a2d10',"
+            "'Renew passport','mine','open','hours',90,'2026-10-14 00:00:00',"
+            "'2026-10-14 00:00:00')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO action_steps(action_id,position,text) VALUES(?,0,'Photos')", (action_id,)
+        )
+        connection.commit()
+    kept = ("actions", "action_steps")
+    before = _rows(path, kept)
+    fresh = tmp_path / "fresh-0019.sqlite3"
+    command.upgrade(_alembic_config(fresh), "20261014_0019")
+
+    command.upgrade(config, "20261014_0020")
+
+    assert _earlier_columns(_rows(path, kept), before) == before
+    assert _query(path, "SELECT priority FROM actions") == [(None,)]
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        for priority in ("high", "medium", "low", None):
+            connection.execute("UPDATE actions SET priority=?", (priority,))
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute("UPDATE actions SET priority='urgent'")
+        connection.execute(
+            "INSERT INTO action_tags(action_id,name,name_key) VALUES(?,'Home','home')",
+            (action_id,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint failed"):
+            connection.execute(
+                "INSERT INTO action_tags(action_id,name,name_key) VALUES(?,'HOME','home')",
+                (action_id,),
+            )
+        for name in ("", "x" * 41):
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+                connection.execute(
+                    "INSERT INTO action_tags(action_id,name,name_key) VALUES(?,?,?)",
+                    (action_id, name, name),
+                )
+        connection.commit()
+    command.check(config)
+    assert _query(path, "SELECT name FROM action_tags") == [("Home",)]
+
+    command.downgrade(config, "20261014_0019")
+
+    assert _rows(path, kept) == before
+    assert _schema(path) == _schema(fresh)
+
+
+def test_tags_go_with_their_task(tmp_path: Path) -> None:
+    path = tmp_path / "tag-cascade.sqlite3"
+    command.upgrade(_alembic_config(path), "head")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        action_id = connection.execute(
+            "INSERT INTO actions(public_id,title,ownership,status,created_at_utc,"
+            "updated_at_utc) VALUES('7a0e8b9c-1d2e-4f30-9a4b-5c6d7e8f9a0b','Call','mine',"
+            "'open','2026-10-14 00:00:00','2026-10-14 00:00:00')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO action_tags(action_id,name,name_key) VALUES(?,'Phone','phone')",
+            (action_id,),
+        )
+        connection.execute("DELETE FROM actions WHERE id=?", (action_id,))
+        connection.commit()
+    assert _query(path, "SELECT count(*) FROM action_tags") == [(0,)]

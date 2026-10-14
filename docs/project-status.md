@@ -15,6 +15,10 @@ later use after Microsoft Entra access is resolved.
   today's agenda and new replies, from local data only ([Today](today.md)).
   Tasks can carry the owner's own estimate in minutes, separate from the AI's effort
   ([estimates](p1-manual-tasks.md#estimates)), awaiting owner desktop acceptance.
+  Priorities and tags (B03) are implemented, awaiting owner desktop acceptance: a priority
+  orders tasks with the same dates, and the Actions filter offers each tag
+  ([priorities and tags](p1-priorities-tags.md)). Recurring tasks are the remaining P1
+  slice.
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

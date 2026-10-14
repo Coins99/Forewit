@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from mailbrief.domain.actions import TARGET_REASON_TEXT, Action, ActionProposal, ActionStatus
+from mailbrief.domain.actions import (
+    TARGET_REASON_TEXT,
+    Action,
+    ActionPriority,
+    ActionProposal,
+    ActionStatus,
+)
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.ui.deadline_text import day_text, deadline_text, length_text, weekday
 from mailbrief.ui.proposals_view import pending_proposals
@@ -78,6 +84,22 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         completed=None if completed is None else completed.astimezone(zone).date(),
         today=today,
     )
+
+
+PRIORITY_TEXT: dict[ActionPriority, str] = {
+    ActionPriority.HIGH: "High priority",
+    ActionPriority.MEDIUM: "Medium priority",
+    ActionPriority.LOW: "Low priority",
+}
+
+
+def priority_text(priority: ActionPriority | None) -> str | None:
+    return None if priority is None else PRIORITY_TEXT[priority]
+
+
+def tags_text(tags: tuple[str, ...]) -> str | None:
+    """The owner's tags as one plain line, or None without any."""
+    return ("Tags: " + ", ".join(tags)) if tags else None
 
 
 def estimate_text(minutes: int | None) -> str | None:

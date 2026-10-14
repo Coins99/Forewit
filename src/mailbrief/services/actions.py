@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import (
     MAX_ACTION_STEPS,
+    PRIORITY_RANK,
     Action,
     ActionActivityKind,
     ActionEdit,
@@ -22,6 +23,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     SuggestionState,
     ThreadLink,
+    tag_key,
 )
 from mailbrief.domain.analysis import (
     ActionOwnership,
@@ -95,9 +97,17 @@ def _new_public_id() -> str:
 def urgency(
     target_date: date | None, due_at_utc: datetime | None, created_at_utc: datetime
 ) -> tuple[date, datetime, datetime]:
-    """How open actions are ordered: by target date, then due time, then creation, with
-    undated actions last."""
+    """How urgent an action is: by target date, then due time, then creation, with undated
+    actions last."""
     return (target_date or date.max, due_at_utc or _LATEST, created_at_utc)
+
+
+def action_order(action: Action) -> tuple[date, datetime, int, datetime]:
+    """How open actions are ordered: by target date, then due time, then the owner's
+    priority (none last), then creation, with undated actions last; so a priority orders
+    work that has no date."""
+    target, due, created = urgency(action.target_date, action.due_at_utc(), action.created_at_utc)
+    return (target, due, PRIORITY_RANK[action.priority], created)
 
 
 def touch(row: ActionTable, now: datetime) -> None:
@@ -128,6 +138,7 @@ def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
     row.project_public_id = edit.project_public_id
     row.title = edit.title
     row.ownership = edit.ownership.value
+    row.priority = None if edit.priority is None else edit.priority.value
     row.effort = None if edit.effort is None else edit.effort.value
     row.estimate_minutes = edit.estimate_minutes
     row.target_date = edit.target_date
@@ -229,6 +240,15 @@ class ActionService:
         ):
             raise ActionConflictError("Choose an active project for this task.")
 
+    async def _apply_tags(self, row: ActionTable, edit: ActionEdit) -> None:
+        """Give the action the edit's tags, each spelt as other live tasks already spell it."""
+        spellings = await self._repository.tag_spellings(
+            (tag_key(name) for name in edit.tags), besides=row.id
+        )
+        await self._repository.set_tags(
+            row.id, [spellings.get(tag_key(name), name) for name in edit.tags]
+        )
+
     async def create(self, edit: ActionEdit, steps: Sequence[StepEdit] = ()) -> Action:
         """Create a task with no account or email source, using the same plan and workflow."""
 
@@ -249,6 +269,7 @@ class ActionService:
             )
             _apply_edit(row, edit)
             await self._repository.add_action(row)
+            await self._apply_tags(row, edit)
             await self._apply_steps(row, steps, listed, now)
             await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             return await self._load(row)
@@ -541,6 +562,7 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             await self._check_project(edit, row.project_public_id)
             _apply_edit(row, edit)
+            await self._apply_tags(row, edit)
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)
             touch(row, now)
@@ -713,10 +735,10 @@ class ActionService:
     ) -> tuple[Action, ...]:
         """Live actions for a view.
 
-        Open and waiting actions come by target date, then due time, then creation, with
-        undated ones last, and are never capped unless ``limit`` is given. Completed actions
-        come newest first, at most COMPLETED_LIST_LIMIT unless ``limit`` says otherwise;
-        count_actions() says how many there are.
+        Open and waiting actions come in action_order() (target date, due time, priority,
+        creation, with undated ones last), and are never capped unless ``limit`` is given.
+        Completed actions come newest first, at most COMPLETED_LIST_LIMIT unless ``limit``
+        says otherwise; count_actions() says how many there are.
         """
         if limit is not None and limit < 1:
             raise ValueError("limit must be at least 1")
@@ -728,13 +750,12 @@ class ActionService:
         if view is ActionFilter.COMPLETED:
             return tuple(actions)
         # The rows arrive in ID order and sorted() is stable, so equal keys keep that order.
-        ordered = sorted(
-            actions,
-            key=lambda action: urgency(
-                action.target_date, action.due_at_utc(), action.created_at_utc
-            ),
-        )
+        ordered = sorted(actions, key=action_order)
         return tuple(ordered if limit is None else ordered[:limit])
+
+    async def list_tags(self) -> tuple[str, ...]:
+        """Every tag on a live task, once each, sorted; the Actions filter offers them."""
+        return await self._repository.tag_names()
 
     async def count_actions(
         self, view: ActionFilter, *, group: str = "all", group_id: str | None = None

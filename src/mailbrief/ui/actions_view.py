@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.actions import Action, ActionFilter
+from mailbrief.domain.actions import Action, ActionFilter, tag_key
 from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.projects import LifeArea, Project
 from mailbrief.ui.action_detail import ActionDetailPane
@@ -41,6 +41,8 @@ from mailbrief.ui.action_text import (
     action_details,
     completed_text,
     gmail_source,
+    priority_text,
+    tags_text,
     target_text,
 )
 from mailbrief.ui.brief_list import (
@@ -117,8 +119,12 @@ def describe_details(action: Action, facts: ActionDetails) -> str:
         details.append(target)
     if facts.due is not None:
         details.append(f"due {facts.due}")
+    if action.priority is not None:
+        details.append(f"{action.priority.value} priority")
     if facts.steps:
         details.append(f"{facts.steps_done}/{facts.steps} steps")
+    if action.tags:
+        details.append("tagged " + ", ".join(action.tags))
     if facts.waiting:
         details.append("waiting for someone")
     if facts.overdue:
@@ -157,12 +163,15 @@ def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
             completed_text(facts),
             target_text(facts, reason=False),  # The detail pane gives the reason.
             None if facts.due is None else f"Due {facts.due}",
+            priority_text(action.priority),
             f"{facts.steps_done}/{facts.steps} steps" if facts.steps else None,
         )
         if text is not None
     ]
     if action.project is not None:
         meta.append(action.project.name)
+    if (tags := tags_text(action.tags)) is not None:
+        meta.append(tags)
     chips: list[Chip] = []
     if facts.overdue:
         chips.append(Chip("Overdue", ChipTone.WARNING))
@@ -307,7 +316,7 @@ class ActionsPanel(QWidget):
         self.group.setObjectName("actionGroup")
         # Keep the project filter in the Tab order on Cocoa as well as Windows.
         self.group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.group.setAccessibleName("Filter tasks by project or life area")
+        self.group.setAccessibleName("Filter tasks by project, life area or tag")
         # Seven characters: with the gap beside it, the page is no wider than before.
         self.group.setMinimumContentsLength(7)
         self.group.setSizeAdjustPolicy(
@@ -405,7 +414,12 @@ class ActionsPanel(QWidget):
             return kind, public_id or None
         return "all", None
 
-    def show_groups(self, projects: tuple[Project, ...], areas: tuple[LifeArea, ...]) -> None:
+    def show_groups(
+        self,
+        projects: tuple[Project, ...],
+        areas: tuple[LifeArea, ...],
+        tags: tuple[str, ...] = (),
+    ) -> None:
         selected = self.group.currentData()
         self.group.blockSignals(True)
         self.group.clear()
@@ -416,6 +430,8 @@ class ActionsPanel(QWidget):
         for project in projects:
             suffix = " (archived)" if project.archived_at_utc else ""
             self.group.addItem(f"Project: {project.name}{suffix}", "project:" + project.public_id)
+        for tag in tags:
+            self.group.addItem(f"Tag: {tag}", "tag:" + tag_key(tag))
         self.group.setCurrentIndex(max(0, self.group.findData(selected)))
         self.group.blockSignals(False)
 

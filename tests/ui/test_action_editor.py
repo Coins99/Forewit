@@ -11,14 +11,21 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QLabel, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
-from mailbrief.domain.actions import Action, ActionEdit, ActionSource, ActionStep, StepEdit
+from mailbrief.domain.actions import (
+    Action,
+    ActionEdit,
+    ActionPriority,
+    ActionSource,
+    ActionStep,
+    StepEdit,
+)
 from mailbrief.domain.analysis import (
     ActionEffort,
     ActionOwnership,
     DeadlinePrecision,
     TargetReason,
 )
-from mailbrief.ui.action_editor import BAD_ESTIMATE, ActionEditor
+from mailbrief.ui.action_editor import BAD_ESTIMATE, ActionEditor, parse_tags
 from tests.factories import make_action
 
 ACTION = make_action(
@@ -110,6 +117,8 @@ def test_saving_without_plan_changes_sends_no_steps(editor: ActionEditor) -> Non
         title="Send the final Q3 deck",
         ownership=ActionOwnership.WAITING_FOR,
         effort=None,
+        priority=None,
+        tags=(),
         estimate_minutes=None,
         target_date=None,
         notes="Ask Sam.",
@@ -548,3 +557,67 @@ def test_arrows_step_to_the_next_quarter_hour(
     editor.estimate.setValue(start)
     editor.estimate.stepBy(steps)
     assert editor.estimate.value() == shown
+
+
+def test_priority_and_tags_show_and_save(editor: ActionEditor) -> None:
+    tagged = ACTION.model_copy(update={"priority": ActionPriority.MEDIUM, "tags": ("Q3", "Work")})
+    editor.edit(tagged, TODAY)
+    assert editor.priority.currentText() == "Medium"
+    assert editor.tags.text() == "Q3, Work"
+    assert not editor.has_unsaved_input()
+    requests = saved(editor)
+
+    editor.priority.setCurrentIndex(1)
+    editor.tags.setText("work, #Clients ,, ")
+    assert editor.has_unsaved_input()
+    save(editor)
+
+    ((_, edit, _),) = requests
+    assert edit.priority is ActionPriority.HIGH
+    assert edit.tags == ("Clients", "work")
+
+
+def test_a_bad_tag_keeps_the_dialog_open_and_names_no_tag(editor: ActionEditor) -> None:
+    requests = saved(editor)
+    long_tag = "x" * 41
+    editor.tags.setText(f"ok, {long_tag}")
+    save(editor)
+    assert requests == []
+    assert editor.status.text() == "A tag can be at most 40 characters."
+    assert editor.tags.text() == f"ok, {long_tag}"  # Kept to fix.
+    assert editor._fields.isEnabled()
+
+
+def test_a_new_task_starts_without_priority_or_tags(editor: ActionEditor) -> None:
+    created: list[ActionEdit] = []
+    editor.create_requested.connect(lambda edit, _steps: created.append(edit))
+    editor.new_task(TODAY)
+    assert (editor.priority.currentText(), editor.tags.text()) == ("Not set", "")
+    editor.title.setText("Water plants")
+    editor.tags.setText("Home")
+    save(editor)
+    assert [(edit.priority, edit.tags) for edit in created] == [(None, ("Home",))]
+
+
+def test_the_tag_completer_completes_only_the_tag_being_typed(editor: ActionEditor) -> None:
+    editor.set_tags(("work", "Home", "health"))
+    completer = editor.tags.completer()
+    assert completer is not None
+    model = completer.model()
+    assert [model.index(row, 0).data() for row in range(model.rowCount())] == [
+        "health",
+        "Home",
+        "work",
+    ]
+    editor.tags.setText("work, he")
+    assert completer.splitPath(editor.tags.text()) == ["he"]
+    completer.setCompletionPrefix(editor.tags.text())
+    assert completer.completionCount() == 1  # Only "health" starts with "he".
+    assert completer.currentCompletion() == "work, health"  # The earlier tags stay.
+    editor.tags.setText("ho")
+    assert completer.pathFromIndex(model.index(1, 0)) == "Home"
+
+
+def test_parse_tags_splits_on_commas() -> None:
+    assert parse_tags("") == ()
+    assert parse_tags(" a , B,a ") == ("a", "B")
