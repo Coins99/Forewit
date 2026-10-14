@@ -274,8 +274,8 @@ async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> 
     release = await hold(window)
     assert window.cancel_button.isVisible() and not window.generate_button.isEnabled()
     chain = tab_chain(window, window.cancel_button)
-    # Sync and review, Saved mail, Data and Settings wait while busy.
-    assert chain == ["cancelButton", "sidebarNav", *FIRST_EMAIL]
+    # Sync and review, Saved mail and Data wait while busy; Settings opens beside it.
+    assert chain == ["cancelButton", "sidebarNav", "settingsButton", *FIRST_EMAIL]
     release.set()
     await finish(window)
 

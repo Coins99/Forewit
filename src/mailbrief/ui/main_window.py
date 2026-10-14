@@ -710,6 +710,9 @@ class MainWindow(QMainWindow):
         # Reads of the week shown run beside start()'s operations: they change nothing. The
         # newest read wins, and shutdown waits for them before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
+        # Settings opened while an operation runs: it only reads, so it runs beside it, and
+        # shutdown waits for it as for the calendar's reads.
+        self._settings_reads: set[asyncio.Task[None]] = set()
         self._calendar_read = 0
         self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
@@ -1002,7 +1005,7 @@ class MainWindow(QMainWindow):
         self._quit_box: QMessageBox | None = None
         sidebar.page_requested.connect(self._request_page)
         self._set_account(None)
-        sidebar.settings_requested.connect(lambda: self.start(self._open_settings))
+        sidebar.settings_requested.connect(self._request_settings)
         self.connect_button.clicked.connect(lambda: self.start(self._connect))
         self.settings_dialog.sign_in_button.clicked.connect(lambda: self.start(self._connect))
         self.disconnect_button.clicked.connect(
@@ -1074,7 +1077,6 @@ class MainWindow(QMainWindow):
         self.generate_button.setEnabled(not busy and self._ready)
         self.cancel_button.setEnabled(busy and self._cancellable)
         self.cancel_button.setVisible(busy)
-        self.settings_button.setEnabled(not busy)
         self.settings_dialog.set_busy(busy)
         self.cached_button.setEnabled(not busy and self._ready)
         self.data_button.setEnabled(not busy and self.data_dialog is not None)
@@ -2777,7 +2779,33 @@ class MainWindow(QMainWindow):
         self.cached_dialog.show_page(await self.backend.cached_messages(account_id, day, offset))
         self.status.setText("Showing saved metadata. No mailbox connection or body retrieval used.")
 
-    async def _open_settings(self) -> None:
+    def _request_settings(self) -> None:
+        """Settings opens at once, even while an operation (a sync, say) runs: opening only
+        reads, and what changes settings waits in the dialog until the operation ends."""
+        if self._closing or self.settings_dialog.isVisible():
+            return
+        if self.start(self._open_settings):
+            return
+
+        async def beside() -> None:
+            try:
+                await self._open_settings(beside=True)
+            except Exception as exc:  # Nothing else reports a read beside an operation.
+                log_failure(exc)
+                self.status.setText("Settings couldn't be opened just now. Try again.")
+
+        task = asyncio.get_running_loop().create_task(beside())
+        self._settings_reads.add(task)
+        task.add_done_callback(self._settings_reads.discard)
+
+    async def drain_settings_reads(self) -> None:
+        """Wait for Settings opening beside an operation."""
+        while pending := [task for task in self._settings_reads if not task.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async def _open_settings(self, *, beside: bool = False) -> None:
+        """Read what Settings shows, then show it. ``beside`` another operation, the status
+        line keeps that operation's words, and the dialog waits for it to finish."""
         try:
             preferences = await self.backend.get_preferences()
         except ConfigurationError as exc:
@@ -2792,7 +2820,8 @@ class MainWindow(QMainWindow):
         panel = self.settings_dialog.preferences_panel
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
-        self.status.setText("Edit connection and AI settings, and your preferences.")
+        if not beside:
+            self.status.setText("Edit connection and AI settings, and your preferences.")
         try:
             panel.set_preferences(await self.backend.get_owner_preferences())
         except PreferencesUnavailableError as exc:
@@ -2800,6 +2829,8 @@ class MainWindow(QMainWindow):
             log_failure(exc)
             panel.set_unavailable()
             self.status.setText(str(exc))
+        if beside:  # Loading cleared its status line; the operation may still be running.
+            self.settings_dialog.set_busy(self.task is not None and not self.task.done())
         self.dialog_guard.show_dialog(self.settings_dialog)
 
     def _set_dialog_zones(self) -> None:
@@ -3671,6 +3702,9 @@ class MainWindow(QMainWindow):
             for read in self._calendar_reads:
                 read.cancel()
             await self.drain_calendar_reads()
+            for read in self._settings_reads:
+                read.cancel()
+            await self.drain_settings_reads()
             await self.draft_writes.drain()
             if self.appearance_writes is not None:
                 await self.appearance_writes.drain()

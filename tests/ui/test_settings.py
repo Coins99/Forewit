@@ -221,3 +221,57 @@ async def test_account_card_gallery(
     qtbot.waitExposed(dialog)
     save_shot(dialog.grab(), f"dialog-settings-{mode}")
     dialog.reject()
+
+
+async def test_settings_open_while_mailbrief_is_busy(qtbot: QtBot) -> None:
+    from mailbrief.ui.settings_view import BUSY
+
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)
+    gate = asyncio.Event()
+
+    async def sync() -> None:
+        window.status.setText("Syncing your full Gmail Inbox…")
+        await gate.wait()
+
+    assert window.start(sync)  # Say, the long Inbox sync at launch.
+    editor = window.settings_dialog
+    assert window.settings_button.isEnabled()
+    window.settings_button.click()
+    await window.drain_settings_reads()
+    assert editor.isVisible()
+    assert window.status.text() == "Syncing your full Gmail Inbox…"  # The sync's words stay.
+    assert editor.status.text() == BUSY
+    assert not editor.fields.isEnabled() and not editor.disconnect_button.isEnabled()
+    assert editor.appearance_panel.isEnabled()  # Appearance works at once.
+    window.settings_button.click()  # Already open: nothing reads again.
+    assert not window._settings_reads
+
+    gate.set()
+    await finish(window)
+    assert editor.fields.isEnabled() and editor.disconnect_button.isEnabled()
+    assert editor.status.text() != BUSY
+    editor.reject()
+
+
+async def test_settings_opening_beside_an_operation_reports_a_failure(qtbot: QtBot) -> None:
+    class Backend(FakeBackend):
+        async def get_preferences(self) -> DesktopPreferences:
+            raise RuntimeError("private detail")
+
+    window = MainWindow(Backend())
+    qtbot.addWidget(window)
+    gate = asyncio.Event()
+
+    async def hold() -> None:
+        await gate.wait()
+
+    assert window.start(hold)
+    window.settings_button.click()
+    await window.drain_settings_reads()
+    assert not window.settings_dialog.isVisible()
+    assert window.status.text() == "Settings couldn't be opened just now. Try again."
+    gate.set()
+    await finish(window)

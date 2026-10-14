@@ -562,7 +562,10 @@ The brief list's chips keep their shorter forms (see Brief list).
   (`disconnectButton`, the window's `disconnect_button`) with an account, or Sign in with
   &Google (`settingsSignInButton`) without one (`set_signed_in`). The window keeps owning
   what they say and does what they ask; a long address wraps there, never widening the
-  dialog.
+  dialog. Settings opens even while an operation runs (`_request_settings`): opening only
+  reads, so it runs beside the operation (`_settings_reads`, drained at shutdown) without
+  touching the status line; the dialog then says `BUSY`, and its fields, Preferences,
+  Disconnect and sign-in wait until the operation ends, while Appearance works at once.
 - Cancel shows in the header only while an operation runs. `ThemeStyle`, Fusion behind a
   `QProxyStyle`, never underlines mnemonics; Alt and the letter still work.
 - Pages: `today` (the "Viewing the brief for …" banner and the retry row in `today_top`),

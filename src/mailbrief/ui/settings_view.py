@@ -28,6 +28,8 @@ from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import PreferencesPanel
 from mailbrief.ui.theme import SMALL_PX, TEXT_PX
 
+BUSY = "MailBrief is busy. Changes here wait until it finishes; Appearance works now."
+
 
 def _scrolling(page: QWidget, name: str, title: str) -> QScrollArea:
     """``page`` in a scroll area, so a tab taller than the dialog scrolls rather than
@@ -198,10 +200,14 @@ class SettingsDialog(QDialog):
         self._loaded_input = self._input()
 
     def set_busy(self, busy: bool) -> None:
+        """While MailBrief works (a sync, or a change asked for here), what changes settings
+        waits; Appearance works at once. The dialog can be open all the while."""
         self.fields.setEnabled(not busy)
         self.preferences_panel.setEnabled(not busy)
         if busy:
-            self.status.setText("Applying changes…")
+            self.status.setText(BUSY)
+        elif self.status.text() == BUSY:
+            self.status.clear()
 
     def _browse(self) -> None:
         self._picker = QFileDialog(self, "Choose Google Desktop OAuth client")
