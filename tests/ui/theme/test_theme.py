@@ -3,7 +3,6 @@
 import dataclasses
 import gc
 import re
-from collections.abc import Callable
 
 import pytest
 from PySide6.QtCore import QMetaMethod
@@ -325,12 +324,9 @@ def test_a_theme_change_never_lets_a_collection_free_a_widget_qt_is_visiting(
     apply_theme(qapp)
     threshold = gc.get_threshold()
 
-    def follower(label: QLabel) -> Callable[[], None]:
-        def follow() -> None:
-            gc.set_threshold(1)  # From here, an allocation may collect…
-            label.setText(" ".join([label.text()]))  # …and this one allocates.
-
-        return follow
+    def follow(label: QLabel) -> None:
+        gc.set_threshold(1)  # From here, an allocation may collect…
+        label.setText(" ".join([label.text()]))  # …and this one allocates.
 
     gc.set_threshold(1_000_000)  # Nothing collects the orphans before the walk.
     try:
@@ -339,7 +335,7 @@ def test_a_theme_change_never_lets_a_collection_free_a_widget_qt_is_visiting(
             orphan.cycle = orphan  # type: ignore[attr-defined]  # Only the collector frees it.
             label = QLabel("orphan", orphan)
             label.ensurePolished()  # Qt restyles, and so sends events to, polished widgets.
-            follow_theme(label, follower(label))
+            follow_theme(label, follow)
         del orphan, label
         gc.set_threshold(1_000_000)  # follow_theme ran each follower once.
         apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.PLUM)

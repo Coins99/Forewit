@@ -21,7 +21,9 @@ class DialogGuard(QWidget):
         self.setObjectName("dialogGuard")
         self.setAccessibleName("A dialog is open")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._window = window
+        # The window is the parent, never kept here: a child holding its parent would leave
+        # a dropped window (a dialog with its own guard) to Python's cycle collector, which
+        # deletes Qt widgets in no safe order (see `follow_theme`).
         self._open: list[QDialog] = []  # The newest last: it is the one brought forward.
         self.hide()
         window.installEventFilter(self)
@@ -38,7 +40,7 @@ class DialogGuard(QWidget):
         if dialog in self._open:
             self._open.remove(dialog)
         self._open.append(dialog)
-        self.setGeometry(self._window.rect())
+        self.setGeometry(self._window().rect())
         self.raise_()
         self.show()
         self.setFocus()  # So the window's shortcuts stop here if it is activated.
@@ -47,9 +49,10 @@ class DialogGuard(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
-        if watched is self._window:
+        window = self._window()
+        if watched is window:
             if kind == QEvent.Type.Resize:
-                self.setGeometry(self._window.rect())
+                self.setGeometry(window.rect())
             elif kind == QEvent.Type.WindowActivate and self._open:
                 QTimer.singleShot(0, self._front)  # After the activation settles.
         elif kind == QEvent.Type.Hide and not event.spontaneous() and watched in self._open:
@@ -59,6 +62,11 @@ class DialogGuard(QWidget):
             if not self._open:
                 self.hide()
         return False
+
+    def _window(self) -> QWidget:
+        window = self.parentWidget()
+        assert window is not None  # Made with one, and never moved.
+        return window
 
     def _front(self) -> None:
         """Bring the newest open dialog in front, where a modal one would have stayed."""

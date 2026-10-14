@@ -181,7 +181,7 @@ class BriefDetailPane(QScrollArea):
         clock = QLabel()
         follow_theme(
             clock,
-            lambda: clock.setPixmap(
+            lambda label: label.setPixmap(
                 icon_pixmap("clock", current_tokens().warning_fg, _ICON_PX, 2.0)
             ),
         )

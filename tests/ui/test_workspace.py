@@ -4,7 +4,9 @@ With MAILBRIEF_UI_SHOTS set to a folder, each render is saved there as
 ``{size}-{mode}-{dpr}x.png`` for the screenshot review loop (.claude/skills/mailbrief-ui).
 """
 
+import gc
 import os
+import weakref
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -920,3 +922,28 @@ def test_a_click_on_the_divider_above_calendar_chooses_nothing(qtbot: QtBot) -> 
     row = QPoint(calendar.center().x(), calendar.bottom() - 8)  # On the row itself.
     QTest.mouseClick(sidebar.nav.viewport(), Qt.MouseButton.LeftButton, pos=row)
     assert sidebar.current_key() == "calendar"
+
+
+@pytest.mark.parametrize("calendar", [False, True], ids=["today", "calendar"])
+def test_a_dropped_workspace_is_freed_without_the_cycle_collector(
+    qtbot: QtBot, calendar: bool
+) -> None:
+    """Nothing inside the workspace refers back up to it (theme followers are handed their
+    widget, the chrome holds it weakly), so the last reference frees it at once, and Qt
+    deletes its widgets in order. Left to Python's cycle collector, the wrappers were
+    cleared one by one, each child handed back to Python and deleted on its own while its
+    parent was half gone: a collection crashed."""
+
+    def dropped() -> weakref.ref[ThreePaneWorkspace]:
+        workspace = build_calendar(qtbot) if calendar else build(qtbot)
+        show(qtbot, workspace)
+        return weakref.ref(workspace)
+
+    gc.collect()
+    gc.disable()  # Only reference counting may free it.
+    try:
+        workspace = dropped()
+        assert workspace() is None
+    finally:
+        gc.enable()
+    gc.collect()  # Crashed here while the workspace was cyclic garbage.

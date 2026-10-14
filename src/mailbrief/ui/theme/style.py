@@ -5,7 +5,7 @@ import dataclasses
 import gc
 import string
 from collections.abc import Callable, Iterator
-from typing import Final
+from typing import Final, cast
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPalette, QPen
@@ -151,22 +151,30 @@ def current_glass() -> GlassTokens:
     return glass_for(current_mode(), _scheme)
 
 
-class _ThemeFollower(QObject):
-    def __init__(self, widget: QWidget, apply: Callable[[], None]) -> None:
+class _ThemeFollower[W: QWidget](QObject):
+    def __init__(self, widget: W, apply: Callable[[W], None]) -> None:
         super().__init__(widget)
         self._apply = apply
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         # A hidden widget gets only StyleChange: Qt resolves its palette once it shows.
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
-            self._apply()
+            self._apply(cast(W, watched))
         return False
 
 
-def follow_theme(widget: QWidget, apply: Callable[[], None]) -> None:
-    """Run ``apply`` now and again whenever a new theme changes ``widget``'s palette, for
-    colours a widget keeps rather than reads at paint time, such as a tinted icon."""
-    apply()
+def follow_theme[W: QWidget](widget: W, apply: Callable[[W], None]) -> None:
+    """Run ``apply(widget)`` now and again whenever a new theme changes ``widget``'s
+    palette, for colours a widget keeps rather than reads at paint time, such as a tinted
+    icon.
+
+    ``apply`` is handed the widget so it needn't hold one: the follower is the widget's
+    child, so an ``apply`` that refers to the widget or a widget above it (a lambda over
+    ``self``, a bound method) would make a reference cycle. A dropped window in a cycle is
+    left to Python's cycle collector, whose clearing hands each child back to Python and
+    deletes it on its own while its parent is half gone: it can crash. Pass a function of
+    the widget, or an unbound method (``ThreePaneWorkspace._request_backdrop``)."""
+    apply(widget)
     widget.installEventFilter(_ThemeFollower(widget, apply))
 
 
