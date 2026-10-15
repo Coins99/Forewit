@@ -266,8 +266,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   from those snapshots, so organization changes cannot rewrite completion history.
 - A task's priority and tags are the owner's: AI runs, proposals and adding an email never
   set them. A tag has no record of its own; tasks share it when their `name_key`
-  (`tag_key`, NFKC case folding) matches, and a saved tag takes the spelling other live
-  tasks already use. Tags change only through `ActionRepository.set_tags` (ORM rows).
+  (`tag_key`, NFKC case folding) matches, and a tag a task gains takes the spelling other
+  live tasks already use; respelling one a task has respells it on every live task, a
+  revision of each. Tags change only through `ActionRepository.set_tags` and
+  `respell_tag` (ORM rows).
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.

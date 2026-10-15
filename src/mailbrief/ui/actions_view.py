@@ -119,8 +119,8 @@ def describe_details(action: Action, facts: ActionDetails) -> str:
         details.append(target)
     if facts.due is not None:
         details.append(f"due {facts.due}")
-    if action.priority is not None:
-        details.append(f"{action.priority.value} priority")
+    if (priority := priority_text(action.priority)) is not None:
+        details.append(priority)
     if facts.steps:
         details.append(f"{facts.steps_done}/{facts.steps} steps")
     if action.tags:

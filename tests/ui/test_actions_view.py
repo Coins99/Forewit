@@ -923,7 +923,7 @@ def test_priority_and_tags_read_in_the_row_the_text_and_the_detail(panel: Action
     row = action_row(tagged, today=TODAY, zone=UTC_ZONE, now=NOW)
     assert row.meta == "Target Tue Oct 6 · High priority · 1/2 steps · Tags: <b>Home</b>, errands"
     assert describe(tagged, today=TODAY, zone=UTC_ZONE, now=NOW) == (
-        "Action 1 — Target Tue Oct 6 · high priority · 1/2 steps · tagged <b>Home</b>, errands"
+        "Action 1 — Target Tue Oct 6 · High priority · 1/2 steps · tagged <b>Home</b>, errands"
     )
     show(panel, ActionFilter.OPEN, tagged)
     label = panel.detail.findChild(QLabel, "actionPriorityTags")

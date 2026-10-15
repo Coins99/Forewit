@@ -600,7 +600,7 @@ def test_a_new_task_starts_without_priority_or_tags(editor: ActionEditor) -> Non
 
 
 def test_the_tag_completer_completes_only_the_tag_being_typed(editor: ActionEditor) -> None:
-    editor.set_tags(("work", "Home", "health"))
+    editor.set_tags(("health", "Home", "work"))  # As the service lists them.
     completer = editor.tags.completer()
     assert completer is not None
     model = completer.model()

@@ -75,9 +75,10 @@ def tag_key(name: str) -> str:
 
 def clean_tag(text: str) -> str:
     """A tag as stored: single spaces, no control or format characters, no leading ``#``."""
-    spaced = _TAG_SPACES.sub(" ", text)
-    kept = "".join(char for char in spaced if not unicodedata.category(char).startswith("C"))
-    return kept.strip().lstrip("#").strip()
+    kept = "".join(
+        char for char in text if char.isspace() or not unicodedata.category(char).startswith("C")
+    )
+    return _TAG_SPACES.sub(" ", kept).strip().lstrip("#").strip()
 
 
 def normalize_tags(values: Iterable[str]) -> tuple[str, ...]:

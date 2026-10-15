@@ -39,7 +39,6 @@ from mailbrief.domain.actions import (
     ActionPriority,
     StepEdit,
     normalize_tags,
-    tag_key,
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
@@ -382,8 +381,9 @@ class ActionEditor(QDialog):
         self._projects = projects
 
     def set_tags(self, tags: tuple[str, ...]) -> None:
-        """The tags in use, which the Tags field completes; the service keeps their spelling."""
-        self._tag_completer.set_tags(tuple(sorted(tags, key=tag_key)))
+        """The tags in use, sorted by key as the service lists them, for the Tags field to
+        complete; the service keeps their spelling."""
+        self._tag_completer.set_tags(tags)
 
     def _fill_projects(self, chosen: str | None) -> None:
         self.project.clear()

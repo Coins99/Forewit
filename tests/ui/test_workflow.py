@@ -338,8 +338,10 @@ class FakeBackend(FakeDrafts):
     async def list_areas(self) -> tuple[LifeArea, ...]:
         return self.areas
 
-    async def list_tags(self) -> tuple[str, ...]:
-        return self.tags
+    async def list_organization(
+        self,
+    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...]]:
+        return await self.list_projects(), await self.list_areas(), self.tags
 
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit

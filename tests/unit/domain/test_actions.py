@@ -401,6 +401,8 @@ def test_tags_are_cleaned_once_each_and_sorted_by_key() -> None:
         "errands",
         "Home",
     )
+    # A format character between spaces leaves one space, not two.
+    assert normalize_tags(["to \u200b do"]) == ("to do",)
     assert tag_key("Ｈｏｍｅ") == tag_key("HOME") == "home"  # Width and case fold away.
     assert tag_key("Straße") == "strasse"
     assert tag_key(tag_key("ℌome")) == tag_key("ℌome")

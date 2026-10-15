@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.actions import ActionActivityKind as Kind
 from mailbrief.domain.actions import ActionEdit, ActionFilter, ActionPriority
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.services.actions import ActionService
+from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
 from mailbrief.services.today import needs_attention
 from mailbrief.storage.backup import create_backup
@@ -100,6 +100,28 @@ async def test_a_tag_keeps_the_spelling_other_tasks_use(session: AsyncSession) -
     await service.delete(first.public_id, 1)
     respelt = await service.create(task(title="Paint", tags=("hOmE",)))
     assert respelt.tags == ("hOmE",)  # The deleted task's spelling no longer counts.
+
+
+async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSession) -> None:
+    service = ActionService(session, clock=Clock())
+    first = await service.create(task(title="Groceries", tags=("home",)))
+    second = await service.create(task(title="Fix tap", tags=("home", "diy")))
+    gone = await service.create(task(title="Old", tags=("home",)))
+    await service.delete(gone.public_id, 1)
+
+    respelt = await service.save(first.public_id, 1, task(title="Groceries", tags=("Home",)))
+    assert respelt.tags == ("Home",)
+    other = await service.get(second.public_id)
+    assert other.tags == ("diy", "Home")
+    assert other.revision == 2  # One revision of the other task, recorded as an edit.
+    assert [event.kind for event in other.activity] == [Kind.CREATED, Kind.EDITED]
+    with pytest.raises(ActionConflictError):
+        await service.save(second.public_id, 1, task(title="Fix tap", tags=("home", "diy")))
+
+    # A deleted task keeps its spelling until it returns, then reads as live tasks do.
+    restored = await service.restore(gone.public_id)
+    assert restored.tags == ("Home",)
+    assert await service.list_tags() == ("diy", "Home")
 
 
 async def test_tags_filter_and_list_only_live_tasks(session: AsyncSession) -> None:

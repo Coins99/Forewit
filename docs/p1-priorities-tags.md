@@ -31,8 +31,9 @@ the tag after the last comma from the tags already in use.
   full-width `Ｈｏｍｅ` are one tag (`tag_key`, Unicode NFKC case folding). A task keeps
   each tag once.
 - A tag keeps the spelling other live tasks already use. Typing `home` on a new task, when
-  another task has `Home`, saves `Home`. A tag can be respelled only while no other live
-  task has it. Renaming a tag across tasks comes later.
+  another task has `Home`, saves `Home`. Respelling a tag a task already has, such as
+  `home` to `Home`, respells it on every live task, as one revision of each. A deleted
+  task's tags take the live spelling when it's restored.
 - A tag is at most 40 characters and can't contain a comma. A task has at most 10 tags. A
   refused tag keeps the editor open with every field as typed. The message never repeats
   the tag.
@@ -74,7 +75,8 @@ With Gmail disconnected:
 2. Give one of them a target date. Confirm it moves above the undated tasks whatever its
    priority.
 3. Tag two tasks `home` and `Home`. Confirm both read `home` (the first spelling) and the
-   filter offers one **Tag: home**.
+   filter offers one **Tag: home**. Change it to `Home` on one task and confirm both read
+   `Home`.
 4. Choose that filter. Confirm both tasks show, and Completed shows one after completing it.
 5. Type a 41-character tag. Confirm the editor stays open with the reason and your input.
 6. Remove the tag from both tasks. Confirm the filter returns to All tasks.

@@ -91,6 +91,7 @@ class ThreadLinkRow:
     deadline_date: date | None
     deadline_at_utc: datetime | None
     deadline_timezone: str | None
+    priority: str | None
     created_at_utc: datetime
     is_source: bool
 
@@ -627,6 +628,7 @@ class ActionRepository:
                     ActionTable.deadline_date,
                     ActionTable.deadline_at_utc,
                     ActionTable.deadline_timezone,
+                    ActionTable.priority,
                     ActionTable.created_at_utc,
                     is_source,
                 )
@@ -673,6 +675,25 @@ class ActionRepository:
                 row.name = name
         for key, name in wanted.items():
             self._session.add(ActionTagTable(action_id=action_id, name=name, name_key=key))
+
+    async def respell_tag(self, key: str, name: str, *, besides: int) -> list[ActionTable]:
+        """Spell the tag ``key`` as ``name`` on every live task but ``besides``; returns the
+        tasks whose spelling changed, for the caller to record."""
+        result = await self._session.execute(
+            select(ActionTagTable, ActionTable)
+            .join(ActionTable, ActionTagTable.action_id == ActionTable.id)
+            .where(
+                ActionTagTable.name_key == key,
+                ActionTagTable.name != name,
+                ActionTagTable.action_id != besides,
+                ActionTable.deleted_at_utc.is_(None),
+            )
+        )
+        changed: list[ActionTable] = []
+        for tag, action in result.tuples():
+            tag.name = name
+            changed.append(action)
+        return changed
 
     async def tag_spellings(self, keys: Iterable[str], *, besides: int | None) -> dict[str, str]:
         """How live tasks other than ``besides`` already spell each tag key: the spelling on
