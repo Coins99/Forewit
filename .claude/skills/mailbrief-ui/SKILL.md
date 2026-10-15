@@ -76,13 +76,17 @@ shadows), in the system's light or dark mode. Its approved renders are
   `HairlineFrame`, `HairlineDivider`, `HairlineSplitter`), never with QSS borders, so they
   stay one device pixel at every scale.
 - Keep MainWindow's attribute names; tests and other modules use them.
-- Never keep a reference from a widget (or a helper QObject such as a theme follower)
-  to its parent or a widget above it: no attribute, lambda or bound method that leads
-  back up. Such a cycle leaves a dropped window to Python's cycle collector, whose
-  `tp_clear` hands each child back to Python and deletes it on its own while its parent
-  is half gone, which can crash. Find the parent with `parentWidget()`, hold it with
-  `weakref.ref` (`GlassChrome.workspace`), and give `follow_theme` a function of the
-  widget it is handed. The `..._is_freed_without_the_cycle_collector` tests check this.
+- Nothing inside a window may keep a reference back to the window: no attribute holding
+  it, and no function or bound method over it kept in an attribute (a clock, a
+  callback, a theme follower's `apply`). That makes a cycle, and a dropped window in a
+  cycle is left to Python's cycle collector, whose `tp_clear` hands each child back to
+  Python and deletes it on its own while its parent is half gone, which can crash. Find
+  the window with `parentWidget()`, hold it with `weakref.ref` (`GlassChrome.workspace`)
+  or keep its method with `weak_method` (`ui/weak.py`), and give `follow_theme` a
+  function of the widget it is handed. Signal connections are fine: Qt holds them, so a
+  `connect(lambda: self...)` makes no cycle the collector sees. Checked by
+  `test_nothing_in_the_main_window_refers_back_to_it` (`tests/ui/references.py`) and the
+  `..._is_freed_without_the_cycle_collector` tests.
 - Every new widget gets an `objectName` and an accessible name. Rows a keyboard must skip
   (section headers) have `NoItemFlags`; Return and Enter activate a row once.
 - Keep the Tab order in `MainWindow._link_tab_order` (see the spec), and never call

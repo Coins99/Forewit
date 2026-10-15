@@ -173,7 +173,7 @@ def follow_theme[W: QWidget](widget: W, apply: Callable[[W], None]) -> None:
     ``self``, a bound method) would make a reference cycle. A dropped window in a cycle is
     left to Python's cycle collector, whose clearing hands each child back to Python and
     deletes it on its own while its parent is half gone: it can crash. Pass a function of
-    the widget, or an unbound method (``ThreePaneWorkspace._request_backdrop``)."""
+    the widget, such as ``lambda workspace: workspace._request_backdrop()``."""
     apply(widget)
     widget.installEventFilter(_ThemeFollower(widget, apply))
 

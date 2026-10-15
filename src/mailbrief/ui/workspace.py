@@ -301,7 +301,7 @@ class ContentSheet(GlassChrome):
         return QRectF(self.rect()).adjusted(0, 0, -SHEET_GUTTER, 0)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.Resize and watched is self.pages:
+        if watched is self.pages and event.type() == QEvent.Type.Resize:
             self._mask_pages()
         return False
 
@@ -801,7 +801,7 @@ class ThreePaneWorkspace(QWidget):
         self.backdrop_renders.ready.connect(self._backdrop_ready)
         for chrome in (self.header, self.sidebar, self.sheet, self.footer_bar):
             chrome.workspace = self
-        follow_theme(self, ThreePaneWorkspace._request_backdrop)
+        follow_theme(self, lambda workspace: workspace._request_backdrop())
 
     def _backdrop_key(self) -> BackdropKey:
         return BackdropKey(self.width(), self.height(), current_scheme(), current_mode())

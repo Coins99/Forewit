@@ -3,6 +3,7 @@ open on macOS: the cover takes the window's input and activation brings the dial
 
 import gc
 import weakref
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -14,6 +15,7 @@ from pytestqt.qtbot import QtBot
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
+from tests.ui.references import references_to
 from tests.ui.test_calendar import NOW
 from tests.ui.test_workflow import FakeBackend, finish
 
@@ -134,6 +136,18 @@ def test_a_dropped_window_with_a_guard_is_freed_without_the_cycle_collector(
         assert window() is None
     finally:
         gc.enable()
+
+
+async def test_nothing_in_the_main_window_refers_back_to_it(qtbot: QtBot, tmp_path: Path) -> None:
+    """The window makes every dialog up front, so this covers them too. Signal connections
+    aren't checked: Qt holds them, and they make no cycle the collector sees."""
+    window = MainWindow(FakeBackend(), database_path=tmp_path / "owner.sqlite3")
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)
+    assert window.data_dialog is not None
+    assert len(window.findChildren(QDialog)) >= 10  # Not a check that missed them.
+    assert references_to(window) == []
 
 
 class _SpontaneousHide(QHideEvent):

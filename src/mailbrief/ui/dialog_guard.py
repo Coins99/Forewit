@@ -40,7 +40,9 @@ class DialogGuard(QWidget):
         if dialog in self._open:
             self._open.remove(dialog)
         self._open.append(dialog)
-        self.setGeometry(self._window().rect())
+        window = self.parentWidget()
+        if window is not None:
+            self.setGeometry(window.rect())
         self.raise_()
         self.show()
         self.setFocus()  # So the window's shortcuts stop here if it is activated.
@@ -49,11 +51,13 @@ class DialogGuard(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
-        window = self._window()
-        if watched is window:
+        if kind in (QEvent.Type.Resize, QEvent.Type.WindowActivate):
+            window = self.parentWidget()  # Only now: this filter sees every event.
+            if window is None or watched is not window:
+                return False  # A dialog's own resize or activation.
             if kind == QEvent.Type.Resize:
                 self.setGeometry(window.rect())
-            elif kind == QEvent.Type.WindowActivate and self._open:
+            elif self._open:
                 QTimer.singleShot(0, self._front)  # After the activation settles.
         elif kind == QEvent.Type.Hide and not event.spontaneous() and watched in self._open:
             # A spontaneous Hide is the window system's, such as Windows hiding a minimized
@@ -62,11 +66,6 @@ class DialogGuard(QWidget):
             if not self._open:
                 self.hide()
         return False
-
-    def _window(self) -> QWidget:
-        window = self.parentWidget()
-        assert window is not None  # Made with one, and never moved.
-        return window
 
     def _front(self) -> None:
         """Bring the newest open dialog in front, where a modal one would have stayed."""
