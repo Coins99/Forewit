@@ -246,8 +246,6 @@ def test_outline_button_takes_a_size_and_an_icon(qtbot: QtBot) -> None:
     assert (iconic.iconSize().width(), iconic.iconSize().height()) == (14, 14)
     named = outline_button("&Connect Gmail", "x", mnemonic=True, accessible_name="Connect Gmail")
     assert named.accessibleName() == "Connect Gmail"
-    for button in (sized, iconic, named):
-        qtbot.addWidget(button)
 
 
 def test_a_shortened_outline_button_can_t_carry_a_mnemonic() -> None:

@@ -167,10 +167,9 @@ def test_a_swatch_shows_the_scheme_panel_inside_its_accent(
     assert image.pixelColor(0, 0).alpha() == 0
 
 
-def test_icons_set_once_follow_a_new_scheme(qtbot: QtBot, qapp: QApplication, themed: None) -> None:
+def test_icons_set_once_follow_a_new_scheme(qapp: QApplication, themed: None) -> None:
     apply_theme(qapp)
     button = outline_button("&Go", "goButton", mnemonic=True, icon_name="refresh")
-    qtbot.addWidget(button)
     before = button.icon().pixmap(16).toImage()
     apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.ROSE)
     after: QImage = button.icon().pixmap(16).toImage()
@@ -342,11 +341,8 @@ def test_the_panel_offers_the_modes_and_emits_only_on_a_choice(qtbot: QtBot) -> 
     assert blocker.args == [ModeChoice.DARK]
 
 
-def test_a_swatch_follows_the_mode_in_effect(
-    qtbot: QtBot, qapp: QApplication, themed: None
-) -> None:
+def test_a_swatch_follows_the_mode_in_effect(qapp: QApplication, themed: None) -> None:
     panel = AppearancePanel()
-    qtbot.addWidget(panel)
     apply_theme(qapp, ThemeMode.LIGHT)
     centre = SWATCH_PX  # At 2x.
     size = QSize(SWATCH_PX, SWATCH_PX)
@@ -355,6 +351,7 @@ def test_a_swatch_follows_the_mode_in_effect(
     apply_theme(qapp, ThemeMode.DARK)
     dark = panel.buttons[ColorScheme.STUDIO].icon().pixmap(size, 2.0).toImage()
     assert dark.pixelColor(centre, centre).name() == tokens_for(ThemeMode.DARK).panel
+    panel.deleteLater()
 
 
 async def test_choosing_a_mode_applies_it_keeps_the_scheme_and_saves_it(

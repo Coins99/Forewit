@@ -30,9 +30,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-    # Twice the longest measured job, rounded up to 5 minutes, and at least 20. On 77e9149
-    # (PR #82), the Windows job took 15.0 minutes (Test 491 s; the single executable's build
-    # and frozen-lifecycle checks 229 s) and the macOS job 7.5 minutes (Test 137 s, Cocoa 208 s).
+    # Twice the longest measured job, rounded up to 5 minutes, and at least 20. On PR #82
+    # (77e9149 and 5dfe0e3), Windows jobs took 15.0 and 11.4 minutes (Test 491 s and 298 s) and
+    # macOS jobs 7.5 and 5.5 minutes (Test 137 s and 102 s, Cocoa 208 s and 141 s).
     # Allow both Windows package builds and the frozen-process scenarios.
     timeout-minutes: 30
     env:
