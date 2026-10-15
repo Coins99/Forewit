@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
+from itertools import batched
 from typing import cast
 
 from pydantic import HttpUrl
@@ -18,7 +19,7 @@ from mailbrief.domain.analysis import (
     MessageAnalysis,
 )
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestCoverage,
@@ -40,7 +41,7 @@ from mailbrief.domain.messages import (
     own_addresses,
 )
 from mailbrief.storage.actions import suggestion_from_row, suggestion_views
-from mailbrief.storage.database import MAX_SQLITE_BATCH_SIZE
+from mailbrief.storage.database import MAX_SQLITE_BATCH_SIZE, sorted_batches
 from mailbrief.storage.tables import (
     AccountTable,
     ActionSourceTable,
@@ -193,8 +194,8 @@ class MessageRepository:
         unique_messages = list(deduped.values())
 
         saved_rows: list[MessageTable] = []
-        for i in range(0, len(unique_messages), MAX_SQLITE_BATCH_SIZE):
-            batch = unique_messages[i : i + MAX_SQLITE_BATCH_SIZE]
+        synced = utc_now()
+        for batch in batched(unique_messages, MAX_SQLITE_BATCH_SIZE, strict=False):
             rows = [
                 {
                     "account_id": account_id,
@@ -223,7 +224,7 @@ class MessageRepository:
                     "body_preview": m.body_preview,
                     "web_link": str(m.web_link),
                     "rank_reasons_json": [],
-                    "synced_at_utc": datetime.now(UTC),
+                    "synced_at_utc": synced,
                 }
                 for m in batch
             ]
@@ -260,56 +261,26 @@ class MessageRepository:
 
         return saved_rows
 
-    async def update_ranking(
-        self,
-        message_id: int,
-        rank_score: int,
-        rank_reasons: Sequence[str | RankReason],
-    ) -> None:
-        """Persist computed rank score and readable reasons for a message."""
-        reasons_list = [r.value if isinstance(r, RankReason) else str(r) for r in rank_reasons]
-        stmt = (
-            update(MessageTable)
-            .where(MessageTable.id == message_id)
-            .values(rank_score=rank_score, rank_reasons_json=reasons_list)
-        )
-        await self._session.execute(stmt)
-
-    async def update_rankings(
-        self,
-        rankings: Sequence[tuple[int, int, Sequence[str | RankReason]]],
-    ) -> None:
-        """Persist computed rank scores and readable reasons for multiple messages by ID."""
-        if not rankings:
-            return
-        for message_id, rank_score, rank_reasons in rankings:
-            reasons_list = [r.value if isinstance(r, RankReason) else str(r) for r in rank_reasons]
-            stmt = (
-                update(MessageTable)
-                .where(MessageTable.id == message_id)
-                .values(rank_score=rank_score, rank_reasons_json=reasons_list)
-            )
-            await self._session.execute(stmt)
-
-    async def update_rankings_by_provider_id(
+    async def save_rankings(
         self,
         account_id: int,
-        rankings: Sequence[tuple[str, int, Sequence[str | RankReason]]],
+        rankings: Iterable[tuple[str, int, Sequence[str | RankReason]]],
     ) -> None:
-        """Persist rank scores and reasons for multiple messages by provider_message_id."""
-        if not rankings:
-            return
-        for provider_msg_id, rank_score, rank_reasons in rankings:
-            reasons_list = [r.value if isinstance(r, RankReason) else str(r) for r in rank_reasons]
-            stmt = (
-                update(MessageTable)
-                .where(
-                    MessageTable.account_id == account_id,
-                    MessageTable.provider_message_id == provider_msg_id,
-                )
-                .values(rank_score=rank_score, rank_reasons_json=reasons_list)
-            )
-            await self._session.execute(stmt)
+        """Store each message's score and readable reasons, by provider message ID; IDs no
+        longer cached are skipped.
+
+        Rows change as ORM objects, so a session that has them loaded sees the change, and
+        the flush writes them together rather than one statement per message.
+        """
+        scores = {message_id: (score, reasons) for message_id, score, reasons in rankings}
+        for row in await self.get_by_provider_ids(account_id, scores):
+            score, reasons = scores[row.provider_message_id]
+            row.rank_score = score
+            row.rank_reasons_json = [
+                reason.value if isinstance(reason, RankReason) else str(reason)
+                for reason in reasons
+            ]
+        await self._session.flush()
 
     async def get_messages_in_range(
         self,
@@ -416,16 +387,10 @@ class MessageRepository:
             MessageTable.received_at_utc < normalize_utc(end_utc),
         )
         await self._session.execute(update(MessageTable).where(*window).values(is_in_inbox=False))
-        identifiers = sorted(seen_ids)
-        for offset in range(0, len(identifiers), MAX_SQLITE_BATCH_SIZE):
+        for chunk in sorted_batches(seen_ids):
             await self._session.execute(
                 update(MessageTable)
-                .where(
-                    *window,
-                    MessageTable.provider_message_id.in_(
-                        identifiers[offset : offset + MAX_SQLITE_BATCH_SIZE]
-                    ),
-                )
+                .where(*window, MessageTable.provider_message_id.in_(chunk))
                 .values(is_in_inbox=True)
             )
 
@@ -435,15 +400,12 @@ class MessageRepository:
         """The cached messages among these IDs, in any order; IDs no longer cached are
         silently absent."""
         found: list[MessageTable] = []
-        identifiers = sorted(set(provider_message_ids))
-        for offset in range(0, len(identifiers), MAX_SQLITE_BATCH_SIZE):
+        for chunk in sorted_batches(provider_message_ids):
             result = await self._session.scalars(
                 select(MessageTable)
                 .where(
                     MessageTable.account_id == account_id,
-                    MessageTable.provider_message_id.in_(
-                        identifiers[offset : offset + MAX_SQLITE_BATCH_SIZE]
-                    ),
+                    MessageTable.provider_message_id.in_(chunk),
                 )
                 .execution_options(populate_existing=True)
             )
@@ -455,14 +417,11 @@ class MessageRepository:
     ) -> frozenset[str]:
         """The IDs among these that the owner declined in a review (ADR 0017)."""
         found: set[str] = set()
-        identifiers = sorted(set(provider_message_ids))
-        for offset in range(0, len(identifiers), MAX_SQLITE_BATCH_SIZE):
+        for chunk in sorted_batches(provider_message_ids):
             result = await self._session.scalars(
                 select(MessageTable.provider_message_id).where(
                     MessageTable.account_id == account_id,
-                    MessageTable.provider_message_id.in_(
-                        identifiers[offset : offset + MAX_SQLITE_BATCH_SIZE]
-                    ),
+                    MessageTable.provider_message_id.in_(chunk),
                     MessageTable.review_declined_at_utc.is_not(None),
                 )
             )
@@ -498,30 +457,18 @@ class MessageRepository:
     ) -> int:
         """Set or clear one of the two review marks; setting one clears the other."""
         changed = 0
-        identifiers = sorted(set(provider_message_ids))
         stamp = None if now_utc is None else normalize_utc(now_utc)
-        for offset in range(0, len(identifiers), MAX_SQLITE_BATCH_SIZE):
-            result = await self._session.scalars(
-                select(MessageTable)
-                .where(
-                    MessageTable.account_id == account_id,
-                    MessageTable.provider_message_id.in_(
-                        identifiers[offset : offset + MAX_SQLITE_BATCH_SIZE]
-                    ),
-                )
-                .execution_options(populate_existing=True)
+        for row in await self.get_by_provider_ids(account_id, provider_message_ids):
+            was = (row.review_declined_at_utc, row.review_wanted_at_utc)
+            current, other = was if declined else was[::-1]
+            if (current is None) != (stamp is None):
+                current = stamp  # A mark already set keeps its first time.
+            if stamp is not None:
+                other = None
+            row.review_declined_at_utc, row.review_wanted_at_utc = (
+                (current, other) if declined else (other, current)
             )
-            for row in result:
-                was = (row.review_declined_at_utc, row.review_wanted_at_utc)
-                current, other = was if declined else was[::-1]
-                if (current is None) != (stamp is None):
-                    current = stamp  # A mark already set keeps its first time.
-                if stamp is not None:
-                    other = None
-                row.review_declined_at_utc, row.review_wanted_at_utc = (
-                    (current, other) if declined else (other, current)
-                )
-                changed += (row.review_declined_at_utc, row.review_wanted_at_utc) != was
+            changed += (row.review_declined_at_utc, row.review_wanted_at_utc) != was
         await self._session.flush()
         return changed
 

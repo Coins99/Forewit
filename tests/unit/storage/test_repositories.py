@@ -207,19 +207,22 @@ async def test_message_repository_upsert_and_ranking(database: Database) -> None
         assert domain_msg.provider_message_id == "msg-001"
         assert domain_msg.subject == "Important Announcement (Updated)"
 
-    # Batch update ranking score and reasons
+    # Rankings are saved by provider message ID: a row the session has loaded shows them,
+    # and an ID no longer cached is skipped.
     async with database.transaction() as session:
         repo = MessageRepository(session)
-        msg1_row = await repo.get_by_provider_message_id(account_id, "msg-001")
-        msg2_row = await repo.get_by_provider_message_id(account_id, "msg-002")
-        assert msg1_row is not None and msg2_row is not None
-        await repo.update_rankings(
+        loaded = await repo.get_by_provider_message_id(account_id, "msg-001")
+        assert loaded is not None
+        await repo.save_rankings(
+            account_id,
             [
-                (msg1_row.id, 50, [RankReason.HIGH_IMPORTANCE]),
-                (msg2_row.id, -5, [RankReason.LOW_IMPORTANCE]),
-            ]
+                ("msg-001", 50, [RankReason.HIGH_IMPORTANCE]),
+                ("msg-002", -5, [RankReason.LOW_IMPORTANCE, "custom"]),
+                ("no-longer-cached", 99, []),
+            ],
         )
-        await repo.update_rankings([])  # Empty batch handled gracefully
+        await repo.save_rankings(account_id, [])  # Nothing to save.
+        assert loaded.rank_score == 50 and loaded.rank_reasons_json == ["high_importance"]
 
     async with database.session() as session:
         repo = MessageRepository(session)
@@ -227,25 +230,18 @@ async def test_message_repository_upsert_and_ranking(database: Database) -> None
         f2 = await repo.get_by_provider_message_id(account_id, "msg-002")
         assert f1 is not None and f1.rank_score == 50
         assert f2 is not None and f2.rank_score == -5
+        assert f2.rank_reasons_json == ["low_importance", "custom"]
+        assert await repo.get_by_provider_message_id(account_id, "no-longer-cached") is None
 
-    # Batch update by provider_message_id
+    # Saving again replaces the score and reasons.
     async with database.transaction() as session:
         repo = MessageRepository(session)
-        await repo.update_rankings_by_provider_id(
-            account_id,
-            [
-                ("msg-001", 60, [RankReason.VERY_RECENT]),
-                ("msg-002", 15, [RankReason.RECENT]),
-            ],
-        )
-        await repo.update_rankings_by_provider_id(account_id, [])
+        await repo.save_rankings(account_id, [("msg-001", 60, [RankReason.VERY_RECENT])])
 
     async with database.session() as session:
         repo = MessageRepository(session)
         f1 = await repo.get_by_provider_message_id(account_id, "msg-001")
-        f2 = await repo.get_by_provider_message_id(account_id, "msg-002")
         assert f1 is not None and f1.rank_score == 60 and f1.rank_reasons_json == ["very_recent"]
-        assert f2 is not None and f2.rank_score == 15 and f2.rank_reasons_json == ["recent"]
 
 
 @pytest.mark.asyncio
