@@ -218,6 +218,7 @@ from mailbrief.ui.theme import (
     system_mode,
 )
 from mailbrief.ui.today_view import DayPanel
+from mailbrief.ui.weak import weak_method
 from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
 
@@ -664,7 +665,11 @@ class MainWindow(QMainWindow):
             None
             if database_path is None
             else DataDialog(
-                self, database_path, self._run_data, self._request_restore, self._refresh_data
+                self,
+                database_path,
+                weak_method(self._run_data),
+                weak_method(self._request_restore),
+                weak_method(self._refresh_data),
             )
         )
         self.task: asyncio.Task[None] | None = None
@@ -700,7 +705,7 @@ class MainWindow(QMainWindow):
         self.now: Callable[[], datetime] = lambda: datetime.now(UTC)
         self.zone = resolve_timezone(None)
         if self.data_dialog is not None:
-            self.data_dialog.today = self._local_today
+            self.data_dialog.today = weak_method(self._local_today)
         self._projects: tuple[Project, ...] = ()
         self._areas: tuple[LifeArea, ...] = ()
         self.projects_dialog = ProjectsDialog(self)
@@ -754,7 +759,7 @@ class MainWindow(QMainWindow):
         self.auto_send_dialog = AutoSendDialog(self.settings_dialog)
         self.auto_send_dialog.save_requested.connect(self._request_set_auto_send)
         # When an automatic run is due, by the owner's schedule; it stops with the window.
-        self.scheduler = RefreshScheduler(self, clock=lambda: self.now())
+        self.scheduler = RefreshScheduler(self, clock=weak_method(self._now))
         self.scheduler.due.connect(self._refresh_due)
         # Once a minute, so a new day dates the check time and recounts the deadline chips.
         self.day_timer = QTimer(self)
@@ -962,7 +967,7 @@ class MainWindow(QMainWindow):
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
         self.calendar_panel = CalendarPanel()
-        self.inbox_panel = InboxPanel(clock=lambda: self.now())
+        self.inbox_panel = InboxPanel(clock=weak_method(self._now))
         self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
         self.inbox_panel.load_more_requested.connect(lambda: self.start(self._load_more_inbox))
         self.inbox_panel.mail_search_requested.connect(
@@ -980,7 +985,7 @@ class MainWindow(QMainWindow):
         )
         workspace.add_page("inbox", self.inbox_panel)
         self.calendar_panel.set_view(self.appearance.calendar_view)  # As the owner last chose.
-        self.calendar_panel.set_clock(lambda: self.now())
+        self.calendar_panel.set_clock(weak_method(self._now))
         self.calendar_panel.month_requested.connect(self._request_calendar_month)
         self.calendar_panel.view_requested.connect(self._request_calendar_view)
         self.calendar_panel.event_requested.connect(self._request_event)
@@ -1184,6 +1189,10 @@ class MainWindow(QMainWindow):
     def _open_source(self, url: str) -> None:
         if is_gmail_link(url):
             QDesktopServices.openUrl(QUrl(url))
+
+    def _now(self) -> datetime:
+        """``now`` as it is at the call (tests replace it), for the panels' clocks."""
+        return self.now()
 
     def _local_today(self) -> date:
         return self.now().astimezone(self.zone).date()

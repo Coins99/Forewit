@@ -1,6 +1,7 @@
 """The three-pane workspace: header, sidebar, pages, brief list and detail pane."""
 
 import math
+import weakref
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Final
@@ -229,7 +230,7 @@ class HeaderAlert(QWidget):
         self.icon.setObjectName("headerAlertIcon")
         follow_theme(
             self.icon,
-            lambda: self.icon.setPixmap(
+            lambda label: label.setPixmap(
                 icon_pixmap("alert-circle", current_tokens().warning_fg, _ALERT_ICON_PX, 2.0)
             ),
         )
@@ -256,7 +257,17 @@ class GlassChrome(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.workspace: ThreePaneWorkspace | None = None
+        self._workspace: weakref.ref[ThreePaneWorkspace] | None = None
+
+    @property
+    def workspace(self) -> "ThreePaneWorkspace | None":
+        return None if self._workspace is None else self._workspace()
+
+    @workspace.setter
+    def workspace(self, workspace: "ThreePaneWorkspace | None") -> None:
+        # Held weakly: the chrome is the workspace's child, and a reference back up would
+        # leave a dropped workspace to the cycle collector (see `follow_theme`).
+        self._workspace = None if workspace is None else weakref.ref(workspace)
 
     @profiled()  # HeaderBar and SidebarNav report apart.
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -350,7 +361,7 @@ class HeaderBar(GlassChrome):
         self.refresh_icon = QLabel()
         follow_theme(
             self.refresh_icon,
-            lambda: self.refresh_icon.setPixmap(
+            lambda label: label.setPixmap(
                 icon_pixmap("refresh", current_tokens().text_secondary, _ICON_PX, 2.0)
             ),
         )
@@ -790,7 +801,7 @@ class ThreePaneWorkspace(QWidget):
         self.backdrop_renders.ready.connect(self._backdrop_ready)
         for chrome in (self.header, self.sidebar, self.sheet, self.footer_bar):
             chrome.workspace = self
-        follow_theme(self, self._request_backdrop)
+        follow_theme(self, lambda workspace: workspace._request_backdrop())
 
     def _backdrop_key(self) -> BackdropKey:
         return BackdropKey(self.width(), self.height(), current_scheme(), current_mode())

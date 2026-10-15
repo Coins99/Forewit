@@ -224,7 +224,9 @@ class InboxReader(QWidget):
         flag.setObjectName("inboxWantedFlag")
         follow_theme(
             flag,
-            lambda: flag.setPixmap(icon_pixmap("flag", current_tokens().warning_fg, _FLAG_PX, 2.0)),
+            lambda label: label.setPixmap(
+                icon_pixmap("flag", current_tokens().warning_fg, _FLAG_PX, 2.0)
+            ),
         )
         row.addWidget(flag, 0, Qt.AlignmentFlag.AlignTop)
         text = QVBoxLayout()

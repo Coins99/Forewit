@@ -21,7 +21,9 @@ class DialogGuard(QWidget):
         self.setObjectName("dialogGuard")
         self.setAccessibleName("A dialog is open")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._window = window
+        # The window is the parent, never kept here: a child holding its parent would leave
+        # a dropped window (a dialog with its own guard) to Python's cycle collector, which
+        # deletes Qt widgets in no safe order (see `follow_theme`).
         self._open: list[QDialog] = []  # The newest last: it is the one brought forward.
         self.hide()
         window.installEventFilter(self)
@@ -38,7 +40,9 @@ class DialogGuard(QWidget):
         if dialog in self._open:
             self._open.remove(dialog)
         self._open.append(dialog)
-        self.setGeometry(self._window.rect())
+        window = self.parentWidget()
+        if window is not None:
+            self.setGeometry(window.rect())
         self.raise_()
         self.show()
         self.setFocus()  # So the window's shortcuts stop here if it is activated.
@@ -47,10 +51,13 @@ class DialogGuard(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
-        if watched is self._window:
+        if kind in (QEvent.Type.Resize, QEvent.Type.WindowActivate):
+            window = self.parentWidget()  # Only now: this filter sees every event.
+            if window is None or watched is not window:
+                return False  # A dialog's own resize or activation.
             if kind == QEvent.Type.Resize:
-                self.setGeometry(self._window.rect())
-            elif kind == QEvent.Type.WindowActivate and self._open:
+                self.setGeometry(window.rect())
+            elif self._open:
                 QTimer.singleShot(0, self._front)  # After the activation settles.
         elif kind == QEvent.Type.Hide and not event.spontaneous() and watched in self._open:
             # A spontaneous Hide is the window system's, such as Windows hiding a minimized

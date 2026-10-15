@@ -175,7 +175,7 @@ class WantedCount(QWidget):
         self.flag.setObjectName("inboxWantedStatusFlag")
         follow_theme(
             self.flag,
-            lambda: self.flag.setPixmap(
+            lambda label: label.setPixmap(
                 icon_pixmap("flag", current_tokens().warning_fg, _FLAG_PX, 2.0)
             ),
         )
@@ -219,7 +219,8 @@ class EmptyInbox(QWidget):
         layout.addWidget(self.message)
         layout.addStretch(2)
 
-    def _paint_glyph(self) -> None:
+    @staticmethod
+    def _paint_glyph(glyph: QLabel) -> None:
         ratio = 2.0
         source = icon_pixmap("mail", current_tokens().text_muted, _EMPTY_ICON_PX, ratio)
         faint = QPixmap(source.size())
@@ -229,7 +230,7 @@ class EmptyInbox(QWidget):
         painter.setOpacity(_EMPTY_ICON_OPACITY)
         painter.drawPixmap(0, 0, source)
         painter.end()
-        self.glyph.setPixmap(faint)
+        glyph.setPixmap(faint)
 
     def set_message(self, text: str) -> None:
         self.message.setText(text)

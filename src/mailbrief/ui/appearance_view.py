@@ -102,7 +102,7 @@ class AppearancePanel(QWidget):
         self.buttons = self._choices("Colour", "scheme", SCHEME_NAMES)
         for scheme, button in self.buttons.items():
             # Each swatch shows its scheme in the mode in effect.
-            follow_theme(button, partial(self._paint_swatch, button, scheme))
+            follow_theme(button, partial(self._paint_swatch, scheme=scheme))
             button.setIconSize(QSize(SWATCH_PX, SWATCH_PX))
         self.mode_buttons = self._choices("Mode", "mode", MODE_NAMES, qualify=True)
         # Both sets offer "Follow the system", so screen readers hear the heading too.

@@ -143,11 +143,11 @@ def outline_button(
     if px is not None:
         button.setFont(ui_font(px, medium=glass))
     if icon_name is not None:
-        glyph = icon_name  # Narrowed for the lambda.
+        glyph = icon_name  # Narrowed for the function.
 
-        def tint() -> None:
+        def tint(target: QPushButton) -> None:
             color = current_glass().primary_text if primary else current_tokens().text
-            button.setIcon(icon(glyph, color, OUTLINE_ICON_PX))
+            target.setIcon(icon(glyph, color, OUTLINE_ICON_PX))
 
         follow_theme(button, tint)
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))

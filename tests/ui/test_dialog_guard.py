@@ -1,6 +1,10 @@
 """Dialogs keep the window to themselves without a modal session, so quitting works with one
 open on macOS: the cover takes the window's input and activation brings the dialog back."""
 
+import gc
+import weakref
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QHideEvent
@@ -11,6 +15,7 @@ from pytestqt.qtbot import QtBot
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
+from tests.ui.references import references_to
 from tests.ui.test_calendar import NOW
 from tests.ui.test_workflow import FakeBackend, finish
 
@@ -108,6 +113,41 @@ def test_the_cover_stays_until_the_last_dialog_closes(qtbot: QtBot) -> None:
     assert guard.isVisibleTo(window)
     first.done(QDialog.DialogCode.Accepted)
     assert not guard.isVisibleTo(window)
+
+
+def test_a_dropped_window_with_a_guard_is_freed_without_the_cycle_collector(
+    qtbot: QtBot,
+) -> None:
+    """The guard finds its window as its parent rather than keeping it, so a dropped window
+    (a dialog with its own guard) is freed at once, in Qt's order, never by the cycle
+    collector, which deletes Qt widgets in no safe order."""
+
+    def dropped() -> weakref.ref[QWidget]:
+        window = QWidget()
+        qtbot.addWidget(window)
+        guard = DialogGuard(window)
+        guard.show_dialog(QDialog(window))
+        return weakref.ref(window)
+
+    gc.collect()
+    gc.disable()  # Only reference counting may free it.
+    try:
+        window = dropped()
+        assert window() is None
+    finally:
+        gc.enable()
+
+
+async def test_nothing_in_the_main_window_refers_back_to_it(qtbot: QtBot, tmp_path: Path) -> None:
+    """The window makes every dialog up front, so this covers them too. Signal connections
+    aren't checked: Qt holds them, and they make no cycle the collector sees."""
+    window = MainWindow(FakeBackend(), database_path=tmp_path / "owner.sqlite3")
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)
+    assert window.data_dialog is not None
+    assert len(window.findChildren(QDialog)) >= 10  # Not a check that missed them.
+    assert references_to(window) == []
 
 
 class _SpontaneousHide(QHideEvent):
