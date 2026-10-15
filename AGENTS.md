@@ -117,7 +117,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 
 ## Layout (ports and adapters)
 
-- `src/mailbrief/domain/`: frozen Pydantic models; no I/O.
+- `src/mailbrief/domain/`: frozen Pydantic models; no I/O. `domain/common.py` has the
+  one `utc_now()` clock and `new_public_id()`; `DeadlineFields` (`domain/analysis.py`) is
+  the deadline every suggestion, analysis, action and proposal carries.
 - `src/mailbrief/ports/`: `EmailProvider` / `AIProvider` / `DraftingProvider` protocols
   (`drafting.py`), `ThreadReader` (`threads.py`) and provider-neutral errors.
 - `src/mailbrief/providers/gmail/`: active adapter. `providers/microsoft/`: dormant adapter.
@@ -125,7 +127,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   list and event reads, behind `ports/calendar.py`. `providers/google/`: what Gmail and
   Google Calendar share: the bounded GET with retries (`requests.py`), the token endpoint
   (`tokens.py`) and the vault-held refresh credential (`credentials.py`); each adapter
-  passes its own fixed messages.
+  passes its own fixed messages, and `error_reasons()` reads Google's error reasons.
+  `GmailBodies` (`gmail/factory.py`) opens Gmail for one body download.
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
@@ -133,6 +136,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
   `projects` for owner projects and life areas, and `calendar_planning` for AI-proposed
   calendar changes. `calendar.py` is day boundaries and time zones, not the calendar feature.
+  `writes.py`: `commit_once()`, the one write every revisioned service uses (clock read
+  once, one commit, rollback on any failure). `compose_brief()` (`brief.py`) builds the
+  brief as the desktop and the CLI both run it.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,
@@ -162,11 +168,16 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `actions.py` for suggestions, decisions and accepted actions, `proposals.py` for
   follow-up proposals, `drafts.py` for drafts, their versions and source snapshots, and
   `preferences.py` for the preferences row. Alembic revisions live in
-  `migrations/versions/`.
+  `migrations/versions/`; `migrated_database()` (`migrate.py`) opens a database brought up
+  to date, and Alembic is imported only where a migration runs. `DeadlineColumns`
+  (`tables.py`) holds the deadline columns, with `deadline_values()` and
+  `deadline_columns()` to copy them to and from `DeadlineFields`.
 - `src/mailbrief/text/`: provider-neutral text helpers for untrusted email (HTML to text,
   quote trimming, length limits, and `matching.py` for checking quotes against the email).
 - `src/mailbrief/infra/`: HTTP retry classification, `vault.py`, the explicit OS
-  credential vault, and `files.py`, atomic writes for exports the owner chooses.
+  credential vault, `files.py`, atomic writes for exports the owner chooses, and
+  `tasks.py`, which runs a group of tasks and never leaves one behind (`running()`,
+  `gather_or_cancel()`).
 - `src/mailbrief/diagnostics/`: developer CLIs. `src/mailbrief/ui/`: PySide6 workflow,
   desktop service composition, saved-brief display, the Actions page (`actions_view.py`:
   rows and lists; `action_detail.py`: the selected action; `action_text.py`: the details
@@ -179,7 +190,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
-  Return or Enter activates a row once on every platform; `dialog_guard.py` shows dialogs
+  Return or Enter activates a row once on every platform; `HeaderRowsModel`
+  (`brief_list.py`) is the model of a painted list with section headers, which the keyboard
+  skips; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
 - `ui/glass/`: Liquid Glass: `backdrop.py` paints the backdrop
   from the glass tokens at a quarter of the window's size and blurs it, off the Qt thread
@@ -453,8 +466,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 ## Code and tests
 
 - Strict mypy and Ruff (100-character lines). Annotate every function.
-- Tests mirror `src/` under `tests/`. Use `tests/factories.py`, `respx` for HTTP and
-  injected sleeps/clocks. Tests never touch external networks (localhost is fine), real
+- Tests mirror `src/` under `tests/`. Use `tests/factories.py` (including `Clock` and
+  `Ids`), the `database` and `session` fixtures in `tests/conftest.py`, `respx` for HTTP
+  and injected sleeps/clocks. Tests never touch external networks (localhost is fine), real
   credentials, real mailboxes or paid AI.
 - Coverage: at least 80% overall and 90% for every module in src/mailbrief/services/.
   `scripts/check_coverage.py` finds the modules itself and enforces the combined
