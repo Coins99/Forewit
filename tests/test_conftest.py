@@ -1,4 +1,5 @@
-"""The suite-wide fixtures: no network beyond loopback, and no SQLite disk flushes."""
+"""The suite-wide fixtures: no network beyond loopback, no SQLite disk flushes, and no window
+left alive after a test."""
 
 import socket
 import sqlite3
@@ -7,12 +8,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import shiboken6
+from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
 from mailbrief.storage import database
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
-from tests.conftest import NETWORK_BLOCKED, REAL_CONNECT
+from tests.conftest import NETWORK_BLOCKED, REAL_CONNECT, delete_windows
 
 UNIX_FAMILY = getattr(socket, "AF_UNIX", None)  # Absent on Windows, where typeshed omits it.
 
@@ -109,3 +112,21 @@ def test_a_file_that_is_not_a_database_fails_where_the_code_reads_it(tmp_path: P
         pytest.raises(sqlite3.DatabaseError, match="not a database"),
     ):
         connection.execute("SELECT name FROM sqlite_master")
+
+
+def test_every_test_deletes_its_windows(request: pytest.FixtureRequest) -> None:
+    assert "free_widgets" in request.fixturenames
+
+
+def test_windows_left_behind_are_deleted_with_their_widgets(qapp: QApplication) -> None:
+    shown = QWidget()
+    shown.show()
+    inside = QWidget(shown)
+    hidden = QDialog()
+    owned = QDialog(shown)  # A window of its own, deleted with its parent.
+    awaiting = QWidget()
+    awaiting.deleteLater()  # As pytest-qt leaves the widgets it closes.
+    delete_windows()
+    assert qapp.topLevelWidgets() == []
+    for widget in (shown, inside, hidden, owned, awaiting):
+        assert not shiboken6.isValid(widget)
