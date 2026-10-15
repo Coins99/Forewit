@@ -4,7 +4,6 @@ Nothing here reads or sends email: suggestions come from stored analyses. Errors
 static messages, and nothing logs action text.
 """
 
-import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -32,8 +31,9 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     deadline_due_at,
 )
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import (
@@ -85,14 +85,6 @@ class AcceptedInto:
     source_added: bool
     changed: bool
     previous: DecisionSnapshot
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def _new_public_id() -> str:
-    return str(uuid.uuid4())
 
 
 def urgency(
@@ -166,8 +158,8 @@ class ActionService:
         self,
         session: AsyncSession,
         *,
-        clock: Callable[[], datetime] = _utc_now,
-        id_factory: Callable[[], str] = _new_public_id,
+        clock: Callable[[], datetime] = utc_now,
+        id_factory: Callable[[], str] = new_public_id,
     ) -> None:
         self._session = session
         self._clock = clock
@@ -175,14 +167,7 @@ class ActionService:
         self._repository = ActionRepository(session)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        now = normalize_utc(self._clock())
-        try:
-            result = await operation(now)
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await commit_once(self._session, self._clock, operation)
 
     async def _suggestion(
         self, suggestion_id: int

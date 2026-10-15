@@ -6,16 +6,15 @@ reads the clock once, commits once and rolls back on failure. Errors carry stati
 and nothing logs event text.
 """
 
-import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.events import (
     ActionMarker,
     AppliedBatch,
@@ -29,6 +28,7 @@ from mailbrief.domain.events import (
 )
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.services.calendar import day_window
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.events import EventRepository, apply_edit, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import ActionTable, CalendarEventTable
@@ -47,14 +47,6 @@ class EventNotFoundError(LookupError):
 
 class EventConflictError(ValueError):
     """The event changed since it was read."""
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def _new_public_id() -> str:
-    return str(uuid.uuid4())
 
 
 def _touch(row: CalendarEventTable, now: datetime) -> None:
@@ -119,8 +111,8 @@ class EventService:
         self,
         session: AsyncSession,
         *,
-        clock: Callable[[], datetime] = _utc_now,
-        id_factory: Callable[[], str] = _new_public_id,
+        clock: Callable[[], datetime] = utc_now,
+        id_factory: Callable[[], str] = new_public_id,
     ) -> None:
         self._session = session
         self._clock = clock
@@ -128,14 +120,7 @@ class EventService:
         self._repository = EventRepository(session)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        now = normalize_utc(self._clock())
-        try:
-            result = await operation(now)
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await commit_once(self._session, self._clock, operation)
 
     async def _live(self, public_id: str, expected_revision: int | None) -> CalendarEventTable:
         row = await self._repository.get(public_id)

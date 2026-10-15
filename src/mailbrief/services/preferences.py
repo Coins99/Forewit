@@ -9,17 +9,18 @@ Sender rules are the owner's own text; only their count is ever logged.
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.config import Settings
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.preferences import AI_LIMIT_FIELDS, OwnerPreferences, PreferencesEdit
 from mailbrief.errors import ConfigurationError
 from mailbrief.services.calendar import resolve_timezone
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.preferences import (
     PREFERENCES_ROW_ID,
     PreferencesRepository,
@@ -52,14 +53,10 @@ class PreferencesUnavailableError(ConfigurationError):
         super().__init__(_UNAVAILABLE)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 class PreferencesService:
     """Every mutating method reads the clock once, commits once and rolls back on failure."""
 
-    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = _utc_now) -> None:
+    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = utc_now) -> None:
         self._session = session
         self._clock = clock
         self._repository = PreferencesRepository(session)
@@ -114,14 +111,7 @@ class PreferencesService:
     async def _write(
         self, operation: Callable[[datetime], Awaitable[OwnerPreferences]]
     ) -> OwnerPreferences:
-        now = normalize_utc(self._clock())
-        try:
-            result = await operation(now)
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await commit_once(self._session, self._clock, operation)
 
 
 def effective_settings(settings: Settings, preferences: OwnerPreferences) -> Settings:

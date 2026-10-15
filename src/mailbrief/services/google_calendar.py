@@ -11,13 +11,13 @@ counts and codes only.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.google_calendar import (
     CalendarSyncResult,
     GoogleCalendarInfo,
@@ -44,10 +44,6 @@ CONCURRENCY: Final = 3
 # Account-wide errors end a sync. Any other failure, a calendar Google refuses included,
 # is that calendar's alone: the token already holds both calendar permissions.
 _STOPPING: Final = (AuthenticationRequiredError, ProviderRateLimitError)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def sync_window(day: date) -> tuple[date, date]:
@@ -86,7 +82,7 @@ class CalendarSyncService:
         session: AsyncSession,
         reader: CalendarReader,
         *,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._session = session
         self._reader = reader

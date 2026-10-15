@@ -1,5 +1,6 @@
 """Shared domain-model behavior."""
 
+import uuid
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -16,3 +17,13 @@ def normalize_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must include a time zone")
     return value.astimezone(UTC)
+
+
+def utc_now() -> datetime:
+    """The current time, aware and in UTC: the clock services and ORM defaults use."""
+    return datetime.now(UTC)
+
+
+def new_public_id() -> str:
+    """A new random public ID for an owner record."""
+    return str(uuid.uuid4())

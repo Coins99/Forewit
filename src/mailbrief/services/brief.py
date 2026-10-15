@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from mailbrief.domain.briefs import (
     BriefStatus,
     TransmissionPreview,
 )
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.digests import DigestCoverage, SyncProgress, SyncResult, SyncStage, SyncStatus
 from mailbrief.services.analysis import (
     KEY_MISSING,
@@ -142,10 +143,6 @@ def _not_refreshed(
     ]
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 class BriefService:
     """Generate and save one local day's brief, asking consent before anything is sent."""
 
@@ -158,7 +155,7 @@ class BriefService:
         analysis: AnalysisService,
         digests: DigestService,
         consent_gate: ConsentGate,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
         proposals: ProposalService | None = None,
     ) -> None:
         self._session = session

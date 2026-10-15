@@ -13,7 +13,7 @@ import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Final, Protocol
 from zoneinfo import ZoneInfo
 
@@ -43,7 +43,7 @@ from mailbrief.domain.calendar_planning import (
     ProposedChange,
     ticked_at_first,
 )
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.drafting import DraftingProblem, PreviewLine
 from mailbrief.domain.events import (
     EVENT_TITLE_MAX_CHARS,
@@ -97,10 +97,6 @@ class PreparedPlan:
     keys: dict[str, CalendarEvent] = field(repr=False)
     events: tuple[CalendarEvent, ...] = field(repr=False)
     google: tuple[GoogleEvent, ...] = field(repr=False)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def _local(moment: datetime, zone: ZoneInfo) -> str:
@@ -474,7 +470,7 @@ class CalendarPlanningService:
         session: AsyncSession,
         provider: CalendarPlanningProvider,
         *,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._session = session
         self._provider = provider
