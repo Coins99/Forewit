@@ -693,15 +693,8 @@ def test_unbroken_mail_text_never_widens_the_workspace(
     )
     hostile = brief.digest.model_copy(update={"items": (long_item, *brief.digest.items[1:])})
 
-    # qtbot holds only weak references. Kept here, each workspace is deleted after the test;
-    # left to the garbage collector, the first one was torn down while the second was built,
-    # its Python attributes cleared before Qt deleted its widgets, whose events still ran
-    # Python code (ContentSheet.eventFilter) that needed them.
-    workspaces: list[ThreePaneWorkspace] = []
-
     def narrowest(digest: DailyDigest) -> int:
         workspace = ThreePaneWorkspace()
-        workspaces.append(workspace)
         qtbot.addWidget(workspace)
         workspace.show_digest(
             digest, links=brief.links, proposals=brief.proposals, owner_zone=OWNER_ZONE, today=TODAY
