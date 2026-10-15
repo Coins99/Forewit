@@ -31,6 +31,7 @@ from mailbrief.domain.messages import (
 )
 from mailbrief.domain.messages import own_addresses as _own_addresses
 from mailbrief.domain.preferences import sender_excluded
+from mailbrief.infra.tasks import running
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     MessageUnavailableError,
@@ -281,8 +282,7 @@ class ThreadService:
         checked = failed = gone = stored = removed = 0
         read_ids: set[str] = set()
         stopped: str | None = None
-        tasks = [asyncio.create_task(read(thread)) for thread in tracked]
-        try:
+        async with running(read(thread) for thread in tracked) as tasks:
             for finished in asyncio.as_completed(tasks):
                 thread, result = await finished
                 if result is None:
@@ -310,10 +310,6 @@ class ThreadService:
                     removed += len(discarded)
                     read_ids.add(thread.thread_id)
                     checked += 1
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
         logger.info(
             "Thread check: %d tracked, %d checked, %d failed, %d gone, %d messages stored, "
             "%d removed%s",

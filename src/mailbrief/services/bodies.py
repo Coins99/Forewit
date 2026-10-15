@@ -12,6 +12,7 @@ from mailbrief.domain.bodies import (
     PreparedBody,
 )
 from mailbrief.domain.messages import RankedMessage
+from mailbrief.infra.tasks import gather_or_cancel
 from mailbrief.ports.errors import MessageUnavailableError, ProviderResponseError
 from mailbrief.text.prepare import (
     looks_like_forward,
@@ -86,13 +87,7 @@ class BodyService:
         permission and rate-limit errors stop the whole batch, and cancelling the caller
         cancels every fetch still in flight.
         """
-        tasks = [asyncio.create_task(self._prepare_one(item)) for item in shortlist]
-        try:
-            return tuple(await asyncio.gather(*tasks))
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        return tuple(await gather_or_cancel(self._prepare_one(item) for item in shortlist))
 
     async def _prepare_one(self, item: RankedMessage) -> PreparedBody:
         message_id = item.message.provider_message_id

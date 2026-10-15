@@ -24,6 +24,7 @@ from mailbrief.domain.google_calendar import (
     GoogleCoverage,
     GoogleEvent,
 )
+from mailbrief.infra.tasks import running
 from mailbrief.ports.calendar import CalendarReader
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
@@ -124,8 +125,7 @@ class CalendarSyncService:
         stopped: str | None = None
         throttled = False
         done: set[str] = set()
-        tasks = [asyncio.create_task(read(calendar)) for calendar in shown]
-        try:
+        async with running(read(calendar) for calendar in shown) as tasks:
             for finished in asyncio.as_completed(tasks):
                 calendar, outcome = await finished
                 if outcome is None:
@@ -148,10 +148,6 @@ class CalendarSyncService:
                     )
                     synced += 1
                 done.add(calendar.calendar_id)
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
         if throttled:
             waiting = [rows[c.calendar_id] for c in shown if c.calendar_id not in done]
             await self._saved(self._repository.mark_checked(waiting, first_day, last_day, now))

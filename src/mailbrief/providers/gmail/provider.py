@@ -11,6 +11,7 @@ from mailbrief.domain.bodies import MessageBody
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.inbox import MailboxPage
 from mailbrief.domain.messages import AccountIdentity, MessagePage, NormalizedMessage, ProviderKind
+from mailbrief.infra.tasks import gather_or_cancel
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
     MessageUnavailableError,
@@ -208,14 +209,7 @@ class GmailProvider:
                 except ProviderResponseError as exc:
                     return exc
 
-        tasks = [asyncio.create_task(fetch(identifier)) for identifier in identifiers]
-        try:
-            results = await asyncio.gather(*tasks)
-        finally:
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        results = await gather_or_cancel(fetch(identifier) for identifier in identifiers)
         return MailboxPage(
             messages=tuple(item for item in results if isinstance(item, NormalizedMessage)),
             continuation=token,
@@ -288,14 +282,7 @@ class GmailProvider:
                 if identifier not in seen_ids:
                     seen_ids.add(identifier)
                     identifiers.append(identifier)
-            tasks = [asyncio.create_task(fetch(identifier)) for identifier in identifiers]
-            try:
-                results = await asyncio.gather(*tasks)
-            finally:
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+            results = await gather_or_cancel(fetch(identifier) for identifier in identifiers)
             number += 1
             yield MessagePage(
                 page_number=number,
