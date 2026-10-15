@@ -120,10 +120,11 @@ async def test_permanent_error_has_no_payload(
     assert route.call_count == 1
 
 
-async def test_403_rate_limit_and_retry_after_cap(respx_mock: respx.MockRouter) -> None:
+@pytest.mark.parametrize("field", ["errors", "details"])
+async def test_403_rate_limit_and_retry_after_cap(respx_mock: respx.MockRouter, field: str) -> None:
     route = respx_mock.get(MESSAGES_URL).respond(
         403,
-        json={"error": {"errors": [{"reason": "userRateLimitExceeded"}]}},
+        json={"error": {field: [{"reason": "userRateLimitExceeded"}]}},
         headers={"Retry-After": "60"},
     )
     async with httpx.AsyncClient() as http:
