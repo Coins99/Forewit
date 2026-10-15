@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
 
-from alembic import command
-from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, create_engine, inspect
 from sqlalchemy.dialects.sqlite import dialect
@@ -70,6 +68,8 @@ def _indexes(connection: sqlite3.Connection) -> frozenset[tuple[tuple[object, ..
 @cache
 def _reference_indexes() -> frozenset[tuple[tuple[object, ...], int]]:
     """The indexes of a freshly migrated database, built once per process."""
+    from alembic import command  # Imported here, like storage/migrate.py's, off startup.
+
     with tempfile.TemporaryDirectory(prefix="mailbrief-reference-") as work:
         reference = Path(work) / "reference.sqlite3"
         command.upgrade(migration_config(reference), "head")
@@ -124,6 +124,8 @@ def _check_schema(connection: sqlite3.Connection, path: Path) -> None:
 
 
 def validate_snapshot(path: Path, *, current_schema: bool = False) -> tuple[str, ...]:
+    from alembic.script import ScriptDirectory
+
     scripts = ScriptDirectory.from_config(migration_config(path))
     with closing(_untrusted(path)) as connection:
         objects = connection.execute("SELECT name, type FROM sqlite_master").fetchall()
