@@ -75,7 +75,7 @@ def test_alembic_failure_reports_database_error(
         raise CommandError("Can't locate revision identified by 'unknown'")
 
     monkeypatch.setattr(gmail, "gmail_provider", factory)
-    monkeypatch.setattr(gmail, "upgrade_database", broken_upgrade)
+    monkeypatch.setattr("mailbrief.storage.migrate.upgrade_database", broken_upgrade)
     args = ["sync", "--silent-only", "--database", str(tmp_path / "x.sqlite3"), "--timezone", "UTC"]
 
     assert gmail.main(args) == 5

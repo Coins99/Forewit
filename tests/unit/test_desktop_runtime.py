@@ -23,6 +23,7 @@ from mailbrief.domain.messages import AccountIdentity, ProviderKind
 from mailbrief.domain.preferences import AI_LIMIT_FIELDS, PreferencesEdit
 from mailbrief.errors import ConfigurationError
 from mailbrief.providers.groq.credentials import GroqKeyStore
+from mailbrief.services import brief as brief_module
 from mailbrief.services.brief import CONSENT_DISCLOSURE_VERSION
 from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.history import BriefDateError
@@ -212,9 +213,9 @@ async def test_a_brief_uses_the_owner_s_zone_limit_rules_and_ai_limits(
     monkeypatch.setattr(runtime, "gmail_provider", provider_factory(seen))
     monkeypatch.setattr(runtime, "groq_provider", provider_factory(seen))
     brief, bodies, analysis = Recorder(), Recorder(), Recorder()
-    monkeypatch.setattr(runtime, "BriefService", brief)
-    monkeypatch.setattr(runtime, "BodyService", bodies)
-    monkeypatch.setattr(runtime, "AnalysisService", analysis)
+    monkeypatch.setattr(brief_module, "BriefService", brief)
+    monkeypatch.setattr(brief_module, "BodyService", bodies)
+    monkeypatch.setattr(brief_module, "AnalysisService", analysis)
     backend = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
     await backend.load_saved()
     try:
@@ -388,7 +389,7 @@ async def test_a_past_day_reaches_the_brief_service(
     monkeypatch.setattr(runtime, "gmail_provider", provider_factory([]))
     monkeypatch.setattr(runtime, "groq_provider", provider_factory([]))
     brief = Recorder()
-    monkeypatch.setattr(runtime, "BriefService", brief)
+    monkeypatch.setattr(brief_module, "BriefService", brief)
     backend = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
     await backend.load_saved()
     try:
@@ -407,9 +408,9 @@ async def test_an_automatic_run_takes_no_review_asks_nothing_and_is_marked_autom
     monkeypatch.setattr(runtime, "gmail_provider", provider_factory([]))
     monkeypatch.setattr(runtime, "groq_provider", provider_factory([]))
     brief, bodies, analysis = Recorder(), Recorder(), Recorder()
-    monkeypatch.setattr(runtime, "BriefService", brief)
-    monkeypatch.setattr(runtime, "BodyService", bodies)
-    monkeypatch.setattr(runtime, "AnalysisService", analysis)
+    monkeypatch.setattr(brief_module, "BriefService", brief)
+    monkeypatch.setattr(brief_module, "BodyService", bodies)
+    monkeypatch.setattr(brief_module, "AnalysisService", analysis)
     backend = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
     await backend.load_saved()
     try:

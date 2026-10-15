@@ -1,9 +1,11 @@
 """Run checked-in Alembic upgrades against the explicit diagnostic database."""
 
+import asyncio
 import sqlite3
 import sys
 import tempfile
-from contextlib import closing
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
 from alembic import command
@@ -11,7 +13,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from mailbrief.errors import ConfigurationError
-from mailbrief.storage.database import sqlite_url
+from mailbrief.storage.database import Database, sqlite_url
 
 
 def migration_config(path: Path) -> Config:
@@ -64,3 +66,15 @@ def upgrade_database(path: Path) -> None:
                     backup.unlink(missing_ok=True)
                     raise
     command.upgrade(config, "head")
+
+
+@asynccontextmanager
+async def migrated_database(path: Path) -> AsyncIterator[Database]:
+    """The database at ``path``, created if missing and upgraded off the event loop's thread,
+    disposed when the block ends."""
+    await asyncio.to_thread(upgrade_database, path)
+    database = Database.from_path(path)
+    try:
+        yield database
+    finally:
+        await database.dispose()

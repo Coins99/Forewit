@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -20,7 +21,6 @@ from mailbrief.domain.actions import (
     StepEdit,
     ThreadLink,
 )
-from mailbrief.domain.bodies import MessageBody
 from mailbrief.domain.briefs import (
     AutoSendPermission,
     AutoSendStatus,
@@ -63,20 +63,19 @@ from mailbrief.providers.gcal.auth import forget_legacy_sign_in
 from mailbrief.providers.gcal.errors import NOT_ALLOWED
 from mailbrief.providers.gcal.factory import google_calendar
 from mailbrief.providers.gmail.cache import GmailCredentialStore
-from mailbrief.providers.gmail.factory import gmail_auth, gmail_provider
+from mailbrief.providers.gmail.factory import GmailBodies, gmail_auth, gmail_provider
 from mailbrief.providers.gmail.oauth import DesktopClient
 from mailbrief.providers.groq.credentials import GroqKeyStore
 from mailbrief.providers.groq.factory import groq_provider
 from mailbrief.providers.groq.provider import PRIVACY_NOTICE, PROVIDER_NAME
 from mailbrief.services.actions import AcceptedInto, ActionService, DecisionSnapshot
-from mailbrief.services.analysis import AnalysisService
-from mailbrief.services.application import ApplicationService
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.brief import (
     CONSENT_DISCLOSURE_VERSION,
-    BriefService,
     ConsentGate,
+    NeverAsks,
     ShortlistGate,
+    compose_brief,
     permission_preview,
 )
 from mailbrief.services.calendar import day_window, resolve_timezone
@@ -86,7 +85,6 @@ from mailbrief.services.calendar_planning import (
     PreparedPlan,
 )
 from mailbrief.services.consent import auto_send_permission, set_auto_send
-from mailbrief.services.digest import DigestService
 from mailbrief.services.drafting import (
     DRAFTING_DISCLOSURE_VERSION,
     DRAFTING_SCOPE,
@@ -109,7 +107,6 @@ from mailbrief.services.projects import ProjectService
 from mailbrief.services.proposals import ProposalService
 from mailbrief.services.search import SearchService
 from mailbrief.services.sync import SyncService
-from mailbrief.services.threads import ThreadService
 from mailbrief.services.today import TodayService
 from mailbrief.storage.database import Database
 from mailbrief.storage.inbox_scan import InboxScanRepository
@@ -128,27 +125,10 @@ from mailbrief.ui.preferences import DesktopPreferences, PreferencesStore
 logger = logging.getLogger(__name__)
 
 
-class _NeverAsks:
-    """The consent gate of an automatic run, which has nobody to ask: BriefService never calls
-    it, and if it ever did, nothing would be sent."""
-
-    async def confirm(self, preview: object) -> bool:
-        return False
-
-
-class _GmailBodies:
-    """Opens Gmail (silent sign-in only) for one body download, then closes it.
-
-    AI drafting downloads a body only when the owner chooses the email, so nothing here
-    touches Gmail until then.
-    """
-
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-
-    async def fetch_message_body(self, provider_message_id: str) -> MessageBody:
-        async with gmail_provider(self._settings, silent_only=True) as provider:
-            return await provider.fetch_message_body(provider_message_id)
+def _groq_key_saved() -> bool:
+    """Whether a Groq API key is in the OS vault; it reads the vault, so call it off the Qt
+    thread."""
+    return GroqKeyStore().load() is not None
 
 
 async def _gmail_account(session: AsyncSession, account_email: str) -> AccountTable | None:
@@ -262,11 +242,7 @@ class DesktopRuntime:
     async def ai_status(self) -> str:
         if not (await self.get_preferences()).groq_model:
             return "AI: choose a Structured Outputs model in Settings."
-
-        def has_key() -> bool:
-            return GroqKeyStore().load() is not None
-
-        if not await asyncio.to_thread(has_key):
+        if not await asyncio.to_thread(_groq_key_saved):
             return "AI: key missing. Add a Groq API key in Settings."
         drafting = ""
         if self._database is not None:
@@ -285,11 +261,7 @@ class DesktopRuntime:
         """Whether AI drafting can be offered: a model is chosen and a Groq key is saved."""
         if not (await self.get_preferences()).groq_model:
             return False
-
-        def has_key() -> bool:
-            return GroqKeyStore().load() is not None
-
-        return await asyncio.to_thread(has_key)
+        return await asyncio.to_thread(_groq_key_saved)
 
     async def generate(
         self,
@@ -318,7 +290,7 @@ class DesktopRuntime:
         active consent lets it send anything, and without one it reports how many messages
         are ready to review."""
         return await self._brief(
-            gate=_NeverAsks(),
+            gate=NeverAsks(),
             review=None,
             cancel=cancel,
             progress=progress,
@@ -346,20 +318,7 @@ class DesktopRuntime:
             groq_provider(settings) as ai,
             self._storage().session() as session,
         ):
-            service = BriefService(
-                session=session,
-                application=ApplicationService(
-                    provider,
-                    MessageRepository(session),
-                    SyncRunRepository(session),
-                    AccountRepository(session),
-                    threads=ThreadService(session, provider),
-                ),
-                bodies=BodyService(provider, limit=settings.ai_body_character_limit),
-                analysis=AnalysisService(session, ai, batch_size=settings.ai_batch_size),
-                digests=DigestService(session),
-                consent_gate=gate,
-            )
+            service = compose_brief(session, provider, ai, settings, consent_gate=gate)
             return await service.generate(
                 tz_key=zone.key,
                 cancel=cancel,
@@ -969,45 +928,42 @@ class DesktopRuntime:
     # AI drafting (ADR 0013). Groq and, only when the owner chooses the email, Gmail are
     # opened for each call and closed afterwards.
 
-    async def available_drafting_parts(self, public_id: str) -> frozenset[DraftContextPart]:
+    @asynccontextmanager
+    async def _drafting(self, *, email: bool) -> AsyncIterator[DraftingService]:
+        """AI drafting over Groq, with the owner's zone and sender exclusions. With ``email``
+        it can download the email being replied to, opening Gmail (silent sign-in only) for
+        that download alone."""
         preferences = await self.get_owner_preferences()
         settings = await self._settings(preferences)
+        bodies = (
+            BodyService(
+                GmailBodies(gmail_provider, settings), limit=settings.ai_body_character_limit
+            )
+            if email
+            else None
+        )
         async with groq_provider(settings) as ai, self._storage().session() as session:
-            service = DraftingService(
+            yield DraftingService(
                 session,
                 ai,
-                BodyService(_GmailBodies(settings), limit=settings.ai_body_character_limit),
+                bodies,
                 zone=owner_zone(preferences),
                 excluded_senders=preferences.excluded_senders,
             )
+
+    async def available_drafting_parts(self, public_id: str) -> frozenset[DraftContextPart]:
+        async with self._drafting(email=True) as service:
             return await service.available_parts(public_id)
 
     async def prepare_drafting(self, public_id: str, options: DraftingOptions) -> DraftingPlan:
         """Build what would be sent; choosing the email downloads its body now, in memory."""
-        preferences = await self.get_owner_preferences()
-        settings = await self._settings(preferences)
-        async with groq_provider(settings) as ai, self._storage().session() as session:
-            service = DraftingService(
-                session,
-                ai,
-                BodyService(_GmailBodies(settings), limit=settings.ai_body_character_limit),
-                zone=owner_zone(preferences),
-                excluded_senders=preferences.excluded_senders,
-            )
+        async with self._drafting(email=True) as service:
             return await service.prepare(public_id, options)
 
     async def generate_draft(
         self, plan: DraftingPlan, gate: DraftingGate, cancel: asyncio.Event
     ) -> DraftingOutcome:
-        preferences = await self.get_owner_preferences()
-        settings = await self._settings(preferences)
-        async with groq_provider(settings) as ai, self._storage().session() as session:
-            service = DraftingService(
-                session,
-                ai,
-                zone=owner_zone(preferences),
-                excluded_senders=preferences.excluded_senders,
-            )
+        async with self._drafting(email=False) as service:
             return await service.generate(plan, gate, cancel)
 
     # The calendar (ADR 0018): local data only, so nothing here builds a provider.
