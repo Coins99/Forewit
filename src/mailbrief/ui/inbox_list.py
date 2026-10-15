@@ -16,11 +16,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Final, Literal
+from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import (
-    QAbstractListModel,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
@@ -43,11 +42,11 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.messages import NormalizedMessage
 from mailbrief.ui.brief_list import (
-    KIND_ROLE,
     NO_SUBJECT,
     ROW_PAD_H,
     ROW_ROLE,
     SINGLE_LINE,
+    HeaderRowsModel,
     flat,
     header_height,
     paint_header,
@@ -198,19 +197,7 @@ _Index = QModelIndex | QPersistentModelIndex
 _ROOT: Final = QModelIndex()
 
 
-class InboxListModel(QAbstractListModel):
-    def __init__(self, parent: QObject | None = None) -> None:
-        super().__init__(parent)
-        self._rows: list[InboxRow] = []
-
-    def set_rows(self, rows: Sequence[InboxRow]) -> None:
-        self.beginResetModel()
-        self._rows = list(rows)
-        self.endResetModel()
-
-    def rows(self) -> tuple[InboxRow, ...]:
-        return tuple(self._rows)
-
+class InboxListModel(HeaderRowsModel[InboxRow]):
     def row_of(self, message_id: str) -> int | None:
         """The row of the message ``message_id``, or None when the page doesn't hold it."""
         return next(
@@ -222,28 +209,8 @@ class InboxListModel(QAbstractListModel):
             None,
         )
 
-    def rowCount(self, parent: _Index = _ROOT) -> int:
-        return 0 if parent.isValid() else len(self._rows)
-
-    def data(self, index: _Index, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
-        if not index.isValid() or not 0 <= index.row() < len(self._rows):
-            return None
-        row = self._rows[index.row()]
-        if role == Qt.ItemDataRole.DisplayRole:
-            return row.title
-        if role == Qt.ItemDataRole.AccessibleTextRole:
-            return accessible_text(row)
-        if role == KIND_ROLE:
-            return row.kind
-        if role == ROW_ROLE:
-            return row
-        return None
-
-    def flags(self, index: _Index) -> Qt.ItemFlag:
-        if not index.isValid() or self._rows[index.row()].kind == "header":
-            # Not even enabled: an enabled, unselectable row would still take focus.
-            return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+    def accessible_text(self, row: InboxRow) -> str:
+        return accessible_text(row)
 
 
 def date_width() -> int:

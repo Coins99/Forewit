@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, Protocol
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import (
@@ -194,27 +194,36 @@ _Index = QModelIndex | QPersistentModelIndex
 _ROOT: Final = QModelIndex()
 
 
-class BriefListModel(QAbstractListModel):
+class ListRow(Protocol):
+    """A row of a painted list: a section header or an entry under one."""
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def title(self) -> str: ...
+
+
+class HeaderRowsModel[R: ListRow](QAbstractListModel):
+    """The rows of a painted list with section headers. DisplayRole is a row's title,
+    KIND_ROLE its kind and ROW_ROLE the row itself; a header is neither enabled nor
+    selectable, so the keyboard passes over it."""
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._rows: list[BriefRow] = []
+        self._rows: list[R] = []
 
-    def set_rows(self, rows: Sequence[BriefRow]) -> None:
+    def set_rows(self, rows: Sequence[R]) -> None:
         self.beginResetModel()
         self._rows = list(rows)
         self.endResetModel()
 
-    def update_rows(self, rows: Sequence[BriefRow]) -> None:
-        """Replace rows that match the current ones one for one (the same brief, its chips
-        recounted) in place: no reset, so the selection, the detail and focus stay."""
-        if len(rows) != len(self._rows):
-            raise ValueError("update_rows needs the same rows")
-        self._rows = list(rows)
-        if self._rows:
-            self.dataChanged.emit(self.index(0), self.index(len(self._rows) - 1))
-
-    def rows(self) -> tuple[BriefRow, ...]:
+    def rows(self) -> tuple[R, ...]:
         return tuple(self._rows)
+
+    def accessible_text(self, row: R) -> str:
+        """What a screen reader says for ``row``."""
+        return row.title
 
     def rowCount(self, parent: _Index = _ROOT) -> int:
         return 0 if parent.isValid() else len(self._rows)
@@ -226,11 +235,7 @@ class BriefListModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return row.title
         if role == Qt.ItemDataRole.AccessibleTextRole:
-            if row.kind == "header":
-                return row.title
-            return f"{row.title}, from {row.sender}" + "".join(
-                f", {chip.text}" for chip in row.chips
-            )
+            return self.accessible_text(row)
         if role == KIND_ROLE:
             return row.kind
         if role == ROW_ROLE:
@@ -242,6 +247,22 @@ class BriefListModel(QAbstractListModel):
             # Not even enabled: an enabled, unselectable row would still take focus.
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+
+
+class BriefListModel(HeaderRowsModel[BriefRow]):
+    def update_rows(self, rows: Sequence[BriefRow]) -> None:
+        """Replace rows that match the current ones one for one (the same brief, its chips
+        recounted) in place: no reset, so the selection, the detail and focus stay."""
+        if len(rows) != len(self._rows):
+            raise ValueError("update_rows needs the same rows")
+        self._rows = list(rows)
+        if self._rows:
+            self.dataChanged.emit(self.index(0), self.index(len(self._rows) - 1))
+
+    def accessible_text(self, row: BriefRow) -> str:
+        if row.kind == "header":
+            return row.title
+        return f"{row.title}, from {row.sender}" + "".join(f", {chip.text}" for chip in row.chips)
 
 
 def chip_height() -> int:
