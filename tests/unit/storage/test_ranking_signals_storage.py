@@ -2,11 +2,8 @@
 and what they say about each sender."""
 
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-import pytest
 from sqlalchemy import insert, update
 
 from mailbrief.domain.messages import (
@@ -37,16 +34,6 @@ IDENTITY = AccountIdentity(
     email_address="owner@example.com",
     account_addresses=("owner@example.com", "alias@example.org"),
 )
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncGenerator[Database]:
-    db = Database.from_path(tmp_path / "signals.sqlite3")
-    await db.create_schema_for_tests()
-    try:
-        yield db
-    finally:
-        await db.dispose()
 
 
 def message(

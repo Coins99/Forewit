@@ -3,7 +3,7 @@
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Collection, Sequence
+from collections.abc import Collection, Sequence
 from datetime import date, timedelta
 
 import pytest
@@ -27,7 +27,6 @@ from mailbrief.services.threads import (
     ThreadService,
     TrackedThread,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import (
     AccountRepository,
     MessageRepository,
@@ -40,15 +39,6 @@ from tests.unit.services.test_sync import FakeEmailProvider
 
 SINCE = NOW - timedelta(days=2)
 TODAY_INBOX = NOW - timedelta(hours=1)
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 def message(

@@ -1,9 +1,7 @@
 """Follow-up proposals: derived from analyses, applied, undone, dismissed and restored."""
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,7 +32,6 @@ from mailbrief.services.proposals import (
     ProposalService,
 )
 from mailbrief.storage.actions import ActionRepository
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, AnalysisRepository, MessageRepository
 from mailbrief.storage.tables import (
     AccountTable,
@@ -43,7 +40,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     MessageTable,
 )
-from tests.factories import make_analysis, make_message
+from tests.factories import Clock, make_analysis, make_message
 
 ZONE = "America/Toronto"
 SOURCE_AT = datetime(2026, 9, 28, 12, tzinfo=UTC)  # A Monday.
@@ -61,28 +58,9 @@ FRIDAY: dict[str, Any] = {
 }
 
 
-class Clock:
-    def __init__(self) -> None:
-        self.now = NOW
-
-    def __call__(self) -> datetime:
-        return self.now
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "proposals.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as active:
-            yield active
-    finally:
-        await database.dispose()
-
-
 @pytest.fixture
 def clock() -> Clock:
-    return Clock()
+    return Clock(NOW)
 
 
 @pytest.fixture

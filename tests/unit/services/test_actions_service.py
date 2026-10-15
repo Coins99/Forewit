@@ -1,6 +1,6 @@
 """Accepted actions: acceptance, decisions, edits, steps, lifecycle, lists and durability."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,34 +47,10 @@ from mailbrief.storage.tables import (
     MessageTable,
     SuggestionDecisionTable,
 )
-from tests.factories import make_analysis, make_message, make_suggestion
+from tests.factories import Clock, Ids, make_analysis, make_message, make_suggestion
 
 START = datetime(2026, 9, 28, 13, 0, tzinfo=UTC)  # A Monday.
 TORONTO = ZoneInfo("America/Toronto")
-
-
-class Clock:
-    """A clock the test moves forward."""
-
-    def __init__(self) -> None:
-        self.now = START
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, **delta: float) -> None:
-        self.now += timedelta(**delta)
-
-
-class Ids:
-    """Predictable public IDs."""
-
-    def __init__(self) -> None:
-        self.count = 0
-
-    def __call__(self) -> str:
-        self.count += 1
-        return f"00000000-0000-4000-8000-{self.count:012d}"
 
 
 def suggestion(position: int, title: str, **overrides: Any) -> ActionSuggestion:
@@ -100,24 +76,8 @@ PLAIN = suggestion(1, "Book the room", steps=(), evidence=None)
 
 
 @pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "actions.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
-
-
-@pytest.fixture
 def clock() -> Clock:
-    return Clock()
+    return Clock(START)
 
 
 @pytest.fixture

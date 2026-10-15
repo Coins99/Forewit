@@ -1,8 +1,6 @@
 """Comprehensive tests for async storage repositories."""
 
-from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
-from pathlib import Path
 
 import pytest
 from sqlalchemy import func, insert, select, update
@@ -42,17 +40,6 @@ from mailbrief.storage.tables import (
     SuggestionDecisionTable,
 )
 from tests.factories import fingerprint_of, make_analysis, make_message, make_suggestion
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncGenerator[Database]:
-    """Provide a fresh SQLite database with created schema."""
-    db = Database.from_path(tmp_path / "test.sqlite3")
-    await db.create_schema_for_tests()
-    try:
-        yield db
-    finally:
-        await db.dispose()
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,7 +21,8 @@ from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
 from mailbrief.storage.recovery import restore_backup
 from mailbrief.storage.tables import ActionTagTable
-from tests.unit.services.test_actions_service import START, Clock, seed
+from tests.factories import Clock
+from tests.unit.services.test_actions_service import START, seed
 
 TODAY = START.date()
 
@@ -43,17 +43,6 @@ def task(**changes: Any) -> ActionEdit:
     return ActionEdit.model_validate(TASK.model_dump() | changes)
 
 
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "tags.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as session:
-            yield session
-    finally:
-        await database.dispose()
-
-
 async def tag_rows(session: AsyncSession) -> list[tuple[str, str]]:
     rows = await session.execute(
         select(ActionTagTable.name, ActionTagTable.name_key).order_by(ActionTagTable.id)
@@ -64,7 +53,7 @@ async def tag_rows(session: AsyncSession) -> list[tuple[str, str]]:
 async def test_create_and_save_keep_priority_and_tags_in_one_revision(
     session: AsyncSession,
 ) -> None:
-    service = ActionService(session, clock=Clock())
+    service = ActionService(session, clock=Clock(START))
     created = await service.create(
         task(priority=ActionPriority.HIGH, tags=("#Errands", " home ", "HOME"))
     )
@@ -90,7 +79,7 @@ async def test_create_and_save_keep_priority_and_tags_in_one_revision(
 
 
 async def test_a_tag_keeps_the_spelling_other_tasks_use(session: AsyncSession) -> None:
-    service = ActionService(session, clock=Clock())
+    service = ActionService(session, clock=Clock(START))
     first = await service.create(task(title="Groceries", tags=("Home",)))
     second = await service.create(task(title="Fix tap", tags=("HOME", "diy")))
     assert second.tags == ("diy", "Home")
@@ -103,7 +92,7 @@ async def test_a_tag_keeps_the_spelling_other_tasks_use(session: AsyncSession) -
 
 
 async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSession) -> None:
-    service = ActionService(session, clock=Clock())
+    service = ActionService(session, clock=Clock(START))
     first = await service.create(task(title="Groceries", tags=("home",)))
     second = await service.create(task(title="Fix tap", tags=("home", "diy")))
     gone = await service.create(task(title="Old", tags=("home",)))
@@ -125,7 +114,7 @@ async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSes
 
 
 async def test_tags_filter_and_list_only_live_tasks(session: AsyncSession) -> None:
-    service = ActionService(session, clock=Clock())
+    service = ActionService(session, clock=Clock(START))
     home = await service.create(task(title="Groceries", tags=("Home",)))
     await service.create(task(title="Gym", tags=("Health",)))
     waiting = await service.create(
@@ -149,7 +138,7 @@ async def test_tags_filter_and_list_only_live_tasks(session: AsyncSession) -> No
 
 
 async def test_priority_orders_tasks_with_the_same_dates(session: AsyncSession) -> None:
-    clock = Clock()
+    clock = Clock(START)
     service = ActionService(session, clock=clock)
     titles = ("None", "Low", "High", "Medium")
     priorities = (None, ActionPriority.LOW, ActionPriority.HIGH, ActionPriority.MEDIUM)
@@ -167,7 +156,7 @@ async def test_priority_orders_tasks_with_the_same_dates(session: AsyncSession) 
 
 
 async def test_today_orders_equal_reasons_by_priority(session: AsyncSession) -> None:
-    clock = Clock()
+    clock = Clock(START)
     service = ActionService(session, clock=clock)
     for title, priority in (("Later", None), ("First", ActionPriority.HIGH)):
         clock.advance(minutes=1)
@@ -187,7 +176,7 @@ async def test_accepted_suggestions_start_without_priority_or_tags(
     session: AsyncSession,
 ) -> None:
     seeded = await seed(session)
-    accepted = await ActionService(session, clock=Clock()).accept(seeded.suggestion_ids[0])
+    accepted = await ActionService(session, clock=Clock(START)).accept(seeded.suggestion_ids[0])
     assert (accepted.priority, accepted.tags) == (None, ())
 
 
@@ -198,7 +187,7 @@ async def test_priority_and_tags_survive_restart_backup_restore_and_export(
     await asyncio.to_thread(upgrade_database, path)
     database = Database.from_path(path)
     async with database.session() as session:
-        created = await ActionService(session, clock=Clock()).create(
+        created = await ActionService(session, clock=Clock(START)).create(
             task(priority=ActionPriority.MEDIUM, tags=("Travel", "Admin"))
         )
     await database.dispose()

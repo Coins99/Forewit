@@ -2,9 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
@@ -27,24 +25,12 @@ from mailbrief.services.threads import (
     THREAD_CONCURRENCY,
     ThreadService,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.storage.tables import AccountTable, ActionSourceTable, ActionTable, MessageTable
 from tests.factories import make_message
 
 START = datetime(2026, 9, 28, 12, tzinfo=UTC)
 ACCOUNT_ID = "gmail-1"
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "threads.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as active:
-            yield active
-    finally:
-        await database.dispose()
 
 
 async def gmail(session: AsyncSession, provider_account_id: str = ACCOUNT_ID) -> AccountTable:

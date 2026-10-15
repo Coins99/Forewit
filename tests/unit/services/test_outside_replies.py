@@ -1,9 +1,8 @@
 """Replies in tracked threads that today's Inbox sync can't see: which qualify, in what order,
 how many, and that finding them takes a fixed number of queries."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -28,22 +27,6 @@ from tests.unit.services.test_threads import START, action, gmail, reply
 TODAY = day_window(date(2026, 9, 30), resolve_timezone("America/Toronto"))
 EARLIER = START + timedelta(days=1, hours=2)  # Tuesday, before today's window.
 IN_TODAY = TODAY.start_utc + timedelta(hours=6)
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "outside.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as active:
-        yield active
 
 
 @pytest.fixture

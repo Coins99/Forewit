@@ -1,8 +1,6 @@
 """Calendar sync into the cache, and the cached events shown beside the owner's."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -24,7 +22,6 @@ from mailbrief.services.google_calendar import (
     needs_sync,
     sync_window,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.tables import GoogleCalendarTable, GoogleEventTable
 
 TORONTO = ZoneInfo("America/Toronto")
@@ -75,17 +72,6 @@ class FakeReader:
         if isinstance(found, ProviderError):
             raise found
         return found
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "google.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as session:
-            yield session
-    finally:
-        await database.dispose()
 
 
 @pytest.fixture

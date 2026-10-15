@@ -22,7 +22,8 @@ from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config, upgrade_database
 from mailbrief.storage.recovery import restore_backup
 from mailbrief.storage.tables import ActionActivityTable, ActionTable
-from tests.unit.services.test_actions_service import Clock, seed
+from tests.factories import Clock
+from tests.unit.services.test_actions_service import START, seed
 
 EDIT = ActionEdit(
     title="Plan the week",
@@ -43,7 +44,7 @@ async def test_full_workflow_survives_restart_backup_restore_and_export(
     path = tmp_path / "original.sqlite3"
     await asyncio.to_thread(upgrade_database, path)
     database = Database.from_path(path)
-    clock = Clock()
+    clock = Clock(START)
     async with database.session() as session:
         service = ActionService(session, clock=clock)
         if email_derived:

@@ -1,10 +1,8 @@
 """The owner's day at a glance: what needs attention, new replies and today's calendar."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import Action, ActionEdit, ActionStatus, ThreadActivity
@@ -20,7 +18,6 @@ from mailbrief.services.today import (
     needs_attention,
     new_replies,
 )
-from mailbrief.storage.database import Database
 from tests.factories import make_action
 
 ZONE = ZoneInfo("America/Toronto")
@@ -135,15 +132,6 @@ def test_new_replies_are_open_actions_with_unseen_messages_latest_first() -> Non
     replies = new_replies([older, newer, seen, quiet, done, newer])
 
     assert [item.title for item in replies] == ["Task 2", "Task 1"]
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 async def test_the_service_reads_open_and_waiting_actions_and_todays_calendar(

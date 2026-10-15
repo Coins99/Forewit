@@ -1,9 +1,7 @@
 """Thread activity on actions, derived from cached messages, and the owner's "mark seen"."""
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,24 +10,12 @@ from mailbrief.domain.actions import ThreadActivity
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.threads import ThreadService
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.storage.tables import AccountTable, ActionSourceTable, ActionTable
 from tests.factories import make_message
 from tests.unit.services.test_threads import FakeReader
 
 SOURCE_AT = datetime(2026, 9, 28, 12, tzinfo=UTC)
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "activity.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as active:
-            yield active
-    finally:
-        await database.dispose()
 
 
 async def account(session: AsyncSession, provider_account_id: str = "gmail-1") -> AccountTable:

@@ -1,9 +1,7 @@
 """AI calendar proposals: what is sent, consent, and the checks every change must pass."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, time, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -34,7 +32,6 @@ from mailbrief.services.calendar_planning import (
 )
 from mailbrief.services.events import EventConflictError, EventService
 from mailbrief.services.google_calendar import CalendarSyncService
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import OwnerConsentRepository
 from mailbrief.storage.tables import ActionTable
 
@@ -90,17 +87,6 @@ class Gate:
     async def request_planning_consent(self, preview: PlanningPreview) -> bool:
         self.previews.append(preview)
         return self.answer
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "planning.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as session:
-            yield session
-    finally:
-        await database.dispose()
 
 
 @pytest.fixture

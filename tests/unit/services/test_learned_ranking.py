@@ -1,29 +1,17 @@
 """The owner's side of ranking in a run (ADR 0020): important senders, messages they pick
 that weren't suggested, and what their choices teach about each sender."""
 
-from collections.abc import AsyncIterator
-
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.messages import NormalizedMessage, RankReason
 from mailbrief.services.application import ApplicationService
 from mailbrief.services.ranking import ExcludedSenderError
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import MessageRepository
 from mailbrief.storage.tables import AccountTable
 from tests.unit.services.test_application import NOW, ZONE
 from tests.unit.services.test_application_outside import message, scene
 from tests.unit.services.test_declines import Choosing, loud
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 def from_(sender: str, key: str, hours_ago: float, *, high: bool = True) -> NormalizedMessage:

@@ -1,9 +1,7 @@
 """Automatic runs in storage (ADR 0017): the refresh preferences, the permission on a consent,
 declined messages and the deferred coverage count."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +11,6 @@ from mailbrief.domain.digests import DigestCoverage, DigestStatus
 from mailbrief.domain.messages import AccountIdentity, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.storage import repositories
-from mailbrief.storage.database import Database
 from mailbrief.storage.preferences import apply_edit, preferences_from_row
 from mailbrief.storage.repositories import (
     AccountRepository,
@@ -26,22 +23,6 @@ from tests.factories import make_message
 
 AT = datetime(2026, 9, 30, 13, tzinfo=UTC)
 LATER = AT + timedelta(hours=2)
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "daily.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as active:
-        yield active
 
 
 async def account(

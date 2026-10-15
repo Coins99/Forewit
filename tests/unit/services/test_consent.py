@@ -1,9 +1,7 @@
 """The automatic-analysis permission on the active consent: the one function the desktop and
 the CLI share, and the disclosure it is given under (ADR 0017)."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -21,22 +19,6 @@ from mailbrief.storage.tables import AccountTable
 AT = datetime(2026, 9, 30, 13, tzinfo=UTC)
 LATER = AT + timedelta(hours=1)
 ME = "me@example.com"
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "consent.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as active:
-        yield active
 
 
 async def consent(

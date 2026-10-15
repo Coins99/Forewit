@@ -2,7 +2,6 @@
 connected account's cached mail metadata."""
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -20,7 +19,6 @@ from mailbrief.domain.search import (
 )
 from mailbrief.services.actions import ActionService
 from mailbrief.services.search import SearchService, like_pattern
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.storage.tables import (
     CalendarEventTable,
@@ -32,15 +30,6 @@ from tests.factories import make_message
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
 OWNER = "owner@example.com"
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 def test_query_terms_need_two_characters_and_keep_at_most_five_words() -> None:

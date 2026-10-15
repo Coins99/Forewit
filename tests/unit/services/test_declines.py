@@ -1,7 +1,6 @@
 """Messages the owner leaves out of a review are remembered and never auto-selected again,
 until they select them (ADR 0017)."""
 
-from collections.abc import AsyncIterator
 from datetime import date
 
 import pytest
@@ -10,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.messages import MessageImportance, NormalizedMessage, RankedMessage
 from mailbrief.services.application import ApplicationService
 from mailbrief.services.ranking import ShortlistReviewError
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import MessageRepository
 from mailbrief.storage.tables import AccountTable
 from tests.unit.services.test_application import NOW, ZONE
@@ -18,15 +16,6 @@ from tests.unit.services.test_application_outside import message, scene
 
 # Rank order is a1 > a2 > a3 > a4 > a5: high importance, then how recent each is.
 INBOX = ("a1", "a2", "a3", "a4", "a5")
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 def loud(key: str, hours_ago: float = 1, **fields: object) -> NormalizedMessage:

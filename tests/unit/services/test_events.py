@@ -1,8 +1,6 @@
 """The owner's calendar: events, revisions, ranges and the open actions' dates."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -18,8 +16,8 @@ from mailbrief.services.events import (
     EventService,
     markers_for,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.tables import ActionTable, CalendarEventTable
+from tests.factories import Clock, Ids
 
 NOW = datetime(2026, 10, 11, 16, 0, tzinfo=UTC)
 TORONTO = ZoneInfo("America/Toronto")
@@ -27,51 +25,9 @@ MONDAY = date(2026, 10, 12)
 SUNDAY = date(2026, 10, 18)
 
 
-class Clock:
-    """A clock the test moves forward."""
-
-    def __init__(self) -> None:
-        self.now = NOW
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, **delta: float) -> None:
-        self.now += timedelta(**delta)
-
-
-class Ids:
-    """Predictable public IDs; ``repeat`` hands out the last one again."""
-
-    def __init__(self) -> None:
-        self.count = 0
-        self.repeat = False
-
-    def __call__(self) -> str:
-        if not self.repeat:
-            self.count += 1
-        return f"00000000-0000-4000-8000-{self.count:012d}"
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "events.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
-
-
 @pytest.fixture
 def clock() -> Clock:
-    return Clock()
+    return Clock(NOW)
 
 
 @pytest.fixture

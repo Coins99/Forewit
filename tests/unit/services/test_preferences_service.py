@@ -1,9 +1,7 @@
 """Preferences service: revisions, resets, failing closed, precedence and the owner's zone."""
 
 import logging
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -30,22 +28,6 @@ from mailbrief.ui.preferences import DesktopPreferences
 
 AT = datetime(2026, 9, 29, 13, tzinfo=UTC)
 RULES = ("private-sender@example.com", "@private-domain.example")
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "preferences.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
 
 
 def service(session: AsyncSession, at: datetime = AT) -> PreferencesService:

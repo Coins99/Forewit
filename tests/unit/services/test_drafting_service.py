@@ -1,7 +1,6 @@
 """AI drafting: parts, preview, consent, the saved own text, retries, validation and apply."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -62,7 +61,7 @@ from mailbrief.storage.tables import (
     MessageTable,
     OwnerConsentTable,
 )
-from tests.factories import make_message
+from tests.factories import Clock, make_message
 from tests.unit.services.drafting_fakes import FakeBodies, FakeDraftingProvider, Gate, answer
 
 START = datetime(2026, 9, 28, 13, 0, tzinfo=UTC)
@@ -84,35 +83,6 @@ def scripts_are_used_up() -> Any:
     assert not leftovers, f"unused drafting script items: {leftovers}"
 
 
-class Clock:
-    def __init__(self) -> None:
-        self.now = START
-
-    def __call__(self) -> datetime:
-        return self.now
-
-
-@pytest.fixture
-def database_path(tmp_path: Path) -> Path:
-    return tmp_path / "drafting.sqlite3"
-
-
-@pytest.fixture
-async def database(database_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(database_path)
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
-
-
 @pytest.fixture
 def bodies() -> FakeBodies:
     return FakeBodies(EMAIL_BODY)
@@ -129,7 +99,7 @@ def service(
         session,
         provider,
         None if bodies is None else BodyService(bodies, limit=limit),
-        clock=Clock(),
+        clock=Clock(START),
         zone=TORONTO,
     )
 
@@ -356,7 +326,7 @@ def excluding(session: AsyncSession, bodies: FakeBodies, rules: tuple[str, ...])
         session,
         FakeDraftingProvider(),
         BodyService(bodies),
-        clock=Clock(),
+        clock=Clock(START),
         zone=TORONTO,
         excluded_senders=rules,
     )
@@ -943,7 +913,7 @@ def test_disclosure_lines() -> None:
 
 async def test_today_is_the_owners_local_date(session: AsyncSession, bodies: FakeBodies) -> None:
     public_id = await seed_reply(session)
-    late = Clock()
+    late = Clock(START)
     late.now = START + timedelta(hours=14, minutes=30)  # 03:30 UTC: the 28th in Toronto.
     drafting = DraftingService(
         session, FakeDraftingProvider(), BodyService(bodies), clock=late, zone=TORONTO
