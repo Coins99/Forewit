@@ -9,6 +9,7 @@ import logging
 import threading
 import unicodedata
 from collections.abc import Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -218,13 +219,14 @@ def _load_settings() -> Settings:
         raise SettingsError(f"Invalid setting: {listed}. See docs/ai-analysis.md.") from None
 
 
-async def _preferences(path: Path) -> OwnerPreferences:
-    """The owner's saved preferences; a missing database gives the defaults without
-    creating it. Raises PreferencesUnavailableError when they can't be read."""
+async def _preferences(path: Path) -> tuple[OwnerPreferences, bool]:
+    """The owner's saved preferences, and whether the database was brought up to date to read
+    them; a missing database gives the defaults without creating it. Raises
+    PreferencesUnavailableError when they can't be read."""
     if not await asyncio.to_thread(path.exists):
-        return OwnerPreferences.defaults()
+        return OwnerPreferences.defaults(), False
     async with migrated_database(path) as database, database.session() as session:
-        return await PreferencesService(session).get()
+        return await PreferencesService(session).get(), True
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +237,11 @@ class _Owner:
     preferences: OwnerPreferences
     settings: Settings
     zone: ZoneInfo
+    migrated: bool  # Reading the preferences already brought the database up to date.
+
+    def database(self) -> AbstractAsyncContextManager[Database]:
+        """The command's database, created if missing, upgraded only if not done already."""
+        return migrated_database(self.path, upgrade=not self.migrated)
 
 
 async def _owner(database_path: Path | None, timezone: str | None) -> _Owner:
@@ -247,12 +254,13 @@ async def _owner(database_path: Path | None, timezone: str | None) -> _Owner:
     settings = _load_settings()
     explicit = resolve_timezone(timezone) if timezone and timezone.strip() else None
     path = database_path or AppPaths.from_qt().database_path
-    preferences = await _preferences(path)
+    preferences, migrated = await _preferences(path)
     return _Owner(
         path=path,
         preferences=preferences,
         settings=effective_settings(settings, preferences),
         zone=explicit or owner_zone(preferences),
+        migrated=migrated,
     )
 
 
@@ -283,10 +291,9 @@ async def sync(
     rules = owner.preferences.excluded_senders
     now = datetime.now(UTC)
     window = local_day_window(now, owner.zone)
-    path = owner.path
     async with gmail_provider(owner.settings, silent_only=silent_only) as provider:
         await provider.connect()
-        async with migrated_database(path) as database, database.session() as session:
+        async with owner.database() as database, database.session() as session:
             accounts = AccountRepository(session)
             messages = MessageRepository(session)
             threads = ThreadService(session, provider)
@@ -397,11 +404,11 @@ async def bodies(
 ) -> int:
     """Sync today's metadata, then read and prepare the shortlist in memory only."""
     owner = await _owner(database_path, timezone)
-    settings, tz, path = owner.settings, owner.zone, owner.path
+    settings, tz = owner.settings, owner.zone
     now = datetime.now(UTC)
     async with gmail_provider(settings, silent_only=silent_only) as provider:
         await provider.connect()
-        async with migrated_database(path) as database, database.session() as session:
+        async with owner.database() as database, database.session() as session:
             application = ApplicationService(
                 provider,
                 MessageRepository(session),
@@ -680,7 +687,7 @@ async def drafts_generate(
     never offered.
     """
     owner = await _owner(database_path, None)
-    settings, path, preferences = owner.settings, owner.path, owner.preferences
+    settings, preferences = owner.settings, owner.preferences
     bodies = (
         BodyService(
             GmailBodies(gmail_provider, settings, silent_only=silent_only),  # Only for --use-email.
@@ -690,7 +697,7 @@ async def drafts_generate(
         else None
     )
     async with (
-        migrated_database(path) as database,
+        owner.database() as database,
         groq_provider(settings) as ai,
         database.session() as session,
     ):
@@ -981,7 +988,7 @@ async def brief(
     silent_only = silent_only or automatic
     day = None if date_text is None else parse_brief_date(date_text)
     owner = await _owner(database_path, timezone)
-    settings, tz, path = owner.settings, owner.zone, owner.path
+    settings, tz = owner.settings, owner.zone
     now = datetime.now(UTC)
     today = local_day_window(now, tz).local_date
     check_brief_date(day or today, today)
@@ -991,7 +998,7 @@ async def brief(
         groq_provider(settings) as ai,
     ):
         await provider.connect()
-        async with migrated_database(path) as database, database.session() as session:
+        async with owner.database() as database, database.session() as session:
             service = compose_brief(
                 session,
                 provider,
@@ -1468,7 +1475,7 @@ async def preferences_show(*, database_path: Path | None) -> int:
     settings = _load_settings()
     path = database_path or AppPaths.from_qt().database_path
     exists = await asyncio.to_thread(path.exists)
-    preferences = await _preferences(path)
+    preferences, _ = await _preferences(path)
     if not exists:
         print("No database yet: these are the defaults.")
     elif preferences.updated_at_utc is None:

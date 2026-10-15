@@ -136,9 +136,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
   `projects` for owner projects and life areas, and `calendar_planning` for AI-proposed
   calendar changes. `calendar.py` is day boundaries and time zones, not the calendar feature.
-  `writes.py`: `commit_once()`, the one write every revisioned service uses (clock read
-  once, one commit, rollback on any failure). `compose_brief()` (`brief.py`) builds the
-  brief as the desktop and the CLI both run it.
+  `writes.py`: `committed()` commits one change and rolls it back on any failure, and
+  `commit_once()` adds the clock read once; the owner-record services, the auto-send
+  permission and the Google Calendar cache write through them. `compose_brief()`
+  (`brief.py`) builds the brief as the desktop and the CLI both run it.
 - `src/mailbrief/domain/messages.py`: normalized messages, `own_addresses` (the primary
   address plus the aliases; every owner address set is built with it) and
   `is_own_message`, the one definition of the owner's own message, shared by ranking,

@@ -358,7 +358,9 @@ class ApplicationService:
 
         # 4. Persist the computed rankings in SQLite
         await self._message_repo.save_rankings(
-            account.id, [(r.message.provider_message_id, r.score, r.reasons) for r in ranked]
+            account.id,
+            [(r.message.provider_message_id, r.score, r.reasons) for r in ranked],
+            loaded=rows,
         )
         if self._session:
             await self._session.commit()

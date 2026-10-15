@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 
 import pytest
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import event, func, insert, select, update
 
 from mailbrief.domain.analysis import (
     ActionEffort,
@@ -1055,3 +1055,47 @@ async def test_deleting_an_account_keeps_actions_decisions_and_source_snapshots(
         source.received_at_utc,
     ) == snapshot
     assert action is not None and action.title == "Approve the proposal"
+
+
+async def test_save_rankings_reads_only_the_rows_it_was_not_given(database: Database) -> None:
+    async with database.transaction() as session:
+        account = await AccountRepository(session).upsert(
+            AccountIdentity(
+                provider=ProviderKind.GMAIL,
+                provider_account_id="gmail-1",
+                email_address="owner@example.com",
+            )
+        )
+        repo = MessageRepository(session)
+        rows = await repo.upsert_messages(
+            account.id, [make_message(provider_message_id=f"m{n}") for n in range(3)]
+        )
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]).split()[0])
+
+    async with database.transaction() as session:
+        repo = MessageRepository(session)
+        loaded = await repo.get_by_provider_ids(account.id, ["m0", "m1"])
+        event.listen(database.engine.sync_engine, "before_cursor_execute", record)
+        try:
+            await repo.save_rankings(
+                account.id,
+                [("m0", 5, [RankReason.RECENT]), ("m1", 6, []), ("m2", 7, [])],
+                loaded=loaded,
+            )
+        finally:
+            event.remove(database.engine.sync_engine, "before_cursor_execute", record)
+        assert {row.provider_message_id: row.rank_score for row in loaded} == {"m0": 5, "m1": 6}
+    assert statements.count("SELECT") == 1  # Only m2, which it wasn't given.
+
+    async with database.session() as session:
+        stored = await MessageRepository(session).get_by_provider_ids(
+            account.id, [row.provider_message_id for row in rows]
+        )
+        assert sorted((row.provider_message_id, row.rank_score) for row in stored) == [
+            ("m0", 5),
+            ("m1", 6),
+            ("m2", 7),
+        ]

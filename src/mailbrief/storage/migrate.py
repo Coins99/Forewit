@@ -78,10 +78,12 @@ def upgrade_database(path: Path) -> None:
 
 
 @asynccontextmanager
-async def migrated_database(path: Path) -> AsyncIterator[Database]:
+async def migrated_database(path: Path, *, upgrade: bool = True) -> AsyncIterator[Database]:
     """The database at ``path``, created if missing and upgraded off the event loop's thread,
-    disposed when the block ends."""
-    await asyncio.to_thread(upgrade_database, path)
+    disposed when the block ends. ``upgrade=False`` skips the upgrade, for a caller that
+    already brought this database up to date."""
+    if upgrade:
+        await asyncio.to_thread(upgrade_database, path)
     database = Database.from_path(path)
     try:
         yield database

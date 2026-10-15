@@ -18,9 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX, AutoSendPermission
-from mailbrief.domain.common import normalize_utc, utc_now
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.errors import ConfigurationError
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.repositories import ConsentRepository
 from mailbrief.storage.tables import AccountTable, AIConsentTable
 
@@ -92,18 +93,15 @@ async def set_auto_send(
     found = await _active(session, account_email, provider, version)
     if limit and found is None:
         raise ConfigurationError(NO_CONSENT)
-    try:
+
+    async def change(now: datetime) -> None:
         for other in await repository.with_auto_send(provider):
             if found is None or other.id != found[0].id:
                 other.auto_send_limit = 0
                 other.auto_send_granted_at_utc = None
         if found is not None:
-            await repository.set_auto_send(
-                found[1].id, provider, version, limit, normalize_utc(clock())
-            )
-        await session.commit()
-    except BaseException:
-        await session.rollback()
-        raise
+            await repository.set_auto_send(found[1].id, provider, version, limit, now)
+
+    await commit_once(session, clock, change)
     logger.info("Automatic-analysis permission set to %d messages", limit)
     return None if found is None else _permission(*found)

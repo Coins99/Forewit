@@ -34,6 +34,7 @@ from mailbrief.ports.errors import (
 )
 from mailbrief.services.calendar import day_window
 from mailbrief.services.sync import sanitize_error_code
+from mailbrief.services.writes import committed
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 
 logger = logging.getLogger(__name__)
@@ -165,13 +166,7 @@ class CalendarSyncService:
 
     async def _saved[T](self, change: Awaitable[T]) -> T:
         """Commit one change to the cache, or roll it back and raise."""
-        try:
-            result = await change
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await committed(self._session, change)
 
     async def clear(self) -> None:
         """Forget the cache, as disconnecting Google Calendar does."""
@@ -180,9 +175,4 @@ class CalendarSyncService:
 
 async def forget_cache(session: AsyncSession) -> None:
     """Forget every cached Google calendar and event; no reader or network is needed."""
-    try:
-        await GoogleCalendarRepository(session).clear()
-        await session.commit()
-    except BaseException:
-        await session.rollback()
-        raise
+    await committed(session, GoogleCalendarRepository(session).clear())

@@ -266,16 +266,26 @@ class MessageRepository:
         self,
         account_id: int,
         rankings: Iterable[tuple[str, int, Sequence[str | RankReason]]],
+        loaded: Iterable[MessageTable] = (),
     ) -> None:
         """Store each message's score and readable reasons, by provider message ID; IDs no
-        longer cached are skipped.
+        longer cached are skipped. ``loaded`` are this account's rows the caller already
+        holds; only the others are read.
 
         Rows change as ORM objects, so a session that has them loaded sees the change, and
         the flush writes them together rather than one statement per message.
         """
         scores = {message_id: (score, reasons) for message_id, score, reasons in rankings}
-        for row in await self.get_by_provider_ids(account_id, scores):
-            score, reasons = scores[row.provider_message_id]
+        rows = {
+            row.provider_message_id: row
+            for row in loaded
+            if row.account_id == account_id and row.provider_message_id in scores
+        }
+        if missing := scores.keys() - rows.keys():
+            for row in await self.get_by_provider_ids(account_id, missing):
+                rows[row.provider_message_id] = row
+        for message_id, row in rows.items():
+            score, reasons = scores[message_id]
             row.rank_score = score
             row.rank_reasons_json = [
                 reason.value if isinstance(reason, RankReason) else str(reason)

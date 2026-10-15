@@ -17,7 +17,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from mailbrief.storage.database import Database, sqlite_url
-from mailbrief.storage.migrate import upgrade_database
+from mailbrief.storage.migrate import migrated_database, upgrade_database
 
 
 def test_packaged_migrations_work_away_from_checkout(
@@ -1580,3 +1580,37 @@ def test_tags_go_with_their_task(tmp_path: Path) -> None:
         connection.execute("DELETE FROM actions WHERE id=?", (action_id,))
         connection.commit()
     assert _query(path, "SELECT count(*) FROM action_tags") == [(0,)]
+
+
+async def test_migrated_database_creates_upgrades_and_always_disposes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "new" / "mailbrief.sqlite3"
+    disposed: list[Database] = []
+    real_dispose = Database.dispose
+
+    async def dispose(self: Database) -> None:
+        disposed.append(self)
+        await real_dispose(self)
+
+    monkeypatch.setattr(Database, "dispose", dispose)
+    async with migrated_database(path):
+        assert "alembic_version" in table_names(path)
+    with pytest.raises(LookupError):
+        async with migrated_database(path):
+            raise LookupError
+    assert len(disposed) == 2  # Once after the block ends, once after it fails.
+
+
+async def test_migrated_database_skips_an_upgrade_already_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    upgraded: list[Path] = []
+    monkeypatch.setattr("mailbrief.storage.migrate.upgrade_database", upgraded.append)
+    path = tmp_path / "mailbrief.sqlite3"
+    async with migrated_database(path, upgrade=False):
+        pass
+    assert upgraded == []
+    async with migrated_database(path):
+        pass
+    assert upgraded == [path]
