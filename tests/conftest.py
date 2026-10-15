@@ -3,6 +3,8 @@
 import os
 import socket
 import sqlite3
+import sys
+from collections.abc import Iterator
 from contextlib import suppress
 from typing import Any
 
@@ -76,3 +78,38 @@ def sqlite_without_disk_flushes(monkeypatch: pytest.MonkeyPatch) -> None:
         return connection
 
     monkeypatch.setattr(sqlite3, "connect", connect)
+
+
+def delete_windows() -> None:
+    """Delete every window still open or awaiting deletion, with its widgets."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        return
+    from mailbrief.ui.theme import paused_collection
+
+    with paused_collection():
+        for window in app.topLevelWidgets():
+            # Its child windows go with it. Not closed: a window's closeEvent can start work
+            # (a cancel, an autosave) on an event loop the test has already closed.
+            if window.parentWidget() is None:
+                window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def free_widgets() -> Iterator[None]:
+    """Delete every window a test leaves behind, once the test and its fixtures are done.
+
+    pytest-qt closes the widgets ``qtbot.addWidget`` registered and calls ``deleteLater()``
+    on them, but with no event loop running nothing ever deletes them. Left alive, they pile
+    up test after test, and every later change of the style or palette walks them all.
+    pytest-qt closes its widgets before any fixture tears down, and this autouse fixture
+    tears down after the test's own fixtures, so nothing it deletes is still in use. It also
+    deletes windows a test never registered; still register them, so they are closed too.
+    """
+    yield
+    if "PySide6.QtWidgets" in sys.modules:  # Otherwise the test never used Qt.
+        delete_windows()
