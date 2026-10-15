@@ -1,5 +1,8 @@
 """User-owned actions accepted from suggestions, with their steps and source messages."""
 
+import re
+import unicodedata
+from collections.abc import Iterable
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Final, Self
@@ -30,6 +33,9 @@ ACTION_NOTES_MAX_CHARS: Final = 10_000
 # The owner's own estimate, in whole minutes up to 100 hours; never derived from the AI's effort.
 ESTIMATE_MAX_MINUTES: Final = 6_000
 PUBLIC_ID_CHARS: Final = 36  # A UUID in its canonical text form.
+TAG_MAX_CHARS: Final = 40
+MAX_ACTION_TAGS: Final = 10
+_TAG_SPACES: Final = re.compile(r"\s+")
 
 TARGET_REASON_TEXT: Final[dict[TargetReason, str]] = {
     TargetReason.WORKING_DAY_BEFORE: "one working day before the deadline",
@@ -42,6 +48,56 @@ class ActionStatus(StrEnum):
 
     OPEN = "open"
     COMPLETED = "completed"
+
+
+class ActionPriority(StrEnum):
+    """The owner's own priority for a task; AI runs and proposals never set it."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+# Among tasks with the same dates: high first, and tasks without a priority last.
+PRIORITY_RANK: Final[dict[ActionPriority | None, int]] = {
+    ActionPriority.HIGH: 0,
+    ActionPriority.MEDIUM: 1,
+    ActionPriority.LOW: 2,
+    None: 3,
+}
+
+
+def tag_key(name: str) -> str:
+    """What makes two tags the same tag: case and character width don't ("Home" is "home").
+    Unicode's NFKC case folding, so a key is its own key."""
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", name).casefold())
+
+
+def clean_tag(text: str) -> str:
+    """A tag as stored: single spaces, no control or format characters, no leading ``#``."""
+    kept = "".join(
+        char for char in text if char.isspace() or not unicodedata.category(char).startswith("C")
+    )
+    return _TAG_SPACES.sub(" ", kept).strip().lstrip("#").strip()
+
+
+def normalize_tags(values: Iterable[str]) -> tuple[str, ...]:
+    """The owner's tags cleaned, without blanks or repeats (the first spelling is kept),
+    sorted by their key. Raises ValueError, naming no tag, for a tag that is too long or has a
+    comma (tags are typed separated by commas), or for more than MAX_ACTION_TAGS."""
+    found: dict[str, str] = {}
+    for value in values:
+        tag = clean_tag(value)
+        if not tag:
+            continue
+        if "," in tag:
+            raise ValueError("A tag can't contain a comma.")
+        if len(tag) > TAG_MAX_CHARS:
+            raise ValueError(f"A tag can be at most {TAG_MAX_CHARS} characters.")
+        found.setdefault(tag_key(tag), tag)
+    if len(found) > MAX_ACTION_TAGS:
+        raise ValueError(f"A task can have at most {MAX_ACTION_TAGS} tags.")
+    return tuple(found[key] for key in sorted(found))
 
 
 class ActionActivityKind(StrEnum):
@@ -246,6 +302,8 @@ class Action(DomainModel):
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     status: ActionStatus
+    priority: ActionPriority | None = None  # The owner's, never the AI's.
+    tags: tuple[str, ...] = Field(default=(), repr=False)  # Sorted by tag_key.
     effort: ActionEffort | None = None
     estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
     deadline_text: str | None = Field(
@@ -341,11 +399,18 @@ class ActionEdit(DomainModel):
     project_public_id: str | None = Field(default=None, min_length=36, max_length=36)
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
+    # Required like the rest: an edit that left one out would erase the owner's choice.
+    priority: ActionPriority | None
+    tags: tuple[str, ...] = Field(repr=False)
     effort: ActionEffort | None
-    # Required like the rest: an edit that left it out would erase the owner's estimate.
     estimate_minutes: int | None = Field(ge=1, le=ESTIMATE_MAX_MINUTES)
     target_date: date | None
     notes: str = Field(max_length=ACTION_NOTES_MAX_CHARS, repr=False)
+
+    @field_validator("tags")
+    @classmethod
+    def check_tags(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return normalize_tags(value)
 
 
 class StepEdit(DomainModel):

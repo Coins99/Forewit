@@ -264,3 +264,24 @@ async def test_committed_save_survives_refresh_failure_and_reopen_reads_fresh_re
     await finish(window)
     assert dialog.name.text() == "Fresh name"
     assert dialog._selected is not None and dialog._selected.revision == 3
+
+
+async def test_tags_reach_the_filter_and_the_editor(qtbot: QtBot) -> None:
+    backend = FakeBackend()
+    tagged = make_action(tags=("Home",))
+    plain = make_action(public_id="44444444-4444-4444-8444-444444444444")
+    backend.actions = {ActionFilter.OPEN: (tagged, plain)}
+    backend.tags = ("Home",)
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window.initialize()
+    window._show_page("actions")
+    panel = window.actions_panel
+    panel.group.setCurrentIndex(panel.group.findData("tag:home"))
+    await finish(window)
+    assert panel.lists[ActionFilter.OPEN].count() == 1
+    assert panel.selected() == tagged
+    completer = window.action_editor.tags.completer()
+    assert completer is not None
+    model = completer.model()
+    assert [model.index(row, 0).data() for row in range(model.rowCount())] == ["Home"]

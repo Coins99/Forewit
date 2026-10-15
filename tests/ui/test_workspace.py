@@ -846,6 +846,7 @@ def test_manual_task_activity_renders(
 def test_project_organization_renders(
     qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
 ) -> None:
+    from mailbrief.domain.actions import ActionPriority
     from mailbrief.ui.projects_view import ProjectsDialog
     from tests.factories import make_action
     from tests.ui.test_projects import AREA, PROJECT
@@ -853,11 +854,14 @@ def test_project_organization_renders(
     apply_theme(qapp, mode)
     workspace = build(qtbot)
     panel = ActionsPanel()
-    panel.show_groups((PROJECT,), (AREA,))
+    panel.show_groups((PROJECT,), (AREA,), ("Errands", "Home"))
     panel.group.setCurrentIndex(panel.group.findData("project:" + PROJECT.public_id))
+    organized = make_action(
+        project=PROJECT, sources=(), priority=ActionPriority.HIGH, tags=("Errands", "Home")
+    )
     panel.show_actions(
         ActionFilter.OPEN,
-        (make_action(project=PROJECT, sources=()),),
+        (organized,),
         today=TODAY,
         zone=OWNER_ZONE,
         now=ACTIONS_NOW,
@@ -881,10 +885,12 @@ def test_project_organization_renders(
 
     editor = ActionEditor(workspace)
     editor.set_projects((PROJECT,))
-    editor.edit(make_action(project=PROJECT, sources=()), TODAY, OWNER_ZONE)
+    editor.set_tags(("Errands", "Home"))
+    editor.edit(organized, TODAY, OWNER_ZONE)
     show(qtbot, editor)
     images["dialog-task-project"] = editor.grab()
     assert editor.project.currentData() == PROJECT.public_id
+    assert (editor.priority.currentText(), editor.tags.text()) == ("High", "Errands, Home")
     assert dialog.name.text() == PROJECT.name
     folder = os.environ.get("MAILBRIEF_UI_SHOTS")
     if folder:

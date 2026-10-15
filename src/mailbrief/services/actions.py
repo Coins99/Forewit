@@ -14,14 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import (
     MAX_ACTION_STEPS,
+    PRIORITY_RANK,
     Action,
     ActionActivityKind,
     ActionEdit,
     ActionFilter,
+    ActionPriority,
     ActionStatus,
     StepEdit,
     SuggestionState,
     ThreadLink,
+    tag_key,
 )
 from mailbrief.domain.analysis import (
     ActionOwnership,
@@ -93,11 +96,21 @@ def _new_public_id() -> str:
 
 
 def urgency(
-    target_date: date | None, due_at_utc: datetime | None, created_at_utc: datetime
-) -> tuple[date, datetime, datetime]:
-    """How open actions are ordered: by target date, then due time, then creation, with
-    undated actions last."""
-    return (target_date or date.max, due_at_utc or _LATEST, created_at_utc)
+    target_date: date | None,
+    due_at_utc: datetime | None,
+    priority: str | None,
+    created_at_utc: datetime,
+) -> tuple[date, datetime, int, datetime]:
+    """How urgent an action is: by target date, then due time, then the owner's priority
+    (none last), then creation, with undated actions last; so a priority orders work that has
+    no date."""
+    rank = PRIORITY_RANK[None if priority is None else ActionPriority(priority)]
+    return (target_date or date.max, due_at_utc or _LATEST, rank, created_at_utc)
+
+
+def action_order(action: Action) -> tuple[date, datetime, int, datetime]:
+    """How open actions are ordered: urgency() for the action."""
+    return urgency(action.target_date, action.due_at_utc(), action.priority, action.created_at_utc)
 
 
 def touch(row: ActionTable, now: datetime) -> None:
@@ -128,6 +141,7 @@ def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
     row.project_public_id = edit.project_public_id
     row.title = edit.title
     row.ownership = edit.ownership.value
+    row.priority = None if edit.priority is None else edit.priority.value
     row.effort = None if edit.effort is None else edit.effort.value
     row.estimate_minutes = edit.estimate_minutes
     row.target_date = edit.target_date
@@ -229,6 +243,30 @@ class ActionService:
         ):
             raise ActionConflictError("Choose an active project for this task.")
 
+    async def _apply_tags(self, row: ActionTable, edit: ActionEdit, now: datetime) -> None:
+        """Give the action the edit's tags. A tag it adds is spelt as other live tasks already
+        spell it, so one tag reads the same on every task; respelling a tag it already has
+        respells it on every live task, one revision of each."""
+        had = {tag.name_key: tag.name for tag in await self._repository.tag_rows(row.id)}
+        spellings = await self._repository.tag_spellings(
+            (key for key in map(tag_key, edit.tags) if key not in had), besides=row.id
+        )
+        names: list[str] = []
+        respelt: dict[int, ActionTable] = {}
+        for name in edit.tags:
+            key = tag_key(name)
+            if key not in had:
+                names.append(spellings.get(key, name))
+                continue
+            names.append(name)
+            if had[key] != name:
+                for other in await self._repository.respell_tag(key, name, besides=row.id):
+                    respelt[other.id] = other
+        await self._repository.set_tags(row.id, names)
+        for other in respelt.values():
+            touch(other, now)
+            await self._repository.record_activity(other, ActionActivityKind.EDITED, now)
+
     async def create(self, edit: ActionEdit, steps: Sequence[StepEdit] = ()) -> Action:
         """Create a task with no account or email source, using the same plan and workflow."""
 
@@ -249,6 +287,7 @@ class ActionService:
             )
             _apply_edit(row, edit)
             await self._repository.add_action(row)
+            await self._apply_tags(row, edit, now)
             await self._apply_steps(row, steps, listed, now)
             await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             return await self._load(row)
@@ -541,6 +580,7 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             await self._check_project(edit, row.project_public_id)
             _apply_edit(row, edit)
+            await self._apply_tags(row, edit, now)
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)
             touch(row, now)
@@ -614,6 +654,14 @@ class ActionService:
         )
         previous_revision = row.revision
         row.deleted_at_utc = None
+        # Its tags read as live tasks spell them now, which may have changed while it was gone.
+        tags = await self._repository.tag_rows(row.id)
+        spellings = await self._repository.tag_spellings(
+            (tag.name_key for tag in tags), besides=row.id
+        )
+        await self._repository.set_tags(
+            row.id, [spellings.get(tag.name_key, tag.name) for tag in tags]
+        )
         touch(row, now)
         await self._repository.record_activity(
             row,
@@ -673,7 +721,9 @@ class ActionService:
         rows = await self._repository.thread_link_rows(
             ProviderKind.GMAIL.value, account_email, message_keys
         )
-        found: dict[str, dict[int, tuple[tuple[date, datetime, datetime, int], ThreadLink]]] = {}
+        found: dict[
+            str, dict[int, tuple[tuple[date, datetime, int, datetime, int], ThreadLink]]
+        ] = {}
         for row in rows:
             due = deadline_due_at(
                 DeadlinePrecision(row.deadline_precision),
@@ -684,7 +734,7 @@ class ActionService:
             links = found.setdefault(row.message_key, {})
             earlier = links.get(row.action_id)
             links[row.action_id] = (
-                (*urgency(row.target_date, due, row.created_at_utc), row.action_id),
+                (*urgency(row.target_date, due, row.priority, row.created_at_utc), row.action_id),
                 ThreadLink(
                     public_id=row.public_id,
                     title=row.title,
@@ -713,10 +763,10 @@ class ActionService:
     ) -> tuple[Action, ...]:
         """Live actions for a view.
 
-        Open and waiting actions come by target date, then due time, then creation, with
-        undated ones last, and are never capped unless ``limit`` is given. Completed actions
-        come newest first, at most COMPLETED_LIST_LIMIT unless ``limit`` says otherwise;
-        count_actions() says how many there are.
+        Open and waiting actions come in action_order() (target date, due time, priority,
+        creation, with undated ones last), and are never capped unless ``limit`` is given.
+        Completed actions come newest first, at most COMPLETED_LIST_LIMIT unless ``limit``
+        says otherwise; count_actions() says how many there are.
         """
         if limit is not None and limit < 1:
             raise ValueError("limit must be at least 1")
@@ -728,13 +778,12 @@ class ActionService:
         if view is ActionFilter.COMPLETED:
             return tuple(actions)
         # The rows arrive in ID order and sorted() is stable, so equal keys keep that order.
-        ordered = sorted(
-            actions,
-            key=lambda action: urgency(
-                action.target_date, action.due_at_utc(), action.created_at_utc
-            ),
-        )
+        ordered = sorted(actions, key=action_order)
         return tuple(ordered if limit is None else ordered[:limit])
+
+    async def list_tags(self) -> tuple[str, ...]:
+        """Every tag on a live task, once each, sorted; the Actions filter offers them."""
+        return await self._repository.tag_names()
 
     async def count_actions(
         self, view: ActionFilter, *, group: str = "all", group_id: str | None = None

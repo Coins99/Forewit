@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from mailbrief.domain.actions import ESTIMATE_MAX_MINUTES
+from mailbrief.domain.actions import ESTIMATE_MAX_MINUTES, TAG_MAX_CHARS, ActionPriority
 from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX
 from mailbrief.domain.preferences import (
@@ -60,6 +60,9 @@ _DEFAULT_LENGTH_CHECK = "draft_length IN ('short','medium','long')"
 _FOLLOW_UP_CHECK = "follow_up_kind IN ('none','new_deadline','cancelled','delivered')"
 _PROPOSAL_KIND_CHECK = "kind IN ('new_deadline','cancelled','delivered')"
 _PROPOSAL_STATE_CHECK = "state IN ('pending','applied','dismissed')"
+_PRIORITY_CHECK = (
+    f"priority IS NULL OR priority IN ({', '.join(repr(item.value) for item in ActionPriority)})"
+)
 _REFRESH_INTERVAL_CHECK = (
     "refresh_interval_minutes IS NULL OR refresh_interval_minutes IN "
     f"({', '.join(str(minutes) for minutes in REFRESH_INTERVALS)})"
@@ -431,6 +434,7 @@ class ActionTable(Base):
             f"estimate_minutes IS NULL OR estimate_minutes BETWEEN 1 AND {ESTIMATE_MAX_MINUTES}",
             name="estimate_minutes_range",
         ),
+        CheckConstraint(_PRIORITY_CHECK, name="priority_known"),
         Index("ix_actions_status", "status"),
     )
 
@@ -444,6 +448,7 @@ class ActionTable(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     effort: Mapped[str | None] = mapped_column(String(16))
     estimate_minutes: Mapped[int | None] = mapped_column(Integer)  # The owner's, never the AI's.
+    priority: Mapped[str | None] = mapped_column(String(16))  # The owner's, never the AI's.
     deadline_text: Mapped[str | None] = mapped_column(Text)
     deadline_precision: Mapped[str] = mapped_column(
         String(16),
@@ -468,6 +473,26 @@ class ActionTable(Base):
     )
     # The owner's "seen" watermark for later messages in the action's threads (ADR 0015).
     thread_seen_until_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class ActionTagTable(Base):
+    """One of the owner's tags on an action. A tag is its name: tasks share a tag when
+    their ``name_key`` (``tag_key``) matches, so there is no tag record to keep in step."""
+
+    __tablename__ = "action_tags"
+    __table_args__ = (
+        UniqueConstraint("action_id", "name_key", name="uq_action_tags_name"),
+        CheckConstraint(f"length(name) BETWEEN 1 AND {TAG_MAX_CHARS}", name="name_length"),
+        Index("ix_action_tags_name_key", "name_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action_id: Mapped[int] = mapped_column(
+        ForeignKey("actions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    name_key: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ActionActivityTable(Base):

@@ -70,6 +70,8 @@ async def add_task(
             title=title,
             ownership=ActionOwnership.MINE,
             effort=None,
+            priority=None,
+            tags=(),
             estimate_minutes=None,
             target_date=None,
             notes=notes,

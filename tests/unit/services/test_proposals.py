@@ -707,6 +707,8 @@ async def test_undo_is_refused_once_the_action_changed(
             title="Send the deck",
             ownership=ActionOwnership.WAITING_FOR,
             effort=None,
+            priority=None,
+            tags=(),
             estimate_minutes=None,
             target_date=applied.target_date,
             notes="Moved.",

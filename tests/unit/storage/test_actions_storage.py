@@ -453,9 +453,9 @@ async def test_loading_many_actions_takes_a_fixed_number_of_queries(
 
         loaded = await repository.load([row for row in rows if row is not None])
 
-    # Activity, steps, sources, the accounts their snapshots name, thread messages and
+    # Activity, tags, steps, sources, the accounts their snapshots name, thread messages and
     # pending proposals: one query each, however many actions load.
-    assert len(selects) == 6
+    assert len(selects) == 7
     assert [len(item.steps) for item in loaded] == [3, 3, 3]
     assert [[source.available for source in item.sources] for item in loaded] == [[True]] * 3
 

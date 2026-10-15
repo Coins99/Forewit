@@ -5,11 +5,12 @@ from datetime import date, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import QDate, QModelIndex, QPersistentModelIndex, QStringListModel, Qt, Signal
 from PySide6.QtGui import QValidator, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
@@ -35,7 +36,9 @@ from mailbrief.domain.actions import (
     TARGET_REASON_TEXT,
     Action,
     ActionEdit,
+    ActionPriority,
     StepEdit,
+    normalize_tags,
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
@@ -48,6 +51,12 @@ _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
     (ActionEffort.MINUTES, "Minutes"),
     (ActionEffort.HOURS, "Hours"),
     (ActionEffort.DAYS, "Days"),
+)
+_PRIORITIES: tuple[tuple[ActionPriority | None, str], ...] = (
+    (None, "Not set"),
+    (ActionPriority.HIGH, "High"),
+    (ActionPriority.MEDIUM, "Medium"),
+    (ActionPriority.LOW, "Low"),
 )
 _STEP_ID = Qt.ItemDataRole.UserRole
 NO_ESTIMATE: Final = "Not set"
@@ -99,6 +108,36 @@ class EstimateBox(QSpinBox):
     def wheelEvent(self, event: QWheelEvent) -> None:
         if takes_wheel(self, event):
             super().wheelEvent(event)
+
+
+class TagCompleter(QCompleter):
+    """Completes the tag being typed after the last comma from the tags already in use,
+    keeping the tags typed before it."""
+
+    def __init__(self, field: QLineEdit) -> None:
+        super().__init__(field)
+        self._field = field
+        # Parented and held here: a model only the completer referred to would be collected.
+        self._tags = QStringListModel(self)
+        self.setModel(self._tags)
+        self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+
+    def set_tags(self, tags: tuple[str, ...]) -> None:
+        self._tags.setStringList(list(tags))
+
+    def splitPath(self, path: str, /) -> list[str]:
+        return [path.rsplit(",", 1)[-1].strip()]
+
+    def pathFromIndex(self, index: QModelIndex | QPersistentModelIndex, /) -> str:
+        typed, _, _ = self._field.text().rpartition(",")
+        chosen = str(index.data())
+        return f"{typed}, {chosen}" if typed.strip() else chosen
+
+
+def parse_tags(text: str) -> tuple[str, ...]:
+    """The tags typed in the editor, separated by commas; raises ValueError like the model."""
+    return normalize_tags(text.split(","))
 
 
 def _plain(text: str) -> QLabel:
@@ -165,6 +204,27 @@ class ActionEditor(QDialog):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         form.addRow("Pro&ject", self.project)
+        self.priority = QComboBox()
+        self.priority.setObjectName("taskPriority")
+        self.priority.setAccessibleName("Task priority")
+        for _priority, name in _PRIORITIES:
+            self.priority.addItem(name)
+        self.tags = QLineEdit()
+        self.tags.setObjectName("taskTags")
+        self.tags.setAccessibleName("Task tags, separated by commas")
+        self.tags.setPlaceholderText("Separate tags with commas")
+        self._tag_completer = TagCompleter(self.tags)
+        self.tags.setCompleter(self._tag_completer)
+        # One row for both, like Target: the editor must still fit a small screen.
+        priority_label = QLabel("&Priority")
+        priority_label.setBuddy(self.priority)
+        tags_label = QLabel("Ta&gs")
+        tags_label.setBuddy(self.tags)
+        organize_row = QHBoxLayout()
+        organize_row.addWidget(self.priority)
+        organize_row.addWidget(tags_label)
+        organize_row.addWidget(self.tags, 1)
+        form.addRow(priority_label, organize_row)
         self.owner = QComboBox()
         for _value, name in _OWNERS:
             self.owner.addItem(name)
@@ -229,6 +289,8 @@ class ActionEditor(QDialog):
         picked = self.target.date()
         return (
             self.title.text(),
+            self.priority.currentIndex(),
+            self.tags.text().strip(),
             self.owner.currentIndex(),
             self.effort.currentIndex(),
             self.estimate.text(),
@@ -254,6 +316,8 @@ class ActionEditor(QDialog):
         self._action = action
         self.title.setText(action.title)
         self._fill_projects(None if action.project is None else action.project.public_id)
+        self.priority.setCurrentIndex([value for value, _ in _PRIORITIES].index(action.priority))
+        self.tags.setText(", ".join(action.tags))
         self.owner.setCurrentIndex([value for value, _ in _OWNERS].index(action.ownership))
         self.effort.setCurrentIndex([value for value, _ in _EFFORTS].index(action.effort))
         self.estimate.setValue(action.estimate_minutes or 0)
@@ -294,6 +358,8 @@ class ActionEditor(QDialog):
         self.setWindowTitle("New task")
         self.title.clear()
         self._fill_projects(None)
+        self.priority.setCurrentIndex(0)
+        self.tags.clear()
         self.owner.setCurrentIndex(0)
         self.effort.setCurrentIndex(0)
         self.estimate.setValue(0)
@@ -313,6 +379,11 @@ class ActionEditor(QDialog):
 
     def set_projects(self, projects: tuple[Project, ...]) -> None:
         self._projects = projects
+
+    def set_tags(self, tags: tuple[str, ...]) -> None:
+        """The tags in use, sorted by key as the service lists them, for the Tags field to
+        complete; the service keeps their spelling."""
+        self._tag_completer.set_tags(tags)
 
     def _fill_projects(self, chosen: str | None) -> None:
         self.project.clear()
@@ -439,6 +510,11 @@ class ActionEditor(QDialog):
         if not self.estimate.hasAcceptableInput():
             self.status.setText(BAD_ESTIMATE)
             return
+        try:
+            tags = parse_tags(self.tags.text())
+        except ValueError as exc:
+            self.status.setText(str(exc))  # The model's own words, which name no tag.
+            return
         self.estimate.interpretText()  # Take what is typed, as leaving the field would.
         picked = self.target.date()
         project_id = self.project.currentData()
@@ -446,6 +522,8 @@ class ActionEditor(QDialog):
             project_public_id=project_id if isinstance(project_id, str) else None,
             title=title,
             ownership=_OWNERS[self.owner.currentIndex()][0],
+            priority=_PRIORITIES[self.priority.currentIndex()][0],
+            tags=tags,
             effort=_EFFORTS[self.effort.currentIndex()][0],
             estimate_minutes=self.estimate.minutes(),
             target_date=(

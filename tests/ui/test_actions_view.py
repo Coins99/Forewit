@@ -24,6 +24,7 @@ from mailbrief.domain.actions import (
     ActionActivity,
     ActionActivityKind,
     ActionFilter,
+    ActionPriority,
     ActionProposal,
     ActionSource,
     ActionStatus,
@@ -908,3 +909,53 @@ def test_activity_distinguishes_new_sources_from_suggestion_decisions(
     labels = panel.detail.findChildren(QLabel, "actionActivityEntry")
     assert any(item.text().startswith(label) for item in labels)
     assert any(item.text().startswith(undo_label) for item in labels)
+
+
+def test_priority_and_tags_read_in_the_row_the_text_and_the_detail(panel: ActionsPanel) -> None:
+    tagged = action(
+        1,
+        target_date=date(2026, 10, 6),
+        priority=ActionPriority.HIGH,
+        tags=("<b>Home</b>", "errands"),
+        steps=steps(True, False),
+    )
+
+    row = action_row(tagged, today=TODAY, zone=UTC_ZONE, now=NOW)
+    assert row.meta == "Target Tue Oct 6 · High priority · 1/2 steps · Tags: <b>Home</b>, errands"
+    assert describe(tagged, today=TODAY, zone=UTC_ZONE, now=NOW) == (
+        "Action 1 — Target Tue Oct 6 · High priority · 1/2 steps · tagged <b>Home</b>, errands"
+    )
+    show(panel, ActionFilter.OPEN, tagged)
+    label = panel.detail.findChild(QLabel, "actionPriorityTags")
+    assert label is not None
+    assert label.text() == "High priority · Tags: <b>Home</b>, errands"
+    assert label.textFormat() is Qt.TextFormat.PlainText  # The owner's text, never markup.
+
+
+def test_an_action_without_priority_or_tags_shows_neither(panel: ActionsPanel) -> None:
+    show(panel, ActionFilter.OPEN, action(1))
+    assert panel.detail.findChild(QLabel, "actionPriorityTags") is None
+    assert action_row(action(1), today=TODAY, zone=UTC_ZONE, now=NOW).meta == NO_DATES
+
+
+def test_the_filter_offers_tags_by_key(panel: ActionsPanel) -> None:
+    panel.show_groups((), (), ("errands", "Home"))
+    items = [
+        (panel.group.itemText(index), panel.group.itemData(index))
+        for index in range(panel.group.count())
+    ]
+    assert items == [
+        ("All tasks", "all"),
+        ("Unassigned", "unassigned"),
+        ("Tag: errands", "tag:errands"),
+        ("Tag: Home", "tag:home"),
+    ]
+    changes: list[None] = []
+    panel.group_changed.connect(lambda: changes.append(None))
+    panel.group.setCurrentIndex(3)
+    assert panel.grouping() == ("tag", "home")
+    assert changes == [None]
+    panel.show_groups((), (), ("HOME",))  # Respelt: the same tag stays chosen.
+    assert panel.grouping() == ("tag", "home") and panel.group.currentText() == "Tag: HOME"
+    panel.show_groups((), (), ())  # No task has it any more: back to all tasks.
+    assert panel.grouping() == ("all", None)

@@ -149,7 +149,10 @@ class ThreadService:
                 action.deadline_at_utc,
                 action.deadline_timezone,
             )
-            order[action.id] = (*urgency(action.target_date, due, action.created_at_utc), action.id)
+            order[action.id] = (
+                *urgency(action.target_date, due, action.priority, action.created_at_utc),
+                action.id,
+            )
         threads = sorted(
             baselines,
             key=lambda thread_id: (min(order[key] for key in baselines[thread_id]), thread_id),

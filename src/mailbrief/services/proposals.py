@@ -267,7 +267,12 @@ class ProposalService:
                         if since < received and (action.id, key) not in already
                     ),
                     key=lambda action: (
-                        *urgency(action.target_date, _due(action), action.created_at_utc),
+                        *urgency(
+                            action.target_date,
+                            _due(action),
+                            action.priority,
+                            action.created_at_utc,
+                        ),
                         action.id,
                     ),
                 )

@@ -14,7 +14,7 @@ from mailbrief.domain.actions import Action, ActionFilter, ActionStatus
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
-from mailbrief.services.actions import ActionService, urgency
+from mailbrief.services.actions import ActionService, action_order
 from mailbrief.services.events import EventService
 
 _ORDER = {reason: number for number, reason in enumerate(AttentionReason)}
@@ -54,7 +54,7 @@ def needs_attention(
     actions: Iterable[Action], *, today: date, zone: ZoneInfo, now: datetime
 ) -> tuple[AttentionItem, ...]:
     """The actions that need attention, most urgent reason first, then as the Actions page
-    orders them (target date, due time, creation). Each action appears once."""
+    orders them (target date, due time, priority, creation). Each action appears once."""
     items = [
         AttentionItem(action=action, reason=reason)
         for action in {action.public_id: action for action in actions}.values()
@@ -63,12 +63,7 @@ def needs_attention(
     return tuple(
         sorted(
             items,
-            key=lambda item: (
-                _ORDER[item.reason],
-                urgency(
-                    item.action.target_date, item.action.due_at_utc(), item.action.created_at_utc
-                ),
-            ),
+            key=lambda item: (_ORDER[item.reason], action_order(item.action)),
         )
     )
 
