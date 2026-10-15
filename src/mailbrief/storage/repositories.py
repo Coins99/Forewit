@@ -54,6 +54,7 @@ from mailbrief.storage.tables import (
     MessageTable,
     OwnerConsentTable,
     SyncRunTable,
+    deadline_columns,
 )
 from mailbrief.text.prepare import truncate_at_boundary
 
@@ -632,11 +633,7 @@ class AnalysisRepository:
             summary=analysis.summary,
             action_required=analysis.action_required,
             action_text=analysis.action_text,
-            deadline_text=analysis.deadline_text,
-            deadline_at_utc=analysis.deadline_at_utc,
-            deadline_precision=analysis.deadline_precision.value,
-            deadline_date=analysis.deadline_date,
-            deadline_timezone=analysis.deadline_timezone,
+            **deadline_columns(analysis),
             confidence=analysis.confidence,
             evidence=analysis.evidence,
             analyzed_at_utc=datetime.now(UTC),
@@ -688,11 +685,7 @@ class AnalysisRepository:
                             "effort": None
                             if suggestion.effort is None
                             else suggestion.effort.value,
-                            "deadline_text": suggestion.deadline_text,
-                            "deadline_precision": suggestion.deadline_precision.value,
-                            "deadline_date": suggestion.deadline_date,
-                            "deadline_at_utc": suggestion.deadline_at_utc,
-                            "deadline_timezone": suggestion.deadline_timezone,
+                            **deadline_columns(suggestion),
                             "suggested_target_date": suggestion.suggested_target_date,
                             "target_reason": (
                                 None

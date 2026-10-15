@@ -11,16 +11,15 @@ from zoneinfo import ZoneInfo
 from pydantic import ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from mailbrief.domain.analysis import (
-    DEADLINE_TEXT_MAX_CHARS,
     FOLLOW_UP_EVIDENCE_CHARS,
     SUGGESTION_EVIDENCE_CHARS,
     ActionEffort,
     ActionOwnership,
     ActionSuggestion,
+    DeadlineFields,
     DeadlinePrecision,
     FollowUpKind,
     TargetReason,
-    check_deadline_fields,
     deadline_due_at,
 )
 from mailbrief.domain.common import DomainModel, normalize_utc
@@ -233,7 +232,7 @@ class ThreadActivity(DomainModel):
         return self.new_messages > 0 or self.owner_replied_at_utc is not None
 
 
-class ActionProposal(DomainModel):
+class ActionProposal(DeadlineFields):
     """A later email's proposed update to an action, which only the owner applies (ADR 0016).
 
     A new deadline carries the deadline and suggested target; a cancellation or delivery
@@ -251,13 +250,6 @@ class ActionProposal(DomainModel):
     action_revision: int = Field(ge=1)
     kind: FollowUpKind
     state: ProposalState
-    deadline_text: str | None = Field(
-        default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
-    )
-    deadline_precision: DeadlinePrecision = DeadlinePrecision.NONE
-    deadline_date: date | None = None
-    deadline_at_utc: datetime | None = None
-    deadline_timezone: str | None = None
     suggested_target_date: date | None = None
     target_reason: TargetReason | None = None
     evidence: str = Field(min_length=1, max_length=FOLLOW_UP_EVIDENCE_CHARS, repr=False)
@@ -268,7 +260,7 @@ class ActionProposal(DomainModel):
     web_link: HttpUrl
     created_at_utc: datetime
 
-    @field_validator("deadline_at_utc", "received_at_utc", "created_at_utc")
+    @field_validator("received_at_utc", "created_at_utc")
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
         return None if value is None else normalize_utc(value)
@@ -277,13 +269,7 @@ class ActionProposal(DomainModel):
     def validate_kind_and_deadline(self) -> Self:
         if self.kind is FollowUpKind.NONE:
             raise ValueError("a proposal needs a follow-up kind")
-        check_deadline_fields(
-            self.deadline_text,
-            self.deadline_precision,
-            self.deadline_date,
-            self.deadline_at_utc,
-            self.deadline_timezone,
-        )
+        self.check_deadline()
         dated = self.deadline_precision is not DeadlinePrecision.NONE
         if dated != (self.kind is FollowUpKind.NEW_DEADLINE):
             raise ValueError("only a new-deadline proposal carries a deadline, and it must")
@@ -292,7 +278,7 @@ class ActionProposal(DomainModel):
         return self
 
 
-class Action(DomainModel):
+class Action(DeadlineFields):
     """An action the owner accepted and now owns, with its plan and source messages."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -306,13 +292,6 @@ class Action(DomainModel):
     tags: tuple[str, ...] = Field(default=(), repr=False)  # Sorted by tag_key.
     effort: ActionEffort | None = None
     estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
-    deadline_text: str | None = Field(
-        default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
-    )
-    deadline_precision: DeadlinePrecision = DeadlinePrecision.NONE
-    deadline_date: date | None = None
-    deadline_at_utc: datetime | None = None
-    deadline_timezone: str | None = None
     suggested_target_date: date | None = None
     target_reason: TargetReason | None = None
     target_date: date | None = None  # The owner's choice.
@@ -333,7 +312,6 @@ class Action(DomainModel):
     activity: tuple[ActionActivity, ...] = ()
 
     @field_validator(
-        "deadline_at_utc",
         "created_at_utc",
         "updated_at_utc",
         "completed_at_utc",
@@ -345,13 +323,7 @@ class Action(DomainModel):
 
     @model_validator(mode="after")
     def validate_deadline_and_completion(self) -> Self:
-        check_deadline_fields(
-            self.deadline_text,
-            self.deadline_precision,
-            self.deadline_date,
-            self.deadline_at_utc,
-            self.deadline_timezone,
-        )
+        self.check_deadline()
         if (self.completed_at_utc is not None) != (self.status is ActionStatus.COMPLETED):
             raise ValueError("completed_at_utc must be set exactly when the action is completed")
         return self

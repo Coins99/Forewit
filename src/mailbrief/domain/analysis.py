@@ -141,6 +141,42 @@ def deadline_due_at(
     return None
 
 
+class DeadlineFields(DomainModel):
+    """A stated deadline: the email's phrase, how precisely it was resolved, and the date,
+    instant and zone that precision carries. Each model with a deadline extends this and
+    calls ``check_deadline()`` from its own validator."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    deadline_text: str | None = Field(
+        default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
+    )
+    deadline_precision: DeadlinePrecision = DeadlinePrecision.NONE
+    deadline_date: date | None = None
+    deadline_at_utc: datetime | None = None
+    deadline_timezone: str | None = None
+
+    @field_validator("deadline_at_utc")
+    @classmethod
+    def normalize_deadline(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else normalize_utc(value)
+
+    @field_validator("deadline_timezone")
+    @classmethod
+    def validate_deadline_timezone(cls, value: str | None) -> str | None:
+        return None if value is None else _require_time_zone(value)
+
+    def check_deadline(self) -> None:
+        """Raise ValueError unless the deadline fields agree with their precision."""
+        check_deadline_fields(
+            self.deadline_text,
+            self.deadline_precision,
+            self.deadline_date,
+            self.deadline_at_utc,
+            self.deadline_timezone,
+        )
+
+
 class AnalysisRequest(DomainModel):
     """Minimized provider-neutral content supplied for AI analysis.
 
@@ -245,7 +281,7 @@ class AnalysisResponse(DomainModel):
         return self
 
 
-class ActionSuggestion(DomainModel):
+class ActionSuggestion(DeadlineFields):
     """A validated action suggested for one message, which the owner may accept or dismiss.
 
     ``fingerprint`` identifies the title with case, punctuation and spacing ignored, so a
@@ -258,13 +294,6 @@ class ActionSuggestion(DomainModel):
     title: str = Field(min_length=1, max_length=SUGGESTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     effort: ActionEffort | None = None
-    deadline_text: str | None = Field(
-        default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
-    )
-    deadline_precision: DeadlinePrecision = DeadlinePrecision.NONE
-    deadline_date: date | None = None
-    deadline_at_utc: datetime | None = None
-    deadline_timezone: str | None = None
     suggested_target_date: date | None = None
     target_reason: TargetReason | None = None
     steps: tuple[_SuggestionStep, ...] = Field(
@@ -275,31 +304,15 @@ class ActionSuggestion(DomainModel):
     )
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
-    @field_validator("deadline_at_utc")
-    @classmethod
-    def normalize_deadline(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else normalize_utc(value)
-
-    @field_validator("deadline_timezone")
-    @classmethod
-    def validate_deadline_timezone(cls, value: str | None) -> str | None:
-        return None if value is None else _require_time_zone(value)
-
     @model_validator(mode="after")
     def validate_deadline_and_target(self) -> Self:
-        check_deadline_fields(
-            self.deadline_text,
-            self.deadline_precision,
-            self.deadline_date,
-            self.deadline_at_utc,
-            self.deadline_timezone,
-        )
+        self.check_deadline()
         if (self.suggested_target_date is None) != (self.target_reason is None):
             raise ValueError("suggested_target_date and target_reason must be set together")
         return self
 
 
-class MessageAnalysis(DomainModel):
+class MessageAnalysis(DeadlineFields):
     """Validated structured analysis of one message."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -311,13 +324,6 @@ class MessageAnalysis(DomainModel):
     action_text: str | None = Field(
         default=None, min_length=1, max_length=ACTION_TEXT_MAX_CHARS, repr=False
     )
-    deadline_text: str | None = Field(
-        default=None, min_length=1, max_length=DEADLINE_TEXT_MAX_CHARS, repr=False
-    )
-    deadline_precision: DeadlinePrecision = DeadlinePrecision.NONE
-    deadline_date: date | None = None
-    deadline_at_utc: datetime | None = None
-    deadline_timezone: str | None = None  # The zone used to resolve the date or instant.
     confidence: float = Field(ge=0, le=1)
     # Empty only for a body of one or two characters, which has no room for a quote of two
     # characters under EVIDENCE_BODY_SHARE.
@@ -328,29 +334,13 @@ class MessageAnalysis(DomainModel):
         default=None, min_length=1, max_length=FOLLOW_UP_EVIDENCE_CHARS, repr=False
     )
 
-    @field_validator("deadline_at_utc")
-    @classmethod
-    def normalize_deadline(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else normalize_utc(value)
-
-    @field_validator("deadline_timezone")
-    @classmethod
-    def validate_deadline_timezone(cls, value: str | None) -> str | None:
-        return None if value is None else _require_time_zone(value)
-
     @model_validator(mode="after")
     def validate_conditional_fields(self) -> Self:
         if self.action_required and not self.action_text:
             raise ValueError("action_text is required when action_required is true")
         if self.category is AnalysisCategory.DEADLINE and not self.deadline_text:
             raise ValueError("a deadline analysis requires deadline_text")
-        check_deadline_fields(
-            self.deadline_text,
-            self.deadline_precision,
-            self.deadline_date,
-            self.deadline_at_utc,
-            self.deadline_timezone,
-        )
+        self.check_deadline()
         if (self.follow_up_evidence is None) != (self.follow_up is FollowUpKind.NONE):
             raise ValueError("follow_up_evidence must be present exactly when follow_up is set")
         self._validate_suggestions()

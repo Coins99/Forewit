@@ -42,6 +42,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     MessageTable,
     SuggestionDecisionTable,
+    deadline_columns,
 )
 
 _NOT_FOUND: Final = "That action was not found."
@@ -338,11 +339,7 @@ class ActionService:
                     ownership=suggestion.ownership.value,
                     status=ActionStatus.OPEN.value,
                     effort=None if suggestion.effort is None else suggestion.effort.value,
-                    deadline_text=suggestion.deadline_text,
-                    deadline_precision=suggestion.deadline_precision.value,
-                    deadline_date=suggestion.deadline_date,
-                    deadline_at_utc=suggestion.deadline_at_utc,
-                    deadline_timezone=suggestion.deadline_timezone,
+                    **deadline_columns(suggestion),
                     suggested_target_date=suggestion.suggested_target_date,
                     target_reason=(
                         None if suggestion.target_reason is None else suggestion.target_reason.value

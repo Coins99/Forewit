@@ -1,6 +1,7 @@
 """SQLAlchemy table mappings for local MailBrief state."""
 
 from datetime import date, datetime
+from typing import TypedDict
 
 from sqlalchemy import (
     JSON,
@@ -21,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from mailbrief.domain.actions import ESTIMATE_MAX_MINUTES, TAG_MAX_CHARS, ActionPriority
-from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH
+from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH, DeadlineFields, DeadlinePrecision
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX
 from mailbrief.domain.common import utc_now
 from mailbrief.domain.preferences import (
@@ -68,6 +69,64 @@ class Base(DeclarativeBase):
     """Declarative base shared by mappings and Alembic metadata."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class DeadlineColumns:
+    """The deadline columns of an analysis, suggestion, action or proposal (DeadlineFields);
+    each of those tables also checks ``_PRECISION_CHECK``."""
+
+    deadline_text: Mapped[str | None] = mapped_column(Text)
+    deadline_precision: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="none",
+        server_default="none",
+    )
+    deadline_date: Mapped[date | None] = mapped_column(Date)
+    deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deadline_timezone: Mapped[str | None] = mapped_column(String(128))
+
+
+class DeadlineValues(TypedDict):
+    """A row's deadline as DeadlineFields takes it."""
+
+    deadline_text: str | None
+    deadline_precision: DeadlinePrecision
+    deadline_date: date | None
+    deadline_at_utc: datetime | None
+    deadline_timezone: str | None
+
+
+class DeadlineColumnValues(TypedDict):
+    """A model's deadline as DeadlineColumns stores it."""
+
+    deadline_text: str | None
+    deadline_precision: str
+    deadline_date: date | None
+    deadline_at_utc: datetime | None
+    deadline_timezone: str | None
+
+
+def deadline_values(row: DeadlineColumns) -> DeadlineValues:
+    """The deadline stored on ``row``, for a domain model's constructor."""
+    return DeadlineValues(
+        deadline_text=row.deadline_text,
+        deadline_precision=DeadlinePrecision(row.deadline_precision),
+        deadline_date=row.deadline_date,
+        deadline_at_utc=row.deadline_at_utc,
+        deadline_timezone=row.deadline_timezone,
+    )
+
+
+def deadline_columns(model: DeadlineFields) -> DeadlineColumnValues:
+    """``model``'s deadline, for a row's columns."""
+    return DeadlineColumnValues(
+        deadline_text=model.deadline_text,
+        deadline_precision=model.deadline_precision.value,
+        deadline_date=model.deadline_date,
+        deadline_at_utc=model.deadline_at_utc,
+        deadline_timezone=model.deadline_timezone,
+    )
 
 
 class AccountTable(Base):
@@ -166,7 +225,7 @@ class MessageTable(Base):
     synced_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
 
 
-class AnalysisTable(Base):
+class AnalysisTable(DeadlineColumns, Base):
     """Cached structured AI result for one versioned message input."""
 
     __tablename__ = "analyses"
@@ -184,10 +243,7 @@ class AnalysisTable(Base):
             "confidence >= 0 AND confidence <= 1",
             name="confidence_range",
         ),
-        CheckConstraint(
-            "deadline_precision IN ('none','unresolved','date','datetime')",
-            name="deadline_precision_known",
-        ),
+        CheckConstraint(_PRECISION_CHECK, name="deadline_precision_known"),
         CheckConstraint(_FOLLOW_UP_CHECK, name="follow_up_kind_known"),
         Index("ix_analyses_message_id", "message_id"),
     )
@@ -211,16 +267,6 @@ class AnalysisTable(Base):
         server_default=false(),
     )
     action_text: Mapped[str | None] = mapped_column(Text)
-    deadline_text: Mapped[str | None] = mapped_column(Text)
-    deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    deadline_precision: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default="none",
-        server_default="none",
-    )
-    deadline_date: Mapped[date | None] = mapped_column(Date)
-    deadline_timezone: Mapped[str | None] = mapped_column(String(128))
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence: Mapped[str] = mapped_column(Text, nullable=False)
     analyzed_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
@@ -411,7 +457,7 @@ class ProjectTable(Base):
     __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
 
 
-class ActionTable(Base):
+class ActionTable(DeadlineColumns, Base):
     """An action the owner accepted.
 
     Actions have no account foreign key: they belong to the owner and outlive account or
@@ -444,16 +490,6 @@ class ActionTable(Base):
     effort: Mapped[str | None] = mapped_column(String(16))
     estimate_minutes: Mapped[int | None] = mapped_column(Integer)  # The owner's, never the AI's.
     priority: Mapped[str | None] = mapped_column(String(16))  # The owner's, never the AI's.
-    deadline_text: Mapped[str | None] = mapped_column(Text)
-    deadline_precision: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default="none",
-        server_default="none",
-    )
-    deadline_date: Mapped[date | None] = mapped_column(Date)
-    deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    deadline_timezone: Mapped[str | None] = mapped_column(String(128))
     suggested_target_date: Mapped[date | None] = mapped_column(Date)
     target_reason: Mapped[str | None] = mapped_column(String(32))
     target_date: Mapped[date | None] = mapped_column(Date)
@@ -514,7 +550,7 @@ class ActionActivityTable(Base):
     legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
-class ActionSuggestionTable(Base):
+class ActionSuggestionTable(DeadlineColumns, Base):
     """One validated action suggested by a cached analysis, at its position."""
 
     __tablename__ = "action_suggestions"
@@ -537,16 +573,6 @@ class ActionSuggestionTable(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     ownership: Mapped[str] = mapped_column(String(16), nullable=False)
     effort: Mapped[str | None] = mapped_column(String(16))
-    deadline_text: Mapped[str | None] = mapped_column(Text)
-    deadline_precision: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default="none",
-        server_default="none",
-    )
-    deadline_date: Mapped[date | None] = mapped_column(Date)
-    deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    deadline_timezone: Mapped[str | None] = mapped_column(String(128))
     suggested_target_date: Mapped[date | None] = mapped_column(Date)
     target_reason: Mapped[str | None] = mapped_column(String(32))
     steps_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -636,7 +662,7 @@ class SuggestionDecisionTable(Base):
     decided_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
-class ActionProposalTable(Base):
+class ActionProposalTable(DeadlineColumns, Base):
     """A later email's proposed update to an action, applied only by the owner (ADR 0016).
 
     It keeps a snapshot of the email, so it outlives the cached message. ``previous_json``,
@@ -666,16 +692,6 @@ class ActionProposalTable(Base):
     state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default="pending"
     )
-    deadline_text: Mapped[str | None] = mapped_column(Text)
-    deadline_precision: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default="none",
-        server_default="none",
-    )
-    deadline_date: Mapped[date | None] = mapped_column(Date)
-    deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    deadline_timezone: Mapped[str | None] = mapped_column(String(128))
     suggested_target_date: Mapped[date | None] = mapped_column(Date)
     target_reason: Mapped[str | None] = mapped_column(String(32))
     evidence: Mapped[str] = mapped_column(String(160), nullable=False)
