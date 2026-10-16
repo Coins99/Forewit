@@ -41,6 +41,7 @@ from mailbrief.storage.database import Database
 from mailbrief.storage.recovery import BackupValidationError, inspect_backup
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.diagnostics import log_failure
+from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.dialog_guard import DialogGuard
 
 HELP = """Your data stays on this computer. Disconnect removes Gmail credentials only.
@@ -109,6 +110,9 @@ class DataDialog(QDialog):
         self.setWindowTitle("MailBrief — Data and recovery")
         self.resize(640, 650)
         layout = QVBoxLayout(self)
+        dialog_heading(
+            self, layout, "Data and recovery", "Back up, export and manage your local records."
+        )
         content = QWidget()
         controls = QVBoxLayout(content)
         hint = QLabel(

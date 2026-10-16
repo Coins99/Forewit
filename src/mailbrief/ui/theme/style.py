@@ -94,6 +94,70 @@ QScrollBar:horizontal { background: transparent; height: 8px; margin: 1px 2px; }
 QScrollBar::handle { background: $border_strong; border-radius: 3px; min-height: 24px; min-width: 24px; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+QWidget#sidebar, QListView#sidebarNav { background: $sidebar; }
+QWidget#headerBar { background: $panel; }
+QWidget#actionsListPane, QWidget#draftsListPane, QWidget#historyListPane, QWidget#cachedListPane { background: $surface_alt; }
+QLabel#headerRefreshIcon { color: $success_fg; }
+QWidget#headerTitleLine { background: transparent; }
+QDialog { background: $panel; }
+QDialog[presentation="drawer"] { background: $panel; border-left: 1px solid $hairline; }
+QDialog[presentation="center"] { background: $panel; border: 1px solid $border_strong; border-radius: 12px; }
+QWidget#summaryCard { background: $summary; border-left: 2px solid $accent_fg; }
+QLabel#summaryHeading { color: $accent_fg; }
+QLabel#actionState { color: $primary; }
+QLabel#actionDeadline { background: $warning_bg; color: $warning_fg; border-radius: 6px; padding: 6px 9px; }
+QLabel#suggestionIcon { color: $accent_fg; background: $accent_bg; border-radius: 8px; }
+QLabel#accountAvatar { background: $nav_selection; color: $text_secondary; border-radius: 16px; }
+QFrame#accountMenu { background: $panel; border: 1px solid $hairline; border-radius: 10px; }
+QPlainTextEdit#draftMessage[inline="true"] { border: none; padding: 16px 0; font-size: 11px; }
+QLabel#senderAvatar { background: $canvas; color: $text_secondary; border-radius: 17px; }
+QListWidget#cachedMailList { border: none; background: $panel; }
+QListWidget#cachedMailList::item { padding: 12px 14px; border-radius: 7px; border: 1px solid transparent; }
+QListWidget#cachedMailList::item:selected { background: $selection; color: $text; border: 1px solid $accent_border; }
+QPlainTextEdit#cachedMessageDetails { border: none; background: $summary; padding: 14px; }
+QPlainTextEdit#savedPreviewText { border: none; background: $panel; padding: 0; font-size: 10px; }
+QWidget#savedMailHeader { border-bottom: 1px solid $hairline; }
+QLabel#savedMailIcon { background: $accent_bg; border-radius: 7px; }
+QWidget#savedMailFooter { border-top: 1px solid $hairline; background: $surface_alt; }
+QPlainTextEdit#draftPreviewBody { border: none; background: $panel; padding: 12px 0; }
+QPlainTextEdit#draftPreviewBody, QPlainTextEdit#cachedMessageDetails { font-size: 11px; }
+QDialog QLabel#dialogHeading { font-size: 21px; }
+QDialog#actionEditor QLabel#dialogHeading { font-size: 23px; }
+QDialog#actionEditor QLabel { font-size: 10px; }
+QDialog#actionEditor QLabel#taskEditorKicker { font-size: 9px; }
+QWidget#inlineReplyCard { border: 1px solid $hairline; border-radius: 10px; }
+QLabel#draftEditorHeading { font-size: 21px; }
+QDialog#draftEditorDialog[inline="true"] QLabel#draftEditorHeading { font-size: 9px; color: $text_muted; }
+QDialog#draftEditorDialog[reply="true"] QWidget#draftEditorHeader, QDialog#draftEditorDialog[reply="true"] QWidget#draftEditorFooter { border: none; }
+QPlainTextEdit#draftMessage[inline="true"][reply="true"] { border: 1px solid $hairline; background: $surface_alt; border-radius: 7px; padding: 12px; font-size: 10px; }
+QPlainTextEdit#draftMessage[inline="true"][reply="true"]:focus { border: 1px solid $accent_border; }
+QDialog QLabel#dialogDescription { font-size: 10px; }
+QWidget#draftEditorHeader, QWidget#draftsToolbar, QWidget#headerBar { border-bottom: 1px solid $hairline; }
+QWidget#draftEditorFooter { border-top: 1px solid $hairline; }
+QWidget#actionsToolbar, QWidget#waitingToolbar { border-bottom: 1px solid $hairline; }
+QWidget#waitingFollowUp { background: $canvas; border-radius: 8px; }
+QDialog#draftEditorDialog { border: none; }
+QWidget[inline="true"] QLineEdit { font-size: 10px; border: none; border-bottom: 1px solid $hairline; border-radius: 0; }
+QTabBar#calendarViews { background: $canvas; border-radius: 7px; font-size: 9px; }
+QTabBar#calendarViews::tab { padding: 6px 12px; font-size: 9px; }
+QTabBar#calendarViews::tab:selected { background: $panel; border: none; border-radius: 5px; }
+QLabel[metricIcon="true"] { background: $canvas; border-radius: 7px; }
+QLabel[metricIcon="true"][attention="true"] { background: $warning_bg; }
+QWidget#calendarToolbar { border-bottom: 1px solid $hairline; background: $surface_alt; }
+QLabel#brandLabel { color: $text; }
+QLabel#brandIcon { background: $text; border-radius: 7px; }
+QLabel#pageHeaderTitle, QLabel#detailTitle, QLabel#actionTitle, QLabel#dialogHeading, QLabel#draftPreviewTitle { font-weight: 600; }
+QLabel#historyPreviewMeta { color: $success_fg; font-size: 10px; }
+QListView#briefList, QListView#actionList { background: $panel; border: none; outline: 0; }
+QListView#sidebarNav { border: none; outline: 0; }
+QScrollArea#briefDetail, QScrollArea#actionDetail { background: $panel; border: none; }
+QListWidget::item { padding: 4px 8px; border-left: 2px solid transparent; }
+QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; border-left: 2px solid $accent_border; }
+QTabBar::tab { background: transparent; color: $text_secondary; padding: 6px 12px; border: none; }
+QTabBar::tab:selected { color: $text; border-bottom: 2px solid $accent_border; }
+QTabBar#actionsTabs { background: $canvas; border-radius: 7px; font-size: 9px; }
+QTabBar#actionsTabs::tab { font-size: 9px; padding: 7px 10px; border-radius: 5px; }
+QTabBar#actionsTabs::tab:selected { background: $panel; border: none; }
 """  # noqa: E501
 
 _current = DARK
@@ -214,7 +278,20 @@ def build_stylesheet(t: Tokens) -> str:
         "field_radius": FIELD_RADIUS,
         "menu_item_radius": MENU_ITEM_RADIUS,
     }
-    return string.Template(QSS).substitute(dataclasses.asdict(t) | metrics)
+    roles = {
+        name: getattr(t, name)
+        for name in (
+            "sidebar",
+            "nav_selection",
+            "primary",
+            "primary_text",
+            "summary",
+            "surface_alt",
+            "success_fg",
+            "overlay",
+        )
+    }
+    return string.Template(QSS).substitute(dataclasses.asdict(t) | roles | metrics)
 
 
 class ThemeStyle(QProxyStyle):
@@ -362,7 +439,10 @@ class ThemeStyle(QProxyStyle):
             font = target.font()  # Keeps a size set before; a Medium label, as Disconnect's.
             font.setWeight(QFont.Weight.Medium)
             target.setFont(font)
-        if isinstance(target, QDialog):
+        if isinstance(target, QDialog) and target.property("presentation") not in (
+            "drawer",
+            "center",
+        ):
             # The home screen's style: glass round a rounded sheet (ui/glass imports this
             # package, so it is imported here).
             from mailbrief.ui.glass.dialog import dialog_sheet

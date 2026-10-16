@@ -10,7 +10,10 @@ their prepared text to Groq for AI analysis.
 Choose the latest successful **main** build and download its Windows artifact.
 GitHub sign-in is required. [Download and launch instructions](#windows-download-extract-and-run).
 
-![MailBrief showing a daily brief and the selected email](docs/ui/workspace-dark.png)
+![MailBrief showing a daily brief and the selected email](docs/ui/today-redesign-light.png)
+
+The desktop follows the [Today design system](docs/ui-redesign.md), including the visual
+verification record and adaptations for existing workflows.
 
 ## What you can do
 

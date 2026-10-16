@@ -7,8 +7,10 @@ and replacing a saved brief is confirmed first.
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -17,12 +19,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.digests import SavedBriefSummary
+from mailbrief.domain.digests import DailyDigest, DigestSection, SavedBriefSummary
 from mailbrief.services.history import CATCH_UP_DAYS
-from mailbrief.ui.deadline_text import day_text
-from mailbrief.ui.labels import outline_button
+from mailbrief.ui.brief_detail import is_gmail_link
+from mailbrief.ui.deadline_text import MONTHS, day_text, full_day_text
+from mailbrief.ui.hairline import HairlineDivider, HairlineSplitter
+from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
 from mailbrief.ui.lists import ActivatingList
-from mailbrief.ui.theme import TITLE_PX, ui_font
+from mailbrief.ui.theme import ui_font
 
 NOT_CONNECTED = "Connect Gmail to brief missed days."
 NONE_MISSED = "No missed days in the last 7 days."
@@ -51,6 +56,7 @@ class BriefHistoryPanel(QWidget):
 
     open_requested = Signal(str, object)
     generate_requested = Signal(object)
+    preview_requested = Signal(str, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -61,24 +67,40 @@ class BriefHistoryPanel(QWidget):
         self._account: str | None = None
         self._today = date.min
         self._busy = False
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        heading = QLabel("Briefs")
+        self._preview: DailyDigest | None = None
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.splitter = HairlineSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        left = QWidget()
+        left.setObjectName("historyListPane")
+        left.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QVBoxLayout(left)
+        layout.setContentsMargins(21, 21, 21, 16)
+        layout.setSpacing(12)
+        heading = QLabel("Saved briefs")
         heading.setTextFormat(Qt.TextFormat.PlainText)
-        heading.setFont(ui_font(TITLE_PX, semibold=True))
+        heading.setFont(ui_font(12, medium=True))
         layout.addWidget(heading)
-        layout.addWidget(_plain("Saved briefs"))
+        layout.addWidget(plain_label("Previous briefs, ready to revisit.", tone="muted", px=9))
         self.saved = ActivatingList()
+        self.saved.setObjectName("savedBriefList")
+        self.saved.setFrameShape(QFrame.Shape.NoFrame)
+        self.saved.setItemDelegate(DisplayRowDelegate(self.saved))
         self.saved.setAccessibleName("Saved briefs")
         layout.addWidget(self.saved, 2)
-        layout.addWidget(_plain("Missed days"))
+        layout.addWidget(plain_label("Missed days", px=12, medium=True))
         self.missed = QListWidget()
+        self.missed.setObjectName("missedDayList")
+        self.missed.setFrameShape(QFrame.Shape.NoFrame)
         self.missed.setAccessibleName("Missed days in the last 7 days")
         layout.addWidget(self.missed, 1)
         self.missed_note = _plain()
         layout.addWidget(self.missed_note)
         buttons = QHBoxLayout()
-        self.open_button = outline_button("&Open", "openBriefButton", mnemonic=True)
+        self.open_button = outline_button(
+            "&Open brief", "openBriefButton", mnemonic=True, primary=True
+        )
         self.brief_button = outline_button("&Brief this day…", "briefDayButton", mnemonic=True)
         buttons.addWidget(self.open_button)
         buttons.addWidget(self.brief_button)
@@ -101,13 +123,16 @@ class BriefHistoryPanel(QWidget):
         layout.addWidget(self.confirm_panel)
         self.confirm_panel.hide()
         layout.addWidget(
-            _plain(
+            plain_label(
                 "A past day's brief covers only the messages still in your Inbox when it is "
-                "made. Briefing sends messages to Groq only after you approve, as for today."
+                "made. Briefing sends messages to Groq only after you approve, as for today.",
+                tone="muted",
+                px=9,
             )
         )
         self.status = _plain()
         layout.addWidget(self.status)
+        layout.addStretch(1)
         self.saved.currentRowChanged.connect(lambda row: self._chose(self.saved, row))
         self.missed.currentRowChanged.connect(lambda row: self._chose(self.missed, row))
         self.saved.itemActivated.connect(lambda _item: self._open())
@@ -115,7 +140,103 @@ class BriefHistoryPanel(QWidget):
         self.brief_button.clicked.connect(self._brief)
         self.replace_button.clicked.connect(self._replace)
         self.keep_button.clicked.connect(self.confirm_panel.hide)
+        preview = QWidget()
+        preview.setObjectName("briefHistoryPreview")
+        right = QVBoxLayout(preview)
+        right.setContentsMargins(44, 30, 44, 25)
+        right.setSpacing(20)
+        right.addWidget(plain_label("SAVED DAILY BRIEF", tone="muted", px=10, medium=True))
+        self.preview_title = wrap_label("Select a saved brief", px=24)
+        self.preview_title.setObjectName("historyPreviewTitle")
+        self.preview_meta = wrap_label(
+            "Open a brief to review its summaries and suggestions.", tone="secondary", px=11
+        )
+        self.preview_meta.setObjectName("historyPreviewMeta")
+        right.addWidget(self.preview_title)
+        right.addWidget(self.preview_meta)
+        self.preview_description = wrap_label("", tone="secondary", px=11)
+        self.preview_description.setObjectName("historyPreviewDescription")
+        right.addWidget(self.preview_description)
+        metrics = QWidget()
+        metrics.setObjectName("historyMetrics")
+        metrics.setAccessibleName("Saved brief overview")
+        metric_frame = QVBoxLayout(metrics)
+        metric_frame.setContentsMargins(0, 0, 0, 0)
+        metric_frame.setSpacing(18)
+        metric_frame.addWidget(HairlineDivider())
+        metric_layout = QHBoxLayout()
+        metric_frame.addLayout(metric_layout)
+        self.item_count = plain_label("", px=21, medium=True)
+        self.item_count.setObjectName("historyItemCount")
+        self.reply_count = plain_label("", px=21, medium=True)
+        self.reply_count.setObjectName("historyReplyCount")
+        self.highlight_count = plain_label("", px=21, medium=True)
+        self.highlight_count.setObjectName("historyHighlightCount")
+        for label, value in (
+            ("Needs attention", self.item_count),
+            ("New replies", self.reply_count),
+            ("Highlights", self.highlight_count),
+        ):
+            column = QVBoxLayout()
+            column.addWidget(value)
+            column.addWidget(plain_label(label, tone="muted", px=8))
+            metric_layout.addLayout(column, 1)
+        metric_frame.addWidget(HairlineDivider())
+        right.addWidget(metrics)
+        choices = QHBoxLayout()
+        choices.addWidget(self.open_button)
+        self._source_url: str | None = None
+        self.source_button = outline_button(
+            "Open in Gmail", "historySource", icon_name="external-link"
+        )
+        self.source_button.clicked.connect(self._open_source)
+        choices.addWidget(self.source_button)
+        choices.addWidget(self.brief_button)
+        choices.addStretch(1)
+        right.addLayout(choices)
+        right.addStretch(1)
+        left.setMinimumWidth(260)
+        preview.setMinimumWidth(320)
+        self.splitter.addWidget(left)
+        self.splitter.addWidget(preview)
+        self.splitter.setSizes([350, 525])
+        outer.addWidget(self.splitter)
         self._update_buttons()
+
+    def show_preview(self, digest: DailyDigest) -> None:
+        selected = self._chosen_summary()
+        if selected is None or (selected.account_email, selected.local_date) != (
+            digest.account_id,
+            digest.local_date,
+        ):
+            return
+        self._preview = digest
+        counts = {
+            section: sum(item.section is section for item in digest.items)
+            for section in DigestSection
+        }
+        self.item_count.setText(
+            str(
+                counts[DigestSection.ACTIONS]
+                + counts[DigestSection.DECISIONS]
+                + counts[DigestSection.DEADLINES]
+            )
+        )
+        self.reply_count.setText(str(counts[DigestSection.FOLLOW_UPS]))
+        self.highlight_count.setText(str(counts[DigestSection.HIGHLIGHTS]))
+        self.preview_description.setText(
+            f"{self.item_count.text()} items needed attention, {self.reply_count.text()} replies "
+            f"arrived, and {self.highlight_count.text()} messages were saved as highlights."
+        )
+        self._source_url = next(
+            (str(item.source_url) for item in digest.items if is_gmail_link(str(item.source_url))),
+            None,
+        )
+        self.source_button.setVisible(self._source_url is not None)
+
+    def _open_source(self) -> None:
+        if self._source_url is not None:
+            QDesktopServices.openUrl(QUrl(self._source_url))
 
     def configure(
         self,
@@ -132,8 +253,21 @@ class BriefHistoryPanel(QWidget):
         self.saved.blockSignals(True)
         self.saved.clear()
         for summary in summaries:
-            self.saved.addItem(QListWidgetItem(summary_text(summary, self._today)))
+            item = QListWidgetItem(summary_text(summary, self._today))
+            item.setData(
+                DISPLAY_ROW_ROLE,
+                DisplayRow(
+                    full_day_text(summary.local_date, today=self._today),
+                    f"{summary.status.value.capitalize()} · {summary.item_count} items",
+                    "",
+                    date_tile=(
+                        f"{MONTHS[summary.local_date.month - 1].upper()}\n{summary.local_date.day}"
+                    ),
+                ),
+            )
+            self.saved.addItem(item)
         self.saved.blockSignals(False)
+        self.saved.setMaximumHeight(max(70, min(320, len(summaries) * 70)))
         self._show_missed(missed)
         if not summaries:
             self.status.setText("No saved briefs yet.")
@@ -187,6 +321,8 @@ class BriefHistoryPanel(QWidget):
             other.blockSignals(False)
         self.confirm_panel.hide()
         self._update_buttons()
+        if (summary := self._chosen_summary()) is not None:
+            self.preview_requested.emit(summary.account_email, summary.local_date)
 
     def _chosen_summary(self) -> SavedBriefSummary | None:
         row = self.saved.currentRow()
@@ -212,6 +348,33 @@ class BriefHistoryPanel(QWidget):
         self.open_button.setEnabled(not self._busy and self._chosen_summary() is not None)
         self.brief_button.setEnabled(not self._busy and self._can_brief(self._chosen_day()))
         self.replace_button.setEnabled(not self._busy)
+        summary = self._chosen_summary()
+        day = self._chosen_missed()
+        self.source_button.hide()
+        self.preview_description.clear()
+        if summary is not None:
+            self.preview_title.setText(full_day_text(summary.local_date, today=self._today))
+            self.preview_meta.setText(f"Review {summary.status.value} · {summary.account_email}")
+            self.item_count.setText("—")
+            self.reply_count.setText(str(summary.follow_up_count))
+            self.highlight_count.setText("—")
+        else:
+            self.preview_title.setText(
+                "Select a saved brief" if day is None else day_text(day, today=self._today)
+            )
+            self.preview_meta.setText(
+                "Open a brief to review its summaries and suggestions."
+                if day is None
+                else (
+                    "No saved brief for this day. Review mail still in your Inbox, "
+                    "then approve any AI analysis."
+                )
+            )
+            self.item_count.clear()
+            self.reply_count.clear()
+            self.highlight_count.clear()
+        if self._preview is not None:
+            self.show_preview(self._preview)
 
     def _open(self) -> None:
         summary = self._chosen_summary()

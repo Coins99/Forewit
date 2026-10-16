@@ -1,4 +1,4 @@
-"""Bundled Inter (SIL OFL 1.1) and Tabler icons (MIT), resolved beside this module so they
+"""Bundled DM Sans and Inter fallback (SIL OFL 1.1) and Tabler icons (MIT), resolved here so they
 also load from the PyInstaller package."""
 
 import functools
@@ -10,7 +10,7 @@ from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-FONT_FAMILY: Final = "Inter"
+FONT_FAMILY: Final = "DM Sans"
 ICON_NAMES: Final = frozenset(
     {
         "sun",
@@ -25,6 +25,11 @@ ICON_NAMES: Final = frozenset(
         "external-link",
         "mail",
         "database",
+        "sparkles",
+        "plus",
+        "bookmark",
+        "check",
+        "trash",
         "search",
         "x",
         "chevron-left",
@@ -50,13 +55,16 @@ _fonts_loaded: bool | None = None  # None until the first attempt; then cached.
 
 
 def register_fonts() -> bool:
-    """Load the bundled fonts once per process; True only when all three loaded.
+    """Load the bundled fonts once per process; True only when all fonts loaded.
 
     A missing or unreadable font never stops the app: the theme then keeps Qt's font.
     """
     global _fonts_loaded
     if _fonts_loaded is None:
-        _fonts_loaded = all(QFontDatabase.addApplicationFont(str(path)) != -1 for path in _FONTS)
+        _fonts_loaded = all(
+            QFontDatabase.addApplicationFont(str(path)) != -1
+            for path in (*_FONTS, _HERE / "fonts" / "DM-Sans.ttf")
+        )
         release_font_cache()
     return _fonts_loaded
 
@@ -83,7 +91,7 @@ _TABULAR: Final = QFont.Tag("tnum")
 
 @functools.cache
 def _font(px: int, weight: QFont.Weight, tabular: bool = False) -> QFont:
-    font = QFont(FONT_FAMILY)
+    font = QFont("Inter" if tabular else FONT_FAMILY)
     font.setPixelSize(px)
     font.setWeight(weight)
     spacing = tracking(px)

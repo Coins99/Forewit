@@ -98,6 +98,7 @@ async def test_offline_browsing_filters_pages_and_renders_preview_as_text(
     backend = CachedBackend()
     window = MainWindow(backend)
     qtbot.addWidget(window)
+    window.show()
     window.start(window.initialize)
     await finish(window)
     forbidden = AsyncMock(side_effect=AssertionError("No Gmail connection during offline browsing"))
@@ -107,13 +108,15 @@ async def test_offline_browsing_filters_pages_and_renders_preview_as_text(
     viewer = window.cached_dialog
     assert viewer.isVisible()
     assert '<img src="https://evil.example">' in viewer.details.toPlainText()
-    assert "may be stale" in viewer.status.text()
+    assert "may be stale" in viewer.status.accessibleName()
     # Times read as everywhere else in the window, not as ISO.
     assert re.search(
-        r"\nReceived: [A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})?, \d\d:\d\d\n",
-        viewer.details.toPlainText(),
+        r"RECEIVED [A-Z]{3} [A-Z]{3} \d+(, \d{4})?, \d\d:\d\d",
+        "RECEIVED " + viewer.saved_received.text().upper(),
     )
-    assert re.match(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})? \(UTC\) · ", viewer.status.text())
+    assert re.match(
+        r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})? \(UTC\) · ", viewer.status.accessibleName()
+    )
     assert not viewer.source.isEnabled()  # The factory's Outlook link cannot open from Gmail UI.
     viewer.next.click()
     await finish(window)

@@ -22,10 +22,8 @@ from mailbrief.ui.brief_detail import (
     item_deadline_text,
     suggestion_meta,
 )
-from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import outline_button
-from mailbrief.ui.theme import SMALL_PX
 from tests.factories import make_digest_item, make_proposal, make_suggestion
 from tests.ui.workspace_fixtures import ACCOUNT, DECK_ACTION, FINANCE_ACTION, ZONE, mockup_digest
 
@@ -91,22 +89,33 @@ def test_mockup_item_reads_like_the_mockup(pane: BriefDetailPane) -> None:
     texts = label_texts(pane)
     assert pane.title is not None
     assert pane.title.text() == "Q3 budget: approval needed by Friday"
-    assert "Priya Shah <priya@example.com>" in texts  # The name and its address.
+    assert "Priya Shah" in texts and "priya@example.com" in texts  # The name and its address.
     assert "Due Fri Oct 9, 17:00" in texts
     assert "Continues: “Finance review prep”" in texts
     assert "Yours. Target Thu Oct 8, one working day before the deadline." in texts
     assert "Yours. No deadline stated." in texts
     assert [b.text() for b in pane.findChildren(QPushButton)] == [
-        "Accept",
+        "View complete email",
+        "Add action",
         "Dismiss",
         "Add to “Finance review prep”",
-        "Accept",
+        "Add action",
         "Dismiss",
         "Add to “Finance review prep”",
         "Draft a reply",
         "Open in Gmail",
     ]
-    assert all(isinstance(b, GlassButton) for b in pane.findChildren(QPushButton))
+    assert all(
+        b.property("variant")
+        == (
+            "primary"
+            if b.objectName() == "acceptButton"
+            else "link"
+            if b.objectName() == "viewEmailButton"
+            else "glass"
+        )
+        for b in pane.findChildren(QPushButton)
+    )
     assert not any(b.autoDefault() for b in pane.findChildren(QPushButton))
 
 
@@ -114,9 +123,9 @@ def test_suggestion_buttons_carry_their_own_ids(pane: BriefDetailPane) -> None:
     show(pane, "priya")
     decisions = QSignalSpy(pane.suggestion_requested)
     into = QSignalSpy(pane.accept_into_requested)
-    button(pane, "Accept").click()
+    button(pane, "Add action").click()
     button(pane, "Dismiss", 1).click()
-    button(pane, "Accept", 1).click()
+    button(pane, "Add action", 1).click()
     button(pane, "Add to “Finance review prep”", 1).click()
     assert [decisions.at(n) for n in range(decisions.count())] == [
         [ACCEPT, 11],
@@ -372,7 +381,11 @@ def test_another_email_replaces_the_old_buttons(pane: BriefDetailPane) -> None:
     show(pane, "lena")  # No suggestions, links or proposals.
     assert not shiboken6.isValid(old)
     assert add_to_buttons(pane) == []
-    assert [b.text() for b in pane.findChildren(QPushButton)] == ["Draft a reply", "Open in Gmail"]
+    assert [b.text() for b in pane.findChildren(QPushButton)] == [
+        "View complete email",
+        "Draft a reply",
+        "Open in Gmail",
+    ]
     assert requests.count() == 0
     show(pane, "marco")
     assert pane.findChild(HairlineFrame, "proposalCard") is not None
@@ -481,7 +494,7 @@ def test_a_pending_suggestion_shows_its_plan(pane: BriefDetailPane) -> None:
     lines = [label for label in card.findChildren(QLabel) if label.text().startswith("· ")]
     assert [label.text() for label in lines] == [f"· {step}" for step in steps]
     for line in lines:
-        assert line.property("tone") == "secondary" and line.font().pixelSize() == SMALL_PX
+        assert line.property("tone") == "secondary" and line.font().pixelSize() == 10
         assert line.textFormat() is Qt.TextFormat.PlainText
 
 

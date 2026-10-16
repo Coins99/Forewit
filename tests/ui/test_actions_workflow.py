@@ -47,6 +47,7 @@ def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     result.zone = ZoneInfo("UTC")
     result.now = lambda: datetime(2026, 9, 28, 15, tzinfo=UTC)
     qtbot.addWidget(result)
+    result.show()
     return result
 
 

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -43,7 +45,10 @@ from mailbrief.domain.actions import (
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
 from mailbrief.ui.deadline_text import length_text, parse_length
+from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.fields import takes_wheel
+from mailbrief.ui.labels import outline_button, plain_label, primary_action
+from mailbrief.ui.theme import ui_font
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
 _EFFORTS: tuple[tuple[ActionEffort | None, str], ...] = (
@@ -181,18 +186,22 @@ class ActionEditor(QDialog):
         self.setWindowTitle("Edit action")
         self.setObjectName("actionEditor")
         self.setAccessibleName("Task editor")
+        self.resize(620, 650)
         self._projects: tuple[Project, ...] = ()
         self._creating = False
+        self.embedded = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
         self._busy = False  # Another operation is running, so Save waits.
         self._saving = False  # This dialog's save is running, so nothing can change.
         layout = QVBoxLayout(self)
+        dialog_heading(self, layout, "Task details", "Keep the task, dates and plan together.")
         # Every field and step control, so one switch locks them all while saving.
         self._fields = QWidget()
         fields = QVBoxLayout(self._fields)
         fields.setContentsMargins(0, 0, 0, 0)
         form = QFormLayout()
+        self._form = form
         self.title = QLineEdit()
         self.title.setMaxLength(ACTION_TITLE_MAX_CHARS)
         form.addRow("&Title", self.title)
@@ -251,30 +260,48 @@ class ActionEditor(QDialog):
         self.sources = _plain("")
         form.addRow("From", self.sources)
         self.notes = QPlainTextEdit()
+        self.notes.setMinimumHeight(100)
         self.notes.setTabChangesFocus(True)
         form.addRow("&Notes", self.notes)
         fields.addLayout(form)
-        fields.addWidget(
-            _plain("Plan (check a step when it's done; double-click a step to rename it):")
-        )
+        self.plan_heading = _plain("Plan (check a step when it's done; double-click to rename):")
+        fields.addWidget(self.plan_heading)
         self.steps = QListWidget()
+        self.steps.setMinimumHeight(100)
         self.steps.setAccessibleName("Plan steps")
         fields.addWidget(self.steps)
-        step_buttons = QHBoxLayout()
+        self.step_controls = QWidget()
+        step_buttons = QHBoxLayout(self.step_controls)
+        step_buttons.setContentsMargins(0, 0, 0, 0)
         self.add_step = QPushButton("&Add step")
         self.remove_step = QPushButton("&Remove step")
         self.up = QPushButton("Move &up")
         self.down = QPushButton("Move do&wn")
         for button in (self.add_step, self.remove_step, self.up, self.down):
             step_buttons.addWidget(button)
-        fields.addLayout(step_buttons)
-        layout.addWidget(self._fields)
+        fields.addWidget(self.step_controls)
+        self.more_options = outline_button("More options", "taskMoreOptions")
+        self.more_options.setCheckable(True)
+        self.more_options.hide()
+        self.more_options.toggled.connect(self._show_options)
+        fields.addWidget(self.more_options, 0, Qt.AlignmentFlag.AlignLeft)
+        fields.addStretch(1)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("taskEditorScroll")
+        self.scroll_area.setAccessibleName("Task fields and plan")
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setWidget(self._fields)
+        layout.addWidget(self.scroll_area, 1)
         self.status = _plain("")
         layout.addWidget(self.status)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         layout.addWidget(self.buttons)
+        if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
+            primary_action(save)
         self.add_step.clicked.connect(self._add_step)
         self.remove_step.clicked.connect(self._remove_step)
         self.up.clicked.connect(lambda: self._move(-1))
@@ -283,6 +310,74 @@ class ActionEditor(QDialog):
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         self._loaded_input = self._input()
+        self.title.textChanged.connect(self._update_buttons)
+
+    def set_embedded(self, parent: QWidget | None, *, window: QWidget) -> None:
+        """The web design creates tasks in the selected-action pane."""
+        self.embedded = parent is not None
+        self.setParent(parent or window)
+        self.setWindowFlags(Qt.WindowType.Widget if self.embedded else Qt.WindowType.Dialog)
+        heading = self.findChild(QLabel, "dialogHeading")
+        caption = self.findChild(QLabel, "dialogDescription")
+        if heading is not None:
+            heading.setText("Create an action" if self.embedded else "Task details")
+            heading.setFont(ui_font(23 if self.embedded else 21))
+        if caption is not None:
+            caption.setVisible(not self.embedded)
+        layout = self.layout()
+        if isinstance(layout, QVBoxLayout):
+            layout.setContentsMargins(44 if self.embedded else 24, 30, 44, 24)
+            if self.embedded and self.findChild(QLabel, "taskEditorKicker") is None:
+                kicker = plain_label("NEW TASK", tone="muted", px=9)
+                kicker.setObjectName("taskEditorKicker")
+                layout.insertWidget(0, kicker)
+            if (existing_kicker := self.findChild(QLabel, "taskEditorKicker")) is not None:
+                existing_kicker.setVisible(self.embedded)
+        self._form.setRowWrapPolicy(
+            QFormLayout.RowWrapPolicy.WrapAllRows
+            if self.embedded
+            else QFormLayout.RowWrapPolicy.DontWrapRows
+        )
+        self._form.setVerticalSpacing(10 if self.embedded else 8)
+        self._fields.setFont(ui_font(10))
+        self.more_options.setVisible(self.embedded)
+        self.more_options.setChecked(False)
+        self._show_options(not self.embedded)
+        fields_layout = self._fields.layout()
+        root_layout = self.layout()
+        if isinstance(fields_layout, QVBoxLayout) and isinstance(root_layout, QVBoxLayout):
+            if self.embedded:
+                root_layout.removeWidget(self.buttons)
+                fields_layout.insertWidget(
+                    fields_layout.count() - 1, self.buttons, 0, Qt.AlignmentFlag.AlignLeft
+                )
+                self.buttons.setCenterButtons(False)
+                self.notes.setFixedHeight(100)
+                self.title.setPlaceholderText("What needs to be done?")
+                self.notes.setPlaceholderText("Add context or next steps")
+            else:
+                fields_layout.removeWidget(self.buttons)
+                root_layout.addWidget(self.buttons)
+                self.notes.setMinimumHeight(100)
+                self.notes.setMaximumHeight(16777215)
+        if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
+            save.setText("Create action" if self.embedded else "Save")
+
+    def _show_options(self, show: bool) -> None:
+        for widget in (
+            self.priority,
+            self.tags,
+            self.estimate,
+            self.project,
+            self.owner,
+            self.effort,
+            self.deadline,
+            self.suggested,
+            self.sources,
+        ):
+            self._form.setRowVisible(widget, show)
+        for control in (self.plan_heading, self.steps, self.step_controls):
+            control.setVisible(show)
 
     def _input(self) -> tuple[object, ...]:
         """Everything the owner can change here, to tell whether any of it is unsaved."""
@@ -292,6 +387,7 @@ class ActionEditor(QDialog):
             self.priority.currentIndex(),
             self.tags.text().strip(),
             self.owner.currentIndex(),
+            self.project.currentData(),
             self.effort.currentIndex(),
             self.estimate.text(),
             (picked.year(), picked.month(), picked.day()) if self.has_target.isChecked() else None,
@@ -432,7 +528,10 @@ class ActionEditor(QDialog):
     def _update_buttons(self) -> None:
         save = self.buttons.button(QDialogButtonBox.StandardButton.Save)
         if save is not None:
-            save.setEnabled(not (self._busy or self._saving))
+            save.setEnabled(
+                not (self._busy or self._saving)
+                and (not self.embedded or bool(self.title.text().strip()))
+            )
         cancel = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel is not None:
             cancel.setEnabled(not self._saving)

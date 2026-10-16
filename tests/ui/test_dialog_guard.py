@@ -25,6 +25,7 @@ def window(qtbot: QtBot) -> MainWindow:
     result = MainWindow(FakeBackend())
     result.now = lambda: NOW
     qtbot.addWidget(result)
+    result.show()
     return result
 
 
@@ -83,7 +84,8 @@ async def test_activating_the_window_brings_the_dialog_back(
     dialog = window.planning_dialog
     window.activateWindow()
     QApplication.sendEvent(window, QEvent(QEvent.Type.WindowActivate))
-    qtbot.waitUntil(lambda: QApplication.activeWindow() is dialog, timeout=2000)
+    qtbot.waitUntil(lambda: QApplication.activeWindow() is window, timeout=2000)
+    assert window.childAt(centre(dialog, window)) is not window.dialog_guard
 
 
 def test_the_cover_paints_nothing(themed: None, qapp: QApplication, qtbot: QtBot) -> None:

@@ -414,7 +414,7 @@ def test_a_waiting_action_s_row_has_no_dates_to_show() -> None:
 
     row = action_row(waiting, today=TODAY, zone=UTC_ZONE, now=NOW)
 
-    assert row == ActionRow(title="Action 2", meta=NO_DATES, chips=(), muted=False)
+    assert row == ActionRow(title="Action 2", meta=NO_DATES, chips=(), muted=False, avatar="?")
 
 
 def test_a_completed_action_s_row_is_muted_with_its_day_in_the_owner_s_zone() -> None:
@@ -568,15 +568,20 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
     show(panel, ActionFilter.OPEN, rich)
 
     assert detail_texts(panel) == [
-        "Action 1",
         "Yours · open",
+        "Action 1",
         "Due Fri Oct 2 · Overdue",
         "Target Tue Oct 6",
+        "Bring the printed copy.",
+        "OWNER",
+        "You",
+        "PROJECT",
+        "Unassigned",
+        "SOURCE EMAIL",
+        "Q3 deck",
         "Plan · 1 of 2 done",
         "✓ Step 1",
         "○ Step 2",
-        "Notes",
-        "Bring the printed copy.",
         "Thread",
         "2 new in thread, latest Sat 08:30 from Sam",
         "You replied Fri",
@@ -596,13 +601,13 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
     done_step = next(label for label in content.findChildren(QLabel) if label.text() == "✓ Step 1")
     assert done_step.property("tone") == "muted"
     assert shown_buttons(panel) == [
+        "completeButton",
+        "draftButton",
+        "editButton",
+        "deleteButton",
         "seenButton",
         "proposalsButton",
         "sourceButton",
-        "editButton",
-        "completeButton",
-        "deleteButton",
-        "draftButton",
     ]
     # Open source follows the first Gmail source, the second here.
     panel.resize(900, 900)
@@ -628,8 +633,19 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.WAITING, action(2, ownership=ActionOwnership.WAITING_FOR))
     panel.show_view(ActionFilter.WAITING)
 
-    assert detail_texts(panel) == ["Action 2", "Waiting for someone · open"]
-    assert shown_buttons(panel) == ["editButton", "completeButton", "deleteButton", "draftButton"]
+    assert detail_texts(panel) == [
+        "Waiting for someone · open",
+        "Action 2",
+        "WAITING SINCE",
+        "Sat Oct 3",
+        "FOLLOW-UP",
+        "No date set",
+        "SOURCE",
+        "Manual task",
+        "Suggested follow-up",
+        "Draft a short check-in when you're ready to follow up.",
+    ]
+    assert shown_buttons(panel) == ["draftButton", "completeButton", "editButton", "deleteButton"]
 
 
 def test_a_completed_action_s_detail(panel: ActionsPanel) -> None:
@@ -642,7 +658,7 @@ def test_a_completed_action_s_detail(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.COMPLETED, done)
     panel.show_view(ActionFilter.COMPLETED)
 
-    assert detail_texts(panel)[:2] == ["Action 3", "Completed Tue Oct 6"]
+    assert detail_texts(panel)[:2] == ["Completed Tue Oct 6", "Action 3"]
     assert panel.complete_button.text() == "Re&open"
 
 
@@ -714,7 +730,7 @@ def test_show_view_moves_the_tab_bar_and_the_list(panel: ActionsPanel) -> None:
 def test_the_selection_and_its_detail_stay_on_the_same_action(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.OPEN, action(1), action(2), action(3))
     panel.lists[ActionFilter.OPEN].setCurrentRow(1)
-    assert detail_texts(panel)[0] == "Action 2"
+    assert detail_texts(panel)[1] == "Action 2"
 
     show(panel, ActionFilter.OPEN, action(3), action(2, notes="Updated"), action(1))
 
@@ -723,7 +739,7 @@ def test_the_selection_and_its_detail_stay_on_the_same_action(panel: ActionsPane
     assert "Updated" in detail_texts(panel)
     # Refreshing another view leaves this one's detail alone.
     show(panel, ActionFilter.WAITING, action(9, ownership=ActionOwnership.WAITING_FOR))
-    assert detail_texts(panel)[0] == "Action 2"
+    assert detail_texts(panel)[1] == "Action 2"
 
 
 def test_a_long_unbroken_title_never_widens_the_page(
@@ -877,7 +893,7 @@ def test_the_state_line_says_when_an_action_is_carried_over() -> None:
 def test_the_detail_shows_carried_over(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.OPEN, action(1, created_at_utc=datetime(2026, 10, 1, tzinfo=UTC)))
 
-    assert detail_texts(panel)[:2] == ["Action 1", "Yours · open · carried over"]
+    assert detail_texts(panel)[:2] == ["Yours · open · carried over", "Action 1"]
 
 
 @pytest.mark.parametrize(
@@ -945,7 +961,7 @@ def test_the_filter_offers_tags_by_key(panel: ActionsPanel) -> None:
         for index in range(panel.group.count())
     ]
     assert items == [
-        ("All tasks", "all"),
+        ("All projects", "all"),
         ("Unassigned", "unassigned"),
         ("Tag: errands", "tag:errands"),
         ("Tag: Home", "tag:home"),

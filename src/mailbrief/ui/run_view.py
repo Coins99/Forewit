@@ -38,7 +38,7 @@ from mailbrief.ui.brief_list import (
     with_address,
 )
 from mailbrief.ui.hairline import paint_focus_ring
-from mailbrief.ui.theme import TEXT_PX, current_tokens, ui_metrics
+from mailbrief.ui.theme import META_PX, current_tokens, ui_metrics
 from mailbrief.ui.theme.indicators import paint_check_box
 
 # The item's own ID stays under Qt.UserRole; the row to paint sits beside it.
@@ -221,7 +221,7 @@ class ShortlistDelegate(QStyledItemDelegate):
             rect.top() + ROW_PAD_V,
             width,
             row.subject,
-            sender_line(ui_metrics(TEXT_PX), row.name, row.address, width),
+            sender_line(ui_metrics(META_PX), row.name, row.address, width),
             title_color=tokens.text_muted if row.blocked else tokens.text,
             subtitle_color=tokens.text_muted if row.blocked else tokens.text_secondary,
         )

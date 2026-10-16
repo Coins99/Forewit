@@ -26,11 +26,11 @@ from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import ELIDE_MARGIN, ROW_ROLE, elided
 from mailbrief.ui.calendar_view import GOOGLE_ON, CalendarPanel
 from mailbrief.ui.hairline import HairlineDivider
-from mailbrief.ui.main_window import PAGE_SHORTCUTS
-from mailbrief.ui.theme import TEXT_PX, ThemeMode, apply_theme, current_tokens, ui_metrics
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens, ui_metrics
 from mailbrief.ui.workspace import (
     EMPTY_BRIEF,
     KEY_ROLE,
+    PAGE_SHORTCUTS,
     SHEET_GUTTER,
     ThreePaneWorkspace,
     brief_meta,
@@ -184,7 +184,7 @@ def test_no_action_row_line_is_cut_off_at_the_gallery_size(
         pytest.skip("the screen is too small for the gallery's window")
     # The width a row really gets, which differs a little by platform (frame, scroll bar).
     width = listing.viewport().width() - ELIDE_MARGIN
-    metrics = ui_metrics(TEXT_PX)
+    metrics = ui_metrics(9)
     for number in range(listing.count()):
         row = listing.item(number).data(ROW_ROLE)
         assert isinstance(row, ActionRow)
@@ -331,7 +331,8 @@ def test_the_header_alert_shows_once_and_never_widens_it(qtbot: QtBot) -> None:
     assert least <= header.alert.icon.sizeHint().width() + alert_layout.spacing()
     assert header.minimumSizeHint().width() <= empty + least + layout.spacing()
     order = [item.widget() for index in range(layout.count()) if (item := layout.itemAt(index))]
-    assert order.index(header.status) < order.index(header.alert)  # Check time, then alert.
+    assert header.title_line.parentWidget() is header
+    assert order.index(header.alert) < layout.count() - 1
     header.set_alert("")
     assert header.alert.isHidden() and not header.alert.toolTip()
 
@@ -344,17 +345,21 @@ def test_sidebar_footer_order_and_mnemonics(qtbot: QtBot) -> None:
     items = [layout.itemAt(index) for index in range(layout.count())]
     widgets = [None if item is None else item.widget() for item in items]
     order = [
+        sidebar.brand,
         sidebar.nav,
         None,  # The stretch.
+        widgets[3],  # The secondary navigation divider.
         sidebar.saved_mail,
         sidebar.data,
         sidebar.settings,
         sidebar.note,
-        None,  # The footer layout.
+        sidebar.account_button,
     ]
     assert widgets == order
     last = items[-1]
-    assert last is not None and last.layout() is sidebar.footer
+    assert last is not None and last.widget() is sidebar.account_button
+    assert isinstance(widgets[3], HairlineDivider)
+    assert sidebar.account_menu.layout() is sidebar.footer
     assert sidebar.saved_mail.text() == "Saved &mail"
     assert sidebar.saved_mail.accessibleName() == "Saved mail"
     assert sidebar.data.text() == "&Data"
@@ -480,7 +485,8 @@ def test_the_heading_shows_the_brief(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     heading = workspace.heading
     assert not heading.isHidden()
-    assert heading.title.text() == "Tue Oct 6"
+    assert heading.title.text() == "Your brief"
+    assert "TUE OCT 6" in heading.eyebrow.text()
     assert heading.meta.text() == "owner@example.com · saved 09:14"
     assert heading.meta.accessibleName().startswith("owner@example.com. Saved Tue Oct 6, 09:14")
 
@@ -525,7 +531,7 @@ def test_page_keys_page_a_list_that_scrolls(qtbot: QtBot) -> None:
 
 
 def test_page_keys_scroll_the_detail_while_the_list_fits(qtbot: QtBot) -> None:
-    workspace = workspace_with(qtbot, three_with_a_long_detail(), (680, 520))
+    workspace = workspace_with(qtbot, three_with_a_long_detail(), (780, 720))
     view, bar = workspace.brief_list, workspace.detail.verticalScrollBar()
     assert view.verticalScrollBar().maximum() == 0  # Three rows fit.
     assert bar.maximum() > 0  # The first email's detail doesn't.
@@ -538,7 +544,7 @@ def test_page_keys_scroll_the_detail_while_the_list_fits(qtbot: QtBot) -> None:
 
 
 def test_page_up_from_a_detail_button_scrolls_the_pane(qtbot: QtBot) -> None:
-    workspace = workspace_with(qtbot, three_with_a_long_detail(), (680, 520))
+    workspace = workspace_with(qtbot, three_with_a_long_detail(), (780, 720))
     bar = workspace.detail.verticalScrollBar()
     QTest.keyClick(workspace.brief_list, Qt.Key.Key_PageDown)
     scrolled = bar.value()
@@ -631,7 +637,6 @@ def test_the_pages_sit_on_a_rounded_sheet(
     workspace.resize(*SIZES["mockup"])
     show(qtbot, workspace)
     sheet = workspace.sheet
-    assert not workspace.findChildren(HairlineDivider)
     edge = sheet.sheet_rect()
     assert sheet.width() - edge.width() == SHEET_GUTTER
     pages = workspace.pages
@@ -647,8 +652,8 @@ def test_the_pages_sit_on_a_rounded_sheet(
         return image.pixelColor(round(x * ratio), round(y * ratio)).name()
 
     # The sheet's corner shows the glass round it, as does the gutter.
-    assert at(0, 0) != tokens.panel
-    assert at(sheet.width() - 2, 10) != tokens.panel
+    assert at(0, 0) == tokens.panel
+    assert at(sheet.width() - 2, 10) == tokens.panel
 
 
 def test_clear_shows_only_the_message(qtbot: QtBot) -> None:
@@ -777,7 +782,7 @@ def test_the_heading_gains_its_year_after_new_year(qtbot: QtBot) -> None:
         coverage=None,
     )
     workspace.show_digest(digest, owner_zone=OWNER_ZONE, today=date(2026, 12, 31))
-    assert workspace.heading.title.text() == "Thu Dec 31"
+    assert "THU DEC 31" in workspace.heading.eyebrow.text()
     assert workspace.coverage.text() == "Inbox on Dec 31, up to 10:00, plus 1 tracked reply"
     assert workspace.heading.meta.accessibleName().startswith(
         "owner@example.com. Saved Thu Dec 31, 10:00"
@@ -785,7 +790,7 @@ def test_the_heading_gains_its_year_after_new_year(qtbot: QtBot) -> None:
 
     workspace.set_today(date(2027, 1, 1), OWNER_ZONE)  # Midnight passes.
 
-    assert workspace.heading.title.text() == "Thu Dec 31, 2026"
+    assert "THU DEC 31, 2026" in workspace.heading.eyebrow.text()
     assert workspace.coverage.text() == (  # The footer too.
         "Inbox on Dec 31, 2026, up to 10:00, plus 1 tracked reply"
     )
@@ -909,11 +914,11 @@ def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
     assert keys == ["today", "inbox", "actions", "waiting", "drafts", "briefs", "calendar"]
     assert list(PAGE_SHORTCUTS) == keys
     rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
-    assert rows[-1].height() == rows[0].height() + 12  # The gap above Calendar.
+    assert rows[-1].height() == rows[0].height()
     assert sidebar.nav.height() >= rows[-1].bottom()  # Every row fits, none scrolls.
 
 
-def test_a_click_on_the_divider_above_calendar_chooses_nothing(qtbot: QtBot) -> None:
+def test_calendar_row_is_clickable_across_its_whole_height(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     workspace.resize(*SIZES["mockup"])
     show(qtbot, workspace)
@@ -923,8 +928,8 @@ def test_a_click_on_the_divider_above_calendar_chooses_nothing(qtbot: QtBot) -> 
     calendar = sidebar.nav.visualRect(sidebar.pages.index(sidebar._row("calendar"), 0))
     gap = QPoint(calendar.center().x(), calendar.top() + 4)  # On the divider.
     QTest.mouseClick(sidebar.nav.viewport(), Qt.MouseButton.LeftButton, pos=gap)
-    assert sidebar.current_key() == "today"
-    assert pages.count() == 0
+    assert sidebar.current_key() == "calendar"
+    assert pages.count() == 1
     row = QPoint(calendar.center().x(), calendar.bottom() - 8)  # On the row itself.
     QTest.mouseClick(sidebar.nav.viewport(), Qt.MouseButton.LeftButton, pos=row)
     assert sidebar.current_key() == "calendar"
@@ -943,6 +948,9 @@ def test_a_dropped_workspace_is_freed_without_the_cycle_collector(
     def dropped() -> weakref.ref[ThreePaneWorkspace]:
         workspace = build_calendar(qtbot) if calendar else build(qtbot)
         show(qtbot, workspace)
+        from tests.ui.references import references_to
+
+        assert not references_to(workspace), references_to(workspace)
         return weakref.ref(workspace)
 
     gc.collect()

@@ -16,7 +16,6 @@ from mailbrief.ui.history_view import (
     BriefHistoryPanel,
 )
 from mailbrief.ui.main_window import MainWindow
-from tests.ui.brief_view import shown_text
 from tests.ui.test_workflow import FakeBackend, finish
 from tests.ui.window_wait import settle
 
@@ -70,6 +69,25 @@ def test_saved_briefs_and_missed_days_are_listed(panel: BriefHistoryPanel) -> No
     assert panel.saved.accessibleName() and panel.missed.accessibleName()
     # Today's brief is open-only: today is briefed with Sync and review.
     assert panel.open_button.isEnabled() and not panel.brief_button.isEnabled()
+
+
+def test_preview_attention_count_includes_deadlines(panel: BriefHistoryPanel) -> None:
+    from mailbrief.domain.digests import DigestSection
+    from tests.ui.workspace_fixtures import mockup_digest
+
+    digest = mockup_digest().digest
+    deadline = next(item for item in digest.items if item.section is DigestSection.DEADLINES)
+    digest = digest.model_copy(update={"items": (deadline,)})
+    panel.configure(
+        (summary(digest.local_date, digest.account_id, items=1),),
+        (),
+        digest.account_id,
+        digest.local_date,
+    )
+    panel.show_preview(digest)
+    assert panel.item_count.text() == "1"
+    assert panel.reply_count.text() == "0"
+    assert panel.highlight_count.text() == "0"
 
 
 def test_a_saved_brief_and_missed_day_from_another_year_name_it(
@@ -199,7 +217,7 @@ async def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
 
 
 def heading(window: MainWindow) -> str:
-    return shown_text(window).splitlines()[0]
+    return window.workspace.heading.eyebrow.text()
 
 
 async def review_and_approve(window: MainWindow) -> None:
@@ -254,7 +272,7 @@ async def test_opening_a_past_brief_shows_the_banner_until_back_to_latest(
 ) -> None:
     await open_past(window)
 
-    assert heading(window).startswith("Thu Sep 3")
+    assert heading(window).startswith("THU SEP 3")
     assert not window.viewing.isHidden()
     assert window.viewing_label.text() == "Viewing the brief for Thu Sep 3."
     assert window.workspace.current_page() == "today"
@@ -263,7 +281,7 @@ async def test_opening_a_past_brief_shows_the_banner_until_back_to_latest(
     await finish(window)
 
     assert window.viewing.isHidden()
-    assert heading(window).startswith("Fri Sep 4")
+    assert heading(window).startswith("FRI SEP 4")
 
 
 async def test_opening_the_latest_brief_shows_no_banner(window: MainWindow) -> None:
@@ -281,12 +299,12 @@ async def test_undo_while_viewing_a_past_brief_keeps_it(
 
     window.start(lambda: window._accept_suggestion(7), cancellable=False)
     await finish(window)
-    assert heading(window).startswith("Thu Sep 3")
+    assert heading(window).startswith("THU SEP 3")
     window.undo_button.click()
     await finish(window)
 
     assert [call[0] for call in backend.action_calls] == ["accept_suggestion", "unaccept_action"]
-    assert heading(window).startswith("Thu Sep 3")
+    assert heading(window).startswith("THU SEP 3")
     assert not window.viewing.isHidden()
 
 
@@ -300,7 +318,7 @@ async def test_briefing_a_missed_day_passes_its_date_and_shows_it(
     await review_and_approve(window)
 
     assert backend.generated_days[-1] == date(2026, 9, 2)
-    assert heading(window).startswith("Wed Sep 2")
+    assert heading(window).startswith("WED SEP 2")
     assert window.viewing_label.text() == "Viewing the brief for Wed Sep 2."
 
 
@@ -348,7 +366,7 @@ async def test_sync_and_review_returns_to_the_latest_brief(
     window.generate_button.click()
     await settle()
     assert window.viewing.isHidden()
-    assert heading(window).startswith("Fri Sep 4")
+    assert heading(window).startswith("FRI SEP 4")
     await review_and_approve(window)
 
     assert backend.generated_days == [None]

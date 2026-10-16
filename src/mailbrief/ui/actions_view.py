@@ -12,13 +12,23 @@ from datetime import date, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QKeyEvent, QPainter
+from PySide6.QtCore import (
+    QModelIndex,
+    QPersistentModelIndex,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QUrl,
+    Signal,
+)
+from PySide6.QtGui import QColor, QDesktopServices, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFrame,
     QHBoxLayout,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -47,7 +57,6 @@ from mailbrief.ui.action_text import (
 )
 from mailbrief.ui.brief_list import (
     CHIP_GAP,
-    ELIDE_MARGIN,
     ROW_PAD_H,
     ROW_PAD_V,
     ROW_ROLE,
@@ -58,15 +67,14 @@ from mailbrief.ui.brief_list import (
     paint_chips,
     paint_lines,
     paint_selection,
-    paint_separator,
     proposal_chip,
     row_height,
 )
-from mailbrief.ui.hairline import HairlineSplitter, paint_focus_ring
+from mailbrief.ui.hairline import HairlineSplitter, hairline_pen, paint_focus_ring
 from mailbrief.ui.labels import outline_button, plain_label
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.proposals_view import pending_proposals
-from mailbrief.ui.theme import TEXT_PX, TITLE_PX, current_tokens, ui_metrics
+from mailbrief.ui.theme import META_PX, TITLE_PX, current_tokens, ui_font, ui_metrics
 
 __all__ = [
     "COMPLETE",
@@ -148,6 +156,7 @@ class ActionRow:
     meta: str
     chips: tuple[Chip, ...]
     muted: bool
+    avatar: str = ""
 
 
 def action_row(action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> ActionRow:
@@ -185,6 +194,9 @@ def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
         meta=" · ".join(meta) if meta else NO_DATES,
         chips=tuple(chips),
         muted=facts.completed is not None,
+        avatar=(action.sources[0].sender_address[:2].upper() if action.sources else "?")
+        if facts.waiting
+        else "",
     )
 
 
@@ -217,21 +229,50 @@ class ActionRowDelegate(QStyledItemDelegate):
         painter.save()
         painter.setClipRect(rect)  # Chips that don't fit stop at the row's edge.
         paint_selection(painter, rect, state, tokens)
-        width = max(0, rect.width() - ELIDE_MARGIN)
-        left = rect.left() + ROW_PAD_H
+        width = max(0, rect.width() - 78)
+        left = rect.left() + 50
+        painter.setPen(hairline_pen(tokens.border_strong))
+        painter.setBrush(QColor(tokens.nav_selection) if row.muted else Qt.BrushStyle.NoBrush)
+        if row.avatar:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.nav_selection))
+            painter.drawEllipse(QRectF(rect.left() + 12, rect.top() + 14, 32, 32))
+            painter.setPen(QColor(tokens.text_secondary))
+            painter.setFont(ui_font(9, medium=True))
+            painter.drawText(
+                QRect(rect.left() + 12, rect.top() + 14, 32, 32),
+                int(Qt.AlignmentFlag.AlignCenter),
+                row.avatar,
+            )
+            left = rect.left() + 56
+        else:
+            painter.drawEllipse(QRectF(rect.left() + 18, rect.top() + 14, 18, 18))
+        if row.muted:
+            painter.setPen(QColor(tokens.text_secondary))
+            painter.drawText(
+                QRect(rect.left() + 18, rect.top() + 14, 18, 18),
+                int(Qt.AlignmentFlag.AlignCenter),
+                "✓",
+            )
         top = paint_lines(
             painter,
             left,
             rect.top() + ROW_PAD_V,
             width,
             row.title,
-            elided(row.meta, ui_metrics(TEXT_PX), width),
+            elided(row.meta, ui_metrics(META_PX), width),
             title_color=tokens.text_secondary if row.muted else tokens.text,
             subtitle_color=tokens.text_muted if row.muted else tokens.text_secondary,
         )
         if row.chips:
             paint_chips(painter, row.chips, left, top + CHIP_GAP)
-        paint_separator(painter, rect, tokens)
+        painter.setFont(ui_font(15))
+        painter.setPen(QColor(tokens.text_muted))
+        painter.drawText(
+            QRect(rect.right() - 23, rect.top(), 15, rect.height()),
+            int(Qt.AlignmentFlag.AlignVCenter),
+            "›",
+        )
         paint_focus_ring(painter, rect, state, tokens.accent_fg)
         painter.restore()
 
@@ -294,15 +335,19 @@ class ActionsPanel(QWidget):
         self.splitter = HairlineSplitter(Qt.Orientation.Horizontal)
         list_side = QWidget()
         list_side.setObjectName("actionsListPane")
+        list_side.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         side = QVBoxLayout(list_side)
         side.setContentsMargins(0, 0, 0, 0)
         side.setSpacing(0)
         heading = plain_label("Your actions", px=TITLE_PX, semibold=True)
         heading.setObjectName("actionsHeading")
-        heading.setContentsMargins(ROW_PAD_H, 14, 12, 4)
+        heading.setContentsMargins(12, 10, 12, 4)
+        heading.hide()
         heading_row = QHBoxLayout()
         heading_row.addWidget(heading, 1)
-        self.new_task_button = outline_button("&New task", "newTaskButton", mnemonic=True)
+        self.new_task_button = outline_button(
+            "&New task", "newTaskButton", mnemonic=True, primary=True, icon_name="plus"
+        )
         self.new_task_button.setAccessibleName("New task")
         self.new_task_button.setToolTip("Create a task (Ctrl+N)")
         self.new_task_button.clicked.connect(self.new_task_requested.emit)
@@ -310,8 +355,7 @@ class ActionsPanel(QWidget):
         heading_row.setContentsMargins(0, 0, ROW_PAD_H, 0)
         side.addLayout(heading_row)
         grouping = QHBoxLayout()
-        grouping.setContentsMargins(12, 4, 12, 4)
-        grouping.setSpacing(6)
+        grouping.setContentsMargins(14, 10, 14, 10)
         self.group = QComboBox()
         self.group.setObjectName("actionGroup")
         # Keep the project filter in the Tab order on Cocoa as well as Windows.
@@ -322,33 +366,63 @@ class ActionsPanel(QWidget):
         self.group.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        self.group.addItem("All tasks", "all")
+        self.group.addItem("All projects", "all")
+        self.group.setFont(ui_font(9))
         self.group.currentIndexChanged.connect(lambda _index: self.group_changed.emit())
         grouping.addWidget(self.group, 1)
-        self.organize_button = outline_button("Projects & areas", "organizeButton")
+        self.organize_button = outline_button("More", "organizeButton")
         self.organize_button.setAccessibleName("Manage projects and life areas")
-        self.organize_button.clicked.connect(self.organize_requested.emit)
+        tools = QMenu(self.organize_button)
+        tools.addAction("Projects & areas", self.organize_requested.emit)
+        search_action = tools.addAction("Search actions")
+        search_action.triggered.connect(self._show_search)
+        self.organize_button.setMenu(tools)
         grouping.addWidget(self.organize_button)
-        side.addLayout(grouping)
+        self.group_toolbar = QWidget()
+        self.group_toolbar.setObjectName("actionsToolbar")
+        self.group_toolbar.setFixedHeight(52)
+        self.group_toolbar.setLayout(grouping)
+        side.addWidget(self.group_toolbar)
+        self.search = QLineEdit()
+        self.search.setObjectName("actionSearch")
+        self.search.setAccessibleName("Search actions in the current view")
+        self.search.setPlaceholderText("Search actions")
+        self.search.textChanged.connect(self._filter)
+        self.search_toolbar = QWidget()
+        self.search_toolbar.setObjectName("waitingToolbar")
+        self.search_toolbar.setFixedHeight(52)
+        search_row = QHBoxLayout(self.search_toolbar)
+        search_row.setContentsMargins(14, 9, 14, 9)
+        search_row.addWidget(self.search, 1)
+        self.waiting_count = plain_label("", tone="muted", px=9)
+        self.waiting_count.setObjectName("waitingCount")
+        search_row.addWidget(self.waiting_count)
+        self.search_toolbar.hide()
+        side.addWidget(self.search_toolbar)
         self.tabs = QTabBar()
         self.tabs.setObjectName("actionsTabs")
+        self.tabs.setFont(ui_font(9))
         self.tabs.setAccessibleName("Action views")
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
+        self.tabs.setMinimumWidth(135)
         self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
         # Tab reaches it on every platform, not only with macOS's keyboard navigation on.
         self.tabs.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        tabs_row = QHBoxLayout()
-        # The selected tab's pill (2 px in) lines up with the fields above.
-        tabs_row.setContentsMargins(ROW_PAD_H - 2, 0, ROW_PAD_H, 0)
-        tabs_row.addWidget(self.tabs)
-        tabs_row.addStretch(1)
-        side.addLayout(tabs_row)
+        grouping.insertWidget(0, self.tabs)
+        grouping.removeWidget(self.organize_button)
+        grouping.addWidget(self.organize_button)
+        self.organize_button.setProperty("variant", "ghost")
+        self.organize_button.setFont(ui_font(9))
+        self.group.setMinimumContentsLength(8)
+        self.group.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
         self.stack = QStackedWidget()
         self.stack.setObjectName("actionsStack")
         self.lists: dict[ActionFilter, QListWidget] = {}
         self.detail = ActionDetailPane()
-        self.detail.setMinimumWidth(280)
+        self.detail.setMinimumWidth(400)
         for view in ActionFilter:
             listing = ActionList(view)
             listing.set_page_scroll(self.detail.verticalScrollBar())
@@ -357,14 +431,20 @@ class ActionsPanel(QWidget):
             self.lists[view] = listing
             self.tabs.addTab(_TAB_NAMES[view])
             self.stack.addWidget(listing)
+        self.tabs.setTabVisible(list(ActionFilter).index(ActionFilter.WAITING), False)
         self.tabs.currentChanged.connect(self._view_changed)
         side.addWidget(self.stack, 1)
         list_side.setMinimumWidth(220)
         self.splitter.addWidget(list_side)
-        self.splitter.addWidget(self.detail)
-        self.splitter.setStretchFactor(0, 4)
-        self.splitter.setStretchFactor(1, 5)
+        self.detail_host = QStackedWidget()
+        self.detail_host.setObjectName("actionDetailHost")
+        self.detail_host.setAccessibleName("Action details and editor")
+        self.detail_host.addWidget(self.detail)
+        self.splitter.addWidget(self.detail_host)
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 3)
         self.splitter.setChildrenCollapsible(False)
+        self.splitter.setSizes([350, 525])
         layout.addWidget(self.splitter)
         detail = self.detail
         self.edit_button = detail.edit_button
@@ -398,6 +478,7 @@ class ActionsPanel(QWidget):
             self.new_task_button,
             self.group,
             self.organize_button,
+            self.search,
             self.tabs,
             *self.lists.values(),
             *detail.all_buttons(),
@@ -414,6 +495,10 @@ class ActionsPanel(QWidget):
             return kind, public_id or None
         return "all", None
 
+    def _show_search(self) -> None:
+        self.search_toolbar.show()
+        self.search.setFocus()
+
     def show_groups(
         self,
         projects: tuple[Project, ...],
@@ -423,7 +508,7 @@ class ActionsPanel(QWidget):
         selected = self.group.currentData()
         self.group.blockSignals(True)
         self.group.clear()
-        self.group.addItem("All tasks", "all")
+        self.group.addItem("All projects", "all")
         self.group.addItem("Unassigned", "unassigned")
         for area in areas:
             self.group.addItem(f"Area: {area.name}", "area:" + area.public_id)
@@ -482,6 +567,8 @@ class ActionsPanel(QWidget):
         row = listing.currentRow()
         kept = previous[row].public_id if 0 <= row < len(previous) else None
         self._actions[view] = actions
+        if view is ActionFilter.WAITING:
+            self.waiting_count.setText(f"{len(actions)} active")
         self._moment = (today, zone, now)
         self._filling = True
         try:
@@ -503,6 +590,7 @@ class ActionsPanel(QWidget):
             list(ActionFilter).index(view), f"{_TAB_NAMES[view]} ({len(actions)}{more})"
         )
         if view is self.view():
+            self._filter(self.search.text())
             self._refresh()
 
     def set_busy(self, busy: bool) -> None:
@@ -513,8 +601,31 @@ class ActionsPanel(QWidget):
         self._update_buttons()
 
     def _view_changed(self, index: int) -> None:
+        self.tabs.setVisible(self.view() is not ActionFilter.WAITING)
+        self.group_toolbar.setVisible(self.view() is not ActionFilter.WAITING)
+        self.search_toolbar.setVisible(self.view() is ActionFilter.WAITING)
+        self.waiting_count.setVisible(self.view() is ActionFilter.WAITING)
         self.stack.setCurrentIndex(index)
+        self.search.setPlaceholderText(
+            "Search waiting items" if self.view() is ActionFilter.WAITING else "Search actions"
+        )
+        self._filter(self.search.text())
         self._refresh()
+
+    def _filter(self, text: str) -> None:
+        listing = self.lists[self.view()]
+        query = text.casefold().strip()
+        first: int | None = None
+        for row in range(listing.count()):
+            item = listing.item(row)
+            if item is not None:
+                visible = query in item.text().casefold()
+                item.setHidden(not visible)
+                if visible and first is None:
+                    first = row
+        selected = listing.currentItem()
+        if selected is None or selected.isHidden():
+            listing.setCurrentRow(-1 if first is None else first)
 
     def _row_changed(self, view: ActionFilter) -> None:
         if not self._filling and view is self.view():
@@ -533,7 +644,17 @@ class ActionsPanel(QWidget):
     def _update_buttons(self) -> None:
         action = self.selected()
         completed = self.view() is ActionFilter.COMPLETED
-        self.complete_button.setText("Re&open" if completed else "Com&plete")
+        waiting = self.view() is ActionFilter.WAITING
+        self.complete_button.setText(
+            "Re&open" if completed else "Mark received" if waiting else "Com&plete"
+        )
+        self.draft_button.setText("Draft follow-up" if waiting else "Dra&ft reply")
+        for button, primary in ((self.complete_button, not waiting), (self.draft_button, waiting)):
+            variant = "primary" if primary else "outline"
+            if button.property("variant") != variant:
+                button.setProperty("variant", variant)
+                button.style().unpolish(button)
+                button.style().polish(button)
         enabled = action is not None and not self._busy
         for button in (self.edit_button, self.complete_button, self.delete_button):
             button.setEnabled(enabled)
@@ -544,6 +665,7 @@ class ActionsPanel(QWidget):
         )
         self.draft_button.setEnabled(enabled)
         self.reply_draft.setEnabled(action is not None and can_reply(action))
+        self.detail.arrange_controls()
 
     def _request(self, kind: str) -> None:
         action = self.selected()

@@ -28,13 +28,19 @@ from tests.ui.window_wait import show
 # the sidebar ends at Settings: Disconnect is in Settings' Account card.
 HEADER_AND_SIDEBAR = [
     "generateButton",
+    "dayOverviewToggle",
     "sidebarNav",
     "savedMailButton",
     "dataButton",
     "settingsButton",
+    "accountControl",
 ]
 FIRST_EMAIL = [
+    "metricActions",
+    "metricCalendar",
+    "metricWaiting",
     "briefList",
+    "viewEmailButton",
     "acceptButton",
     "dismissButton",
     "addToButton",
@@ -259,15 +265,25 @@ async def test_another_email_relinks_its_buttons(window: MainWindow) -> None:
     brief_list.setCurrentIndex(brief_list.model().index(4, 0))
     QApplication.processEvents()  # The new buttons show on the next pass.
     names = [button.objectName() for button in detail_buttons(window)]
-    assert names and names[0] == "replyButton"
-    assert tab_chain(window, window.generate_button) == [*HEADER_AND_SIDEBAR, "briefList", *names]
+    assert names and names[0] == "viewEmailButton"
+    assert tab_chain(window, window.generate_button) == [
+        *HEADER_AND_SIDEBAR,
+        "metricActions",
+        "metricCalendar",
+        "metricWaiting",
+        "briefList",
+        *names,
+    ]
 
 
 async def test_google_sign_in_follows_settings_when_signed_out(window: MainWindow) -> None:
     window.start(window._disconnect)
     await finish(window)
     chain = tab_chain(window, window.generate_button)
-    assert chain[: len(HEADER_AND_SIDEBAR) + 1] == [*HEADER_AND_SIDEBAR, "connectButton"]
+    assert chain[: len(HEADER_AND_SIDEBAR)] == HEADER_AND_SIDEBAR
+    window.workspace.sidebar.account_button.click()
+    assert window.connect_button.isVisible()
+    window.workspace.sidebar.account_menu.hide()
 
 
 async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> None:
@@ -275,7 +291,14 @@ async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> 
     assert window.cancel_button.isVisible() and not window.generate_button.isEnabled()
     chain = tab_chain(window, window.cancel_button)
     # Sync and review, Saved mail and Data wait while busy; Settings opens beside it.
-    assert chain == ["cancelButton", "sidebarNav", "settingsButton", *FIRST_EMAIL]
+    assert chain == [
+        "cancelButton",
+        "sidebarNav",
+        "settingsButton",
+        "accountControl",
+        *FIRST_EMAIL,
+        "dayOverviewToggle",
+    ]
     release.set()
     await finish(window)
 
@@ -285,7 +308,7 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
     QApplication.processEvents()
     panel = window.actions_panel
     detail = [button.objectName() for button in panel.detail.buttons()]
-    assert detail == ["editButton", "completeButton", "deleteButton", "draftButton"]
+    assert detail == ["completeButton", "draftButton", "editButton", "deleteButton"]
 
     chain = tab_chain(window, panel.new_task_button)
 
@@ -296,5 +319,5 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
         "actionsTabs",
         "actionList",
         *detail,
-        *HEADER_AND_SIDEBAR,
+        *HEADER_AND_SIDEBAR[2:],
     ]

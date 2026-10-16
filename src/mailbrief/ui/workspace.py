@@ -3,7 +3,7 @@
 import math
 import weakref
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -52,32 +52,42 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.domain.actions import ActionProposal, ThreadLink
-from mailbrief.domain.digests import DailyDigest, DigestItem, DigestStatus, SavedBriefSummary
+from mailbrief.domain.analysis import DeadlinePrecision
+from mailbrief.domain.digests import (
+    DailyDigest,
+    DigestItem,
+    DigestSection,
+    DigestStatus,
+    SavedBriefSummary,
+)
 from mailbrief.services.history import coverage_line, outside_count
 from mailbrief.ui.brief_detail import BriefDetailPane
-from mailbrief.ui.brief_list import ROW_PAD_H, BriefListView, build_rows
-from mailbrief.ui.deadline_text import day_text, moment_text, month_day
+from mailbrief.ui.brief_list import ROW_PAD_H, BriefListView, BriefRow, build_rows
+from mailbrief.ui.deadline_text import day_text, full_day_text, moment_text, month_day
 from mailbrief.ui.glass.backdrop import Backdrop, BackdropKey, BackdropRenderer
 from mailbrief.ui.glass.backdrop import color as tint_color
 from mailbrief.ui.glass.motion import GLIDE_MS, fluid_curve
-from mailbrief.ui.glass.painter import paint_panel, paint_raised
+from mailbrief.ui.glass.painter import GlassMode, paint_panel, paint_raised
 from mailbrief.ui.glass.preferences import glass_preferences
 from mailbrief.ui.glass.profile import profiled
 from mailbrief.ui.hairline import (
+    HairlineDivider,
+    HairlineFrame,
     HairlineSplitter,
     crisp_fill_rect,
     crisp_rect,
     hairline_pen,
     paint_focus_ring,
 )
-from mailbrief.ui.labels import ElidedLabel, button_label, plain_label
+from mailbrief.ui.labels import ElidedLabel, button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.theme import (
     CAPTION_PX,
-    HEADING_PX,
+    RADIUS,
     SHEET_RADIUS,
     SIDEBAR_WIDTH,
     SMALL_PX,
     TEXT_PX,
+    ColorScheme,
     current_glass,
     current_mode,
     current_scheme,
@@ -86,6 +96,7 @@ from mailbrief.ui.theme import (
     icon_pixmap,
     ui_font,
 )
+from mailbrief.ui.weak import weak_method
 
 # How strongly a hovered or focused sidebar button shows the raised fill.
 ACTIVE_RAISE: Final = 0.6
@@ -101,14 +112,15 @@ SHEET_GUTTER: Final = 8
 # Archive). Calendar comes last, set apart, as Outlook keeps it apart from mail. Ctrl+1 to
 # Ctrl+7 follow this order.
 PAGES: Final = (
-    ("today", "Today", "sun"),
+    ("today", "Today", "clock"),
     ("inbox", "Inbox", "mail"),
     ("actions", "Actions", "checkbox"),
-    ("waiting", "Waiting", "hourglass"),
+    ("waiting", "Waiting", "clock"),
     ("drafts", "Drafts", "pencil"),
     ("briefs", "Briefs", "calendar"),
     ("calendar", "Calendar", "calendar-week"),
 )
+PAGE_SHORTCUTS: Final = tuple(key for key, _label, _icon in PAGES)
 # Pages that start a group: a gap with a hairline divider above them.
 GROUP_STARTS: Final = frozenset({"calendar"})
 EMPTY_BRIEF: Final = "No analyzed messages in this brief."
@@ -117,9 +129,9 @@ KEY_ROLE: Final = Qt.ItemDataRole.UserRole + 1
 ICON_ROLE: Final = Qt.ItemDataRole.UserRole + 2
 COUNT_ROLE: Final = Qt.ItemDataRole.UserRole + 3
 
-_NAV_ROW: Final = 32
-_GROUP_GAP: Final = 12  # Above a page that starts a group.
-_ICON_PX: Final = 16
+_GROUP_GAP: Final = 0
+_NAV_ROW: Final = 39
+_ICON_PX: Final = 18
 _ICON_X: Final = 10
 _LABEL_X: Final = _ICON_X + _ICON_PX + 10
 
@@ -271,6 +283,19 @@ class GlassChrome(QWidget):
 
     @profiled()  # HeaderBar and SidebarNav report apart.
     def paintEvent(self, event: QPaintEvent) -> None:
+        if current_scheme() is ColorScheme.STUDIO:
+            painter = QPainter(self)
+            tokens = current_tokens()
+            painter.fillRect(
+                self.rect(),
+                QColor(
+                    (tokens.sidebar if self.objectName() == "sidebar" else tokens.panel)
+                    if glass_preferences().mode is GlassMode.NORMAL
+                    else current_glass().opaque
+                ),
+            )
+            painter.end()
+            return
         rect = QRectF(self.rect())
         workspace = self.workspace
         backdrop = None if workspace is None else workspace.backdrop
@@ -352,17 +377,29 @@ class HeaderBar(GlassChrome):
         _styled(self, "headerBar")
         self.setAccessibleName("MailBrief status")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(6)
-        title = plain_label("MailBrief", px=TITLE_BAR_PX, semibold=True)
-        title.setWordWrap(False)
-        layout.addWidget(title)
-        layout.addStretch(1)
-        self.refresh_icon = QLabel()
+        layout.setContentsMargins(25, 22, 25, 17)
+        layout.setSpacing(13)
+        headings = self.headings = QVBoxLayout()
+        headings.setSpacing(3)
+        self.date = ElidedLabel(tone="muted", px=CAPTION_PX)
+        self.date.setText("Your daily workspace")
+        self.date.setObjectName("pageHeaderDate")
+        self.title = plain_label("Today’s brief", px=24, medium=True)
+        self.title.setObjectName("pageHeaderTitle")
+        headings.addWidget(self.date)
+        self.title_line = QWidget()
+        self.title_line.setObjectName("headerTitleLine")
+        title_row = QHBoxLayout(self.title_line)
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(13)
+        title_row.addWidget(self.title)
+        headings.addWidget(self.title_line)
+        layout.addLayout(headings, 1)
+        self.refresh_icon = plain_label("")
         follow_theme(
             self.refresh_icon,
             lambda label: label.setPixmap(
-                icon_pixmap("refresh", current_tokens().text_secondary, _ICON_PX, 2.0)
+                icon_pixmap("clock", current_tokens().text_secondary, 8, 2.0)
             ),
         )
         self.refresh_icon.setObjectName("headerRefreshIcon")
@@ -372,12 +409,11 @@ class HeaderBar(GlassChrome):
         policy = self.refresh_icon.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self.refresh_icon.setSizePolicy(policy)
-        layout.addWidget(self.refresh_icon)
-        self.status = _StatusLabel(tone="secondary", px=SMALL_PX)
+        title_row.addWidget(self.refresh_icon)
+        self.status = _StatusLabel(tone="muted", px=10)
         self.status.setObjectName("headerStatus")
-        layout.addWidget(self.status)
-        # After the check time and before the window's buttons, as the one place a standing
-        # problem shows.
+        title_row.addWidget(self.status)
+        title_row.addStretch(1)
         self.alert = HeaderAlert()
         layout.addWidget(self.alert)
         # Widgets the window adds, right of the status: 2 + the layout's 6 makes 8.
@@ -411,7 +447,11 @@ class _NavDelegate(QStyledItemDelegate):
         selected = bool(state & QStyle.StateFlag.State_Selected)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if index.data(KEY_ROLE) in GROUP_STARTS:
+        if selected and current_scheme() is ColorScheme.STUDIO:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.nav_selection))
+            painter.drawRoundedRect(QRectF(rect.adjusted(1, 2, -1, -2)), RADIUS, RADIUS)
+        if _GROUP_GAP and index.data(KEY_ROLE) in GROUP_STARTS:
             # The gap above a group, with a hairline across its middle; the row below it.
             painter.setPen(hairline_pen(tokens.hairline))
             middle = rect.top() + _GROUP_GAP // 2
@@ -421,12 +461,12 @@ class _NavDelegate(QStyledItemDelegate):
             rect = rect.adjusted(0, _GROUP_GAP, 0, 0)
         # The selected page's raised pill is the list's: it glides between rows.
         name = index.data(ICON_ROLE)
-        color = tokens.text if selected else tokens.text_secondary
+        color = tokens.primary if selected else tokens.text_secondary
         if isinstance(name, str):
             pixmap = icon_pixmap(name, color, _ICON_PX, painter.device().devicePixelRatioF())
             top = rect.top() + (rect.height() - _ICON_PX) // 2
             painter.drawPixmap(rect.left() + _ICON_X, top, pixmap)
-        font = ui_font(TEXT_PX)
+        font = ui_font(TEXT_PX, medium=selected)
         painter.setFont(font)
         painter.setPen(QColor(tokens.text if selected else tokens.text_secondary))
         flags = int(Qt.AlignmentFlag.AlignVCenter) | int(Qt.TextFlag.TextSingleLine)
@@ -444,6 +484,47 @@ class _NavDelegate(QStyledItemDelegate):
     def sizeHint(self, option: QStyleOptionViewItem, index: _Index) -> QSize:
         gap = _GROUP_GAP if index.data(KEY_ROLE) in GROUP_STARTS else 0
         return QSize(option.rect.width(), _NAV_ROW + gap)
+
+
+class OverviewButton(QPushButton):
+    """A compact daily metric whose whole surface is keyboard and mouse accessible."""
+
+    def __init__(self, title: str, icon_name: str, caption: str) -> None:
+        super().__init__()
+        self.setProperty("variant", "nav")
+        self.setAccessibleName(title)
+        self.setMinimumHeight(40)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(6, 4, 6, 4)
+        row.setSpacing(10)
+        symbol = QLabel()
+        symbol.setObjectName("overviewIcon" + icon_name)
+        symbol.setProperty("metricIcon", True)
+        symbol.setProperty("attention", icon_name == "checkbox")
+        symbol.setFixedSize(28, 28)
+        symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        symbol.setPixmap(icon_pixmap(icon_name, current_tokens().text_secondary, 18, 2.0))
+        row.addWidget(symbol)
+        copy = QVBoxLayout()
+        copy.setSpacing(3)
+        self.heading = ElidedLabel(title, px=11)
+        self.caption = ElidedLabel(tone="muted", px=10)
+        self.caption.setText(caption)
+        self.caption.setFont(ui_font(9))
+        copy.addWidget(self.heading)
+        copy.addWidget(self.caption)
+        row.addLayout(copy, 1)
+        self.count = plain_label("", px=17, medium=True)
+        row.addWidget(self.count)
+        for child in (symbol, self.heading, self.caption, self.count):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def set_metric(self, count: int | None, caption: str) -> None:
+        self.count.setText("" if count is None else str(count))
+        self.caption.setText(caption)
+        self.setAccessibleName(
+            f"{self.heading.text()}, {caption}" + ("" if count is None else f", {count}")
+        )
 
 
 class _NavList(QListView):
@@ -497,7 +578,7 @@ class _NavList(QListView):
 
     def paintEvent(self, event: QPaintEvent) -> None:
         pill = self.shown_pill()
-        if pill is not None:
+        if pill is not None and current_scheme() is not ColorScheme.STUDIO:
             painter = QPainter(self.viewport())
             paint_raised(painter, pill, current_glass(), glass_preferences().mode)
             painter.end()
@@ -608,8 +689,23 @@ class SidebarNav(GlassChrome):
         self.setAccessibleName("Pages")
         self.setFixedWidth(SIDEBAR_WIDTH)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 12, 8, 12)
-        layout.setSpacing(2)
+        layout.setContentsMargins(13, 21, 13, 13)
+        layout.setSpacing(3)
+        self.brand = QWidget()
+        self.brand.setAccessibleName("MailBrief")
+        brand_row = QHBoxLayout(self.brand)
+        brand_row.setContentsMargins(8, 0, 8, 18)
+        brand_row.setSpacing(10)
+        brand_icon = QLabel()
+        brand_icon.setObjectName("brandIcon")
+        brand_icon.setFixedSize(28, 28)
+        brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_icon.setPixmap(icon_pixmap("mail", current_tokens().panel, 16, 2.0))
+        brand_row.addWidget(brand_icon)
+        brand_text = plain_label("MailBrief", px=15, medium=True)
+        brand_text.setObjectName("brandLabel")
+        brand_row.addWidget(brand_text, 1)
+        layout.addWidget(self.brand)
         self.pages = QStandardItemModel(self)
         for key, label, icon_name in PAGES:
             item = QStandardItem(label)
@@ -634,7 +730,8 @@ class SidebarNav(GlassChrome):
         self.nav.page_activated.connect(self.page_requested)
         layout.addWidget(self.nav)
         layout.addStretch(1)
-        self.saved_mail = NavButton("Saved mail", "mail", mnemonic="Saved &mail")
+        layout.addWidget(HairlineDivider())
+        self.saved_mail = NavButton("Saved mail", "bookmark", mnemonic="Saved &mail")
         self.saved_mail.setObjectName("savedMailButton")
         layout.addWidget(self.saved_mail)
         self.data = NavButton(
@@ -652,11 +749,83 @@ class SidebarNav(GlassChrome):
         self.note.setContentsMargins(10, 4, 4, 0)
         self.note.hide()
         layout.addWidget(self.note)
-        self.footer = QVBoxLayout()
-        self.footer.setContentsMargins(0, 0, 0, 0)
-        self.footer.setSpacing(4)
-        layout.addLayout(self.footer)
+        self.account_button = QPushButton()
+        self.account_button.setObjectName("accountControl")
+        self.account_button.setProperty("variant", "nav")
+        self.account_button.setAccessibleName("Gmail account")
+        self.account_button.setMinimumHeight(55)
+        account_row = QHBoxLayout(self.account_button)
+        account_row.setContentsMargins(8, 8, 8, 8)
+        account_row.setSpacing(9)
+        self.account_avatar = plain_label("@", px=11, medium=True)
+        self.account_avatar.setObjectName("accountAvatar")
+        self.account_avatar.setFixedSize(33, 33)
+        self.account_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        account_row.addWidget(self.account_avatar)
+        copy = QVBoxLayout()
+        copy.setSpacing(2)
+        self.account_name = ElidedLabel(px=11)
+        self.account_caption = plain_label("Gmail disconnected", tone="muted", px=9)
+        copy.addWidget(self.account_name)
+        copy.addWidget(self.account_caption)
+        account_row.addLayout(copy, 1)
+        chevron = plain_label("⌃", tone="muted", px=13)
+        account_row.addWidget(chevron)
+        for child in (self.account_avatar, self.account_name, self.account_caption, chevron):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(self.account_button)
+        self.account_menu = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.account_menu.setObjectName("accountMenu")
+        self.account_menu.setAccessibleName("Gmail connection")
+        self.account_menu.setFixedWidth(220)
+        self.footer = QVBoxLayout(self.account_menu)
+        self.footer.setContentsMargins(14, 14, 14, 14)
+        self.footer.setSpacing(10)
+        self.footer.addWidget(plain_label("Gmail connection", tone="muted", px=9))
+        self.popup_account = wrap_label("", px=11, medium=True)
+        self.popup_account.setObjectName("popupAccount")
+        self.footer.addWidget(self.popup_account)
+        popup_settings = outline_button("Settings", "accountSettings", icon_name="settings")
+        popup_settings.setProperty("variant", "ghost")
+        popup_settings.clicked.connect(self.account_menu.hide)
+        popup_settings.clicked.connect(self.settings_requested.emit)
+        self.footer.addWidget(popup_settings)
+        self.account_button.clicked.connect(self._toggle_account)
+        self.set_account(None)
         self.set_current("today")
+
+    def set_account(self, email: str | None) -> None:
+        self.account_name.setText(email or "Connect Gmail")
+        self.popup_account.setText(email or "No account connected")
+        self.account_caption.setText("● Gmail connected" if email else "Gmail disconnected")
+        self.account_avatar.setText(email[:2].upper() if email else "@")
+        self.account_button.setAccessibleName(
+            f"Gmail account, {email}" if email else "Connect Gmail account"
+        )
+
+    def _toggle_account(self) -> None:
+        if self.account_menu.isVisible():
+            self.account_menu.hide()
+            return
+        height = 28
+        visible = []
+        for index in range(self.footer.count()):
+            item = self.footer.itemAt(index)
+            widget = None if item is None else item.widget()
+            if widget is not None and not widget.isHidden():
+                visible.append(widget)
+                height += max(
+                    widget.minimumHeight(),
+                    widget.heightForWidth(192)
+                    if widget.hasHeightForWidth()
+                    else widget.sizeHint().height(),
+                )
+        height += max(0, len(visible) - 1) * self.footer.spacing()
+        self.account_menu.resize(220, height)
+        origin = self.account_button.mapToGlobal(QPoint(0, 0))
+        self.account_menu.move(origin.x(), origin.y() - self.account_menu.height() - 8)
+        self.account_menu.show()
+        self.account_menu.setFocus()
 
     def _row(self, key: str) -> int:
         return next(number for number, page in enumerate(PAGES) if page[0] == key)
@@ -703,18 +872,31 @@ class BriefHeading(QWidget):
         self.setObjectName("briefHeading")
         self.setAccessibleName("Brief")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ROW_PAD_H, 16, ROW_PAD_H, 4)
-        layout.setSpacing(2)
-        self.title = plain_label("", px=HEADING_PX, semibold=True)
+        layout.setContentsMargins(25, 14, 17, 12)
+        layout.setSpacing(3)
+        self.eyebrow = plain_label("", tone="muted", px=9, medium=True)
+        self.eyebrow.setObjectName("briefHeadingDay")
+        layout.addWidget(self.eyebrow)
+        self.title = plain_label("", px=15, medium=True)
         self.title.setObjectName("briefHeadingTitle")
-        layout.addWidget(self.title)
-        self.meta = ElidedLabel(tone="muted", px=CAPTION_PX)
+        title_row = QHBoxLayout()
+        title_row.addWidget(self.title, 1)
+        self.total = plain_label("", tone="muted", px=9)
+        self.total.setObjectName("briefItemTotal")
+        title_row.addWidget(self.total)
+        layout.addLayout(title_row)
+        self.meta = ElidedLabel(tone="muted", px=9)
         self.meta.setObjectName("briefHeadingMeta")
         layout.addWidget(self.meta)
+        self.meta.hide()
+        self.setFixedHeight(70)
 
     def show_brief(self, digest: DailyDigest, zone: ZoneInfo, today: date) -> None:
-        self.title.setText(brief_title(digest, today))
+        self.eyebrow.setText(brief_title(digest, today).upper() + " · BRIEFING")
+        self.title.setText("Your brief")
+        self.total.setText(f"{len(digest.items)} items")
         self.meta.setText(*brief_meta(digest, zone, today))
+        self.setAccessibleName("Brief. " + self.meta.accessibleName())
         self.show()
 
 
@@ -732,7 +914,6 @@ class ThreePaneWorkspace(QWidget):
         # One sheet of glass (header, sidebar, the gutter round the pages and the footer)
         # with the pages on a rounded sheet: no hairline meets another at a sharp corner.
         self.header = HeaderBar()
-        outer.addWidget(self.header)
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
@@ -741,6 +922,7 @@ class ThreePaneWorkspace(QWidget):
         self.pages = QStackedWidget()
         self.pages.setObjectName("workspacePages")
         self._pages: dict[str, QWidget] = {}
+        self._header_actions: dict[str, list[QWidget]] = {}
         today = QWidget()
         today.setObjectName("todayPage")
         today.setAccessibleName("Today")
@@ -751,6 +933,37 @@ class ThreePaneWorkspace(QWidget):
         self.today_top.setContentsMargins(0, 0, 0, 0)
         self.today_top.setSpacing(0)
         today_layout.addLayout(self.today_top)
+        overview = QWidget()
+        overview.setObjectName("todayOverview")
+        overview.setAccessibleName("Daily overview")
+        overview_layout = QHBoxLayout(overview)
+        overview_layout.setContentsMargins(25, 0, 25, 16)
+        overview_layout.setSpacing(0)
+        self.metrics: dict[str, OverviewButton] = {}
+        overview_group = HairlineFrame()
+        overview_group.setObjectName("overviewGroup")
+        overview_group.setAccessibleName("Daily overview")
+        group_layout = QHBoxLayout(overview_group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_layout.setSpacing(0)
+        overview_layout.addWidget(overview_group)
+        for key, label, icon_name, caption in (
+            ("actions", "Needs attention", "checkbox", "Open your actions"),
+            ("calendar", "Today’s agenda", "calendar", "View your calendar"),
+            ("waiting", "New replies", "mail", "Replies in the saved brief"),
+        ):
+            if self.metrics:
+                group_layout.addWidget(HairlineDivider(Qt.Orientation.Vertical))
+            button = OverviewButton(label, icon_name, caption)
+            button.setObjectName(f"metric{key.title()}")
+            button.setAccessibleName(label)
+            button.setCheckable(key != "calendar")
+            callback = weak_method(self._filter_brief)
+            button.clicked.connect(lambda _checked=False, page=key, choose=callback: choose(page))
+            group_layout.addWidget(button, 115 if key == "actions" else 100)
+            self.metrics[key] = button
+        today_layout.addWidget(overview)
+        today_layout.addWidget(HairlineDivider(Qt.Orientation.Horizontal))
         self.splitter = HairlineSplitter(Qt.Orientation.Horizontal)
         list_pane = QWidget()
         list_pane.setObjectName("briefListPane")
@@ -765,24 +978,31 @@ class ThreePaneWorkspace(QWidget):
         self.coverage = ElidedLabel(tone="muted", px=CAPTION_PX)
         self.coverage.setContentsMargins(ROW_PAD_H, 10, ROW_PAD_H, 10)
         list_layout.addWidget(self.coverage)
-        list_pane.setMinimumWidth(220)
+        list_pane.setMinimumWidth(160)
         self.detail = BriefDetailPane()
-        self.detail.setMinimumWidth(280)
+        self.detail.setMinimumWidth(240)
         # Page Up and Page Down in the list page through the selected email.
         self.brief_list.set_page_scroll(self.detail.verticalScrollBar())
         self.splitter.addWidget(list_pane)
         self.splitter.addWidget(self.detail)
-        self.splitter.setStretchFactor(0, 4)
-        self.splitter.setStretchFactor(1, 5)
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 3)
         self.splitter.setChildrenCollapsible(False)
+        self.splitter.setSizes([350, 525])
         today_layout.addWidget(self.splitter, 1)
         self.add_page("today", today)
+        main = QVBoxLayout()
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self.header)
         self.sheet = ContentSheet(self.pages)
-        body.addWidget(self.sheet, 1)
+        main.addWidget(self.sheet, 1)
+        body.addLayout(main, 1)
         outer.addLayout(body, 1)
         self.footer_bar = FooterBar()
         outer.addWidget(self.footer_bar)
         self._digest: DailyDigest | None = None
+        self._brief_filter: str | None = None
         self._links: Mapping[str, Sequence[ThreadLink]] = {}
         self._proposals: Mapping[str, Sequence[ActionProposal]] = {}
         # The detail's scroll position to restore once its new content has a range.
@@ -828,9 +1048,53 @@ class ThreePaneWorkspace(QWidget):
         self._pages[key] = widget
         self.pages.addWidget(widget)
 
+    def add_header_action(self, key: str, widget: QWidget) -> None:
+        """Host an existing page action in the shared header without changing its signal."""
+        self._header_actions.setdefault(key, []).append(widget)
+        self.header.add_widget(widget)
+        widget.setVisible(self.current_page() == key)
+
     def show_page(self, key: str) -> None:
         """Show page ``key``; an unknown key raises KeyError."""
         self.pages.setCurrentWidget(self._pages[key])
+        titles = {
+            "today": "Today’s brief",
+            "actions": "Actions",
+            "drafts": "Drafts",
+            "briefs": "Briefs",
+            "calendar": "Calendar",
+            "run": "Sync and review",
+        }
+        self.header.title.setText(titles.get(key, key.title()))
+        headings = self.header.headings
+        for label in (self.header.date, self.header.title_line):
+            headings.removeWidget(label)
+        for label in (
+            (self.header.date, self.header.title_line)
+            if key in ("today", "calendar")
+            else (self.header.title_line, self.header.date)
+        ):
+            headings.addWidget(label)
+        self.header.date.setFont(ui_font(11 if key == "today" else 9 if key == "calendar" else 10))
+        self.header.setFixedHeight(86 if key in ("today", "calendar") else 88)
+        descriptions = {
+            "actions": "Turn important email into clear, trackable next steps.",
+            "drafts": (
+                "Replies and private notes stay here until you explicitly send or remove them."
+            ),
+            "briefs": "Revisit completed daily reviews or create a brief for a missed day.",
+            "calendar": "GOOGLE CALENDAR",
+            "inbox": "Browse saved Gmail previews and metadata.",
+            "run": "Choose messages, then approve what is sent to AI.",
+        }
+        self.header.date.setText(
+            full_day_text(self._today, today=self._today)
+            if key == "today" and self._today is not None
+            else descriptions.get(key, "Your daily workspace")
+        )
+        for page, widgets in self._header_actions.items():
+            for widget in widgets:
+                widget.setVisible(page == key)
 
     def current_page(self) -> str:
         current = self.pages.currentWidget()
@@ -856,14 +1120,31 @@ class ThreePaneWorkspace(QWidget):
         self._links = links or {}
         self._proposals = proposals or {}
         self._owner_zone, self._today = owner_zone, today
+        if self.current_page() == "today":
+            self.header.date.setText(full_day_text(today, today=today))
+        self.metrics["actions"].set_metric(
+            sum(self._attention(item) for item in digest.items),
+            self._attention_caption(today, owner_zone),
+        )
+        tracked = {
+            link.public_id for found in self._links.values() for link in found if not link.is_source
+        }
+        self.metrics["waiting"].set_metric(
+            sum(self._reply(item) for item in digest.items),
+            f"On {len(tracked)} open action{'s' if len(tracked) != 1 else ''}"
+            if tracked
+            else "Replies in tracked threads",
+        )
         self.heading.show_brief(digest, owner_zone, today)
         self.coverage.setText(coverage_short(digest, today), coverage_line(digest))
         if not digest.items:
             self.brief_list.show_rows([])
             self.detail.show_empty(EMPTY_BRIEF)
             return
-        rows = build_rows(digest, self._proposals, today, owner_zone)
+        rows = self._display_rows()
         self.brief_list.show_rows(rows, select=select)
+        if not rows:
+            self.detail.show_empty("No matching emails in this brief.")
         if same and scroll:
             # The new content gets its scroll range once it is laid out: from the next turn
             # of the event loop, or when the range changes, whichever has one first.
@@ -877,15 +1158,70 @@ class ThreePaneWorkspace(QWidget):
         time, and the coverage footer's days, are rewritten too: a brief gains its year after
         New Year. Nothing else in the brief depends on the day."""
         digest = self._digest
+        if self.current_page() == "today":
+            self.header.date.setText(full_day_text(today, today=today))
         if digest is None or (today, owner_zone) == (self._today, self._owner_zone):
             return
         self._today, self._owner_zone = today, owner_zone
+        self.metrics["actions"].set_metric(
+            sum(self._attention(item) for item in digest.items),
+            self._attention_caption(today, owner_zone),
+        )
         self.heading.show_brief(digest, owner_zone, today)  # Its year, and its save day.
         self.coverage.setText(coverage_short(digest, today), coverage_line(digest))
         if digest.items:
-            self.brief_list.brief_model.update_rows(
-                build_rows(digest, self._proposals, today, owner_zone)
+            self.brief_list.brief_model.update_rows(self._display_rows())
+
+    @staticmethod
+    def _attention(item: DigestItem) -> bool:
+        return item.section in (
+            DigestSection.ACTIONS,
+            DigestSection.DEADLINES,
+            DigestSection.DECISIONS,
+        )
+
+    def _attention_caption(self, today: date, zone: ZoneInfo) -> str:
+        if self._digest is None:
+            return "No saved brief"
+        days = [
+            item.deadline_at_utc.astimezone(zone).date()
+            if item.deadline_precision is DeadlinePrecision.DATETIME and item.deadline_at_utc
+            else item.deadline_date
+            for item in self._digest.items
+            if self._attention(item)
+        ]
+        overdue = sum(day < today for day in days if day is not None)
+        soon = sum(today <= day <= today + timedelta(days=6) for day in days if day is not None)
+        return f"{overdue} overdue · {soon} due soon"
+
+    def _reply(self, item: DigestItem) -> bool:
+        return item.section is DigestSection.FOLLOW_UPS or any(
+            not link.is_source for link in self._links.get(item.message_key, ())
+        )
+
+    def _display_rows(self) -> Sequence[BriefRow]:
+        digest, today, zone = self._digest, self._today, self._owner_zone
+        if digest is None or today is None or zone is None:
+            return ()
+        if self._brief_filter is not None:
+            predicate = self._attention if self._brief_filter == "actions" else self._reply
+            digest = digest.model_copy(
+                update={"items": tuple(item for item in digest.items if predicate(item))}
             )
+        return build_rows(digest, self._proposals, today, zone)
+
+    def _filter_brief(self, key: str) -> None:
+        if key == "calendar":
+            self.sidebar.page_requested.emit(key)
+            return
+        self._brief_filter = key if self.metrics[key].isChecked() else None
+        for other in ("actions", "waiting"):
+            self.metrics[other].setChecked(other == self._brief_filter)
+        if self._digest is not None:
+            rows = self._display_rows()
+            self.brief_list.show_rows(rows, select=self.brief_list.selected_key())
+            if not rows:
+                self.detail.show_empty("No matching emails in this brief.")
 
     def _restore_scroll(self) -> None:
         """Scroll back as far as the range allows. The new content's wrapped labels can
@@ -903,6 +1239,10 @@ class ThreePaneWorkspace(QWidget):
     def clear(self, message: str) -> None:
         """Show no brief, only ``message``."""
         self._digest = None
+        self._brief_filter = None
+        for key in ("actions", "waiting"):
+            self.metrics[key].setChecked(False)
+            self.metrics[key].set_metric(None, "No saved brief")
         self._links = {}
         self._proposals = {}
         self._pending_scroll = None

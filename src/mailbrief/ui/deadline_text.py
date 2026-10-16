@@ -29,7 +29,15 @@ MONTHS: Final = (
     "Nov",
     "Dec",
 )
-# Month names in full, for headings such as the Inbox's "September".
+FULL_WEEKDAYS: Final = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
 MONTH_NAMES: Final = (
     "January",
     "February",
@@ -78,6 +86,12 @@ def parse_length(text: str) -> int | None:
         return None
     hours = float(unit[1].replace(",", ".")) if unit[1] else 0.0
     return round(hours * 60) + int(unit[2] or 0)
+
+
+def full_day_text(day: date, *, today: date) -> str:
+    """The design's full English date, independent of the operating system locale."""
+    text = f"{FULL_WEEKDAYS[day.weekday()]}, {MONTH_NAMES[day.month - 1]} {day.day}"
+    return text if day.year == today.year else f"{text}, {day.year}"
 
 
 def weekday(day: date) -> str:

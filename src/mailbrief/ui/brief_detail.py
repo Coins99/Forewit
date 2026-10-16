@@ -10,7 +10,8 @@ from datetime import date
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -31,20 +32,19 @@ from mailbrief.domain.actions import (
 )
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.digests import DigestItem
-from mailbrief.ui.brief_list import NO_SUBJECT, sender_with_address
+from mailbrief.ui.brief_list import BRIEF_SECTION_TITLES, NO_SUBJECT
 from mailbrief.ui.deadline_text import day_text, deadline_text
-from mailbrief.ui.hairline import HairlineFrame
+from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
 from mailbrief.ui.labels import (
     outline_button,
     plain_label,
     wrap_label,
 )
 from mailbrief.ui.proposals_view import effect_text
+from mailbrief.ui.sender_identity import sender_identity
 from mailbrief.ui.theme import (
-    READING_PX,
-    SMALL_PX,
+    BODY_PX,
     TEXT_PX,
-    TITLE_PX,
     current_tokens,
     follow_theme,
     icon_pixmap,
@@ -107,21 +107,43 @@ class BriefDetailPane(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Reserve the scrollbar gutter so replacing content cannot change its wrapping
+        # width and invalidate a saved scroll position during a brief refresh.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.title: QLabel | None = None
+        self.reply_host = QWidget(self)
+        self.reply_host.setObjectName("inlineReplyCard")
+        self.reply_host.setAccessibleName("Reply draft")
+        self.reply_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.reply_host.hide()
+        self.reply_layout = QVBoxLayout(self.reply_host)
+        self.reply_layout.setContentsMargins(1, 1, 1, 1)
+        self.reply_key: str | None = None
+        self.shown_key: str | None = None
         self.show_empty()
 
     def _fresh(self) -> QVBoxLayout:
+        self.reply_host.setParent(self)
+        self.reply_host.hide()
         content = QWidget()
         content.setObjectName("briefDetailContent")
         # A readable measure on wide windows; the scroll area keeps it at the left.
         content.setMaximumWidth(DETAIL_MAX_WIDTH)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(10)
+        margin = max(16, min(44, self.viewport().width() * 8 // 100 - 8))
+        layout.setContentsMargins(margin, 25, margin, 36)
+        layout.setSpacing(16)
         self.setWidget(content)  # Deletes the previous content.
         return layout
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if (content := self.widget()) is not None and (layout := content.layout()) is not None:
+            margin = max(16, min(44, self.viewport().width() * 8 // 100 - 8))
+            layout.setContentsMargins(margin, 25, margin, 36)
+
     def show_empty(self, text: str = EMPTY_TEXT) -> None:
+        self.shown_key = None
         layout = self._fresh()
         self.title = None
         layout.addWidget(plain_label(text, tone="muted", px=TEXT_PX))
@@ -144,26 +166,78 @@ class BriefDetailPane(QScrollArea):
         proposals: Sequence[ActionProposal] = (),
     ) -> None:
         zone = ZoneInfo(timezone_name)
+        self.shown_key = item.message_key
         layout = self._fresh()
-        self.title = wrap_label(item.subject or NO_SUBJECT, px=TITLE_PX, semibold=True)
+        layout.setSpacing(0)
+        kicker = plain_label(
+            BRIEF_SECTION_TITLES[item.section].upper(), tone="muted", px=9, medium=True
+        )
+        kicker.setObjectName("detailKicker")
+        layout.addWidget(kicker)
+        layout.addSpacing(8)
+        self.title = wrap_label(item.subject or NO_SUBJECT, px=21)
+        self.title.setObjectName("detailTitle")
         layout.addWidget(self.title)
-        sender = wrap_label(sender_with_address(item.sender), tone="secondary", px=TEXT_PX)
-        sender.setObjectName("detailSender")
-        layout.addWidget(sender)
-        layout.addWidget(wrap_label(item.summary, px=READING_PX))
+        layout.addSpacing(18)
+        layout.addWidget(sender_identity(item.sender, name="detailSender"))
+        layout.addWidget(HairlineDivider())
+        layout.addSpacing(20)
+        summary = QWidget()
+        summary.setObjectName("summaryCard")
+        summary.setAccessibleName("MailBrief summary")
+        summary.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        summary_layout = QVBoxLayout(summary)
+        summary_layout.setContentsMargins(16, 14, 16, 14)
+        summary_layout.setSpacing(8)
+        summary_header = QHBoxLayout()
+        spark = plain_label("")
+        spark.setObjectName("summaryIcon")
+        spark.setAccessibleName("MailBrief summary")
+        spark.setPixmap(icon_pixmap("sparkles", current_tokens().primary, 15, 2.0))
+        summary_header.addWidget(spark)
+        summary_heading = plain_label("MAILBRIEF SUMMARY", px=9, medium=True)
+        summary_heading.setObjectName("summaryHeading")
+        summary_header.addWidget(summary_heading, 1)
+        summary_layout.addLayout(summary_header)
+        summary_layout.addWidget(wrap_label(item.summary, px=BODY_PX))
+        source = str(item.source_url)
+        if is_gmail_link(source):
+            view_email = outline_button(
+                "View complete email", "viewEmailButton", icon_name="external-link", px=9
+            )
+            view_email.setProperty("variant", "link")
+            view_email.clicked.connect(
+                lambda _checked=False, url=source: self.source_requested.emit(url)
+            )
+            summary_layout.addWidget(view_email, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(summary)
+        layout.addSpacing(18)
+        if item.evidence:
+            evidence = QWidget()
+            evidence.setObjectName("emailExcerpt")
+            evidence.setAccessibleName("From the email")
+            excerpt_layout = QVBoxLayout(evidence)
+            excerpt_layout.setContentsMargins(4, 2, 4, 2)
+            excerpt_layout.setSpacing(7)
+            excerpt_layout.addWidget(plain_label("FROM THE EMAIL", tone="muted", px=9))
+            excerpt_layout.addWidget(wrap_label(item.evidence, tone="secondary", px=BODY_PX))
+            layout.addWidget(evidence)
+            layout.addSpacing(12)
         if item.action_text and item.action_text != item.summary:
-            layout.addWidget(wrap_label(item.action_text, tone="secondary", px=TEXT_PX))
+            layout.addWidget(wrap_label(item.action_text, tone="secondary", px=11))
+            layout.addSpacing(12)
         due = item_deadline_text(item, zone, today=today)
         if due is not None:
             layout.addLayout(self._deadline_row(due))
+            layout.addSpacing(18)
         for link in links:
             if not link.is_source:
-                layout.addWidget(
-                    wrap_label(f"Continues: “{link.title}”", tone="secondary", px=TEXT_PX)
-                )
+                layout.addWidget(wrap_label(f"Continues: “{link.title}”", tone="secondary", px=11))
+                layout.addSpacing(16)
         for view in item.suggestions:
             if view.state is SuggestionState.PENDING:
                 layout.addWidget(self._suggestion_card(view, links, zone, today))
+                layout.addSpacing(16)
             elif view.state is SuggestionState.ACCEPTED:
                 layout.addWidget(
                     wrap_label(f"Accepted: {view.suggestion.title}", tone="secondary", px=TEXT_PX)
@@ -172,8 +246,26 @@ class BriefDetailPane(QScrollArea):
             if proposal.state is ProposalState.PENDING:
                 layout.addWidget(self._proposal_card(proposal, zone, today))
         layout.addLayout(self._footer(item, account_email))
+        layout.addSpacing(16)
+        if self.reply_key == self.shown_key:
+            layout.addWidget(self.reply_host)
+            self.reply_host.show()
         layout.addStretch(1)
         self.rebuilt.emit()
+
+    def show_reply_editor(self, editor: QWidget) -> None:
+        self.reply_key = self.shown_key
+        self.reply_layout.addWidget(editor)
+        content = self.widget()
+        if content is not None and isinstance(layout := content.layout(), QVBoxLayout):
+            layout.insertWidget(max(0, layout.count() - 1), self.reply_host)
+        self.reply_host.show()
+        editor.show()
+        QTimer.singleShot(0, self._scroll_to_reply)
+
+    def _scroll_to_reply(self) -> None:
+        if self.reply_host.isVisible():
+            self.ensureWidgetVisible(self.reply_host, 0, 12)
 
     def _deadline_row(self, text: str) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -187,7 +279,7 @@ class BriefDetailPane(QScrollArea):
         )
         clock.setAccessibleName("Deadline")
         row.addWidget(clock)
-        row.addWidget(wrap_label(text, tone="warning", px=TEXT_PX), 1)
+        row.addWidget(wrap_label(text, tone="warning", px=10), 1)
         return row
 
     def _suggestion_card(
@@ -196,25 +288,58 @@ class BriefDetailPane(QScrollArea):
         card = HairlineFrame()
         card.setObjectName("suggestionCard")
         card.setAccessibleName("Suggested action")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QHBoxLayout(card)
+        outer.setContentsMargins(5, 7, 5, 7)
+        outer.setSpacing(4)
+        symbol = plain_label("")
+        symbol.setPixmap(icon_pixmap("sparkles", current_tokens().primary, 22, 2.0))
+        symbol.setObjectName("suggestionIcon")
+        symbol.setAccessibleName("Suggested action")
+        symbol.setFixedSize(28, 28)
+        symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(symbol, 0, Qt.AlignmentFlag.AlignTop)
+        layout = QVBoxLayout()
+        outer.addLayout(layout, 1)
         layout.setSpacing(4)
-        layout.addWidget(wrap_label(view.suggestion.title, px=TEXT_PX, medium=True))
+        layout.addWidget(plain_label("SUGGESTED ACTION", tone="muted", px=9, medium=True))
+        layout.addWidget(wrap_label(view.suggestion.title, px=13))
         layout.addWidget(
-            wrap_label(suggestion_meta(view, zone, today=today), tone="secondary", px=SMALL_PX)
+            wrap_label(suggestion_meta(view, zone, today=today), tone="secondary", px=10)
         )
         for step in view.suggestion.steps:  # The suggested plan, in order.
-            layout.addWidget(wrap_label(f"· {step}", tone="secondary", px=SMALL_PX))
+            layout.addWidget(wrap_label(f"· {step}", tone="secondary", px=10))
+        facts = QHBoxLayout()
+        target = view.suggestion.suggested_target_date
+        for caption, value in (
+            (
+                "Owner",
+                "You"
+                if view.suggestion.ownership is ActionOwnership.MINE
+                else "Waiting for someone",
+            ),
+            (
+                "Suggested due date",
+                day_text(target, today=today) if target is not None else "Not set",
+            ),
+        ):
+            column = QVBoxLayout()
+            column.setSpacing(4)
+            column.addWidget(plain_label(caption, tone="muted", px=8))
+            column.addWidget(plain_label(value, px=9, medium=True))
+            facts.addLayout(column)
+        facts.addStretch(1)
+        layout.addSpacing(8)
+        layout.addLayout(facts)
         layout.addSpacing(4)
         decisions = QHBoxLayout()
         decisions.setSpacing(8)
-        accept = outline_button("Accept", "acceptButton", glass=True)
+        accept = outline_button("Add action", "acceptButton", primary=True, px=10)
         accept.clicked.connect(
             lambda _checked=False, sid=view.suggestion_id: self.suggestion_requested.emit(
                 ACCEPT, sid
             )
         )
-        dismiss = outline_button("Dismiss", "dismissButton", glass=True)
+        dismiss = outline_button("Dismiss", "dismissButton", glass=True, px=10)
         dismiss.clicked.connect(
             lambda _checked=False, sid=view.suggestion_id: self.suggestion_requested.emit(
                 DISMISS, sid
@@ -228,7 +353,7 @@ class BriefDetailPane(QScrollArea):
             # One row each, so a long title never widens the pane.
             row = QHBoxLayout()
             button = outline_button(
-                f"Add to “{link.title}”", "addToButton", shorten=True, glass=True
+                f"Add to “{link.title}”", "addToButton", shorten=True, glass=True, px=9
             )
             button.clicked.connect(self._into(view.suggestion_id, link))
             row.addWidget(button)
@@ -281,7 +406,7 @@ class BriefDetailPane(QScrollArea):
     def _footer(self, item: DigestItem, account_email: str) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
-        reply = outline_button("Draft a reply", "replyButton", icon_name="pencil", glass=True)
+        reply = outline_button("Draft a reply", "replyButton", icon_name="pencil", glass=True, px=9)
         reply.clicked.connect(
             lambda _checked=False, key=item.message_key: self.reply_requested.emit(
                 account_email, key
@@ -295,6 +420,7 @@ class BriefDetailPane(QScrollArea):
                 "openInGmailButton",
                 icon_name="external-link",
                 glass=True,
+                px=9,
             )
             open_gmail.clicked.connect(
                 lambda _checked=False, url=source: self.source_requested.emit(url)

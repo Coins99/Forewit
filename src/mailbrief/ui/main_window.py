@@ -162,6 +162,7 @@ from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
 from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start
+from mailbrief.ui.calendar_preview import GoogleEventDialog
 from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
 from mailbrief.ui.calendar_view import (
@@ -716,10 +717,16 @@ class MainWindow(QMainWindow):
         self.projects_dialog.archive_requested.connect(self._request_archive_project)
         self.projects_dialog.delete_area_requested.connect(self._request_delete_area)
         self.action_editor = ActionEditor(self)
+        self.action_editor.finished.connect(self._action_editor_finished)
         self.action_editor.save_requested.connect(self._request_save_action)
         self.event_editor = EventEditor(self)
+        self.google_event_dialog = GoogleEventDialog(self)
+        self.google_event_dialog.source_requested.connect(self._open_calendar_link)
+        self.google_event_dialog.event_requested.connect(self._request_event)
         self.event_editor.save_requested.connect(self._request_save_event)
         self.planning_dialog = PlanningDialog(self)
+        for drawer in (self.event_editor, self.google_event_dialog, self.planning_dialog):
+            drawer.setProperty("presentation", "drawer")
         self.planning_dialog.preview_requested.connect(self._request_planning_preview)
         self.planning_dialog.ask_requested.connect(self._request_planning_ask)
         self.planning_dialog.apply_requested.connect(self._request_apply_planning)
@@ -737,6 +744,7 @@ class MainWindow(QMainWindow):
         # week wins, and shutdown waits for them all before closing the database.
         self._calendar_reads: set[asyncio.Task[None]] = set()
         self._settings_opening: asyncio.Task[None] | None = None  # Until Settings shows.
+        self._draft_reads: set[asyncio.Task[None]] = set()
         self._calendar_read = 0
         self._day_read = 0  # Like the calendar's: the newest read of "Your day" wins.
 
@@ -749,6 +757,7 @@ class MainWindow(QMainWindow):
         self.draft_editor = DraftEditor(self)
         self._connect_draft_editor(self.draft_editor)
         self.cached_dialog = CachedMailDialog(self)
+        self.cached_dialog.setProperty("presentation", "center")
         self.proposals_dialog = ProposalsDialog(self)
         self.proposals_dialog.apply_requested.connect(self._request_apply_from_dialog)
         self.proposals_dialog.dismiss_requested.connect(
@@ -757,6 +766,7 @@ class MainWindow(QMainWindow):
         self.history_panel = BriefHistoryPanel()
         self.history_panel.open_requested.connect(self._request_open_brief)
         self.history_panel.generate_requested.connect(self._request_brief_day)
+        self.history_panel.preview_requested.connect(self._request_history_preview)
         self.cached_dialog.page_requested.connect(self._request_cached_page)
         self.settings_dialog = SettingsDialog(self)
         self.auto_send_dialog = AutoSendDialog(self.settings_dialog)
@@ -815,7 +825,7 @@ class MainWindow(QMainWindow):
         )
         self.generate_button.setToolTip("Refresh today's Inbox or retry an incomplete run.")
         self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True, glass=True)
-        workspace.header.add_widget(self.generate_button)
+        workspace.add_header_action("today", self.generate_button)
         workspace.header.add_widget(self.cancel_button)
         # The sidebar's rows, under the names the rest of the window uses.
         self.settings_button = sidebar.settings
@@ -854,16 +864,31 @@ class MainWindow(QMainWindow):
             "&Retry loading saved data", "retryButton", mnemonic=True
         )
         self.retry_button.clicked.connect(lambda: self.start(self.initialize))
-        retry = QHBoxLayout()
+        self.retry_row = QWidget()
+        self.retry_row.setObjectName("retryRow")
+        self.retry_row.setAccessibleName("Retry loading saved data")
+        retry = QHBoxLayout(self.retry_row)
         retry.setContentsMargins(12, 8, 12, 8)
         retry.addWidget(self.retry_button)
         retry.addStretch(1)
-        workspace.today_top.addLayout(retry)
+        workspace.today_top.addWidget(self.retry_row)
         # "Your day" above the brief: local data only, so it shows without Gmail or AI.
         self.day_panel = DayPanel()
         self.day_panel.action_requested.connect(self._open_day_action)
         self.day_panel.event_requested.connect(self._open_day_event)
-        workspace.today_top.addWidget(self.day_panel)
+        self.day_area = QScrollArea()
+        self.day_area.setObjectName("dayOverviewScroll")
+        self.day_area.setAccessibleName("Your day")
+        self.day_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.day_area.setWidgetResizable(True)
+        self.day_area.setMaximumHeight(128)
+        self.day_area.setWidget(self.day_panel)
+        workspace.today_top.addWidget(self.day_area)
+        self.day_area.hide()
+        self.day_toggle = outline_button("Your day", "dayOverviewToggle")
+        self.day_toggle.setCheckable(True)
+        self.day_toggle.toggled.connect(self.day_area.setVisible)
+        workspace.add_header_action("today", self.day_toggle)
         # The run page: step 1 reviews the shortlist, step 2 approves sending.
         self.review_panel = QWidget()
         self.review_panel.setObjectName("reviewPanel")
@@ -965,10 +990,13 @@ class MainWindow(QMainWindow):
         workspace.add_page(
             "actions", _page(self.actions_panel, "actionsPage", "Actions", margins=0)
         )
+        workspace.add_header_action("actions", self.actions_panel.new_task_button)
         self.drafts_panel = DraftsPanel()
         self.drafts_panel.draft_requested.connect(self._request_draft)
-        workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts"))
-        workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs"))
+        self.drafts_panel.preview_requested.connect(self._request_draft_preview)
+        workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts", margins=0))
+        workspace.add_header_action("drafts", self.drafts_panel.new_button)
+        workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs", margins=0))
         self.calendar_panel = CalendarPanel()
         self.inbox_panel = InboxPanel(clock=weak_method(self._now))
         self.inbox_panel.refresh_requested.connect(lambda: self.start(self._refresh_inbox))
@@ -992,10 +1020,17 @@ class MainWindow(QMainWindow):
         self.calendar_panel.month_requested.connect(self._request_calendar_month)
         self.calendar_panel.view_requested.connect(self._request_calendar_view)
         self.calendar_panel.event_requested.connect(self._request_event)
+        self.calendar_panel.google_preview_requested.connect(self._preview_google_event)
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
         self.calendar_panel.plan_requested.connect(self._request_planning)
-        workspace.add_page("calendar", _page(self.calendar_panel, "calendarPage", "Calendar"))
+        workspace.add_page(
+            "calendar", _page(self.calendar_panel, "calendarPage", "Calendar", margins=0)
+        )
+        self.calendar_panel.refresh_button.setParent(workspace.header)
+        workspace.add_header_action("calendar", self.calendar_panel.refresh_button)
+        self.calendar_panel.new_button.setParent(workspace.header)
+        workspace.add_header_action("calendar", self.calendar_panel.new_button)
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
         # The status strip under the workspace.
@@ -1022,6 +1057,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         layout.addWidget(workspace, 1)
         workspace.footer_bar.set_strip(strip)
+        self.status.text_changed.connect(self._status_visibility)
         self.setCentralWidget(central)
         # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
         # closeEvent on macOS (a modal dialog's AppKit session drops them).
@@ -1079,14 +1115,16 @@ class MainWindow(QMainWindow):
         chain: list[QWidget] = [
             self.undo_button,
             self.generate_button,
+            self.day_toggle,
             self.cancel_button,
             workspace.sidebar.nav,
             self.cached_button,
             self.data_button,
             self.settings_button,
-            self.connect_button,
+            self.workspace.sidebar.account_button,
             self.latest_button,
             self.retry_button,
+            *workspace.metrics.values(),
             self.day_panel.attention.list,
             self.day_panel.agenda.list,
             self.day_panel.replies.list,
@@ -1096,15 +1134,23 @@ class MainWindow(QMainWindow):
         for first, second in itertools.pairwise(chain):
             QWidget.setTabOrder(first, second)
 
+    def _status_visibility(self, text: str) -> None:
+        strip = self.status.parentWidget()
+        if strip is not None:
+            quiet = text.startswith(("Ready.", "Cached Inbox metadata."))
+            strip.setVisible(not quiet or not self.undo_button.isHidden())
+
     def _set_account(self, email: str | None) -> None:
         """The connected Gmail account, or None; Connect shows only without one and
         Disconnect only with one, and the Briefs page follows it."""
         self._account_email = email
+        self.workspace.sidebar.set_account(email)
         self.connect_button.setVisible(email is None)
         self.settings_dialog.set_signed_in(email is not None)
         self.history_panel.set_account(email)
 
     def _set_busy(self, busy: bool) -> None:
+        self.retry_row.setVisible(not self._ready)
         self.retry_button.setVisible(not self._ready)
         self.retry_button.setEnabled(not busy)
         self.connect_button.setEnabled(not busy)
@@ -1121,10 +1167,12 @@ class MainWindow(QMainWindow):
         self.history_panel.set_busy(busy)
         self.latest_button.setEnabled(not busy)
         self.cached_dialog.set_busy(busy)
+        self.inbox_panel.set_busy(busy)
         self.proposals_dialog.set_busy(busy)
         self.undo_button.setEnabled(not busy)
         self.actions_panel.set_busy(busy)
         self.action_editor.set_busy(busy)
+        self.google_event_dialog.delete_button.setEnabled(not busy)
         self.projects_dialog.set_busy(busy)
         self.drafts_panel.set_busy(busy)
         self.calendar_panel.set_busy(busy)
@@ -1148,9 +1196,16 @@ class MainWindow(QMainWindow):
             self.actions_panel.show_view(
                 ActionFilter.WAITING if key == "waiting" else ActionFilter.OPEN
             )
+            self._actions_tab_changed(self.actions_panel.tabs.currentIndex())
         else:
             self.workspace.show_page(key)
         self.workspace.sidebar.set_current(self._sidebar_key())
+        if key == "drafts" and (selected := self.drafts_panel.selected()) is not None:
+            self._request_draft_preview(selected)
+        if key == "calendar":
+            self.calendar_panel.refresh_button.setVisible(self._google_mode() == GOOGLE_ON)
+            self.workspace.header.title.setText(self.calendar_panel.heading.text())
+            self.calendar_panel.heading.hide()
 
     def _sidebar_key(self) -> str:
         """The sidebar row for the page shown."""
@@ -1164,6 +1219,14 @@ class MainWindow(QMainWindow):
     def _actions_tab_changed(self, _index: int) -> None:
         if self.workspace.current_page() == "actions":
             self.workspace.sidebar.set_current(self._sidebar_key())
+            waiting = self.actions_panel.view() is ActionFilter.WAITING
+            self.actions_panel.new_task_button.setVisible(not waiting)
+            self.workspace.header.title.setText("Waiting" if waiting else "Actions")
+            self.workspace.header.date.setText(
+                "Keep track of commitments you’re waiting on from other people."
+                if waiting
+                else "Turn important email into clear, trackable next steps."
+            )
 
     def _request_page(self, key: str) -> None:
         if key == "inbox":
@@ -1251,6 +1314,15 @@ class MainWindow(QMainWindow):
         )
 
     async def _open_data(self) -> None:
+        if self.draft_editor.embedded:
+            await self.draft_writes.drain()
+            if not await self._save_inline_draft():
+                self.status.setText("Resolve the failed draft save before managing data.")
+                return
+            self.draft_editor.force_close()
+            self.draft_editor.draft = None
+            self.draft_editor.embedded = False
+            self.drafts_panel.editor_host.setCurrentIndex(0)
         if self._unsaved_drafts:
             self.status.setText("Resolve the failed draft save before managing data.")
             return
@@ -1309,6 +1381,7 @@ class MainWindow(QMainWindow):
         self._undo = None if label is None or operation is None else (label, operation)
         self.undo_button.setText("&Undo" if self._undo is None else f"&{self._undo[0]}")
         self.undo_button.setVisible(self._undo is not None)
+        self._status_visibility(self.status.text())
 
     def _note_not_refreshed(self, exc: Exception) -> None:
         """The change itself was saved; only the view is out of date."""
@@ -1571,6 +1644,7 @@ class MainWindow(QMainWindow):
 
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
+            self.action_editor.set_embedded(None, window=self)
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
             self.dialog_guard.show_dialog(self.action_editor)
         elif kind == COMPLETE:
@@ -1687,8 +1761,18 @@ class MainWindow(QMainWindow):
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
         self._show_page("actions")
+        if self.action_editor.embedded and self.action_editor.has_unsaved_input():
+            self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
+            return
+        self.action_editor.set_embedded(self.actions_panel.detail_host, window=self)
         self.action_editor.new_task(self._local_today())
-        self.dialog_guard.show_dialog(self.action_editor)
+        self.actions_panel.detail_host.addWidget(self.action_editor)
+        self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
+        self.action_editor.show()
+
+    def _action_editor_finished(self, _result: int) -> None:
+        if self.action_editor.embedded:
+            self.actions_panel.detail_host.setCurrentWidget(self.actions_panel.detail)
 
     def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
         started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
@@ -1809,8 +1893,26 @@ class MainWindow(QMainWindow):
         if read != self._calendar_read:
             return  # A newer read, perhaps of another week, shows the page.
         self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        if self.workspace.current_page() == "calendar":
+            self.workspace.header.title.setText(self.calendar_panel.heading.text())
+        today = self._local_today()
+        if shown.first_day <= today <= shown.last_day:
+            calendar_events: tuple[CalendarEvent | GoogleEvent, ...] = (
+                *shown.events,
+                *shown.google_events,
+            )
+            count = sum(
+                event.days(self.zone)[0] <= today <= event.days(self.zone)[1]
+                for event in calendar_events
+            )
+            self.workspace.metrics["calendar"].set_metric(
+                count, "No events today" if count == 0 else "Events on your calendar"
+            )
         self._calendar_shown = shown
         self.calendar_panel.set_google(self._google_mode(), self._google_note(shown))
+        self.calendar_panel.refresh_button.setVisible(
+            self.workspace.current_page() == "calendar" and self._google_mode() == GOOGLE_ON
+        )
         await self._refresh_day()
 
     async def _refresh_day(self) -> None:
@@ -1940,6 +2042,11 @@ class MainWindow(QMainWindow):
 
         return work
 
+    def _preview_google_event(self, value: object) -> None:
+        if isinstance(value, (CalendarEvent, GoogleEvent)):
+            self.google_event_dialog.show_event(value, self.zone, self._local_today())
+            self.dialog_guard.show_dialog(self.google_event_dialog)
+
     def _request_event(self, kind: str, value: object) -> None:
         if kind == NEW_EVENT and isinstance(value, date):
             self.event_editor.edit_new(value, self.now(), self.zone)
@@ -2060,12 +2167,20 @@ class MainWindow(QMainWindow):
         self._start_or_busy(unfiltered)
 
     async def _open_draft_by_id(self, public_id: str) -> None:
+        await self.draft_writes.drain()
+        editor = self.draft_editor
+        editor.set_switching(True)
         try:
-            draft = await self.backend.get_draft(public_id)
-        except _STALE as exc:
-            await self._stale(exc)
-            return
-        self._edit_draft(draft)
+            if not await self._save_inline_draft():
+                return
+            try:
+                draft = await self.backend.get_draft(public_id)
+            except _STALE as exc:
+                await self._stale(exc)
+                return
+            self._edit_draft(draft)
+        finally:
+            editor.set_switching(False)
 
     def _open_event_hit(self, hit: SearchHit) -> None:
         day = hit.when.astimezone(self.zone).date() if hit.when is not None else hit.day
@@ -2449,31 +2564,126 @@ class MainWindow(QMainWindow):
             elif kind == DELETE_DRAFT:
                 self.start(lambda: self._delete_draft(summary), cancellable=False)
 
+    def _request_draft_preview(self, value: object) -> None:
+        if (
+            self._closing
+            or self.workspace.current_page() != "drafts"
+            or (self.draft_editor.isVisible() and not self.draft_editor.embedded)
+            or not isinstance(value, DraftSummary)
+        ):
+            return
+
+        async def read() -> None:
+            selected = self.drafts_panel.selected()
+            if selected is None or selected.public_id != value.public_id or self._closing:
+                return
+            editor = self.draft_editor
+            if editor.embedded and editor.draft is not None:
+                if (
+                    editor.draft.public_id == value.public_id
+                    and editor.parentWidget() is self.drafts_panel.editor_host
+                ):
+                    self.drafts_panel.editor_host.setCurrentWidget(editor)
+                    return  # A refresh must never replace the owner's unsaved typing.
+                editor.set_switching(True)
+                if not await self._save_inline_draft():
+                    editor.set_switching(False)
+                    self._restore_draft_selection()
+                    return
+            try:
+                draft = await self.backend.get_draft(value.public_id)
+            except Exception as exc:
+                editor.set_switching(False)
+                log_failure(exc)
+                return
+            selected = self.drafts_panel.selected()
+            if (
+                not self._closing
+                and self.workspace.current_page() == "drafts"
+                and selected is not None
+                and selected.public_id == draft.public_id
+            ):
+                self.drafts_panel.show_preview(draft)
+                self._edit_draft(draft)
+            editor.set_switching(False)
+
+        self.draft_writes.run(read)
+        task = asyncio.get_running_loop().create_task(self.draft_writes.drain())
+        self._draft_reads.add(task)
+        task.add_done_callback(self._draft_reads.discard)
+
     async def _open_new_draft(self, create: Callable[[], Awaitable[Draft]]) -> None:
+        await self.draft_writes.drain()
+        editor = self.draft_editor
+        editor.set_switching(True)
         try:
-            draft = await create()
-        except SourceNotFoundError as exc:
-            log_failure(exc)
-            self.status.setText(_NO_SOURCE)
-            return
-        except _STALE as exc:
-            await self._stale(exc)
-            return
-        self._edit_draft(draft)
+            if not await self._save_inline_draft():
+                return
+            try:
+                draft = await create()
+            except SourceNotFoundError as exc:
+                log_failure(exc)
+                self.status.setText(_NO_SOURCE)
+                return
+            except _STALE as exc:
+                await self._stale(exc)
+                return
+            self._edit_draft(draft)
+        finally:
+            editor.set_switching(False)
         self.status.setText(f"{KIND_NAMES[draft.kind]} draft started. It saves as you type.")
         await self._refresh_drafts()
+        if self.draft_editor.embedded:
+            self.drafts_panel.select_draft(draft.public_id)
 
     async def _open_draft(self, summary: DraftSummary) -> None:
-        try:
-            draft = await self.backend.get_draft(summary.public_id)
-        except _STALE as exc:
-            await self._stale(exc)
-            return
-        self._edit_draft(draft)
+        await self._open_draft_by_id(summary.public_id)
 
     def _edit_draft(self, draft: Draft) -> None:
+        inline = self.workspace.current_page() == "drafts"
+        reply = self.workspace.current_page() == "today" and draft.kind is DraftKind.REPLY
+        if not inline:
+            self.drafts_panel.restore_list_controls()
+        self.draft_editor.set_embedded(
+            self.drafts_panel.editor_host
+            if inline
+            else self.workspace.detail.reply_host
+            if reply
+            else None,
+            window=self,
+        )
         self.draft_editor.load(draft, self.zone)
-        self.dialog_guard.show_dialog(self.draft_editor)
+        if inline:
+            self.drafts_panel.open_button.hide()
+            self.drafts_panel.delete_button.setProperty("variant", "ghost")
+            self.draft_editor._buttons.addWidget(
+                self.drafts_panel.delete_button, 0, 0, Qt.AlignmentFlag.AlignLeft
+            )
+            self.drafts_panel.editor_host.addWidget(self.draft_editor)
+            self.drafts_panel.editor_host.setCurrentWidget(self.draft_editor)
+            self.draft_editor.show()
+            self.drafts_panel.select_draft(draft.public_id)
+        elif reply:
+            self.workspace.detail.show_reply_editor(self.draft_editor)
+        else:
+            self.dialog_guard.show_dialog(self.draft_editor)
+
+    async def _save_inline_draft(self) -> bool:
+        editor = self.draft_editor
+        draft = editor.draft
+        if not editor.embedded or draft is None:
+            return True
+        if editor.in_conflict or editor.current_edit() is None or editor.ai_active():
+            editor.set_status("Finish editing this draft before switching drafts.")
+            return False
+        if (edit := editor.final_edit()) is not None:
+            return await self._autosave_draft(draft.public_id, edit)
+        return draft.public_id not in self._unsaved_drafts
+
+    def _restore_draft_selection(self) -> None:
+        draft = self.draft_editor.draft
+        if draft is not None:
+            self.drafts_panel.select_draft(draft.public_id)
 
     # Writing with AI. Every step runs in draft_writes after pending autosaves; the
     # generation itself is a task of its own, so Cancel and quitting can stop it.
@@ -2598,11 +2808,29 @@ class MainWindow(QMainWindow):
             self._drafting_task.cancel()
 
     async def _delete_draft(self, summary: DraftSummary) -> None:
+        await self.draft_writes.drain()
+        if not await self._save_inline_draft():
+            return
+        editor = self.draft_editor
+        if (
+            editor.embedded
+            and editor.draft is not None
+            and editor.draft.public_id == summary.public_id
+        ):
+            summary = summary.model_copy(update={"revision": editor.draft.revision})
         try:
             await self.backend.delete_draft(summary.public_id, summary.revision)
         except _STALE as exc:
             await self._stale(exc)
             return
+        if (
+            editor.embedded
+            and editor.draft is not None
+            and editor.draft.public_id == summary.public_id
+        ):
+            editor.force_close()
+            editor.draft = None
+            self.drafts_panel.editor_host.setCurrentIndex(0)
         public_id = summary.public_id
 
         async def undo() -> None:
@@ -3318,6 +3546,19 @@ class MainWindow(QMainWindow):
         today = self.now().astimezone(self.zone).date()
         self.history_panel.configure(briefs, missed, email, today)
 
+    def _request_history_preview(self, email: str, day: date) -> None:
+        async def read() -> None:
+            try:
+                digest = await self.backend.load_brief(email, day)
+                if digest is not None and not self._closing:
+                    self.history_panel.show_preview(digest)
+            except Exception as exc:
+                log_failure(exc)
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._draft_reads.add(task)
+        task.add_done_callback(self._draft_reads.discard)
+
     async def _reload_history(self) -> None:
         """Reload the Briefs page when it shows. The page is only a view: when it can't be
         read, it stays as it was and the status line says so."""
@@ -3491,6 +3732,7 @@ class MainWindow(QMainWindow):
                 self.projects_dialog,
                 self.draft_editor,
                 self.event_editor,
+                self.google_event_dialog,
                 self.planning_dialog,
                 self.command_palette,
             )
@@ -3799,7 +4041,9 @@ class MainWindow(QMainWindow):
             (self.event_editor, "this event"),
             (self.settings_dialog, "Settings"),
         ):
-            if dialog.isVisible() and dialog.has_unsaved_input():
+            if (
+                not dialog.isHidden() or getattr(dialog, "embedded", False)
+            ) and dialog.has_unsaved_input():
                 return what
         return None
 
@@ -3857,11 +4101,16 @@ class MainWindow(QMainWindow):
         self.projects_dialog.force_close()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
+        self.google_event_dialog.reject()
         self._cancel_planning()
         self.planning_dialog.reject()
         self.command_palette.reject()
         self._cancel_drafting()
-        final = self.draft_editor.final_edit() if self.draft_editor.isVisible() else None
+        final = (
+            self.draft_editor.final_edit()
+            if self.draft_editor.isVisible() or self.draft_editor.embedded
+            else None
+        )
         if final is not None:
             self._queue_autosave(final)  # shutdown() drains it before closing the database.
         self.draft_editor.force_close()
@@ -3880,6 +4129,9 @@ class MainWindow(QMainWindow):
             for read in self._calendar_reads:
                 read.cancel()
             await self.drain_calendar_reads()
+            for read in tuple(self._draft_reads):
+                read.cancel()
+            await asyncio.gather(*self._draft_reads, return_exceptions=True)
             await self.draft_writes.drain()
             if self.appearance_writes is not None:
                 await self.appearance_writes.drain()

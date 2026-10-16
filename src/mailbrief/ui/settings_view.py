@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.providers.groq.credentials import GroqKeyError, parse_api_key
 from mailbrief.ui.appearance_view import AppearancePanel
+from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
@@ -72,6 +73,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("MailBrief settings")
         self.resize(640, 620)
         layout = QVBoxLayout(self)
+        dialog_heading(self, layout, "Settings", "Manage connections, AI and your preferences.")
         self.tabs = QTabWidget()
         connection = QWidget()
         connection_layout = QVBoxLayout(connection)
@@ -93,6 +95,7 @@ class SettingsDialog(QDialog):
         self.model.setAccessibleName("Groq Structured Outputs model")
         form.addRow("Groq model", self.model)
         self.save_button = QPushButton("&Save settings")
+        self.save_button.setProperty("variant", "primary")
         form.addRow(self.save_button)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)

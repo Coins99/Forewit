@@ -44,7 +44,9 @@ async def test_manager_creates_area_project_assigns_task_and_archives(qtbot: QtB
     qtbot.addWidget(window)
     await window.initialize()
     window._show_page("actions")
-    window.actions_panel.organize_button.click()
+    menu = window.actions_panel.organize_button.menu()
+    assert menu is not None
+    menu.actions()[0].trigger()
     await finish(window)
     dialog = window.projects_dialog
     assert dialog.isVisible()

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from PySide6.QtCore import QDate, Qt, QTime
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QDialogButtonBox, QWidget
+from PySide6.QtWidgets import QDialogButtonBox, QLabel, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.events import (
@@ -21,6 +21,7 @@ from mailbrief.domain.events import (
 from mailbrief.ui.calendar_view import (
     DELETE,
     EMPTY,
+    MARKER_NOTE,
     NEW,
     OPEN,
     CalendarPanel,
@@ -184,7 +185,7 @@ def test_buttons_have_their_own_mnemonics(panel: CalendarPanel) -> None:
             panel.delete_button,
         )
     ]
-    letters = [text[text.index("&") + 1].casefold() for text in texts]
+    letters = [text[text.index("&") + 1].casefold() for text in texts if "&" in text]
     assert len(set(letters)) == len(letters)
     assert not set(letters) & set("scdlrutm")
 
@@ -211,7 +212,9 @@ def test_week_rows_order_each_day(panel: CalendarPanel) -> None:
         "Sat Oct 17",
         "Sun Oct 18",
     ]
-    assert panel.empty.isHidden() and not panel.note.isHidden()
+    assert panel.empty.isHidden() and panel.note.isHidden()
+    legend = panel.findChild(QLabel, "calendarLegend")
+    assert legend is not None and legend.accessibleName() == MARKER_NOTE
     # Day headings are read but never selected.
     assert not panel.list.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
 
@@ -231,6 +234,8 @@ def test_buttons_ask_the_window(panel: CalendarPanel, qtbot: QtBot) -> None:
     asked: list[tuple[str, object]] = []
     weeks: list[object] = []
     panel.event_requested.connect(lambda kind, value: asked.append((kind, value)))
+    previews: list[object] = []
+    panel.google_preview_requested.connect(previews.append)
     panel.week_requested.connect(weeks.append)
 
     panel.new_button.click()  # No selection: today, since it is in the week.
@@ -246,8 +251,8 @@ def test_buttons_ask_the_window(panel: CalendarPanel, qtbot: QtBot) -> None:
         (NEW, MONDAY + timedelta(days=1)),
         (OPEN, event),
         (DELETE, event),
-        (OPEN, event),
     ]
+    assert previews == [event]
 
     panel.previous_button.click()
     panel.next_button.click()
@@ -269,7 +274,7 @@ def test_buttons_ask_the_window(panel: CalendarPanel, qtbot: QtBot) -> None:
     panel.new_button.click()
     panel.delete_button.click()
     panel.next_button.click()
-    assert asked[5:] == [(NEW, TODAY)] and weeks[3:] == [MONDAY + timedelta(days=7)]
+    assert asked[4:] == [(NEW, TODAY)] and weeks[3:] == [MONDAY + timedelta(days=7)]
 
 
 def test_refresh_keeps_the_selected_event(panel: CalendarPanel) -> None:
@@ -375,6 +380,7 @@ def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     result = MainWindow(backend)
     result.now = lambda: NOW
     qtbot.addWidget(result)
+    result.show()
     return result
 
 

@@ -106,6 +106,7 @@ def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     result = MainWindow(backend)
     result.now = lambda: NOW
     qtbot.addWidget(result)
+    result.show()
     return result
 
 
