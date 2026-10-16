@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import itertools
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
@@ -54,6 +54,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningStatus,
 )
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -715,7 +716,7 @@ class MainWindow(QMainWindow):
         # A new day's reload of the actions and Briefs, waiting for the window to be free.
         self._day_refresh_pending = False
         # Carryover and overdue labels use the owner's local day.
-        self.now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self.now: Callable[[], datetime] = utc_now
         self.zone = resolve_timezone(None)
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)

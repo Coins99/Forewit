@@ -1,7 +1,7 @@
 """Database repositories implementing transactional persistence and domain mappings."""
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from itertools import batched
 from typing import cast
 
@@ -89,7 +89,7 @@ class AccountRepository:
             account_addresses=list(identity.account_addresses)
             if identity.account_addresses
             else [identity.email_address],  # noqa: E501
-            created_at_utc=datetime.now(UTC),
+            created_at_utc=utc_now(),
         )
         stmt = base_stmt.on_conflict_do_update(
             index_elements=["provider", "provider_account_id"],
@@ -270,7 +270,8 @@ class MessageRepository:
     ) -> None:
         """Store each message's score and readable reasons, by provider message ID; IDs no
         longer cached are skipped. ``loaded`` are this account's rows the caller already
-        holds; only the others are read.
+        holds in this session; only the others are read, including any row from another
+        session, whose change this flush would never write.
 
         Rows change as ORM objects, so a session that has them loaded sees the change, and
         the flush writes them together rather than one statement per message.
@@ -279,7 +280,9 @@ class MessageRepository:
         rows = {
             row.provider_message_id: row
             for row in loaded
-            if row.account_id == account_id and row.provider_message_id in scores
+            if row in self._session
+            and row.account_id == account_id
+            and row.provider_message_id in scores
         }
         if missing := scores.keys() - rows.keys():
             for row in await self.get_by_provider_ids(account_id, missing):
@@ -646,7 +649,7 @@ class AnalysisRepository:
             **deadline_columns(analysis),
             confidence=analysis.confidence,
             evidence=analysis.evidence,
-            analyzed_at_utc=datetime.now(UTC),
+            analyzed_at_utc=utc_now(),
             follow_up_kind=analysis.follow_up.value,
             follow_up_evidence=analysis.follow_up_evidence,
         )
@@ -896,7 +899,7 @@ class DigestRepository:
             local_date=local_date,
             timezone_name=timezone_name,
             status=status_val,
-            generated_at_utc=datetime.now(UTC),
+            generated_at_utc=utc_now(),
             **coverage_values,
         )
         stmt = (
@@ -1352,7 +1355,7 @@ class SyncRunRepository:
             account_id=account_id,
             range_start_utc=normalize_utc(range_start_utc),
             range_end_utc=normalize_utc(range_end_utc),
-            started_at_utc=datetime.now(UTC),
+            started_at_utc=utc_now(),
             status=status_val,
             page_count=0,
             message_count=0,
@@ -1388,7 +1391,7 @@ class SyncRunRepository:
         if error_code is not None:
             sync_run.sanitized_error_code = error_code
         if completed:
-            sync_run.completed_at_utc = datetime.now(UTC)
+            sync_run.completed_at_utc = utc_now()
 
         await self._session.flush()
         return sync_run

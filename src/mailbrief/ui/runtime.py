@@ -937,7 +937,8 @@ class DesktopRuntime:
         settings = await self._settings(preferences)
         bodies = (
             BodyService(
-                GmailBodies(gmail_provider, settings), limit=settings.ai_body_character_limit
+                GmailBodies(gmail_provider, settings, silent_only=True),
+                limit=settings.ai_body_character_limit,
             )
             if email
             else None

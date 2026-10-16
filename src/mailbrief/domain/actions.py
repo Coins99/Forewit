@@ -266,10 +266,9 @@ class ActionProposal(DeadlineFields):
         return None if value is None else normalize_utc(value)
 
     @model_validator(mode="after")
-    def validate_kind_and_deadline(self) -> Self:
+    def validate_kind(self) -> Self:
         if self.kind is FollowUpKind.NONE:
             raise ValueError("a proposal needs a follow-up kind")
-        self.check_deadline()
         dated = self.deadline_precision is not DeadlinePrecision.NONE
         if dated != (self.kind is FollowUpKind.NEW_DEADLINE):
             raise ValueError("only a new-deadline proposal carries a deadline, and it must")
@@ -322,8 +321,7 @@ class Action(DeadlineFields):
         return None if value is None else normalize_utc(value)
 
     @model_validator(mode="after")
-    def validate_deadline_and_completion(self) -> Self:
-        self.check_deadline()
+    def validate_completion(self) -> Self:
         if (self.completed_at_utc is not None) != (self.status is ActionStatus.COMPLETED):
             raise ValueError("completed_at_utc must be set exactly when the action is completed")
         return self

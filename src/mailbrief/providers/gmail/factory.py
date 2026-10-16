@@ -56,12 +56,11 @@ class GmailBodies:
     touches Gmail until a body is wanted: AI drafting's email, once the owner chooses it.
 
     ``open_gmail`` is the caller's own gmail_provider, so whatever opens Gmail for the
-    caller opens it for the download too.
+    caller opens it for the download too. ``silent_only`` has no default, so each caller
+    chooses whether the download may ask the owner to sign in.
     """
 
-    def __init__(
-        self, open_gmail: GmailOpener, settings: Settings, *, silent_only: bool = True
-    ) -> None:
+    def __init__(self, open_gmail: GmailOpener, settings: Settings, *, silent_only: bool) -> None:
         self._open_gmail = open_gmail
         self._settings = settings
         self._silent_only = silent_only

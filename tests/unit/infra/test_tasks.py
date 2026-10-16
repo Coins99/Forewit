@@ -1,6 +1,7 @@
 """Tasks started together never outlive the call that started them."""
 
 import asyncio
+from collections.abc import Coroutine, Iterator
 
 import pytest
 
@@ -73,3 +74,16 @@ async def test_leaving_the_block_early_cancels_what_is_still_running() -> None:
     assert first == 1
     assert all(task.done() for task in tasks)
     assert tasks[1].cancelled()
+
+
+async def test_a_failing_iterable_cancels_the_tasks_it_already_started() -> None:
+    before = asyncio.all_tasks()
+
+    def work() -> Iterator[Coroutine[object, object, None]]:
+        yield asyncio.sleep(10)
+        raise LookupError("broken")
+
+    with pytest.raises(LookupError, match="broken"):
+        async with running(work()):
+            pass
+    assert asyncio.all_tasks() == before  # The first sleep was cancelled and awaited.

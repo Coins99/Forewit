@@ -8,7 +8,7 @@ import getpass
 import logging
 import threading
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -129,7 +129,7 @@ from mailbrief.services.ranking import (
 )
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
-from mailbrief.storage.migrate import migrated_database, upgrade_database
+from mailbrief.storage.migrate import migrated_database
 from mailbrief.storage.repositories import (
     AccountRepository,
     ConsentRepository,
@@ -1054,12 +1054,14 @@ async def _brief_extras(
     return links, proposals
 
 
-async def _open_existing(path: Path) -> Database | None:
+@contextlib.asynccontextmanager
+async def _existing_database(path: Path) -> AsyncIterator[Database | None]:
     """The migrated database, or None when it doesn't exist; it is never created here."""
     if not await asyncio.to_thread(path.exists):
-        return None
-    await asyncio.to_thread(upgrade_database, path)
-    return Database.from_path(path)
+        yield None
+        return
+    async with migrated_database(path) as database:
+        yield database
 
 
 async def briefs_list(
@@ -1072,11 +1074,10 @@ async def briefs_list(
     """
     explicit = resolve_timezone(timezone) if timezone and timezone.strip() else None
     path = database_path or AppPaths.from_qt().database_path
-    database = await _open_existing(path)
-    if database is None:
-        print("No saved briefs.")
-        return 0
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            print("No saved briefs.")
+            return 0
         async with database.session() as session:
             if explicit is not None:
                 zone = explicit
@@ -1096,8 +1097,6 @@ async def briefs_list(
                 if account.provider == ProviderKind.GMAIL.value
             ]
             missed = {email: await history.missed_days(email, today) for email in accounts}
-    finally:
-        await database.dispose()
     if not summaries:
         print("No saved briefs.")
     for summary in summaries:
@@ -1117,11 +1116,10 @@ async def briefs_show(date_text: str, *, account: str | None, database_path: Pat
     """Print one saved brief as brief --show does, with its coverage line; offline."""
     day = parse_brief_date(date_text)
     path = database_path or AppPaths.from_qt().database_path
-    database = await _open_existing(path)
-    if database is None:
-        print(_NO_BRIEF)
-        return 3
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            print(_NO_BRIEF)
+            return 3
         async with database.session() as session:
             history = BriefHistory(session)
             if account is None:
@@ -1132,8 +1130,6 @@ async def briefs_show(date_text: str, *, account: str | None, database_path: Pat
                 account = accounts[0] if accounts else None
             digest = None if account is None else await history.get(account, day)
             links, proposals = ({}, {}) if digest is None else await _brief_extras(session, digest)
-    finally:
-        await database.dispose()
     if digest is None:
         print(_NO_BRIEF)
         return 3
@@ -1435,14 +1431,13 @@ def _refresh_text(minutes: int | None) -> str:
 async def _automatic_analysis_text(path: Path, *, exists: bool) -> str:
     """The connected account's automatic-analysis permission, read locally; nothing is
     created when there is no database."""
-    database = await _open_existing(path) if exists else None
-    if database is None:
+    if not exists:
         return await _connected_permission_text(None)
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            return await _connected_permission_text(None)
         async with database.session() as session:
             return await _connected_permission_text(session)
-    finally:
-        await database.dispose()
 
 
 async def _connected_permission_text(session: AsyncSession | None) -> str:

@@ -102,10 +102,8 @@ def check_deadline_fields(
     at_utc: datetime | None,
     timezone: str | None,
 ) -> None:
-    """Raise ValueError unless the deadline fields agree with their precision.
-
-    A zone must also be loadable, so a model without its own zone validator can use this.
-    """
+    """Raise ValueError unless the deadline fields agree with their precision and the zone
+    is loadable."""
     if timezone is not None:
         _require_time_zone(timezone)
     if (text is None) != (precision is DeadlinePrecision.NONE):
@@ -143,8 +141,8 @@ def deadline_due_at(
 
 class DeadlineFields(DomainModel):
     """A stated deadline: the email's phrase, how precisely it was resolved, and the date,
-    instant and zone that precision carries. Each model with a deadline extends this and
-    calls ``check_deadline()`` from its own validator."""
+    instant and zone that precision carries. Every model with a deadline extends this; its
+    validator checks, for every subclass, that the fields agree and the zone loads."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
@@ -161,12 +159,8 @@ class DeadlineFields(DomainModel):
     def normalize_deadline(cls, value: datetime | None) -> datetime | None:
         return None if value is None else normalize_utc(value)
 
-    @field_validator("deadline_timezone")
-    @classmethod
-    def validate_deadline_timezone(cls, value: str | None) -> str | None:
-        return None if value is None else _require_time_zone(value)
-
-    def check_deadline(self) -> None:
+    @model_validator(mode="after")
+    def validate_deadline(self) -> Self:
         """Raise ValueError unless the deadline fields agree with their precision."""
         check_deadline_fields(
             self.deadline_text,
@@ -175,6 +169,7 @@ class DeadlineFields(DomainModel):
             self.deadline_at_utc,
             self.deadline_timezone,
         )
+        return self
 
 
 class AnalysisRequest(DomainModel):
@@ -305,8 +300,7 @@ class ActionSuggestion(DeadlineFields):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
-    def validate_deadline_and_target(self) -> Self:
-        self.check_deadline()
+    def validate_target(self) -> Self:
         if (self.suggested_target_date is None) != (self.target_reason is None):
             raise ValueError("suggested_target_date and target_reason must be set together")
         return self
@@ -340,7 +334,6 @@ class MessageAnalysis(DeadlineFields):
             raise ValueError("action_text is required when action_required is true")
         if self.category is AnalysisCategory.DEADLINE and not self.deadline_text:
             raise ValueError("a deadline analysis requires deadline_text")
-        self.check_deadline()
         if (self.follow_up_evidence is None) != (self.follow_up is FollowUpKind.NONE):
             raise ValueError("follow_up_evidence must be present exactly when follow_up is set")
         self._validate_suggestions()

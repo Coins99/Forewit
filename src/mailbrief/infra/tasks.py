@@ -11,8 +11,10 @@ async def running[T](
 ) -> AsyncIterator[list[asyncio.Task[T]]]:
     """Start each coroutine as a task. Leaving the block cancels those still running and
     waits for every one, so none outlives it, whether the block ends, fails or is cancelled."""
-    tasks = [asyncio.create_task(item) for item in work]
+    tasks: list[asyncio.Task[T]] = []
     try:
+        # Inside the try, so the tasks already started are cancelled if ``work`` fails.
+        tasks.extend(asyncio.create_task(item) for item in work)
         yield tasks
     finally:
         for task in tasks:

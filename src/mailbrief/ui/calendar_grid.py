@@ -14,7 +14,7 @@ actions' dates in warning on its tint, today in white on the primary fill.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -34,6 +34,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
 
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.ui.calendar_layout import (
@@ -192,7 +193,7 @@ class _Grid(QWidget):
         self._today: date | None = None
         self._day: date | None = None
         self._key: Key | None = None
-        self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self.clock: Callable[[], datetime] = utc_now
 
     def show_range(self, shown: CalendarRange, zone: ZoneInfo, today: date) -> None:
         self._shown, self._zone, self._today = shown, zone, today

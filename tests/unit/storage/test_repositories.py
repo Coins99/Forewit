@@ -1057,6 +1057,29 @@ async def test_deleting_an_account_keeps_actions_decisions_and_source_snapshots(
     assert action is not None and action.title == "Approve the proposal"
 
 
+async def test_save_rankings_reads_again_the_rows_of_another_session(database: Database) -> None:
+    async with database.transaction() as session:
+        account = await AccountRepository(session).upsert(
+            AccountIdentity(
+                provider=ProviderKind.GMAIL,
+                provider_account_id="gmail-1",
+                email_address="owner@example.com",
+            )
+        )
+        stale = await MessageRepository(session).upsert_messages(
+            account.id, [make_message(provider_message_id="m0")]
+        )
+
+    async with database.transaction() as session:
+        await MessageRepository(session).save_rankings(
+            account.id, [("m0", 9, [RankReason.RECENT])], loaded=stale
+        )
+
+    async with database.session() as session:
+        stored = await MessageRepository(session).get_by_provider_ids(account.id, ["m0"])
+        assert [row.rank_score for row in stored] == [9]
+
+
 async def test_save_rankings_reads_only_the_rows_it_was_not_given(database: Database) -> None:
     async with database.transaction() as session:
         account = await AccountRepository(session).upsert(
