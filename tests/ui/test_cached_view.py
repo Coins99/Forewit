@@ -153,6 +153,38 @@ class OneAccountBackend(FakeBackend):
         )
 
 
+async def test_saved_mail_status_does_not_announce_an_old_page(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = OneAccountBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window.show()
+    window.start(window.initialize)
+    await finish(window)
+    window.cached_button.click()
+    await finish(window)
+    viewer = window.cached_dialog
+    assert "may be stale" in viewer.status.accessibleName()
+    viewer.begin_load()
+    assert viewer.status.text() == "Loading saved metadata…"
+    assert viewer.status.accessibleName() == ""
+
+    viewer.show_page(await backend.cached_messages(1, viewer.today()))
+    monkeypatch.setattr(
+        backend, "cached_messages", AsyncMock(side_effect=RuntimeError("synthetic failure"))
+    )
+    viewer.request_page(0)
+    await finish(window)
+    assert viewer.status.text() == window.status.text()
+    assert "Operation failed" in viewer.status.text()
+    assert viewer.status.accessibleName() == ""
+
+    viewer.configure(())
+    assert "No cached Gmail accounts" in viewer.status.text()
+    assert viewer.status.accessibleName() == ""
+
+
 async def test_browse_saved_mail_opens_on_today_in_your_time_zone(qtbot: QtBot) -> None:
     backend = OneAccountBackend()
     window = MainWindow(backend)

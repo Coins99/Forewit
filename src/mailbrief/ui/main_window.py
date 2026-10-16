@@ -3074,7 +3074,7 @@ class MainWindow(QMainWindow):
                 if failed:
                     self.status.setText(_AUTOMATIC + self.status.text())
             if self.cached_dialog.isVisible() and not self.cached_dialog.has_page:
-                self.cached_dialog.status.setText(self.status.text())
+                self.cached_dialog.set_status(self.status.text())
             if self.settings_dialog.isVisible():
                 self.settings_dialog.status.setText(self.status.text())
             self.review_panel.hide()

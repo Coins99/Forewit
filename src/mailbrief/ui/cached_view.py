@@ -211,7 +211,7 @@ class CachedMailDialog(QDialog):
         self.accounts.blockSignals(False)
         self.begin_load()
         if not accounts:
-            self.status.setText("No cached Gmail accounts yet. Connect and sync to save metadata.")
+            self.set_status("No cached Gmail accounts yet. Connect and sync to save metadata.")
 
     @property
     def has_page(self) -> bool:
@@ -234,8 +234,13 @@ class CachedMailDialog(QDialog):
         self.messages.clear()
         self.details.clear()
         self._clear_message()
-        self.status.setText("Loading saved metadata…")
+        self.set_status("Loading saved metadata…")
         self.source.setEnabled(False)
+
+    def set_status(self, text: str, *, accessible_name: str = "") -> None:
+        """Replace both representations so a previous page cannot stay announced."""
+        self.status.setText(text)
+        self.status.setAccessibleName(accessible_name)
 
     def set_busy(self, busy: bool) -> None:
         self.accounts.setEnabled(not busy)
@@ -256,8 +261,9 @@ class CachedMailDialog(QDialog):
             "Cached metadata may be stale; browsing does not use the network."
         )
         cache_time = f"Cached at {stamp}" if last else "No complete sync recorded"
-        self.status.setText(f"{len(page.messages)} messages saved · {cache_time}")
-        self.status.setAccessibleName(status)
+        self.set_status(
+            f"{len(page.messages)} messages saved · {cache_time}", accessible_name=status
+        )
         self.messages.clear()
         for message in page.messages:
             item = QListWidgetItem(

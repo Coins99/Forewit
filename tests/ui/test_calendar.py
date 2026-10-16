@@ -25,6 +25,7 @@ from mailbrief.ui.calendar_view import (
     NEW,
     OPEN,
     CalendarPanel,
+    CalendarView,
     day_heading,
     event_when,
     marker_text,
@@ -48,6 +49,18 @@ MONDAY = date(2026, 10, 12)
 TODAY = date(2026, 10, 14)  # A Wednesday.
 NOW = datetime(2026, 10, 14, 14, 20, tzinfo=TORONTO)
 ACTION_ID = "5b1f3c2e-8d4a-4e6b-9c7d-1a2b3c4d5e6f"
+
+
+def test_calendar_navigation_is_visibly_directional_in_every_view(qtbot: QtBot) -> None:
+    panel = CalendarPanel()
+    qtbot.addWidget(panel)
+    for view in CalendarView:
+        panel.set_view(view)
+        assert panel.previous_button.text() == "\u2039"
+        assert panel.next_button.text() == "\u203a"
+        period = "month" if view is CalendarView.MONTH else "week"
+        assert panel.previous_button.accessibleName() == f"Previous {period}"
+        assert panel.next_button.accessibleName() == f"Next {period}"
 
 
 def stored(edit: EventEdit, number: int = 1, revision: int = 1) -> CalendarEvent:

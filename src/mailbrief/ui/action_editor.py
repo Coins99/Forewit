@@ -505,6 +505,12 @@ class ActionEditor(QDialog):
         self._set_saving(False)
         self.accept()
 
+    def done(self, result: int) -> None:
+        """Accepted or discarded input must not resume as a pending inline task."""
+        self._loaded_input = self._input()
+        self._creating = False
+        super().done(result)
+
     def keep_open(self, message: str) -> None:
         """The save did not happen: unlock the dialog, keep every field and say why."""
         self._set_saving(False)

@@ -700,7 +700,10 @@ class SidebarNav(GlassChrome):
         brand_icon.setObjectName("brandIcon")
         brand_icon.setFixedSize(28, 28)
         brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_icon.setPixmap(icon_pixmap("mail", current_tokens().panel, 16, 2.0))
+        follow_theme(
+            brand_icon,
+            lambda label: label.setPixmap(icon_pixmap("mail", current_tokens().panel, 16, 2.0)),
+        )
         brand_row.addWidget(brand_icon)
         brand_text = plain_label("MailBrief", px=15, medium=True)
         brand_text.setObjectName("brandLabel")

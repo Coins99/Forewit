@@ -543,9 +543,9 @@ class CalendarPanel(QWidget):
             button.setText(
                 "Today"
                 if button is self.this_week_button
-                else "?"
+                else "\u2039"
                 if button is self.previous_button
-                else "?"
+                else "\u203a"
             )
             button.setAccessibleName(text.replace("&", ""))
             button.setFixedWidth(52 if button is self.this_week_button else 30)

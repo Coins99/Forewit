@@ -55,6 +55,29 @@ OWNER_ZONE = ZoneInfo(ZONE)
 TODAY = date(2026, 10, 6)  # The mockup brief's day.
 
 
+def test_brand_glyph_follows_live_appearance_changes(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    workspace = ThreePaneWorkspace()
+    qtbot.addWidget(workspace)
+    brand = workspace.sidebar.findChild(QLabel, "brandIcon")
+    assert brand is not None
+    images = []
+    for mode in (ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.LIGHT):
+        apply_theme(qapp, mode)
+        image = brand.pixmap().toImage()
+        ink = max(
+            (image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height())),
+            key=lambda color: color.alpha(),
+        )
+        assert ink.alpha() > 200
+        assert ink.name() == current_tokens().panel
+        images.append(image)
+    assert images[0] != images[1]
+    assert images[0] == images[2]
+
+
 def build(qtbot: QtBot) -> ThreePaneWorkspace:
     workspace = ThreePaneWorkspace()
     qtbot.addWidget(workspace)
