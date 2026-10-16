@@ -158,6 +158,9 @@ QTabBar::tab:selected { color: $text; border-bottom: 2px solid $accent_border; }
 QTabBar#actionsTabs { background: $canvas; border-radius: 7px; font-size: 9px; }
 QTabBar#actionsTabs::tab { font-size: 9px; padding: 7px 10px; border-radius: 5px; }
 QTabBar#actionsTabs::tab:selected { background: $panel; border: none; }
+QTabBar#settingsTabs { background: $canvas; border-radius: 7px; }
+QTabBar#settingsTabs::tab { padding: 7px 12px; border-radius: 5px; }
+QTabBar#settingsTabs::tab:selected { background: $panel; border: none; }
 """  # noqa: E501
 
 _current = DARK
