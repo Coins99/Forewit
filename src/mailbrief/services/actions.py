@@ -11,6 +11,7 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.actions import (
     MAX_ACTION_STEPS,
@@ -195,7 +196,12 @@ class ActionService:
             raise ActionRepeatError(str(error)) from None
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        return await commit_once(self._session, self._clock, operation)
+        try:
+            return await commit_once(self._session, self._clock, operation)
+        except StaleDataError:
+            raise ActionRepeatError(
+                "The repeat changed since it was loaded; reload it and try again."
+            ) from None
 
     async def _suggestion(
         self, suggestion_id: int

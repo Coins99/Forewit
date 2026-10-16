@@ -107,6 +107,13 @@ additive extension of format version 1. Activity records `skipped` with the stat
 and undo refers to it like a completion. Downgrading turns a skipped occurrence into a completed
 one at its last change, since older versions have no skip, and drops the series.
 
+Follow-up revision `20261016_0022` preserves the schema and history on upgrade. On downgrade,
+it maps skip and tag-respelling activity to completed and edited activity, and previous skipped
+states to completed states with the original skip time, so older applications can read them.
+An existing 0021 database must first upgrade to 0022 before downgrading to 0020; 0021 itself
+remains unchanged. Series edits refresh the stored revision and also check it at flush, so a
+session that cached an older series cannot overwrite a newer template or rule.
+
 ## Owner acceptance
 
 With Gmail disconnected:

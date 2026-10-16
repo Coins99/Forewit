@@ -512,6 +512,8 @@ class ActionSeriesTable(Base):
     ended_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())  # Repeats stopped.
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
 
 class ActionTable(DeadlineColumns, Base):
     """An action the owner accepted.

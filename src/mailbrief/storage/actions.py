@@ -602,7 +602,8 @@ class ActionRepository:
         return count or 0
 
     async def get_series(self, series_id: int) -> ActionSeriesTable | None:
-        return await self._session.get(ActionSeriesTable, series_id)
+        # A session can outlive another writer's commit; validate the stored revision.
+        return await self._session.get(ActionSeriesTable, series_id, populate_existing=True)
 
     async def add_series(self, row: ActionSeriesTable) -> ActionSeriesTable:
         self._session.add(row)

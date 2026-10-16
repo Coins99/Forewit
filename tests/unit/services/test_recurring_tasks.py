@@ -5,11 +5,14 @@ import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from alembic import command
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.actions import Action, ActionEdit, ActionFilter, ActionStatus, StepEdit
 from mailbrief.domain.actions import ActionActivityKind as Kind
@@ -26,9 +29,9 @@ from mailbrief.services.preferences import PreferencesService
 from mailbrief.services.projects import ProjectService
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
-from mailbrief.storage.migrate import upgrade_database
+from mailbrief.storage.migrate import migration_config, upgrade_database
 from mailbrief.storage.recovery import restore_backup
-from mailbrief.storage.tables import ActionSeriesTable, ActionTable
+from mailbrief.storage.tables import ActionActivityTable, ActionSeriesTable, ActionTable
 from tests.factories import Clock
 
 START = datetime(2026, 10, 15, 13, 0, tzinfo=UTC)  # A Thursday; 09:00 in Toronto.
@@ -299,6 +302,75 @@ async def test_a_stale_series_or_a_closed_task_is_refused(session: AsyncSession)
         await actions.save(plain.public_id, plain.revision, same(plain), None, weekly)
 
 
+async def test_a_cached_series_cannot_overwrite_another_sessions_edit(database: Database) -> None:
+    async with database.session() as setup:
+        actions = service(setup, Clock(START))
+        first = await actions.create(task(), (), DAILY)
+        done = await actions.complete(first.public_id, first.revision)
+        following = await only_open(actions)
+        # Editing the successor keeps it when the earlier occurrence is reopened.
+        following = await actions.save(following.public_id, following.revision, same(following))
+        first = await actions.reopen(first.public_id, done.revision)
+
+    async with database.session() as stale, database.session() as fresh:
+        cached = await stale.scalar(select(ActionSeriesTable))
+        assert cached is not None
+        await stale.commit()  # expire_on_commit=False deliberately retains this object.
+        assert cached.revision == 1
+        await service(fresh, Clock(START)).save(
+            first.public_id,
+            first.revision,
+            same(first, title="Fresh template"),
+            None,
+            RepeatEdit(rule=DAILY, series_revision=1),
+        )
+        with pytest.raises(ActionRepeatError, match="repeat changed"):
+            await service(stale, Clock(START)).save(
+                following.public_id,
+                following.revision,
+                same(following, title="Stale template"),
+                None,
+                RepeatEdit(rule=DAILY, series_revision=1),
+            )
+
+    async with database.session() as check:
+        series = await check.scalar(select(ActionSeriesTable))
+        assert series is not None
+        assert (series.title, series.revision) == ("Fresh template", 2)
+        unchanged = await service(check, Clock(START)).get(following.public_id)
+        assert (unchanged.title, unchanged.revision) == (following.title, following.revision)
+
+
+async def test_series_update_checks_the_revision_at_flush(database: Database) -> None:
+    async with database.session() as setup:
+        await service(setup, Clock(START)).create(task(), (), DAILY)
+    async with database.session() as stale, database.session() as fresh:
+        old = await stale.scalar(select(ActionSeriesTable))
+        current = await fresh.scalar(select(ActionSeriesTable))
+        assert old is not None and current is not None
+        await stale.commit()
+        current.title, current.revision = "Fresh template", 2
+        await fresh.commit()
+        old.title, old.revision = "Stale template", 2
+        with pytest.raises(StaleDataError):
+            await stale.commit()
+        await stale.rollback()
+    async with database.session() as check:
+        saved = await check.scalar(select(ActionSeriesTable))
+        assert saved is not None
+        assert (saved.title, saved.revision) == ("Fresh template", 2)
+
+
+async def test_a_flush_conflict_rolls_back_and_reports_a_repeat_conflict(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session, "commit", AsyncMock(side_effect=StaleDataError()))
+    with pytest.raises(ActionRepeatError, match="repeat changed"):
+        await service(session, Clock(START)).create(task(), (), DAILY)
+    assert await session.scalar(select(func.count()).select_from(ActionTable)) == 0
+    assert await session.scalar(select(func.count()).select_from(ActionSeriesTable)) == 0
+
+
 async def test_stopping_and_restarting_the_repeats(session: AsyncSession) -> None:
     actions = service(session, Clock(START))
     first = await actions.create(task(), (), DAILY)
@@ -508,4 +580,52 @@ async def test_repeating_tasks_survive_backup_restore_and_export(tmp_path: Path)
         assert following.repeat.previous_status is ActionStatus.SKIPPED
         rows = await session.scalars(select(ActionSeriesTable))
         assert [row.revision for row in rows] == [1]
+    await database.dispose()
+
+
+async def test_downgrade_keeps_repeat_history_readable_by_older_versions(tmp_path: Path) -> None:
+    path = tmp_path / "downgrade.sqlite3"
+    config = migration_config(path)
+    # Simulate an owner database that has already used the immutable 0021 revision.
+    await asyncio.to_thread(command.upgrade, config, "20261015_0021")
+    database = Database.from_path(path)
+    clock = Clock(START)
+    async with database.session() as session:
+        actions = service(session, clock)
+        first = await actions.create(task(), (), DAILY)
+        skipped = await actions.skip(first.public_id, first.revision)
+        clock.advance(minutes=10)
+        reopened = await actions.reopen(first.public_id, skipped.revision)
+        await actions.undo_status(first.public_id, reopened.revision)
+        other = await actions.create(task(title="Other"))
+        await actions.save(other.public_id, other.revision, same(other, tags=("HOME",)))
+        before = list((await session.execute(select(ActionActivityTable.__table__))).mappings())
+        assert any(row["kind"] == "tag_respelled" for row in before)
+        assert any(row["previous_status"] == "skipped" for row in before)
+    await database.dispose()
+
+    await asyncio.to_thread(command.upgrade, config, "head")
+    database = Database.from_path(path)
+    async with database.session() as session:
+        after = list((await session.execute(select(ActionActivityTable.__table__))).mappings())
+        assert after == before  # Upgrading must preserve the original audit trail.
+    await database.dispose()
+    await asyncio.to_thread(command.downgrade, config, "20261014_0020")
+
+    # Read only 0020 columns, and enforce its enum vocabulary as its loader does.
+    database = Database.from_path(path)
+    async with database.session() as session:
+        records = (await session.execute(text("SELECT * FROM action_activity"))).mappings().all()
+        assert len(records) == len(before)
+        older_kinds = {kind.value for kind in Kind} - {"skipped", "tag_respelled"}
+        for record in records:
+            assert record["kind"] in older_kinds
+            assert record["previous_status"] in (None, "open", "completed")
+            if record["previous_status"] == "completed":
+                # The reopening points to the skip's time, not the later reopening time.
+                assert str(record["previous_completed_at_utc"]).startswith("2026-10-15 13:00:00")
+        tasks = (await session.execute(text("SELECT status, completed_at_utc FROM actions"))).all()
+        for status, completed_at in tasks:
+            assert status in ("open", "completed")
+            assert (completed_at is not None) == (status == "completed")
     await database.dispose()
