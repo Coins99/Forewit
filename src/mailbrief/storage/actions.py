@@ -51,6 +51,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     ActionTagTable,
     AnalysisTable,
+    DraftTable,
     MessageTable,
     ProjectTable,
     SuggestionDecisionTable,
@@ -626,9 +627,16 @@ class ActionRepository:
         )
         return list(result)
 
+    async def drafted(self, action_id: int) -> bool:
+        """Whether any draft, deleted or not, links to the action."""
+        found = await self._session.scalar(
+            select(DraftTable.id).where(DraftTable.action_id == action_id).limit(1)
+        )
+        return found is not None
+
     async def _repeats(self, rows: Sequence[ActionTable]) -> dict[int, ActionRepeat]:
-        """Each occurrence's repeat, with the live occurrence it follows. The table's checks
-        keep every series' rule valid."""
+        """Each occurrence's repeat, with the live occurrences it follows and made. The
+        table's checks keep every series' rule valid."""
         occurrences = [
             row for row in rows if row.series_id is not None and row.occurrence_date is not None
         ]
@@ -651,6 +659,19 @@ class ActionRepository:
             for action_id, day, status in result.tuples():
                 if day is not None:
                     previous[action_id] = (day, status)
+        following: dict[int, date] = {}
+        for chunk in sorted_batches({row.id for row in occurrences}):
+            made = await self._session.execute(
+                select(ActionTable.follows_action_id, ActionTable.occurrence_date)
+                .where(
+                    ActionTable.follows_action_id.in_(chunk),
+                    ActionTable.deleted_at_utc.is_(None),
+                )
+                .order_by(ActionTable.id)
+            )
+            for closed_id, day in made.tuples():
+                if closed_id is not None and day is not None:
+                    following[closed_id] = day  # The newest, should there be more than one.
         repeats: dict[int, ActionRepeat] = {}
         for row in occurrences:
             found = series.get(row.series_id or 0)
@@ -665,6 +686,7 @@ class ActionRepository:
                 ended=found.ended_at_utc is not None,
                 previous_date=None if before is None else before[0],
                 previous_status=None if before is None else ActionStatus(before[1]),
+                next_date=following.get(row.id),
             )
         return repeats
 

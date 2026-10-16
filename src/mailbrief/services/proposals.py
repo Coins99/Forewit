@@ -32,7 +32,6 @@ from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.messages import NormalizedMessage, ProviderKind, is_own_message
 from mailbrief.services.actions import ActionConflictError, touch, urgency
 from mailbrief.services.analysis import PlannedMessage
-from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.deadlines import ResolvedDeadline, suggest_target_for
 from mailbrief.services.recurrence import Repeats
 from mailbrief.services.threads import own_addresses
@@ -175,7 +174,7 @@ class ProposalService:
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
     A proposal that completes a repeating task makes its next occurrence, counted from
-    today in ``zone`` (the owner's; the system's by default), as completing it would.
+    today in ``zone`` (by default the owner's saved zone), as completing it would.
     """
 
     def __init__(
@@ -189,12 +188,7 @@ class ProposalService:
         self._clock = clock
         self._proposals = ProposalRepository(session)
         self._actions = ActionRepository(session)
-        self._repeats = Repeats(
-            session,
-            self._actions,
-            zone=zone or resolve_timezone(None),
-            id_factory=new_public_id,
-        )
+        self._repeats = Repeats(session, self._actions, zone=zone, id_factory=new_public_id)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         return await commit_once(self._session, self._clock, operation)

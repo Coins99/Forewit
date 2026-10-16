@@ -8,16 +8,21 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import Action, ActionEdit, ActionFilter, ActionStatus, StepEdit
 from mailbrief.domain.actions import ActionActivityKind as Kind
 from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.drafts import DraftKind
+from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.domain.projects import ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
-from mailbrief.services.actions import ActionConflictError, ActionService
+from mailbrief.services.actions import ActionConflictError, ActionRepeatError, ActionService
+from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.data import export_writing
+from mailbrief.services.drafts import DraftService
+from mailbrief.services.preferences import PreferencesService
 from mailbrief.services.projects import ProjectService
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
@@ -269,16 +274,25 @@ async def test_a_stale_series_or_a_closed_task_is_refused(session: AsyncSession)
 
     with pytest.raises(ActionConflictError, match="repeat changed"):
         await actions.save(first.public_id, changed.revision, same(first), None, weekly)
+    # A repeating task's edit must carry the series revision it saw.
+    with pytest.raises(ActionConflictError, match="repeat changed"):
+        await actions.save(
+            first.public_id, changed.revision, same(first), None, RepeatEdit(rule=DAILY)
+        )
     done = await actions.complete(first.public_id, changed.revision)
-    with pytest.raises(ActionConflictError, match="Reopen"):
-        await actions.save(first.public_id, done.revision, same(done), None, RepeatEdit(rule=DAILY))
+    for edit in (
+        RepeatEdit(rule=DAILY, series_revision=2),
+        RepeatEdit(rule=None, series_revision=2),  # Not even to stop it.
+    ):
+        with pytest.raises(ActionConflictError, match="Reopen"):
+            await actions.save(first.public_id, done.revision, same(done), None, edit)
     with pytest.raises(ActionConflictError, match="Reopen"):
         await actions.save(
             first.public_id,
             done.revision,
             same(done, title="Renamed"),
             None,
-            RepeatEdit(rule=MONDAY_WEDNESDAY, later_too=True),
+            RepeatEdit(rule=MONDAY_WEDNESDAY, series_revision=2, later_too=True),
         )
     plain = await actions.complete((await actions.create(task())).public_id, 1)
     with pytest.raises(ActionConflictError, match="Reopen"):
@@ -289,19 +303,27 @@ async def test_stopping_and_restarting_the_repeats(session: AsyncSession) -> Non
     actions = service(session, Clock(START))
     first = await actions.create(task(), (), DAILY)
     stopped = await actions.save(
-        first.public_id, first.revision, same(first), None, RepeatEdit(rule=None)
+        first.public_id, first.revision, same(first), None, RepeatEdit(rule=None, series_revision=1)
     )
     assert stopped.repeat is not None
     assert stopped.repeat.ended
     with pytest.raises(ActionConflictError, match="repeating task"):
         await actions.skip(stopped.public_id, stopped.revision)
     resumed = await actions.save(
-        stopped.public_id, stopped.revision, same(stopped), None, RepeatEdit(rule=DAILY)
+        stopped.public_id,
+        stopped.revision,
+        same(stopped),
+        None,
+        RepeatEdit(rule=DAILY, series_revision=2),
     )
     assert resumed.repeat is not None
     assert not resumed.repeat.ended
     stopped_again = await actions.save(
-        resumed.public_id, resumed.revision, same(resumed), None, RepeatEdit(rule=None)
+        resumed.public_id,
+        resumed.revision,
+        same(resumed),
+        None,
+        RepeatEdit(rule=None, series_revision=3),
     )
     await actions.complete(stopped_again.public_id, stopped_again.revision)
     assert await open_tasks(actions) == []
@@ -318,8 +340,14 @@ async def test_the_end_date_is_the_last_occurrence(session: AsyncSession) -> Non
     assert await open_tasks(actions) == []
 
     early = DAILY.model_copy(update={"end_date": date(2026, 10, 14)})
-    with pytest.raises(ActionConflictError, match="ends before"):
+    with pytest.raises(ActionRepeatError, match="ends before"):
         await actions.create(task(), (), early)
+    # Undated, it would take November 1, after an end on October 20.
+    first_of_month = RepeatRule(
+        frequency=RepeatFrequency.MONTHLY_DAY, month_day=1, end_date=date(2026, 10, 20)
+    )
+    with pytest.raises(ActionRepeatError, match="ends before"):
+        await actions.create(task(), (), first_of_month)
     late = await actions.create(task(target_date=date(2026, 10, 20)))
     with pytest.raises(ActionConflictError, match="ends before"):
         await actions.save(late.public_id, late.revision, same(late), None, RepeatEdit(rule=until))
@@ -356,6 +384,79 @@ async def test_an_existing_date_makes_no_second_occurrence(session: AsyncSession
     assert await open_tasks(actions) == []
     restored = await actions.restore(following.public_id)
     assert [action.public_id for action in await open_tasks(actions)] == [restored.public_id]
+
+
+async def test_the_closed_occurrence_names_the_next_it_made(session: AsyncSession) -> None:
+    actions = service(session, Clock(START))
+    first = await actions.create(task(), (), DAILY)
+    assert first.repeat is not None and first.repeat.next_date is None
+    done = await actions.complete(first.public_id, first.revision)
+    assert done.repeat is not None and done.repeat.next_date == date(2026, 10, 16)
+
+    # Once the next one is deleted, closing again makes none, and names none.
+    following = await only_open(actions)
+    await actions.delete(following.public_id, following.revision)
+    reopened = await actions.reopen(first.public_id, done.revision)
+    again = await actions.complete(first.public_id, reopened.revision)
+    assert again.repeat is not None and again.repeat.next_date is None
+
+
+async def test_a_next_occurrence_with_a_draft_is_kept(session: AsyncSession) -> None:
+    """Linking a draft doesn't change the task, but the draft makes it the owner's."""
+    clock = Clock(START)
+    actions = service(session, clock)
+    first = await actions.create(task(), (), DAILY)
+    done = await actions.complete(first.public_id, first.revision)
+    following = await only_open(actions)
+    draft = await DraftService(session, clock=clock).create_for_action(
+        following.public_id, DraftKind.NOTE
+    )
+
+    await actions.undo_status(first.public_id, done.revision)
+
+    assert {a.public_id for a in await open_tasks(actions)} == {
+        first.public_id,
+        following.public_id,
+    }
+    kept_draft = await DraftService(session, clock=clock).get(draft.public_id)
+    assert kept_draft.action_public_id == following.public_id
+
+
+async def test_a_tag_respelt_elsewhere_leaves_the_next_untouched(session: AsyncSession) -> None:
+    actions = service(session, Clock(START))
+    first = await actions.create(task(), (), DAILY)
+    await actions.complete(first.public_id, first.revision)
+    other = await actions.create(task(title="Other", tags=("Home",)))
+    await actions.save(other.public_id, other.revision, same(other, tags=("HOME",)))
+    following = next(a for a in await open_tasks(actions) if a.title == "Water plants")
+    assert following.revision == 2
+    assert [event.kind for event in following.activity] == [Kind.CREATED, Kind.TAG_RESPELLED]
+
+    # The respelling changed the completed task too, so reopen it rather than undo.
+    await actions.reopen(first.public_id, (await actions.get(first.public_id)).revision)
+
+    assert {a.public_id for a in await open_tasks(actions)} == {
+        first.public_id,
+        other.public_id,
+    }  # The next occurrence was withdrawn.
+
+
+async def test_the_owner_zone_is_read_when_none_is_given(session: AsyncSession) -> None:
+    """At 16:00 UTC it is already the 16th in Tokyo, the owner's saved zone."""
+    clock = Clock(datetime(2026, 10, 15, 16, 0, tzinfo=UTC))
+    await PreferencesService(session, clock=clock).save(PreferencesEdit(time_zone="Asia/Tokyo"), 0)
+    actions = ActionService(session, clock=clock)
+    created = await actions.create(task(), (), DAILY)
+    assert created.target_date == date(2026, 10, 16)
+
+
+async def test_unreadable_preferences_date_by_the_system_zone(session: AsyncSession) -> None:
+    await PreferencesService(session).save(PreferencesEdit(), 0)
+    await session.execute(text("UPDATE owner_preferences SET time_zone = 'Mars/Base'"))
+    await session.commit()
+    actions = ActionService(session, clock=Clock(START))
+    created = await actions.create(task(), (), DAILY)
+    assert created.target_date == START.astimezone(resolve_timezone(None)).date()
 
 
 async def test_an_archived_project_takes_no_new_occurrence(session: AsyncSession) -> None:

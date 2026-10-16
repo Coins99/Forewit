@@ -18,6 +18,7 @@ from mailbrief.domain.common import DomainModel
 WEEKDAYS: Final = range(7)  # date.weekday(): Monday is 0.
 ALL_WEEKDAYS: Final = (0, 1, 2, 3, 4, 5, 6)
 WORKING_WEEKDAYS: Final = (0, 1, 2, 3, 4)
+ENDS_FIRST: Final = "The repeat ends before the task's date. Choose a later end date."
 
 
 class RepeatFrequency(StrEnum):
@@ -139,6 +140,20 @@ def next_occurrence(rule: RepeatRule, occurrence: date, today: date) -> date | N
     skipped ``today``: the rule's first date after both. Dates missed in between are not
     created, so a task left for a week comes back once, not seven times."""
     return rule.next_after(max(occurrence, today))
+
+
+def first_occurrence(rule: RepeatRule, target: date | None, today: date) -> date | None:
+    """The date a task that starts repeating takes: its target date, or else the rule's first
+    date from ``today``. None when the rule ends before it (ENDS_FIRST)."""
+    day = target or rule.first_on_or_after(today)
+    if day is None or ends_before(rule, day):
+        return None
+    return day
+
+
+def ends_before(rule: RepeatRule, day: date) -> bool:
+    """Whether the rule's end date comes before an occurrence dated ``day``."""
+    return rule.end_date is not None and rule.end_date < day
 
 
 class RepeatEdit(DomainModel):

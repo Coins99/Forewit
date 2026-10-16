@@ -109,6 +109,7 @@ from mailbrief.services.actions import (
     AcceptedInto,
     ActionConflictError,
     ActionNotFoundError,
+    ActionRepeatError,
     DecisionSnapshot,
     SuggestionNotFoundError,
 )
@@ -145,7 +146,6 @@ from mailbrief.services.ranking import (
     reason_text,
 )
 from mailbrief.ui.action_editor import ActionEditor
-from mailbrief.ui.action_text import next_repeat
 from mailbrief.ui.actions_view import (
     COMPLETE,
     DELETE,
@@ -1798,6 +1798,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         try:
             created = await self.backend.create_action(edit, steps, repeat)
+        except ActionRepeatError as exc:
+            if not self._closing:
+                self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
+            return
         except Exception:
             if not self._closing:
                 self.action_editor.keep_open(_EDITOR_FAILED)
@@ -1825,11 +1829,11 @@ class MainWindow(QMainWindow):
         if not started and not self._closing:
             self.action_editor.keep_open(_BUSY)
 
-    def _next_repeat(self, action: Action) -> str:
-        """ "Next Fri Oct 16." for a repeating task that has just closed, else nothing."""
-        today = self._local_today()
-        day = next_repeat(action, today)
-        return "" if day is None else f" Next {day_text(day, today=today)}."
+    def _next_repeat(self, closed: Action) -> str:
+        """ "Next Fri Oct 16." when closing a repeating task made its next occurrence, else
+        nothing."""
+        day = None if closed.repeat is None else closed.repeat.next_date
+        return "" if day is None else f" Next {day_text(day, today=self._local_today())}."
 
     async def _complete_action(self, action: Action) -> None:
         done = await self._unless_stale(
@@ -1842,7 +1846,7 @@ class MainWindow(QMainWindow):
             await self.backend.undo_action_status(done.public_id, done.revision)
 
         self._offer_undo("Undo complete", undo)
-        self.status.setText(f"Completed: {done.title}.{self._next_repeat(action)}")
+        self.status.setText(f"Completed: {done.title}.{self._next_repeat(done)}")
         await self._refresh_views()
 
     async def _skip_action(self, action: Action) -> None:
@@ -1856,7 +1860,7 @@ class MainWindow(QMainWindow):
             await self.backend.undo_action_status(skipped.public_id, skipped.revision)
 
         self._offer_undo("Undo skip", undo)
-        self.status.setText(f"Skipped: {skipped.title}.{self._next_repeat(action)}")
+        self.status.setText(f"Skipped: {skipped.title}.{self._next_repeat(skipped)}")
         await self._refresh_views()
 
     async def _reopen_action(self, action: Action) -> None:
@@ -1910,6 +1914,10 @@ class MainWindow(QMainWindow):
             saved = await self.backend.save_action(
                 action.public_id, action.revision, edit, steps, repeat
             )
+        except ActionRepeatError as exc:
+            if not self._closing:
+                self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
+            return
         except _STALE as exc:
             if not self._closing:
                 self.action_editor.keep_open(_EDITOR_STALE)

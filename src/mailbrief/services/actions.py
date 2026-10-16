@@ -35,7 +35,6 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
-from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.recurrence import RepeatError, Repeats
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
@@ -78,6 +77,10 @@ class SuggestionNotFoundError(LookupError):
 
 class ActionConflictError(ValueError):
     """The action changed since it was read, or the change is not allowed now."""
+
+
+class ActionRepeatError(ActionConflictError):
+    """The repeat settings can't be applied; the static message says why, for the owner."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,9 +169,9 @@ class ActionService:
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
     A method taking ``expected_revision`` raises ActionConflictError when the action's
-    revision differs, so a stale screen never overwrites a newer change. ``zone`` is the
-    owner's, for the local date a repeating task's next occurrence is counted from; it
-    defaults to the system's.
+    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates a
+    repeating task's occurrences; by default the owner's saved zone is read when one is
+    needed (see Repeats).
     """
 
     def __init__(
@@ -183,18 +186,13 @@ class ActionService:
         self._clock = clock
         self._id_factory = id_factory
         self._repository = ActionRepository(session)
-        self._repeats = Repeats(
-            session,
-            self._repository,
-            zone=zone or resolve_timezone(None),
-            id_factory=id_factory,
-        )
+        self._repeats = Repeats(session, self._repository, zone=zone, id_factory=id_factory)
 
     async def _apply_repeat(self, row: ActionTable, repeat: RepeatEdit, now: datetime) -> None:
         try:
             await self._repeats.apply(row, repeat, now)
         except RepeatError as error:
-            raise ActionConflictError(str(error)) from None
+            raise ActionRepeatError(str(error)) from None
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         return await commit_once(self._session, self._clock, operation)
@@ -280,7 +278,7 @@ class ActionService:
         await self._repository.set_tags(row.id, names)
         for other in respelt.values():
             touch(other, now)
-            await self._repository.record_activity(other, ActionActivityKind.EDITED, now)
+            await self._repository.record_activity(other, ActionActivityKind.TAG_RESPELLED, now)
 
     async def create(
         self,
@@ -635,8 +633,7 @@ class ActionService:
             row = await self._live(public_id, expected_revision)
             if row.status != ActionStatus.OPEN.value:
                 raise ActionConflictError("Only an open task can be skipped.")
-            action = await self._load(row)
-            if action.repeat is None or action.repeat.ended:
+            if not await self._repeats.repeating(row):
                 raise ActionConflictError("Only a repeating task can be skipped.")
             return await self._close(row, ActionStatus.SKIPPED, now)
 

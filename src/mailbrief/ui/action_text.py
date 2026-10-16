@@ -18,7 +18,6 @@ from mailbrief.domain.recurrence import (
     WORKING_WEEKDAYS,
     RepeatFrequency,
     RepeatRule,
-    next_occurrence,
 )
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
@@ -172,15 +171,6 @@ def repeat_short(action: Action) -> str | None:
             return "Repeats daily" if repeat.rule.weekdays == ALL_WEEKDAYS else "Repeats weekly"
         case _:
             return "Repeats monthly"
-
-
-def next_repeat(action: Action, today: date) -> date | None:
-    """The date of the occurrence completing or skipping ``action`` today makes, as the
-    service works it out; None when it makes none."""
-    repeat = action.repeat
-    if repeat is None or repeat.ended:
-        return None
-    return next_occurrence(repeat.rule, repeat.occurrence_date, today)
 
 
 PRIORITY_TEXT: dict[ActionPriority, str] = {

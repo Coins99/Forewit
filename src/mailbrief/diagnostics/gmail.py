@@ -1343,8 +1343,9 @@ def _applied_line(proposal: ActionProposal, before: Action, after: Action, zone:
 async def _proposals_command(
     session: AsyncSession, action: str, proposal_id: int | None, zone: ZoneInfo
 ) -> int:
-    """actions proposals, apply-proposal and dismiss-proposal; local data only."""
-    service = ProposalService(session)
+    """actions proposals, apply-proposal and dismiss-proposal; local data only. ``zone`` also
+    dates the next occurrence of a repeating task a proposal completes."""
+    service = ProposalService(session, zone=zone)
     if action == "proposals":
         pending = await service.pending()
         if not pending:

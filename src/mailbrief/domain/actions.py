@@ -115,6 +115,8 @@ class ActionActivityKind(StrEnum):
     THREAD_SEEN = "thread_seen"
     PROPOSAL_APPLIED = "proposal_applied"
     SKIPPED = "skipped"
+    # Another task respelt a tag this one shares; the owner didn't change this task itself.
+    TAG_RESPELLED = "tag_respelled"
 
 
 class ActionActivity(DomainModel):
@@ -167,7 +169,8 @@ class ActionRepeat(DomainModel):
     ``occurrence_date`` is the occurrence's identity in its series; moving the task's target
     date reschedules it without changing which occurrence it is. ``ended`` says the owner
     stopped the repeats. ``previous_date`` and ``previous_status`` describe the live
-    occurrence this one followed, if any.
+    occurrence this one followed, if any, and ``next_date`` is the date of the live one its
+    completion or skip made, if any.
     """
 
     series_public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
@@ -177,6 +180,7 @@ class ActionRepeat(DomainModel):
     ended: bool = False
     previous_date: date | None = None
     previous_status: ActionStatus | None = None
+    next_date: date | None = None
 
     @model_validator(mode="after")
     def check_previous(self) -> Self:

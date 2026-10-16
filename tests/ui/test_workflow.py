@@ -18,6 +18,7 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionFilter,
     ActionProposal,
+    ActionRepeat,
     StepEdit,
     SuggestionState,
     ThreadLink,
@@ -147,6 +148,7 @@ class FakeBackend(FakeDrafts):
         self.loads = 0
         self.action_calls: list[tuple[object, ...]] = []
         self.repeats: list[RepeatRule | RepeatEdit | None] = []  # Each create's or save's.
+        self.closed_repeat: ActionRepeat | None = None  # What a complete or skip returns.
         self.action_fail: Exception | None = None
         self.list_calls = 0
         self.list_fail: Exception | None = None
@@ -438,11 +440,11 @@ class FakeBackend(FakeDrafts):
 
     async def complete_action(self, public_id: str, revision: int) -> Action:
         await self._act("complete_action", public_id, revision)
-        return make_action(revision=revision + 1)
+        return make_action(revision=revision + 1, repeat=self.closed_repeat)
 
     async def skip_action(self, public_id: str, revision: int) -> Action:
         await self._act("skip_action", public_id, revision)
-        return make_action(revision=revision + 1)
+        return make_action(revision=revision + 1, repeat=self.closed_repeat)
 
     async def reopen_action(self, public_id: str, revision: int) -> Action:
         await self._act("reopen_action", public_id, revision)

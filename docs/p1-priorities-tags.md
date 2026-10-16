@@ -33,7 +33,8 @@ the tag after the last comma from the tags already in use.
   each tag once.
 - A tag keeps the spelling other live tasks already use. Typing `home` on a new task, when
   another task has `Home`, saves `Home`. Respelling a tag a task already has, such as
-  `home` to `Home`, respells it on every live task, as one revision of each. A deleted
+  `home` to `Home`, respells it on every live task, as one revision of each, recorded as
+  `tag_respelled` on the other tasks (an edit of the task itself is `edited`). A deleted
   task's tags take the live spelling when it's restored.
 - A tag is at most 40 characters and can't contain a comma. A task has at most 10 tags. A
   refused tag keeps the editor open with every field as typed. The message never repeats

@@ -102,8 +102,8 @@ async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSes
     assert respelt.tags == ("Home",)
     other = await service.get(second.public_id)
     assert other.tags == ("diy", "Home")
-    assert other.revision == 2  # One revision of the other task, recorded as an edit.
-    assert [event.kind for event in other.activity] == [Kind.CREATED, Kind.EDITED]
+    assert other.revision == 2  # One revision of the other task, recorded as a respelling.
+    assert [event.kind for event in other.activity] == [Kind.CREATED, Kind.TAG_RESPELLED]
     with pytest.raises(ActionConflictError):
         await service.save(second.public_id, 1, task(title="Fix tap", tags=("home", "diy")))
 

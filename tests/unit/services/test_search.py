@@ -3,6 +3,7 @@ connected account's cached mail metadata."""
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from mailbrief.domain.actions import ActionEdit, StepEdit
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.messages import AccountIdentity, EmailContact, ProviderKind
+from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule
 from mailbrief.domain.search import (
     QUERY_MAX_CHARS,
     QUERY_MAX_TERMS,
@@ -30,6 +32,7 @@ from tests.factories import make_message
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
 OWNER = "owner@example.com"
+UTC_ZONE = ZoneInfo("UTC")
 
 
 def test_query_terms_need_two_characters_and_keep_at_most_five_words() -> None:
@@ -100,6 +103,32 @@ async def test_open_actions_come_first_and_deleted_ones_never(session: AsyncSess
     found = (await SearchService(session).search("renew")).hits
 
     assert [(hit.public_id, hit.open) for hit in found] == [(open_id, True), (done_id, False)]
+
+
+async def test_a_skipped_occurrence_is_never_found(session: AsyncSession) -> None:
+    """A skipped occurrence of a repeating task is in no Actions view, so search leaves it
+    out; the occurrence its skip made is found."""
+    service = ActionService(session, zone=UTC_ZONE)
+    first = await service.create(
+        ActionEdit(
+            title="Water the plants",
+            ownership=ActionOwnership.MINE,
+            effort=None,
+            priority=None,
+            tags=(),
+            estimate_minutes=None,
+            target_date=None,
+            notes="",
+        ),
+        (),
+        RepeatRule(frequency=RepeatFrequency.DAILY),
+    )
+    await service.skip(first.public_id, first.revision)
+
+    found = (await SearchService(session).search("water")).hits
+
+    assert len(found) == 1
+    assert found[0].public_id != first.public_id and found[0].open
 
 
 async def test_wildcards_in_a_query_match_only_themselves(session: AsyncSession) -> None:

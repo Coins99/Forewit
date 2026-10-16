@@ -40,11 +40,12 @@ first date after **both** the occurrence's own date and today, in the owner's ti
 - Early: a Monday task completed on Saturday comes back on the rule's next date after that
   Monday.
 
-The status line says when it comes back ("Completed: Water plants. Next Fri Oct 16."). Past the
-end date, or after the owner stops the repeats, no next occurrence is made.
+The status line says when it comes back ("Completed: Water plants. Next Fri Oct 16."), naming
+the occurrence actually made, and says nothing more when none was. Past the end date, or after
+the owner stops the repeats, no next occurrence is made.
 
 A skipped occurrence is closed without being done: status `skipped`, with no completion time. It
-is in neither Open nor Completed, but keeps its activity. The next occurrence's detail says what
+is in neither Open nor Completed, nor in search, but keeps its activity. The next occurrence's detail says what
 it follows ("Follows Wed Oct 14 · Skipped").
 
 The next occurrence copies the template: title, notes, steps (none of them done), whose it is,
@@ -55,11 +56,12 @@ unassigned.
 ## Undo and reopen
 
 - **Undo complete** or **Undo skip** reopens the occurrence and removes the next one, while
-  that one is untouched: open, live and still at revision 1.
+  that one is untouched: open, live, with no activity of its own since it was made (another
+  task respelling a tag it shares doesn't count) and no draft linked to it.
 - **Reopen** does the same. An untouched next occurrence has no owner input, so it is removed,
   not soft-deleted. Completing again makes it again.
-- A next occurrence the owner has changed is theirs and stays. Then closing the earlier one
-  again makes no second one.
+- A next occurrence the owner has changed, or drafted from, is theirs and stays. Then closing
+  the earlier one again makes no second one.
 - If the next date already has an occurrence, even a deleted one, none is made: the owner can
   restore that one. So repeating any of this makes one next occurrence at most.
 - A follow-up proposal that completes an occurrence (a cancellation or delivery) makes the next
@@ -72,9 +74,18 @@ also copies the edit into the template, except the target date. Untick it to cha
 one. A new rule changes the series, but doesn't move the open occurrence.
 
 Choosing **Doesn't repeat** on a repeating task stops the series. The task stays and keeps its
-history, and choosing a rule again resumes it. A closed occurrence's repeat can't change:
-reopen it first. Series changes carry their own revision. An editor that saw an older one is
-refused, like a stale task.
+history, and choosing a rule again resumes it. A closed occurrence's repeat can't change, nor
+be stopped: reopen it first. Series changes carry their own revision, and every repeat edit of
+a repeating task must name the one it saw. An editor that saw an older one is refused, like a
+stale task.
+
+**Until** is checked the same way in the editor and the service: against the occurrence date
+of a repeating task, and against the date a task that starts repeating would take (its target,
+or else the rule's first date from today). A refused repeat keeps the editor open with the
+reason.
+
+Occurrences are dated in the owner's saved time zone, read from preferences when a date is
+needed (the system's when preferences can't be read), in the desktop and the CLI alike.
 
 ## Storage, durability and history
 

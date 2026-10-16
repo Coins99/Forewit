@@ -20,14 +20,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionActivityKind, ActionStatus, tag_key
 from mailbrief.domain.analysis import DeadlinePrecision
-from mailbrief.domain.recurrence import RepeatEdit, RepeatRule, next_occurrence, weekday_mask
+from mailbrief.domain.recurrence import (
+    ENDS_FIRST,
+    RepeatEdit,
+    RepeatRule,
+    ends_before,
+    first_occurrence,
+    next_occurrence,
+    weekday_mask,
+)
+from mailbrief.services.calendar import resolve_timezone
+from mailbrief.services.preferences import (
+    PreferencesService,
+    PreferencesUnavailableError,
+    owner_zone,
+)
 from mailbrief.storage.actions import ActionRepository, series_rule
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import ActionSeriesTable, ActionTable
 
-_ENDS_FIRST: Final = "The repeat ends before the task's date. Choose a later end date."
 _REOPEN: Final = "Reopen the task to change how it repeats."
 _STALE: Final = "The repeat changed since it was loaded; reload it and try again."
+# What the owner's own changes leave on a task; a task with no other activity is untouched.
+_UNTOUCHED: Final = frozenset(
+    {ActionActivityKind.CREATED.value, ActionActivityKind.TAG_RESPELLED.value}
+)
 _TEMPLATE_FIELDS: Final = (
     "project_public_id",
     "title",
@@ -51,14 +68,18 @@ def _set_rule(series: ActionSeriesTable, rule: RepeatRule) -> None:
 
 
 class Repeats:
-    """The repeat side of the owner's task changes, in the caller's session."""
+    """The repeat side of the owner's task changes, in the caller's session.
+
+    ``zone`` dates occurrences; without one, the owner's saved zone is read from the same
+    session the first time a date is needed, and the system's when preferences can't be read,
+    since it only dates a local task."""
 
     def __init__(
         self,
         session: AsyncSession,
         repository: ActionRepository,
         *,
-        zone: ZoneInfo,
+        zone: ZoneInfo | None = None,
         id_factory: Callable[[], str],
     ) -> None:
         self._session = session
@@ -66,14 +87,24 @@ class Repeats:
         self._zone = zone
         self._id_factory = id_factory
 
-    def today(self, now: datetime) -> date:
+    async def _today(self, now: datetime) -> date:
         """The owner's local date at ``now``."""
+        if self._zone is None:
+            try:
+                self._zone = owner_zone(await PreferencesService(self._session).get())
+            except PreferencesUnavailableError:
+                self._zone = resolve_timezone(None)
         return now.astimezone(self._zone).date()
 
     async def _series(self, row: ActionTable) -> ActionSeriesTable | None:
         if row.series_id is None or row.occurrence_date is None:
             return None
         return await self._repository.get_series(row.series_id)
+
+    async def repeating(self, row: ActionTable) -> bool:
+        """Whether ``row`` is an occurrence of a series that still repeats."""
+        series = await self._series(row)
+        return series is not None and series.ended_at_utc is None
 
     async def _template(self, row: ActionTable) -> dict[str, object]:
         """What a later occurrence would start with, from the task as it now is."""
@@ -86,28 +117,31 @@ class Repeats:
         """Apply the owner's repeat settings to a task whose edit is already applied; whether
         its series changed. A task that didn't repeat starts a series, as its first occurrence:
         dated its target date, or else the rule's first date from today, which becomes its
-        target. A rule of None stops a series. Raises RepeatError for a stale series, a change
-        to a closed task's rule or template, or a rule that ends before the task's date."""
+        target. A rule of None stops a series. Raises RepeatError for a stale series (an edit
+        of a repeating task must carry the series revision it saw), a change to a closed
+        task's repeat, or a rule that ends before the task's date."""
         series = await self._series(row)
         if series is None:
             if edit.rule is None:
                 return False
             return await self._start(row, edit.rule, now)
-        if edit.series_revision is not None and edit.series_revision != series.revision:
+        if edit.series_revision != series.revision:
             raise RepeatError(_STALE)
+        is_open = row.status == ActionStatus.OPEN.value
         changed = False
         if edit.rule is None:
             if series.ended_at_utc is None:
+                if not is_open:
+                    raise RepeatError(_REOPEN)
                 series.ended_at_utc = now
                 changed = True
         else:
-            is_open = row.status == ActionStatus.OPEN.value
             if series.ended_at_utc is not None or series_rule(series) != edit.rule:
                 if not is_open:
                     raise RepeatError(_REOPEN)
-                ends = edit.rule.end_date
-                if ends is not None and row.occurrence_date and ends < row.occurrence_date:
-                    raise RepeatError(_ENDS_FIRST)
+                assert row.occurrence_date is not None  # _series() found the series by it.
+                if ends_before(edit.rule, row.occurrence_date):
+                    raise RepeatError(ENDS_FIRST)
                 _set_rule(series, edit.rule)
                 series.ended_at_utc = None
                 changed = True
@@ -127,9 +161,9 @@ class Repeats:
     async def _start(self, row: ActionTable, rule: RepeatRule, now: datetime) -> bool:
         if row.status != ActionStatus.OPEN.value:
             raise RepeatError(_REOPEN)
-        day = row.target_date or rule.first_on_or_after(self.today(now))
-        if day is None or (rule.end_date is not None and day > rule.end_date):
-            raise RepeatError(_ENDS_FIRST)
+        day = first_occurrence(rule, row.target_date, await self._today(now))
+        if day is None:
+            raise RepeatError(ENDS_FIRST)
         series = ActionSeriesTable(
             public_id=self._id_factory(),
             created_at_utc=now,
@@ -154,7 +188,7 @@ class Repeats:
             return None
         if any(item.deleted_at_utc is None for item in await self._repository.followers(row.id)):
             return None
-        day = next_occurrence(series_rule(series), row.occurrence_date, self.today(now))
+        day = next_occurrence(series_rule(series), row.occurrence_date, await self._today(now))
         if day is None or await self._repository.occurrence(series.id, day) is not None:
             return None
         project = series.project_public_id
@@ -194,15 +228,23 @@ class Repeats:
         return follower
 
     async def withdraw(self, row: ActionTable) -> int:
-        """Remove the occurrences ``row`` made that the owner never touched: live, open and
-        unchanged since they were made. One the owner changed stays; it is theirs now."""
+        """Remove the occurrences ``row`` made that the owner never touched: live, open, with
+        no change of their own since they were made (another task respelling a tag they share
+        doesn't count) and no draft linked to them. One the owner touched stays; it is theirs
+        now."""
         removed = 0
         for follower in await self._repository.followers(row.id):
             if (
-                follower.revision == 1
-                and follower.deleted_at_utc is None
+                follower.deleted_at_utc is None
                 and follower.status == ActionStatus.OPEN.value
+                and await self._untouched(follower)
             ):
                 await self._repository.delete_action(follower)
                 removed += 1
         return removed
+
+    async def _untouched(self, row: ActionTable) -> bool:
+        activity = await self._repository.activity_rows(row.id)
+        if any(event.kind not in _UNTOUCHED for event in activity):
+            return False
+        return not await self._repository.drafted(row.id)

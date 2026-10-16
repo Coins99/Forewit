@@ -45,7 +45,14 @@ from mailbrief.domain.actions import (
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
-from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
+from mailbrief.domain.recurrence import (
+    ENDS_FIRST,
+    RepeatEdit,
+    RepeatFrequency,
+    RepeatRule,
+    ends_before,
+    first_occurrence,
+)
 from mailbrief.ui.deadline_text import FULL_WEEKDAYS, WEEKDAYS, length_text, parse_length
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.fields import takes_wheel
@@ -73,7 +80,6 @@ _REPEATS: tuple[tuple[RepeatFrequency | None, str], ...] = (
     (RepeatFrequency.MONTHLY_LAST, "On the last day of each month"),
 )
 NO_WEEKDAY: Final = "Choose at least one day of the week."
-ENDS_FIRST: Final = "The repeat ends before the task's date. Choose a later end date."
 _STEP_ID = Qt.ItemDataRole.UserRole
 NO_ESTIMATE: Final = "Not set"
 BAD_ESTIMATE: Final = "Type an estimate like 45, 1.5h, 1h 30 or 1:30, or clear it."
@@ -618,18 +624,23 @@ class ActionEditor(QDialog):
         if frequency is RepeatFrequency.WEEKLY and not weekdays:
             raise ValueError(NO_WEEKDAY)
         end = self.repeat_end.date()
-        ends = date(end.year(), end.month(), end.day()) if self.repeat_ends.isChecked() else None
-        start = self._picked_target()
-        if self._action is not None and self._action.repeat is not None:
-            start = self._action.repeat.occurrence_date  # Moving the target doesn't move it.
-        if ends is not None and ends < (start or self._today):
-            raise ValueError(ENDS_FIRST)
-        return RepeatRule(
+        rule = RepeatRule(
             frequency=frequency,
             weekdays=weekdays,
             month_day=self.month_day.value() if frequency is RepeatFrequency.MONTHLY_DAY else None,
-            end_date=ends,
+            end_date=(
+                date(end.year(), end.month(), end.day()) if self.repeat_ends.isChecked() else None
+            ),
         )
+        # The checks the service makes: a series keeps its occurrence date however the target
+        # moves, and a task that starts repeating takes its target or the rule's first date.
+        repeat = None if self._action is None else self._action.repeat
+        if repeat is not None:
+            if ends_before(rule, repeat.occurrence_date):
+                raise ValueError(ENDS_FIRST)
+        elif first_occurrence(rule, self._picked_target(), self._today) is None:
+            raise ValueError(ENDS_FIRST)
+        return rule
 
     def _repeat_edit(self, action: Action, rule: RepeatRule | None) -> RepeatEdit | None:
         if action.status is not ActionStatus.OPEN:

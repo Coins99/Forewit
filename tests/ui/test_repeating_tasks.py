@@ -12,14 +12,15 @@ from pytestqt.qtbot import QtBot
 from mailbrief.domain.actions import ActionFilter, ActionRepeat, ActionStatus
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.recurrence import (
+    ENDS_FIRST,
     WORKING_WEEKDAYS,
     RepeatEdit,
     RepeatFrequency,
     RepeatRule,
 )
 from mailbrief.ui.action_detail import ActionDetailPane
-from mailbrief.ui.action_editor import ENDS_FIRST, NO_WEEKDAY, ActionEditor
-from mailbrief.ui.action_text import next_repeat, repeat_short, repeat_text, rule_text
+from mailbrief.ui.action_editor import NO_WEEKDAY, ActionEditor
+from mailbrief.ui.action_text import repeat_short, repeat_text, rule_text
 from mailbrief.ui.actions_view import action_row, can_skip, describe
 from mailbrief.ui.main_window import MainWindow
 from tests.factories import make_action
@@ -101,14 +102,11 @@ def test_rows_and_descriptions_name_the_repeat() -> None:
     )
 
 
-def test_skip_and_the_next_date_apply_only_while_it_repeats() -> None:
+def test_skip_applies_only_while_it_repeats() -> None:
     assert can_skip(WATER)
-    assert next_repeat(WATER, TODAY) == date(2026, 10, 16)
     assert not can_skip(make_action())
     stopped = WATER.model_copy(update={"repeat": repeating(ended=True)})
     assert not can_skip(stopped)
-    assert next_repeat(stopped, TODAY) is None
-    assert next_repeat(make_action(), TODAY) is None
     done = WATER.model_copy(update={"status": ActionStatus.COMPLETED, "completed_at_utc": NOW})
     assert not can_skip(done)
 
@@ -184,7 +182,15 @@ def test_a_weekly_repeat_needs_a_weekday_and_an_end_after_its_date(
     editor.repeat_end.setDate(QDate(2026, 10, 14))
     save(editor)
     assert editor.status.text() == ENDS_FIRST
+    # With no target, the task takes the rule's first date from today, as the service
+    # dates it: the 1st is November 1, after an end on October 20.
+    editor.month_day.setValue(1)
+    editor.repeat_end.setDate(QDate(2026, 10, 20))
+    editor.status.clear()
+    save(editor)
+    assert editor.status.text() == ENDS_FIRST
     assert created == []
+    editor.month_day.setValue(15)
 
     editor.repeat_end.setDate(QDate(2027, 1, 15))
     save(editor)
@@ -233,6 +239,8 @@ def backend() -> FakeBackend:
     result = FakeBackend()
     result.actions = {ActionFilter.OPEN: (WATER,)}
     result.owner_preferences = OwnerPreferences(revision=1, time_zone="UTC")
+    # What the service returns: the closed occurrence, naming the one its close made.
+    result.closed_repeat = repeating(next_date=date(2026, 10, 16))
     return result
 
 
@@ -271,3 +279,14 @@ async def test_completing_says_when_it_comes_back(window: MainWindow, backend: F
     assert window.task is not None
     await window.task
     assert window.status.text() == "Completed: Approve the proposal. Next Fri Oct 16."
+
+
+async def test_the_status_names_no_next_date_when_none_was_made(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.closed_repeat = repeating()  # Its next date already had an occurrence.
+    await window.initialize()
+    window.actions_panel.complete_button.click()
+    assert window.task is not None
+    await window.task
+    assert window.status.text() == "Completed: Approve the proposal."
