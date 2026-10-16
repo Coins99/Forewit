@@ -55,6 +55,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -701,6 +702,14 @@ class DesktopRuntime:
             raise RuntimeError("Desktop storage is not initialized.")
         return self._database
 
+    async def _task_zone(self) -> ZoneInfo:
+        """The owner's zone, for the date a repeating task's next occurrence counts from. It
+        only dates a local task, so unreadable preferences fall back to the system zone."""
+        try:
+            return owner_zone(await self.get_owner_preferences())
+        except PreferencesUnavailableError:
+            return resolve_timezone(None)
+
     async def list_actions(self, view: ActionFilter) -> tuple[Action, ...]:
         async with self._storage().session() as session:
             return await ActionService(session).list_actions(view)
@@ -727,12 +736,14 @@ class DesktopRuntime:
             )
 
     async def apply_proposal(self, proposal_id: int, revision: int) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ProposalService(session).apply(proposal_id, revision)
+            return await ProposalService(session, zone=zone).apply(proposal_id, revision)
 
     async def undo_apply_proposal(self, proposal_id: int, revision: int) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ProposalService(session).undo_apply(proposal_id, revision)
+            return await ProposalService(session, zone=zone).undo_apply(proposal_id, revision)
 
     async def dismiss_proposal(self, proposal_id: int) -> None:
         async with self._storage().session() as session:
@@ -833,13 +844,17 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await ActionService(session).count_actions(view, group=group, group_id=group_id)
 
-    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
+    async def create_action(
+        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+    ) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ActionService(session).create(edit, steps)
+            return await ActionService(session, zone=zone).create(edit, steps, repeat)
 
     async def undo_action_status(self, public_id: str, revision: int) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ActionService(session).undo_status(public_id, revision)
+            return await ActionService(session, zone=zone).undo_status(public_id, revision)
 
     async def save_action(
         self,
@@ -847,13 +862,23 @@ class DesktopRuntime:
         revision: int,
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
+        repeat: RepeatEdit | None = None,
     ) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ActionService(session).save(public_id, revision, edit, steps)
+            return await ActionService(session, zone=zone).save(
+                public_id, revision, edit, steps, repeat
+            )
 
     async def complete_action(self, public_id: str, revision: int) -> Action:
+        zone = await self._task_zone()
         async with self._storage().session() as session:
-            return await ActionService(session).complete(public_id, revision)
+            return await ActionService(session, zone=zone).complete(public_id, revision)
+
+    async def skip_action(self, public_id: str, revision: int) -> Action:
+        zone = await self._task_zone()
+        async with self._storage().session() as session:
+            return await ActionService(session, zone=zone).skip(public_id, revision)
 
     async def reopen_action(self, public_id: str, revision: int) -> Action:
         async with self._storage().session() as session:

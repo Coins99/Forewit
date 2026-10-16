@@ -20,6 +20,7 @@ from mailbrief.domain.actions import (
     ActionFilter,
     ActionPriority,
     ActionProposal,
+    ActionRepeat,
     ActionSource,
     ActionStatus,
     ActionStep,
@@ -36,12 +37,14 @@ from mailbrief.domain.analysis import (
 )
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
 from mailbrief.domain.projects import Project
+from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule, mask_weekdays
 from mailbrief.storage.database import sorted_batches
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.proposals import ProposalRepository, proposal_from_row
 from mailbrief.storage.tables import (
     AccountTable,
     ActionActivityTable,
+    ActionSeriesTable,
     ActionSourceTable,
     ActionStepTable,
     ActionSuggestionTable,
@@ -246,6 +249,16 @@ async def suggestion_views(
     return views
 
 
+def series_rule(series: ActionSeriesTable) -> RepeatRule:
+    """A series' rule; the table's checks keep it valid."""
+    return RepeatRule(
+        frequency=RepeatFrequency(series.frequency),
+        weekdays=mask_weekdays(series.weekday_mask),
+        month_day=series.month_day,
+        end_date=series.end_date,
+    )
+
+
 def action_from_rows(
     row: ActionTable,
     steps: Sequence[ActionStepTable],
@@ -255,6 +268,7 @@ def action_from_rows(
     activity: Sequence[ActionActivity] = (),
     project: Project | None = None,
     tags: Sequence[str] = (),
+    repeat: ActionRepeat | None = None,
 ) -> Action:
     """Rebuild an action; each source pairs its snapshot with the cached Inbox state, if any,
     ``thread`` is its derived thread activity, and ``proposals`` its pending proposals."""
@@ -301,6 +315,7 @@ def action_from_rows(
             for source, in_inbox in sources
         ),
         thread_seen_until_utc=row.thread_seen_until_utc,
+        repeat=repeat,
         thread=thread,
         proposals=tuple(proposals),
         activity=tuple(activity),
@@ -584,6 +599,74 @@ class ActionRepository:
             .where(ActionSourceTable.action_id == action_id)
         )
         return count or 0
+
+    async def get_series(self, series_id: int) -> ActionSeriesTable | None:
+        return await self._session.get(ActionSeriesTable, series_id)
+
+    async def add_series(self, row: ActionSeriesTable) -> ActionSeriesTable:
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def occurrence(self, series_id: int, day: date) -> ActionTable | None:
+        """The series' occurrence on ``day``, deleted or not."""
+        result = await self._session.scalars(
+            select(ActionTable).where(
+                ActionTable.series_id == series_id, ActionTable.occurrence_date == day
+            )
+        )
+        return result.first()
+
+    async def followers(self, action_id: int) -> list[ActionTable]:
+        """The occurrences made when ``action_id`` was completed or skipped, deleted or not."""
+        result = await self._session.scalars(
+            select(ActionTable)
+            .where(ActionTable.follows_action_id == action_id)
+            .order_by(ActionTable.id)
+        )
+        return list(result)
+
+    async def _repeats(self, rows: Sequence[ActionTable]) -> dict[int, ActionRepeat]:
+        """Each occurrence's repeat, with the live occurrence it follows. The table's checks
+        keep every series' rule valid."""
+        occurrences = [
+            row for row in rows if row.series_id is not None and row.occurrence_date is not None
+        ]
+        if not occurrences:
+            return {}
+        series: dict[int, ActionSeriesTable] = {}
+        for chunk in sorted_batches({row.series_id for row in occurrences if row.series_id}):
+            for item in await self._session.scalars(
+                select(ActionSeriesTable).where(ActionSeriesTable.id.in_(chunk))
+            ):
+                series[item.id] = item
+        previous: dict[int, tuple[date, str]] = {}
+        follows = {row.follows_action_id for row in occurrences if row.follows_action_id}
+        for chunk in sorted_batches(follows):
+            result = await self._session.execute(
+                select(ActionTable.id, ActionTable.occurrence_date, ActionTable.status).where(
+                    ActionTable.id.in_(chunk), ActionTable.deleted_at_utc.is_(None)
+                )
+            )
+            for action_id, day, status in result.tuples():
+                if day is not None:
+                    previous[action_id] = (day, status)
+        repeats: dict[int, ActionRepeat] = {}
+        for row in occurrences:
+            found = series.get(row.series_id or 0)
+            if found is None or row.occurrence_date is None:
+                continue
+            before = previous.get(row.follows_action_id or 0)
+            repeats[row.id] = ActionRepeat(
+                series_public_id=found.public_id,
+                series_revision=found.revision,
+                rule=series_rule(found),
+                occurrence_date=row.occurrence_date,
+                ended=found.ended_at_utc is not None,
+                previous_date=None if before is None else before[0],
+                previous_status=None if before is None else ActionStatus(before[1]),
+            )
+        return repeats
 
     async def thread_link_rows(
         self, provider: str, account_email: str, message_keys: Iterable[str]
@@ -882,6 +965,7 @@ class ActionRepository:
         }
         accounts, cached = await self._thread_messages(snapshots)
         proposals = await ProposalRepository(self._session).pending_for_actions(ids)
+        repeats = await self._repeats(rows)
         return [
             action_from_rows(
                 row,
@@ -895,6 +979,7 @@ class ActionRepository:
                 activity.get(row.id, ()),
                 projects.get(row.project_public_id or ""),
                 tags.get(row.id, ()),
+                repeats.get(row.id),
             )
             for row in rows
         ]

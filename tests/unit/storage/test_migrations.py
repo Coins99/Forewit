@@ -1252,8 +1252,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261014_0020"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0020",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261015_0021"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261015_0021",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1420,7 +1420,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261014_0020",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261015_0021",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")
@@ -1554,8 +1554,9 @@ def test_priorities_and_tags_upgrade_keeps_every_row_and_downgrades_cleanly(
                     (action_id, name, name),
                 )
         connection.commit()
-    command.check(config)
     assert _query(path, "SELECT name FROM action_tags") == [("Home",)]
+    command.upgrade(config, "head")  # The ORM is at head, so check the schema there.
+    command.check(config)
 
     command.downgrade(config, "20261014_0019")
 
@@ -1580,6 +1581,116 @@ def test_tags_go_with_their_task(tmp_path: Path) -> None:
         connection.execute("DELETE FROM actions WHERE id=?", (action_id,))
         connection.commit()
     assert _query(path, "SELECT count(*) FROM action_tags") == [(0,)]
+
+
+_SERIES_INSERT = (
+    "INSERT INTO action_series(public_id,frequency,weekday_mask,month_day,title,ownership,"
+    "notes,steps_json,tags_json,created_at_utc,updated_at_utc,revision)"
+    " VALUES(?,?,?,?,'Water plants','mine','','[]','[]','2026-10-15 00:00:00',"
+    "'2026-10-15 00:00:00',1)"
+)
+
+
+def test_recurring_tasks_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path: Path) -> None:
+    """0021 adds the series table and each task's occurrence columns (NULL for existing
+    tasks), allows a skipped status, and downgrades a skipped occurrence to completed."""
+    path = tmp_path / "recurring.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261014_0020")
+    with closing(sqlite3.connect(path)) as connection:
+        action_id = connection.execute(
+            "INSERT INTO actions(public_id,title,ownership,status,priority,"
+            "created_at_utc,updated_at_utc) VALUES('5b1d0d0e-3f4c-4a3e-8f5e-0c6b8f7a2d11',"
+            "'Renew passport','mine','open','high','2026-10-15 00:00:00',"
+            "'2026-10-15 00:00:00')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO action_tags(action_id,name,name_key) VALUES(?,'Home','home')",
+            (action_id,),
+        )
+        connection.commit()
+    kept = ("actions", "action_tags")
+    before = _rows(path, kept)
+    fresh = tmp_path / "fresh-0020.sqlite3"
+    command.upgrade(_alembic_config(fresh), "20261014_0020")
+
+    command.upgrade(config, "20261015_0021")
+
+    assert _earlier_columns(_rows(path, kept), before) == before
+    assert _query(path, "SELECT series_id, occurrence_date, follows_action_id FROM actions") == [
+        (None, None, None)
+    ]
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        series_id = connection.execute(
+            _SERIES_INSERT, ("6c2e1e1f-4a5d-4b4f-9a6f-1d7c9a8b3e21", "weekly", 5, None)
+        ).lastrowid
+        for frequency, mask, day in (
+            ("weekly", 0, None),
+            ("weekly", 128, None),
+            ("daily", 1, None),
+            ("monthly_day", 0, None),
+            ("monthly_day", 0, 32),
+            ("monthly_last", 0, 3),
+            ("yearly", 0, None),
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+                connection.execute(
+                    _SERIES_INSERT, ("6c2e1e1f-4a5d-4b4f-9a6f-1d7c9a8b3e22", frequency, mask, day)
+                )
+        connection.execute(
+            "UPDATE actions SET series_id=?, occurrence_date='2026-10-15', status='skipped'",
+            (series_id,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint failed"):
+            connection.execute(
+                "INSERT INTO actions(public_id,title,ownership,status,created_at_utc,"
+                "updated_at_utc,series_id,occurrence_date) VALUES("
+                "'5b1d0d0e-3f4c-4a3e-8f5e-0c6b8f7a2d12','Again','mine','open',"
+                "'2026-10-15 00:00:00','2026-10-15 00:00:00',?,'2026-10-15')",
+                (series_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute("UPDATE actions SET status='archived'")
+        connection.commit()
+    command.check(config)
+
+    command.downgrade(config, "20261014_0020")
+
+    assert _query(path, "SELECT status, completed_at_utc FROM actions") == [
+        ("completed", "2026-10-15 00:00:00")
+    ]
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("UPDATE actions SET status='open', completed_at_utc=NULL")
+        connection.commit()
+    assert _rows(path, kept) == before
+    assert _schema(path) == _schema(fresh)
+
+
+def test_an_occurrence_outlives_the_one_it_follows(tmp_path: Path) -> None:
+    path = tmp_path / "follows.sqlite3"
+    command.upgrade(_alembic_config(path), "head")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        series_id = connection.execute(
+            _SERIES_INSERT, ("6c2e1e1f-4a5d-4b4f-9a6f-1d7c9a8b3e23", "daily", 0, None)
+        ).lastrowid
+        insert = (
+            "INSERT INTO actions(public_id,title,ownership,status,created_at_utc,updated_at_utc,"
+            "series_id,occurrence_date,follows_action_id) VALUES(?,'Water plants','mine','open',"
+            "'2026-10-15 00:00:00','2026-10-15 00:00:00',?,?,?)"
+        )
+        first = connection.execute(
+            insert, ("7a0e8b9c-1d2e-4f30-9a4b-5c6d7e8f9a01", series_id, "2026-10-15", None)
+        ).lastrowid
+        connection.execute(
+            insert, ("7a0e8b9c-1d2e-4f30-9a4b-5c6d7e8f9a02", series_id, "2026-10-16", first)
+        )
+        connection.execute("DELETE FROM actions WHERE id=?", (first,))
+        connection.commit()
+    assert _query(path, "SELECT occurrence_date, follows_action_id FROM actions") == [
+        ("2026-10-16", None)
+    ]
 
 
 async def test_migrated_database_creates_upgrades_and_always_disposes(

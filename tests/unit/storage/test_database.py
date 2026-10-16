@@ -65,6 +65,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "action_suggestions",
         "action_steps",
         "action_tags",
+        "action_series",
         "action_sources",
         "suggestion_decisions",
         "action_proposals",

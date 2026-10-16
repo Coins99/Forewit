@@ -24,6 +24,7 @@ from mailbrief.domain.analysis import (
 )
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.projects import Project
+from mailbrief.domain.recurrence import RepeatRule
 
 ACTION_TITLE_MAX_CHARS: Final = 200
 ACTION_STEP_MAX_CHARS: Final = 500
@@ -43,10 +44,12 @@ TARGET_REASON_TEXT: Final[dict[TargetReason, str]] = {
 
 
 class ActionStatus(StrEnum):
-    """Whether an accepted action is still open."""
+    """Whether an accepted action is still open. Only an occurrence of a repeating task is
+    skipped: closed without being done, so its series moves on (B05)."""
 
     OPEN = "open"
     COMPLETED = "completed"
+    SKIPPED = "skipped"
 
 
 class ActionPriority(StrEnum):
@@ -111,6 +114,7 @@ class ActionActivityKind(StrEnum):
     SUGGESTION_ACCEPTED = "suggestion_accepted"
     THREAD_SEEN = "thread_seen"
     PROPOSAL_APPLIED = "proposal_applied"
+    SKIPPED = "skipped"
 
 
 class ActionActivity(DomainModel):
@@ -155,6 +159,30 @@ class ProposalState(StrEnum):
     PENDING = "pending"
     APPLIED = "applied"
     DISMISSED = "dismissed"
+
+
+class ActionRepeat(DomainModel):
+    """How a task repeats (B05): its series, the rule, and this occurrence's own date.
+
+    ``occurrence_date`` is the occurrence's identity in its series; moving the task's target
+    date reschedules it without changing which occurrence it is. ``ended`` says the owner
+    stopped the repeats. ``previous_date`` and ``previous_status`` describe the live
+    occurrence this one followed, if any.
+    """
+
+    series_public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    series_revision: int = Field(ge=1)
+    rule: RepeatRule
+    occurrence_date: date
+    ended: bool = False
+    previous_date: date | None = None
+    previous_status: ActionStatus | None = None
+
+    @model_validator(mode="after")
+    def check_previous(self) -> Self:
+        if (self.previous_date is None) != (self.previous_status is None):
+            raise ValueError("the previous occurrence has both a date and a status, or neither")
+        return self
 
 
 class ActionStep(DomainModel):
@@ -305,6 +333,7 @@ class Action(DeadlineFields):
     steps: tuple[ActionStep, ...] = Field(default=(), max_length=MAX_ACTION_STEPS)
     sources: tuple[ActionSource, ...] = ()
     thread_seen_until_utc: datetime | None = None  # The owner's "seen" watermark.
+    repeat: ActionRepeat | None = None  # None for a task that never repeated.
     thread: ThreadActivity | None = None  # None when no source has a thread snapshot.
     proposals: tuple[ActionProposal, ...] = ()  # Pending follow-up proposals only.
     # Recent display history; the complete audit trail stays in storage and exports.

@@ -8,7 +8,14 @@ import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import Action, ActionEdit, ActionStatus, ProposalState, StepEdit
+from mailbrief.domain.actions import (
+    Action,
+    ActionEdit,
+    ActionFilter,
+    ActionStatus,
+    ProposalState,
+    StepEdit,
+)
 from mailbrief.domain.analysis import (
     ActionOwnership,
     DeadlinePrecision,
@@ -17,6 +24,7 @@ from mailbrief.domain.analysis import (
     TargetReason,
 )
 from mailbrief.domain.briefs import AnalysisOutcome
+from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
 from mailbrief.domain.messages import (
     AccountIdentity,
     EmailContact,
@@ -777,3 +785,37 @@ async def test_applying_and_undoing_keep_the_owner_s_estimate(
     undone = await service.undo_apply(proposal_id, 2)
 
     assert (applied.estimate_minutes, undone.estimate_minutes) == (90, 90)
+
+
+async def test_a_completing_proposal_moves_a_repeating_task_on(
+    session: AsyncSession, service: ProposalService, clock: Clock
+) -> None:
+    """Completed by a cancellation, a repeating task's next occurrence is made, and undoing
+    the proposal withdraws it while it is untouched."""
+    _, public_id, _ = await scene(session, service, FollowUpKind.CANCELLED)
+    actions = ActionService(session, clock=clock)
+    before = await actions.get(public_id)
+    edit = ActionEdit(
+        title=before.title,
+        ownership=before.ownership,
+        priority=None,
+        tags=(),
+        effort=before.effort,
+        estimate_minutes=None,
+        target_date=date(2026, 10, 1),
+        notes="",
+    )
+    daily = RepeatRule(frequency=RepeatFrequency.DAILY)
+    repeating = await actions.save(public_id, before.revision, edit, None, RepeatEdit(rule=daily))
+    proposal_id = await only(service)
+
+    applied = await service.apply(proposal_id, repeating.revision)
+
+    assert applied.status is ActionStatus.COMPLETED
+    (following,) = await actions.list_actions(ActionFilter.WAITING)
+    assert following.target_date == date(2026, 10, 2)
+    assert following.sources == ()  # A later occurrence is the owner's own task.
+    await service.undo_apply(proposal_id, applied.revision)
+    assert [action.public_id for action in await actions.list_actions(ActionFilter.WAITING)] == [
+        public_id
+    ]
