@@ -49,16 +49,21 @@ def retry_delay(value: str | None, attempt: int) -> float:
 
 
 def error_reasons(payload: object) -> set[str]:
-    """The ``reason`` strings of a Google error payload's ``errors`` list."""
+    """The ``reason`` strings of a Google error payload: from its ``errors`` list, the older
+    form, and its ``details``, where newer APIs put an ``ErrorInfo`` reason."""
     error = payload.get("error") if isinstance(payload, dict) else None
-    errors = error.get("errors", []) if isinstance(error, dict) else []
-    if not isinstance(errors, list):
+    if not isinstance(error, dict):
         return set()
-    return {
-        reason
-        for item in errors
-        if isinstance(item, dict) and isinstance(reason := item.get("reason"), str)
-    }
+    reasons: set[str] = set()
+    for field in ("errors", "details"):
+        entries = error.get(field)
+        if isinstance(entries, list):
+            reasons.update(
+                reason
+                for entry in entries
+                if isinstance(entry, dict) and isinstance(reason := entry.get("reason"), str)
+            )
+    return reasons
 
 
 @dataclass(frozen=True, slots=True)

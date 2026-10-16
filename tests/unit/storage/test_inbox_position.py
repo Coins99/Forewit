@@ -1,26 +1,14 @@
 """Where a cached message sits in the Inbox page's order (the command palette opens it)."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.messages import AccountIdentity, ProviderKind
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from tests.factories import make_message
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 async def test_the_position_follows_the_inbox_page_order(session: AsyncSession) -> None:

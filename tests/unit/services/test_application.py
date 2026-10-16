@@ -2,10 +2,8 @@
 fails the sync."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.digests import SyncProgress, SyncStage, SyncStatus
@@ -17,7 +15,6 @@ from mailbrief.services.threads import (
     ThreadService,
     TrackedThread,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import (
     AccountRepository,
     MessageRepository,
@@ -29,15 +26,6 @@ from tests.unit.services.test_sync import FakeEmailProvider
 
 NOW = datetime(2026, 9, 30, 16, tzinfo=UTC)
 ZONE = "America/Toronto"
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 class RecordingThreads(ThreadService):

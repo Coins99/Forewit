@@ -96,7 +96,13 @@ class Tint:
     alpha: float  # 0 is clear, 1 is opaque.
 
 
-@dataclass(frozen=True, slots=True)
+# A layer turned off: alpha 0 paints nothing. Only Studio lights the colour field and a
+# pill's Liquid Glass layers; every other scheme leaves them at these defaults.
+_LIGHT_OFF: Final = Tint("#ffffff", 0.0)
+_SHADE_OFF: Final = Tint("#000000", 0.0)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GlassTokens:
     """Liquid Glass for navigation chrome only (header, sidebar, pill buttons); lists and
     the reading pane stay opaque. Glass lies over a backdrop painted from these tokens, so
@@ -129,20 +135,20 @@ class GlassTokens:
     opaque: str  # A panel's fill when transparency is reduced or contrast increased.
     # The colour field behind the glass: three soft pools of light over the backdrop, as
     # colourful content spills onto Liquid Glass. Alpha 0 paints no pool.
-    pool_a: Tint
-    pool_b: Tint
-    pool_c: Tint
+    pool_a: Tint = _LIGHT_OFF
+    pool_b: Tint = _LIGHT_OFF
+    pool_c: Tint = _LIGHT_OFF
     # Liquid Glass's layers on a pill (WWDC25), lit as a Liquid Glass tab is: the light on its
     # rim, along the top and the bottom; the glow it lenses into the body from both edges;
     # and the soft shadow it casts. Alpha 0 turns a layer off.
-    highlight: Tint
-    lens: Tint
-    shadow: Tint
+    highlight: Tint = _LIGHT_OFF
+    lens: Tint = _LIGHT_OFF
+    shadow: Tint = _SHADE_OFF
     # A pill's edges, as on a Liquid Glass tab: an even contact ring just outside it (for a
     # light page, where its light can't show), and the shade at its ends, where the light
     # that runs along its long edges never reaches.
-    edge: Tint
-    end_shade: Tint
+    edge: Tint = _SHADE_OFF
+    end_shade: Tint = _SHADE_OFF
     rim_contrast: str  # Every rim when contrast is increased (3:1 on `opaque`).
 
 
@@ -498,14 +504,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#15171c",
         rim_contrast="#c3c6cd",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SLATE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e4e8ef",
@@ -531,14 +529,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#1d4f91", 0.6),
         opaque="#eef0f3",
         rim_contrast="#646872",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.GRAPHITE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#373632",
@@ -564,14 +554,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#181715",
         rim_contrast="#c3c2b8",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.GRAPHITE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e8e8e5",
@@ -597,14 +579,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#204e91", 0.6),
         opaque="#f0f0ef",
         rim_contrast="#6f6e69",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.OCEAN, ThemeMode.DARK): GlassTokens(
         backdrop_top="#2b393b",
@@ -630,14 +604,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#121919",
         rim_contrast="#bfc8c9",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.OCEAN, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e0eaeb",
@@ -663,14 +629,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#035a6a", 0.6),
         opaque="#edf1f1",
         rim_contrast="#5e6b6d",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SAGE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#303931",
@@ -696,14 +654,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#141815",
         rim_contrast="#c2c8c3",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.SAGE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#e3eae4",
@@ -729,14 +679,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#03612a", 0.6),
         opaque="#eef1ee",
         rim_contrast="#626b63",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.PLUM, ThemeMode.DARK): GlassTokens(
         backdrop_top="#39343d",
@@ -762,14 +704,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#19161b",
         rim_contrast="#c8c4cb",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.PLUM, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#eae6ed",
@@ -795,14 +729,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#603b85", 0.6),
         opaque="#f1eff2",
         rim_contrast="#6b666f",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.ROSE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#3f3234",
@@ -828,14 +754,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#ffffff", 0.9),
         opaque="#1c1516",
         rim_contrast="#cdc3c4",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
     (ColorScheme.ROSE, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#efe5e6",
@@ -861,14 +779,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         specular=Tint("#842d47", 0.6),
         opaque="#f3efef",
         rim_contrast="#716466",
-        pool_a=Tint("#ffffff", 0.0),
-        pool_b=Tint("#ffffff", 0.0),
-        pool_c=Tint("#ffffff", 0.0),
-        highlight=Tint("#ffffff", 0.0),
-        lens=Tint("#ffffff", 0.0),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.0),
     ),
 }
 

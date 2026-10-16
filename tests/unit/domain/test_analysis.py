@@ -17,6 +17,7 @@ from mailbrief.domain.analysis import (
     AnalysisProblem,
     AnalysisRequest,
     AnalysisResponse,
+    DeadlineFields,
     DeadlinePrecision,
     FollowUpKind,
     MessageAnalysis,
@@ -542,6 +543,30 @@ def test_check_deadline_fields_rejects_an_unloadable_zone_without_echoing_it() -
 
     assert MARKER not in str(caught.value)
     check_deadline_fields("Friday", DeadlinePrecision.DATE, FRIDAY, None, "America/Toronto")
+
+
+def test_every_model_with_a_deadline_checks_it_without_a_validator_of_its_own() -> None:
+    class Dated(DeadlineFields):
+        label: str
+
+    Dated(
+        label="ok",
+        deadline_text="Friday",
+        deadline_date=FRIDAY,
+        deadline_timezone="UTC",
+        deadline_precision=DeadlinePrecision.DATE,
+    )
+    with pytest.raises(ValidationError, match="deadline_date and deadline_timezone"):
+        Dated(label="x", deadline_text="Friday", deadline_precision=DeadlinePrecision.DATE)
+    with pytest.raises(ValidationError, match="loadable IANA name") as caught:
+        Dated(
+            label="x",
+            deadline_text="Friday",
+            deadline_date=FRIDAY,
+            deadline_timezone=MARKER,
+            deadline_precision=DeadlinePrecision.DATE,
+        )
+    assert MARKER not in str(caught.value)
 
 
 def test_follow_up_kinds_are_stable() -> None:

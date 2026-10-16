@@ -11,7 +11,7 @@ counts it for its sender. The mark is local; Gmail is never told.
 """
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.domain.cached_mail import WANTED_WINDOW_DAYS, InboxPage
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.messages import NormalizedMessage
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.inbox_list import WANTED, Density, InboxListView, build_inbox_rows
@@ -255,7 +256,7 @@ class InboxPanel(QWidget):
         self.setObjectName("inboxPanel")
         self.setAccessibleName("Gmail Inbox")
         self.zone = ZoneInfo("UTC")
-        self.clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
+        self.clock: Callable[[], datetime] = clock or utc_now
         self._page: InboxPage | None = None
         self._open: str | None = None  # The message in the reading pane.
         self._list_width: int | None = None  # Once the owner drags the divider.

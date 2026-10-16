@@ -8,7 +8,7 @@ text.
 
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final
 
 from sqlalchemy import select
@@ -27,12 +27,13 @@ from mailbrief.domain.analysis import (
     MessageAnalysis,
     deadline_due_at,
 )
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.messages import NormalizedMessage, ProviderKind, is_own_message
 from mailbrief.services.actions import ActionConflictError, touch, urgency
 from mailbrief.services.analysis import PlannedMessage
 from mailbrief.services.deadlines import ResolvedDeadline, suggest_target_for
 from mailbrief.services.threads import own_addresses
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.proposals import ProposalRepository, proposal_from_row
 from mailbrief.storage.tables import (
@@ -70,10 +71,6 @@ class ProposalNotFoundError(LookupError):
 
     def __init__(self) -> None:
         super().__init__(_NOT_FOUND)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def _due(action: ActionTable) -> datetime | None:
@@ -176,21 +173,14 @@ class ProposalService:
     Every mutating method reads the clock once, commits once and rolls back on failure.
     """
 
-    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = _utc_now) -> None:
+    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = utc_now) -> None:
         self._session = session
         self._clock = clock
         self._proposals = ProposalRepository(session)
         self._actions = ActionRepository(session)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        now = normalize_utc(self._clock())
-        try:
-            result = await operation(now)
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await commit_once(self._session, self._clock, operation)
 
     async def _row(self, proposal_id: int) -> ActionProposalTable:
         row = await self._proposals.get(proposal_id)

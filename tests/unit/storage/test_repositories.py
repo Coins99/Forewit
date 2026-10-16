@@ -1,11 +1,9 @@
 """Comprehensive tests for async storage repositories."""
 
-from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
-from pathlib import Path
 
 import pytest
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import event, func, insert, select, update
 
 from mailbrief.domain.analysis import (
     ActionEffort,
@@ -42,17 +40,6 @@ from mailbrief.storage.tables import (
     SuggestionDecisionTable,
 )
 from tests.factories import fingerprint_of, make_analysis, make_message, make_suggestion
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncGenerator[Database]:
-    """Provide a fresh SQLite database with created schema."""
-    db = Database.from_path(tmp_path / "test.sqlite3")
-    await db.create_schema_for_tests()
-    try:
-        yield db
-    finally:
-        await db.dispose()
 
 
 @pytest.mark.asyncio
@@ -220,19 +207,22 @@ async def test_message_repository_upsert_and_ranking(database: Database) -> None
         assert domain_msg.provider_message_id == "msg-001"
         assert domain_msg.subject == "Important Announcement (Updated)"
 
-    # Batch update ranking score and reasons
+    # Rankings are saved by provider message ID: a row the session has loaded shows them,
+    # and an ID no longer cached is skipped.
     async with database.transaction() as session:
         repo = MessageRepository(session)
-        msg1_row = await repo.get_by_provider_message_id(account_id, "msg-001")
-        msg2_row = await repo.get_by_provider_message_id(account_id, "msg-002")
-        assert msg1_row is not None and msg2_row is not None
-        await repo.update_rankings(
+        loaded = await repo.get_by_provider_message_id(account_id, "msg-001")
+        assert loaded is not None
+        await repo.save_rankings(
+            account_id,
             [
-                (msg1_row.id, 50, [RankReason.HIGH_IMPORTANCE]),
-                (msg2_row.id, -5, [RankReason.LOW_IMPORTANCE]),
-            ]
+                ("msg-001", 50, [RankReason.HIGH_IMPORTANCE]),
+                ("msg-002", -5, [RankReason.LOW_IMPORTANCE, "custom"]),
+                ("no-longer-cached", 99, []),
+            ],
         )
-        await repo.update_rankings([])  # Empty batch handled gracefully
+        await repo.save_rankings(account_id, [])  # Nothing to save.
+        assert loaded.rank_score == 50 and loaded.rank_reasons_json == ["high_importance"]
 
     async with database.session() as session:
         repo = MessageRepository(session)
@@ -240,25 +230,18 @@ async def test_message_repository_upsert_and_ranking(database: Database) -> None
         f2 = await repo.get_by_provider_message_id(account_id, "msg-002")
         assert f1 is not None and f1.rank_score == 50
         assert f2 is not None and f2.rank_score == -5
+        assert f2.rank_reasons_json == ["low_importance", "custom"]
+        assert await repo.get_by_provider_message_id(account_id, "no-longer-cached") is None
 
-    # Batch update by provider_message_id
+    # Saving again replaces the score and reasons.
     async with database.transaction() as session:
         repo = MessageRepository(session)
-        await repo.update_rankings_by_provider_id(
-            account_id,
-            [
-                ("msg-001", 60, [RankReason.VERY_RECENT]),
-                ("msg-002", 15, [RankReason.RECENT]),
-            ],
-        )
-        await repo.update_rankings_by_provider_id(account_id, [])
+        await repo.save_rankings(account_id, [("msg-001", 60, [RankReason.VERY_RECENT])])
 
     async with database.session() as session:
         repo = MessageRepository(session)
         f1 = await repo.get_by_provider_message_id(account_id, "msg-001")
-        f2 = await repo.get_by_provider_message_id(account_id, "msg-002")
         assert f1 is not None and f1.rank_score == 60 and f1.rank_reasons_json == ["very_recent"]
-        assert f2 is not None and f2.rank_score == 15 and f2.rank_reasons_json == ["recent"]
 
 
 @pytest.mark.asyncio
@@ -1072,3 +1055,70 @@ async def test_deleting_an_account_keeps_actions_decisions_and_source_snapshots(
         source.received_at_utc,
     ) == snapshot
     assert action is not None and action.title == "Approve the proposal"
+
+
+async def test_save_rankings_reads_again_the_rows_of_another_session(database: Database) -> None:
+    async with database.transaction() as session:
+        account = await AccountRepository(session).upsert(
+            AccountIdentity(
+                provider=ProviderKind.GMAIL,
+                provider_account_id="gmail-1",
+                email_address="owner@example.com",
+            )
+        )
+        stale = await MessageRepository(session).upsert_messages(
+            account.id, [make_message(provider_message_id="m0")]
+        )
+
+    async with database.transaction() as session:
+        await MessageRepository(session).save_rankings(
+            account.id, [("m0", 9, [RankReason.RECENT])], loaded=stale
+        )
+
+    async with database.session() as session:
+        stored = await MessageRepository(session).get_by_provider_ids(account.id, ["m0"])
+        assert [row.rank_score for row in stored] == [9]
+
+
+async def test_save_rankings_reads_only_the_rows_it_was_not_given(database: Database) -> None:
+    async with database.transaction() as session:
+        account = await AccountRepository(session).upsert(
+            AccountIdentity(
+                provider=ProviderKind.GMAIL,
+                provider_account_id="gmail-1",
+                email_address="owner@example.com",
+            )
+        )
+        repo = MessageRepository(session)
+        rows = await repo.upsert_messages(
+            account.id, [make_message(provider_message_id=f"m{n}") for n in range(3)]
+        )
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]).split()[0])
+
+    async with database.transaction() as session:
+        repo = MessageRepository(session)
+        loaded = await repo.get_by_provider_ids(account.id, ["m0", "m1"])
+        event.listen(database.engine.sync_engine, "before_cursor_execute", record)
+        try:
+            await repo.save_rankings(
+                account.id,
+                [("m0", 5, [RankReason.RECENT]), ("m1", 6, []), ("m2", 7, [])],
+                loaded=loaded,
+            )
+        finally:
+            event.remove(database.engine.sync_engine, "before_cursor_execute", record)
+        assert {row.provider_message_id: row.rank_score for row in loaded} == {"m0": 5, "m1": 6}
+    assert statements.count("SELECT") == 1  # Only m2, which it wasn't given.
+
+    async with database.session() as session:
+        stored = await MessageRepository(session).get_by_provider_ids(
+            account.id, [row.provider_message_id for row in rows]
+        )
+        assert sorted((row.provider_message_id, row.rank_score) for row in stored) == [
+            ("m0", 5),
+            ("m1", 6),
+            ("m2", 7),
+        ]

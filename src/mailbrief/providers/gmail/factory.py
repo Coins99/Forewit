@@ -2,11 +2,13 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Protocol
 
 import httpx
 
 from mailbrief.config import Settings
+from mailbrief.domain.bodies import MessageBody
 from mailbrief.errors import ConfigurationError
 from mailbrief.providers.gmail.auth import GmailAuth
 from mailbrief.providers.gmail.cache import GmailCredentialStore
@@ -39,3 +41,30 @@ async def gmail_provider(
         httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as http,
     ):
         yield GmailProvider(auth, GmailClient(http, auth), silent_only=silent_only)
+
+
+class GmailOpener(Protocol):
+    """Opens Gmail for a block: gmail_provider, or a stand-in for it."""
+
+    def __call__(
+        self, settings: Settings, *, silent_only: bool = False
+    ) -> AbstractAsyncContextManager[GmailProvider]: ...
+
+
+class GmailBodies:
+    """A body source that opens Gmail for one download and closes it again, so nothing
+    touches Gmail until a body is wanted: AI drafting's email, once the owner chooses it.
+
+    ``open_gmail`` is the caller's own gmail_provider, so whatever opens Gmail for the
+    caller opens it for the download too. ``silent_only`` has no default, so each caller
+    chooses whether the download may ask the owner to sign in.
+    """
+
+    def __init__(self, open_gmail: GmailOpener, settings: Settings, *, silent_only: bool) -> None:
+        self._open_gmail = open_gmail
+        self._settings = settings
+        self._silent_only = silent_only
+
+    async def fetch_message_body(self, provider_message_id: str) -> MessageBody:
+        async with self._open_gmail(self._settings, silent_only=self._silent_only) as provider:
+            return await provider.fetch_message_body(provider_message_id)

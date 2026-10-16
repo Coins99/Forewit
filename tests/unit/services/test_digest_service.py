@@ -1,6 +1,5 @@
 """Digest service: sections, deterministic order, status rules and coverage."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
 
 import pytest
@@ -15,7 +14,6 @@ from mailbrief.domain.messages import AccountIdentity, ProviderKind, RankedMessa
 from mailbrief.services.analysis import PlannedMessage
 from mailbrief.services.calendar import DayWindow
 from mailbrief.services.digest import SECTION_ORDER, DigestService, section_for
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import (
     AccountRepository,
     AnalysisRepository,
@@ -71,15 +69,6 @@ UNRESOLVED: dict[str, object] = {
     "deadline_text": "ASAP",
     "deadline_precision": DeadlinePrecision.UNRESOLVED,
 }
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 @pytest.fixture

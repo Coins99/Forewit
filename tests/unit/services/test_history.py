@@ -1,8 +1,6 @@
 """Brief history: date bounds, catch-up days, missed days, listing and coverage lines."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
-from pathlib import Path
 
 import pytest
 from pydantic import HttpUrl
@@ -26,7 +24,6 @@ from mailbrief.services.history import (
     outside_count,
     parse_brief_date,
 )
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, DigestRepository
 
 TODAY = date(2026, 9, 29)
@@ -96,17 +93,6 @@ def test_the_brief_s_own_zone_decides_the_day_it_was_made() -> None:
         status=DigestStatus.EMPTY,
     )
     assert "up to 23:30 (America/Toronto)" in coverage_line(digest)
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "history.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as active:
-            yield active
-    finally:
-        await database.dispose()
 
 
 async def save(session: AsyncSession, email: str, day: date, status: DigestStatus) -> None:

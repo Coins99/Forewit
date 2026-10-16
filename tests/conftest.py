@@ -4,14 +4,28 @@ import os
 import socket
 import sqlite3
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from mailbrief.config import Settings
+from mailbrief.storage.database import Database
 
 # Ensure Qt runs in offscreen mode in headless test environments
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide the developer's own MAILBRIEF_ settings, such as an OAuth client path exported
+    in their shell, so every test starts from the defaults; a test sets what it needs."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(f"MAILBRIEF_{name.upper()}", raising=False)
+
 
 REAL_CONNECT = sqlite3.connect
 
@@ -78,6 +92,31 @@ def sqlite_without_disk_flushes(monkeypatch: pytest.MonkeyPatch) -> None:
         return connection
 
     monkeypatch.setattr(sqlite3, "connect", connect)
+
+
+@pytest.fixture
+def database_path(tmp_path: Path) -> Path:
+    """Where ``database`` keeps its file."""
+    return tmp_path / "mailbrief.sqlite3"
+
+
+@pytest.fixture
+async def database(database_path: Path) -> AsyncIterator[Database]:
+    """A fresh database with the current schema, disposed after the test. It is a file, so a
+    test can open several sessions on it and see what another one committed."""
+    database = Database.from_path(database_path)
+    await database.create_schema_for_tests()
+    try:
+        yield database
+    finally:
+        await database.dispose()
+
+
+@pytest.fixture
+async def session(database: Database) -> AsyncIterator[AsyncSession]:
+    """One session on ``database``; nothing is committed for the test."""
+    async with database.session() as active:
+        yield active
 
 
 def delete_windows() -> None:

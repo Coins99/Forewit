@@ -7,25 +7,15 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.scheduler import TICK_MS, RefreshScheduler
+from tests.factories import Clock
 
 START = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
 
 
-class Clock:
-    def __init__(self) -> None:
-        self.now = START
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, by: timedelta) -> None:
-        self.now += by
-
-
 @pytest.fixture
 def clock() -> Clock:
-    return Clock()
+    return Clock(START)
 
 
 @pytest.fixture

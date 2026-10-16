@@ -1,12 +1,9 @@
 """The open actions that continue an email's thread, for the brief's continuations."""
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
-import pytest
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,24 +11,12 @@ from mailbrief.domain.actions import ThreadLink
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.messages import NormalizedMessage
 from mailbrief.services.actions import MAX_THREAD_LINKS, ActionService
-from mailbrief.storage.database import Database
 from mailbrief.storage.tables import AccountTable, ActionSourceTable, ActionTable
 from tests.unit.services.test_thread_activity import account, cache
 from tests.unit.services.test_thread_activity import message as thread_message
 
 CREATED = datetime(2026, 9, 28, 12, tzinfo=UTC)
 OWNER = "gmail-1@example.com"
-
-
-@pytest.fixture
-async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    database = Database.from_path(tmp_path / "links.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as active:
-            yield active
-    finally:
-        await database.dispose()
 
 
 def message(key: str, thread: str | None, *, owner: str = "gmail-1") -> NormalizedMessage:

@@ -13,13 +13,14 @@ from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionProposal, ActionStatus, ProposalState
-from mailbrief.domain.analysis import DeadlinePrecision, FollowUpKind, TargetReason
+from mailbrief.domain.analysis import FollowUpKind, TargetReason
 from mailbrief.storage.database import sorted_batches
 from mailbrief.storage.tables import (
     AccountTable,
     ActionProposalTable,
     ActionSourceTable,
     ActionTable,
+    deadline_values,
 )
 
 
@@ -35,11 +36,7 @@ def proposal_from_row(
         action_revision=revision,
         kind=FollowUpKind(row.kind),
         state=ProposalState(row.state),
-        deadline_text=row.deadline_text,
-        deadline_precision=DeadlinePrecision(row.deadline_precision),
-        deadline_date=row.deadline_date,
-        deadline_at_utc=row.deadline_at_utc,
-        deadline_timezone=row.deadline_timezone,
+        **deadline_values(row),
         suggested_target_date=row.suggested_target_date,
         target_reason=None if row.target_reason is None else TargetReason(row.target_reason),
         evidence=row.evidence,

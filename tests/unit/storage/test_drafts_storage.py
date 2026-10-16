@@ -1,8 +1,6 @@
 """Draft storage: chunked loading, ORM-only pruning, and summaries that never read versions."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,22 +19,6 @@ from mailbrief.storage.tables import (
 )
 
 AT = datetime(2026, 9, 28, 13, tzinfo=UTC)
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "drafts.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
 
 
 async def add_drafts(session: AsyncSession, count: int) -> list[DraftTable]:

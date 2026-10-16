@@ -1,7 +1,6 @@
 """Gmail metadata through real repositories/ranking; no bodies or AI calls."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import timedelta
 
 import httpx
@@ -13,7 +12,6 @@ from mailbrief.domain.digests import SyncStatus
 from mailbrief.providers.gmail.client import MESSAGES_URL, GmailClient
 from mailbrief.providers.gmail.provider import GmailProvider
 from mailbrief.services.application import ApplicationService
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, MessageRepository, SyncRunRepository
 from mailbrief.ui.diagnostics import ERROR_MESSAGES, error_guidance
 from tests.unit.providers.gmail.metadata_fixtures import (
@@ -23,17 +21,6 @@ from tests.unit.providers.gmail.metadata_fixtures import (
     metadata,
     no_sleep,
 )
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    try:
-        async with database.session() as session:
-            yield session
-    finally:
-        await database.dispose()
 
 
 async def test_sync_repeat_reconcile_and_review(

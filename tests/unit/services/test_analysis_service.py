@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import re
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import cast
@@ -85,15 +85,6 @@ OWNER = "owner@example.com"
 BODY = "Please approve the quarterly budget by Friday 5 PM. The finance team needs it."
 ANALYZED = AnalysisOutcome.ANALYZED
 FAILED = AnalysisOutcome.FAILED
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 async def seed(session: AsyncSession, count: int) -> tuple[int, list[RankedMessage]]:

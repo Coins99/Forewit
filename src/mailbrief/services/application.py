@@ -356,14 +356,11 @@ class ApplicationService:
             signals=await self._signals(account, important_senders, now),
         )
 
-        # 4. Batch persist computed rankings in SQLite
-        rankings_data = [
-            (row.id, r.score, r.reasons) for row, r in zip(rows, ranked[: len(rows)], strict=True)
-        ]
-        await self._message_repo.update_rankings(rankings_data)
-        await self._message_repo.update_rankings_by_provider_id(
+        # 4. Persist the computed rankings in SQLite
+        await self._message_repo.save_rankings(
             account.id,
-            [(r.message.provider_message_id, r.score, r.reasons) for r in ranked[len(rows) :]],
+            [(r.message.provider_message_id, r.score, r.reasons) for r in ranked],
+            loaded=rows,
         )
         if self._session:
             await self._session.commit()

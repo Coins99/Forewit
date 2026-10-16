@@ -4,6 +4,7 @@ from typing import Final
 
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.errors import ProviderResponseError
+from mailbrief.providers.google.requests import error_reasons
 
 # Quota reasons a retry won't clear; the client reports them as a rate limit, not a refusal.
 QUOTA_REASONS: Final = frozenset({"dailyLimitExceeded", "quotaExceeded"})
@@ -28,16 +29,7 @@ def calendar_response_error(message: str) -> ProviderResponseError:
 
 def calendar_permission_guidance(payload: object) -> str:
     """Translate recognized Google reasons without exposing response contents."""
-    reasons: set[str] = set()
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(error, dict):
-        for field in ("errors", "details"):
-            entries = error.get(field)
-            if isinstance(entries, list):
-                for entry in entries:
-                    reason = entry.get("reason") if isinstance(entry, dict) else None
-                    if isinstance(reason, str):
-                        reasons.add(reason)
+    reasons = error_reasons(payload)
     if reasons & {"accessNotConfigured", "SERVICE_DISABLED"}:
         return (
             "Google Calendar API is disabled for this OAuth client's Google Cloud project. "

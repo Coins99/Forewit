@@ -1,21 +1,29 @@
-"""Run checked-in Alembic upgrades against the explicit diagnostic database."""
+"""Run checked-in Alembic upgrades against the explicit diagnostic database.
 
+Alembic is imported where a migration runs, which the desktop does off the Qt thread, so
+importing it (about 0.4 s) never delays the window.
+"""
+
+import asyncio
 import sqlite3
 import sys
 import tempfile
-from contextlib import closing
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
-
-from alembic import command
-from alembic.config import Config
-from alembic.script import ScriptDirectory
+from typing import TYPE_CHECKING
 
 from mailbrief.errors import ConfigurationError
-from mailbrief.storage.database import sqlite_url
+from mailbrief.storage.database import Database, sqlite_url
+
+if TYPE_CHECKING:
+    from alembic.config import Config
 
 
-def migration_config(path: Path) -> Config:
+def migration_config(path: Path) -> "Config":
     """Resolve bundled revisions and bind them to an explicit database path."""
+    from alembic.config import Config
+
     bundle = getattr(sys, "_MEIPASS", None)
     root = Path(bundle) if isinstance(bundle, str) else Path(__file__).resolve().parents[3]
     if not (root / "migrations" / "env.py").is_file():
@@ -31,6 +39,9 @@ def migration_config(path: Path) -> Config:
 
 def upgrade_database(path: Path) -> None:
     """Use read-only bundled revisions; always migrate the explicit user-data database."""
+    from alembic import command
+    from alembic.script import ScriptDirectory
+
     config = migration_config(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.stat().st_size:
@@ -64,3 +75,17 @@ def upgrade_database(path: Path) -> None:
                     backup.unlink(missing_ok=True)
                     raise
     command.upgrade(config, "head")
+
+
+@asynccontextmanager
+async def migrated_database(path: Path, *, upgrade: bool = True) -> AsyncIterator[Database]:
+    """The database at ``path``, created if missing and upgraded off the event loop's thread,
+    disposed when the block ends. ``upgrade=False`` skips the upgrade, for a caller that
+    already brought this database up to date."""
+    if upgrade:
+        await asyncio.to_thread(upgrade_database, path)
+    database = Database.from_path(path)
+    try:
+        yield database
+    finally:
+        await database.dispose()

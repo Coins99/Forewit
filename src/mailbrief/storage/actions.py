@@ -32,7 +32,6 @@ from mailbrief.domain.analysis import (
     ActionEffort,
     ActionOwnership,
     ActionSuggestion,
-    DeadlinePrecision,
     TargetReason,
 )
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
@@ -52,6 +51,7 @@ from mailbrief.storage.tables import (
     MessageTable,
     ProjectTable,
     SuggestionDecisionTable,
+    deadline_values,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,11 +105,7 @@ def suggestion_from_row(row: ActionSuggestionTable) -> ActionSuggestion:
         title=row.title,
         ownership=ActionOwnership(row.ownership),
         effort=None if row.effort is None else ActionEffort(row.effort),
-        deadline_text=row.deadline_text,
-        deadline_precision=DeadlinePrecision(row.deadline_precision),
-        deadline_date=row.deadline_date,
-        deadline_at_utc=row.deadline_at_utc,
-        deadline_timezone=row.deadline_timezone,
+        **deadline_values(row),
         suggested_target_date=row.suggested_target_date,
         target_reason=None if row.target_reason is None else TargetReason(row.target_reason),
         steps=tuple(row.steps_json),
@@ -272,11 +268,7 @@ def action_from_rows(
         tags=tuple(sorted(tags, key=tag_key)),
         effort=None if row.effort is None else ActionEffort(row.effort),
         estimate_minutes=row.estimate_minutes,
-        deadline_text=row.deadline_text,
-        deadline_precision=DeadlinePrecision(row.deadline_precision),
-        deadline_date=row.deadline_date,
-        deadline_at_utc=row.deadline_at_utc,
-        deadline_timezone=row.deadline_timezone,
+        **deadline_values(row),
         suggested_target_date=row.suggested_target_date,
         target_reason=None if row.target_reason is None else TargetReason(row.target_reason),
         target_date=row.target_date,

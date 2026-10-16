@@ -4,11 +4,12 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.config import Settings
 from mailbrief.domain.analysis import AIUsage
 from mailbrief.domain.briefs import (
     AnalysisOutcome,
@@ -16,7 +17,11 @@ from mailbrief.domain.briefs import (
     BriefStatus,
     TransmissionPreview,
 )
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.digests import DigestCoverage, SyncProgress, SyncResult, SyncStage, SyncStatus
+from mailbrief.ports.ai_provider import AIProvider
+from mailbrief.ports.email_provider import EmailProvider
+from mailbrief.ports.threads import ThreadReader
 from mailbrief.services.analysis import (
     KEY_MISSING,
     AnalysisPlan,
@@ -33,7 +38,13 @@ from mailbrief.services.history import BriefDateError, check_brief_date
 from mailbrief.services.proposals import ProposalService
 from mailbrief.services.ranking import MAX_SHORTLIST_SIZE
 from mailbrief.services.ranking import ShortlistGate as ShortlistGate
-from mailbrief.storage.repositories import ConsentRepository
+from mailbrief.services.threads import ThreadService
+from mailbrief.storage.repositories import (
+    AccountRepository,
+    ConsentRepository,
+    MessageRepository,
+    SyncRunRepository,
+)
 from mailbrief.storage.tables import AccountTable
 
 logger = logging.getLogger(__name__)
@@ -51,6 +62,18 @@ class ConsentGate(Protocol):
     """Asks the user whether the previewed transmission may happen."""
 
     async def confirm(self, preview: TransmissionPreview) -> bool: ...
+
+
+class NeverAsks:
+    """The consent gate of an automatic run, which has nobody to ask: BriefService never
+    calls it, and if it ever did, nothing would be sent."""
+
+    async def confirm(self, preview: TransmissionPreview) -> bool:
+        return False
+
+
+class MailSource(EmailProvider, ThreadReader, Protocol):
+    """A mail provider that also reads threads, as Gmail's does: what a brief run needs."""
 
 
 def _count(number: int, noun: str) -> str:
@@ -142,10 +165,6 @@ def _not_refreshed(
     ]
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 class BriefService:
     """Generate and save one local day's brief, asking consent before anything is sent."""
 
@@ -158,7 +177,7 @@ class BriefService:
         analysis: AnalysisService,
         digests: DigestService,
         consent_gate: ConsentGate,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
         proposals: ProposalService | None = None,
     ) -> None:
         self._session = session
@@ -411,3 +430,31 @@ class BriefService:
             ai_provider=self._analysis.provider_name if used else None,
             ai_model=self._analysis.model_name if used else None,
         )
+
+
+def compose_brief(
+    session: AsyncSession,
+    provider: MailSource,
+    ai: AIProvider,
+    settings: Settings,
+    *,
+    consent_gate: ConsentGate,
+    clock: Callable[[], datetime] = utc_now,
+) -> BriefService:
+    """BriefService as the desktop and the CLI both run it: over ``provider`` and ``ai``,
+    following tracked threads, with the body and batch limits of ``settings``."""
+    return BriefService(
+        session=session,
+        application=ApplicationService(
+            provider,
+            MessageRepository(session),
+            SyncRunRepository(session),
+            AccountRepository(session),
+            threads=ThreadService(session, provider),
+        ),
+        bodies=BodyService(provider, limit=settings.ai_body_character_limit),
+        analysis=AnalysisService(session, ai, batch_size=settings.ai_batch_size),
+        digests=DigestService(session),
+        consent_gate=consent_gate,
+        clock=clock,
+    )

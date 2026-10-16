@@ -1,7 +1,7 @@
 """Stored suggestions and the owner's decisions, read back as suggestion views."""
 
 import logging
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,16 +41,6 @@ def suggestion(position: int, title: str) -> ActionSuggestion:
 
 
 FIVE = tuple(suggestion(index, title) for index, title in enumerate("ABCDE"))
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "actions.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
 
 
 async def messages(session: AsyncSession, count: int, *, account: str = "gmail-1") -> list[int]:

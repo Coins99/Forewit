@@ -1,10 +1,7 @@
 """Saved briefs by day: the latest is the newest day, summaries, and one day's brief."""
 
-from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
-from pathlib import Path
 
-import pytest
 from sqlalchemy import event, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,16 +19,6 @@ from tests.factories import fingerprint_of, make_analysis, make_message, make_su
 
 TODAY = date(2026, 9, 29)
 YESTERDAY = date(2026, 9, 28)
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncGenerator[Database]:
-    db = Database.from_path(tmp_path / "history.sqlite3")
-    await db.create_schema_for_tests()
-    try:
-        yield db
-    finally:
-        await db.dispose()
 
 
 async def account(session: AsyncSession, email: str, provider: ProviderKind) -> int:

@@ -1,7 +1,7 @@
 """Small typed factories shared by unit tests."""
 
 import hashlib
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from mailbrief.domain.actions import Action, ActionProposal, ActionStatus, ProposalState
 from mailbrief.domain.analysis import (
@@ -159,3 +159,30 @@ def make_digest_item(**overrides: object) -> DigestItem:
 
 TEST_LOCAL_DATE = date(2026, 8, 31)
 TEST_GENERATED_AT = datetime(2026, 8, 31, 16, 0, tzinfo=UTC)
+
+
+class Clock:
+    """A clock a test sets (``clock.now = ...``) or moves forward (``clock.advance(...)``)."""
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, by: timedelta = timedelta(), **delta: float) -> None:
+        self.now += by + timedelta(**delta)
+
+
+class Ids:
+    """Predictable public IDs in UUID form, counting from 1; with ``repeat`` set, the last
+    one is handed out again."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.repeat = False
+
+    def __call__(self) -> str:
+        if not self.repeat:
+            self.count += 1
+        return f"00000000-0000-4000-8000-{self.count:012d}"

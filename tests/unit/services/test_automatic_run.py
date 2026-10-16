@@ -1,7 +1,6 @@
 """Automatic runs (ADR 0017): nothing is sent without the owner's permission on the active
 consent, never more than the permission and messages per brief allow, and never a past day."""
 
-from collections.abc import AsyncIterator
 from datetime import date
 
 import pytest
@@ -14,7 +13,6 @@ from mailbrief.domain.messages import AccountIdentity, ProviderKind
 from mailbrief.services.brief import CONSENT_DISCLOSURE_VERSION
 from mailbrief.services.history import BriefDateError
 from mailbrief.services.proposals import ProposalService
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import (
     AccountRepository,
     ConsentRepository,
@@ -39,15 +37,6 @@ from tests.unit.services.test_brief_service import (
 
 ZONE = "America/Toronto"
 PROVIDER = "fake"  # The fake AI provider's name, which the consent is recorded under.
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 async def account(session: AsyncSession) -> AccountTable:

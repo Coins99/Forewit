@@ -2,7 +2,7 @@
 carried forward ahead of the automatic selection, unless they are gone, archived, blocked or
 declined, and an automatic run never saves a brief that would lose one."""
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 
 import pytest
 from sqlalchemy import select
@@ -22,7 +22,6 @@ from mailbrief.services.application import ApplicationService
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.brief import CARRIED_BODY_FAILED, needs_review_sentence
 from mailbrief.services.threads import ThreadCheck
-from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import AccountRepository, DigestRepository, MessageRepository
 from mailbrief.storage.tables import AccountTable, AnalysisTable, MessageTable
 from tests.unit.services.ai_fakes import FakeAIProvider, Respond, answer_all
@@ -46,15 +45,6 @@ from tests.unit.services.test_brief_service import (
     inbox as brief_inbox,
 )
 from tests.unit.services.test_declines import INBOX, Choosing, inbox, loud
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
 
 
 async def run(

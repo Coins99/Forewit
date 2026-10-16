@@ -113,15 +113,6 @@ def database_bytes(directory: Path, name: str) -> bytes:
     return b"".join(item.read_bytes() for item in sorted(directory.glob(f"{name}*")))
 
 
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    database = Database("sqlite+aiosqlite:///:memory:")
-    await database.create_schema_for_tests()
-    async with database.session() as active:
-        yield active
-    await database.dispose()
-
-
 def build(
     session: AsyncSession,
     provider: FakeAIProvider,

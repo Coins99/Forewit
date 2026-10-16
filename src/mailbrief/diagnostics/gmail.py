@@ -8,7 +8,8 @@ import getpass
 import logging
 import threading
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -33,7 +34,7 @@ from mailbrief.domain.actions import (
     ThreadLink,
 )
 from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision, FollowUpKind
-from mailbrief.domain.bodies import BodyStatus, MessageBody, PreparedBody
+from mailbrief.domain.bodies import BodyStatus, PreparedBody
 from mailbrief.domain.briefs import (
     AUTO_SEND_LIMIT_MAX,
     BriefRunResult,
@@ -66,7 +67,7 @@ from mailbrief.paths import AppPaths
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
 from mailbrief.providers.gmail.cache import GmailCredentialStore
 from mailbrief.providers.gmail.errors import GmailSetupError
-from mailbrief.providers.gmail.factory import gmail_auth, gmail_provider
+from mailbrief.providers.gmail.factory import GmailBodies, gmail_auth, gmail_provider
 from mailbrief.providers.groq.credentials import GroqKeyStore, parse_api_key
 from mailbrief.providers.groq.factory import groq_provider
 from mailbrief.providers.groq.provider import KEY_MISSING_MESSAGE, PRIVACY_NOTICE, PROVIDER_NAME
@@ -77,12 +78,12 @@ from mailbrief.services.actions import (
     ActionService,
     SuggestionNotFoundError,
 )
-from mailbrief.services.analysis import AnalysisService
 from mailbrief.services.application import ApplicationService
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.brief import (
     CONSENT_DISCLOSURE_VERSION,
-    BriefService,
+    NeverAsks,
+    compose_brief,
     disclosure_lines,
     needs_review_sentence,
     permission_preview,
@@ -96,7 +97,6 @@ from mailbrief.services.calendar import (
     resolve_timezone,
 )
 from mailbrief.services.consent import NO_CONSENT, auto_send_permission, set_auto_send
-from mailbrief.services.digest import DigestService
 from mailbrief.services.drafting import (
     DRAFTING_DISCLOSURE_VERSION,
     DRAFTING_SCOPE,
@@ -129,7 +129,7 @@ from mailbrief.services.ranking import (
 )
 from mailbrief.services.threads import ThreadService
 from mailbrief.storage.database import Database
-from mailbrief.storage.migrate import upgrade_database
+from mailbrief.storage.migrate import migrated_database
 from mailbrief.storage.repositories import (
     AccountRepository,
     ConsentRepository,
@@ -219,18 +219,14 @@ def _load_settings() -> Settings:
         raise SettingsError(f"Invalid setting: {listed}. See docs/ai-analysis.md.") from None
 
 
-async def _preferences(path: Path) -> OwnerPreferences:
-    """The owner's saved preferences; a missing database gives the defaults without
-    creating it. Raises PreferencesUnavailableError when they can't be read."""
+async def _preferences(path: Path) -> tuple[OwnerPreferences, bool]:
+    """The owner's saved preferences, and whether the database was brought up to date to read
+    them; a missing database gives the defaults without creating it. Raises
+    PreferencesUnavailableError when they can't be read."""
     if not await asyncio.to_thread(path.exists):
-        return OwnerPreferences.defaults()
-    await asyncio.to_thread(upgrade_database, path)
-    database = Database.from_path(path)
-    try:
-        async with database.session() as session:
-            return await PreferencesService(session).get()
-    finally:
-        await database.dispose()
+        return OwnerPreferences.defaults(), False
+    async with migrated_database(path) as database, database.session() as session:
+        return await PreferencesService(session).get(), True
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +237,11 @@ class _Owner:
     preferences: OwnerPreferences
     settings: Settings
     zone: ZoneInfo
+    migrated: bool  # Reading the preferences already brought the database up to date.
+
+    def database(self) -> AbstractAsyncContextManager[Database]:
+        """The command's database, created if missing, upgraded only if not done already."""
+        return migrated_database(self.path, upgrade=not self.migrated)
 
 
 async def _owner(database_path: Path | None, timezone: str | None) -> _Owner:
@@ -253,12 +254,13 @@ async def _owner(database_path: Path | None, timezone: str | None) -> _Owner:
     settings = _load_settings()
     explicit = resolve_timezone(timezone) if timezone and timezone.strip() else None
     path = database_path or AppPaths.from_qt().database_path
-    preferences = await _preferences(path)
+    preferences, migrated = await _preferences(path)
     return _Owner(
         path=path,
         preferences=preferences,
         settings=effective_settings(settings, preferences),
         zone=explicit or owner_zone(preferences),
+        migrated=migrated,
     )
 
 
@@ -289,100 +291,89 @@ async def sync(
     rules = owner.preferences.excluded_senders
     now = datetime.now(UTC)
     window = local_day_window(now, owner.zone)
-    path = owner.path
     async with gmail_provider(owner.settings, silent_only=silent_only) as provider:
         await provider.connect()
-        await asyncio.to_thread(upgrade_database, path)
-        database = Database.from_path(path)
-        try:
-            async with database.session() as session:
-                accounts = AccountRepository(session)
-                messages = MessageRepository(session)
-                threads = ThreadService(session, provider)
-                application = ApplicationService(
-                    provider,
-                    messages,
-                    SyncRunRepository(session),
-                    accounts,
-                    threads=threads,
+        async with owner.database() as database, database.session() as session:
+            accounts = AccountRepository(session)
+            messages = MessageRepository(session)
+            threads = ThreadService(session, provider)
+            application = ApplicationService(
+                provider,
+                messages,
+                SyncRunRepository(session),
+                accounts,
+                threads=threads,
+            )
+            result, shortlist = await application.prepare_daily_shortlist(
+                tz_key=owner.zone.key,
+                now_utc=now,
+                include_ids=include_ids,
+                exclude_ids=exclude_ids,
+                shortlist_limit=owner.preferences.shortlist_limit,
+                excluded_senders=rules,
+                important_senders=owner.preferences.important_senders,
+            )
+            identity = await provider.current_account()
+            assert identity is not None
+            account = await accounts.get_by_provider_identity(
+                identity.provider, identity.provider_account_id
+            )
+            assert account is not None
+            # Refresh ORM state after the sync's committed update.
+            await session.refresh(account)
+            print(f"Inbox date: {window.local_date} ({window.timezone_name})")
+            print(
+                f"Status: {result.status.value}; pages: {result.page_count}; "
+                f"retrieved: {result.message_count}; "
+                f"failed items: {result.failed_message_count}; "
+                f"selected: {len(shortlist)}"
+            )
+            print(f"Last complete sync (UTC): {account.last_sync_at_utc or 'never'}")
+            _print_threads(result)
+            print("Metadata only: no full bodies, attachments, AI calls, or mailbox changes.")
+            if result.error_code:
+                print(f"Incomplete coverage: {result.error_code}. Cached metadata may be older.")
+            if show_metadata:
+                selected = {item.message.provider_message_id for item in shortlist}
+                rows = await messages.get_messages_in_range(
+                    account.id, window.start_utc, window.end_utc, inbox_only=True
                 )
-                result, shortlist = await application.prepare_daily_shortlist(
-                    tz_key=owner.zone.key,
-                    now_utc=now,
-                    include_ids=include_ids,
-                    exclude_ids=exclude_ids,
-                    shortlist_limit=owner.preferences.shortlist_limit,
-                    excluded_senders=rules,
-                    important_senders=owner.preferences.important_senders,
-                )
-                identity = await provider.current_account()
-                assert identity is not None
-                account = await accounts.get_by_provider_identity(
-                    identity.provider, identity.provider_account_id
-                )
-                assert account is not None
-                # Refresh ORM state after the sync's committed update.
-                await session.refresh(account)
-                print(f"Inbox date: {window.local_date} ({window.timezone_name})")
-                print(
-                    f"Status: {result.status.value}; pages: {result.page_count}; "
-                    f"retrieved: {result.message_count}; "
-                    f"failed items: {result.failed_message_count}; "
-                    f"selected: {len(shortlist)}"
-                )
-                print(f"Last complete sync (UTC): {account.last_sync_at_utc or 'never'}")
-                _print_threads(result)
-                print("Metadata only: no full bodies, attachments, AI calls, or mailbox changes.")
-                if result.error_code:
+                for row in rows:
+                    marker = (
+                        "excluded"
+                        if sender_excluded(row.sender_address, rules)
+                        else "selected"
+                        if row.provider_message_id in selected
+                        else "omitted"
+                    )
                     print(
-                        f"Incomplete coverage: {result.error_code}. Cached metadata may be older."
+                        f"{row.provider_message_id} [{marker}] score={row.rank_score} "
+                        f"{row.sender_address}: {row.subject}"
                     )
-                if show_metadata:
-                    selected = {item.message.provider_message_id for item in shortlist}
-                    rows = await messages.get_messages_in_range(
-                        account.id, window.start_utc, window.end_utc, inbox_only=True
-                    )
-                    for row in rows:
-                        marker = (
-                            "excluded"
-                            if sender_excluded(row.sender_address, rules)
-                            else "selected"
-                            if row.provider_message_id in selected
-                            else "omitted"
-                        )
-                        print(
-                            f"{row.provider_message_id} [{marker}] score={row.rank_score} "
-                            f"{row.sender_address}: {row.subject}"
-                        )
-                        reasons = ", ".join(_reason_words(value) for value in row.rank_reasons_json)
-                        if reasons:
-                            print(f"  reasons: {reasons}")
-                        if row.review_declined_at_utc is not None:
-                            print(f"  {DECLINED_TEXT}")
-                        print(f"  {row.web_link}")
-                    # Replies in tracked threads that today's Inbox sync can't see (ADR 0016).
-                    # Excluded senders never appear, like in the review.
-                    for reply in await threads.outside_replies(
-                        account,
-                        window,
-                        excluded_senders=rules,
-                        read_threads=result.threads_read,
-                    ):
-                        key = reply.provider_message_id
-                        stored = await messages.get_by_provider_message_id(account.id, key)
-                        score = None if stored is None else stored.rank_score
-                        marker = "selected" if key in selected else "omitted"
-                        print(
-                            f"{key} [{marker}] score={score} {reply.sender.address}: "
-                            f"{reply.subject}"
-                        )
-                        print(f"  {OUTSIDE_REPLY_TEXT}")
-                        if stored is not None and stored.review_declined_at_utc is not None:
-                            print(f"  {DECLINED_TEXT}")
-                        print(f"  {reply.web_link}")
-                return 0 if result.status is SyncStatus.COMPLETE else 4
-        finally:
-            await database.dispose()
+                    reasons = ", ".join(_reason_words(value) for value in row.rank_reasons_json)
+                    if reasons:
+                        print(f"  reasons: {reasons}")
+                    if row.review_declined_at_utc is not None:
+                        print(f"  {DECLINED_TEXT}")
+                    print(f"  {row.web_link}")
+                # Replies in tracked threads that today's Inbox sync can't see (ADR 0016).
+                # Excluded senders never appear, like in the review.
+                for reply in await threads.outside_replies(
+                    account,
+                    window,
+                    excluded_senders=rules,
+                    read_threads=result.threads_read,
+                ):
+                    key = reply.provider_message_id
+                    stored = await messages.get_by_provider_message_id(account.id, key)
+                    score = None if stored is None else stored.rank_score
+                    marker = "selected" if key in selected else "omitted"
+                    print(f"{key} [{marker}] score={score} {reply.sender.address}: {reply.subject}")
+                    print(f"  {OUTSIDE_REPLY_TEXT}")
+                    if stored is not None and stored.review_declined_at_utc is not None:
+                        print(f"  {DECLINED_TEXT}")
+                    print(f"  {reply.web_link}")
+            return 0 if result.status is SyncStatus.COMPLETE else 4
 
 
 def _describe(index: int, body: PreparedBody) -> str:
@@ -413,31 +404,26 @@ async def bodies(
 ) -> int:
     """Sync today's metadata, then read and prepare the shortlist in memory only."""
     owner = await _owner(database_path, timezone)
-    settings, tz, path = owner.settings, owner.zone, owner.path
+    settings, tz = owner.settings, owner.zone
     now = datetime.now(UTC)
     async with gmail_provider(settings, silent_only=silent_only) as provider:
         await provider.connect()
-        await asyncio.to_thread(upgrade_database, path)
-        database = Database.from_path(path)
-        try:
-            async with database.session() as session:
-                application = ApplicationService(
-                    provider,
-                    MessageRepository(session),
-                    SyncRunRepository(session),
-                    AccountRepository(session),
-                )
-                result, shortlist = await application.prepare_daily_shortlist(
-                    tz_key=tz.key,
-                    now_utc=now,
-                    include_ids=include_ids,
-                    exclude_ids=exclude_ids,
-                    shortlist_limit=owner.preferences.shortlist_limit,
-                    excluded_senders=owner.preferences.excluded_senders,
-                    important_senders=owner.preferences.important_senders,
-                )
-        finally:
-            await database.dispose()
+        async with owner.database() as database, database.session() as session:
+            application = ApplicationService(
+                provider,
+                MessageRepository(session),
+                SyncRunRepository(session),
+                AccountRepository(session),
+            )
+            result, shortlist = await application.prepare_daily_shortlist(
+                tz_key=tz.key,
+                now_utc=now,
+                include_ids=include_ids,
+                exclude_ids=exclude_ids,
+                shortlist_limit=owner.preferences.shortlist_limit,
+                excluded_senders=owner.preferences.excluded_senders,
+                important_senders=owner.preferences.important_senders,
+            )
         prepared = await BodyService(provider, limit=settings.ai_body_character_limit).prepare(
             shortlist
         )
@@ -563,50 +549,45 @@ async def ai_consent(
     drafting, or set how many messages automatic runs may send without asking (auto-send).
     Needs no Gmail connection."""
     path = database_path or AppPaths.from_qt().database_path
-    await asyncio.to_thread(upgrade_database, path)
-    database = Database.from_path(path)
-    try:
-        async with database.session() as session:
-            if action == "auto-send":
-                assert limit is not None
-                return await _auto_send(session, limit, assume_yes=assume_yes)
-            accounts = await AccountRepository(session).list_all()
-            consents = ConsentRepository(session)
-            owner = OwnerConsentRepository(session)
-            if action == "status":
-                if not accounts:
-                    print("No accounts in this database.")
-                for account in accounts:
-                    active = await consents.get_active(
-                        account.id, PROVIDER_NAME, CONSENT_DISCLOSURE_VERSION
-                    )
-                    when = None if active is None else active.granted_at_utc
-                    line = f"Account {account.id}: Groq consent {_granted(when)}"
-                    if active is not None:
-                        line += "; " + _permission_text(
-                            active.auto_send_limit, active.auto_send_granted_at_utc
-                        )
-                    print(line)
-                drafting = await owner.get_active(
-                    PROVIDER_NAME, DRAFTING_SCOPE, DRAFTING_DISCLOSURE_VERSION
-                )
-                when = None if drafting is None else drafting.granted_at_utc
-                print(f"AI drafting: Groq consent {_granted(when)}")
-                print(f"Automatic analysis: {await _connected_permission_text(session)}")
-                return 0
-            now = datetime.now(UTC)
-            briefs = 0
+    async with migrated_database(path) as database, database.session() as session:
+        if action == "auto-send":
+            assert limit is not None
+            return await _auto_send(session, limit, assume_yes=assume_yes)
+        accounts = await AccountRepository(session).list_all()
+        consents = ConsentRepository(session)
+        owner = OwnerConsentRepository(session)
+        if action == "status":
+            if not accounts:
+                print("No accounts in this database.")
             for account in accounts:
-                briefs += await consents.revoke_all(account.id, PROVIDER_NAME, now)
-            drafting_revoked = await owner.revoke_all(PROVIDER_NAME, now)
-            await session.commit()
-            print(
-                f"Groq consent revoked: {briefs + drafting_revoked} "
-                f"(briefs {briefs}, drafting {drafting_revoked})"
+                active = await consents.get_active(
+                    account.id, PROVIDER_NAME, CONSENT_DISCLOSURE_VERSION
+                )
+                when = None if active is None else active.granted_at_utc
+                line = f"Account {account.id}: Groq consent {_granted(when)}"
+                if active is not None:
+                    line += "; " + _permission_text(
+                        active.auto_send_limit, active.auto_send_granted_at_utc
+                    )
+                print(line)
+            drafting = await owner.get_active(
+                PROVIDER_NAME, DRAFTING_SCOPE, DRAFTING_DISCLOSURE_VERSION
             )
+            when = None if drafting is None else drafting.granted_at_utc
+            print(f"AI drafting: Groq consent {_granted(when)}")
+            print(f"Automatic analysis: {await _connected_permission_text(session)}")
             return 0
-    finally:
-        await database.dispose()
+        now = datetime.now(UTC)
+        briefs = 0
+        for account in accounts:
+            briefs += await consents.revoke_all(account.id, PROVIDER_NAME, now)
+        drafting_revoked = await owner.revoke_all(PROVIDER_NAME, now)
+        await session.commit()
+        print(
+            f"Groq consent revoked: {briefs + drafting_revoked} "
+            f"(briefs {briefs}, drafting {drafting_revoked})"
+        )
+        return 0
 
 
 async def _ask(prompt: str) -> str:
@@ -678,18 +659,6 @@ class CliDraftingGate:
         return (await _ask("Send? [y/N] ")).lower() in {"y", "yes"}
 
 
-class _GmailBodies:
-    """Opens Gmail for one body download, then closes it; only --use-email needs it."""
-
-    def __init__(self, settings: Settings, *, silent_only: bool) -> None:
-        self._settings = settings
-        self._silent_only = silent_only
-
-    async def fetch_message_body(self, provider_message_id: str) -> MessageBody:
-        async with gmail_provider(self._settings, silent_only=self._silent_only) as provider:
-            return await provider.fetch_message_body(provider_message_id)
-
-
 def _drafting_exit_code(outcome: DraftingOutcome) -> int:
     """Brief's codes: 0 done, 6 declined, 130 cancelled, 4 failed."""
     if outcome.status is DraftingStatus.GENERATED:
@@ -718,36 +687,35 @@ async def drafts_generate(
     never offered.
     """
     owner = await _owner(database_path, None)
-    settings, path, preferences = owner.settings, owner.path, owner.preferences
-    await asyncio.to_thread(upgrade_database, path)
-    database = Database.from_path(path)
+    settings, preferences = owner.settings, owner.preferences
     bodies = (
         BodyService(
-            _GmailBodies(settings, silent_only=silent_only),
+            GmailBodies(gmail_provider, settings, silent_only=silent_only),  # Only for --use-email.
             limit=settings.ai_body_character_limit,
         )
         if DraftContextPart.SOURCE_EMAIL in parts
         else None
     )
-    try:
-        async with groq_provider(settings) as ai, database.session() as session:
-            service = DraftingService(
-                session,
-                ai,
-                bodies,
-                zone=owner.zone,
-                excluded_senders=preferences.excluded_senders,
-            )
-            options = DraftingOptions(
-                parts=parts,
-                tone=preferences.draft_tone if tone is None else DraftTone(tone),
-                length=preferences.draft_length if length is None else DraftLength(length),
-                instructions=instructions,
-            )
-            plan = await service.prepare(public_id, options)
-            outcome = await service.generate(plan, CliDraftingGate(assume_yes=assume_yes))
-    finally:
-        await database.dispose()
+    async with (
+        owner.database() as database,
+        groq_provider(settings) as ai,
+        database.session() as session,
+    ):
+        service = DraftingService(
+            session,
+            ai,
+            bodies,
+            zone=owner.zone,
+            excluded_senders=preferences.excluded_senders,
+        )
+        options = DraftingOptions(
+            parts=parts,
+            tone=preferences.draft_tone if tone is None else DraftTone(tone),
+            length=preferences.draft_length if length is None else DraftLength(length),
+            instructions=instructions,
+        )
+        plan = await service.prepare(public_id, options)
+        outcome = await service.generate(plan, CliDraftingGate(assume_yes=assume_yes))
     if outcome.status is DraftingStatus.GENERATED:
         assert outcome.draft is not None
         previous = (
@@ -785,14 +753,6 @@ async def drafts_generate(
 
 def _count(value: int | None) -> str:
     return "?" if value is None else str(value)
-
-
-class _NeverAsks:
-    """The consent gate of an automatic run, which has nobody to ask: it is never called, and
-    if it were, nothing would be sent."""
-
-    async def confirm(self, preview: TransmissionPreview) -> bool:
-        return False
 
 
 def _ready_line(ready: int) -> str:
@@ -1028,7 +988,7 @@ async def brief(
     silent_only = silent_only or automatic
     day = None if date_text is None else parse_brief_date(date_text)
     owner = await _owner(database_path, timezone)
-    settings, tz, path = owner.settings, owner.zone, owner.path
+    settings, tz = owner.settings, owner.zone
     now = datetime.now(UTC)
     today = local_day_window(now, tz).local_date
     check_brief_date(day or today, today)
@@ -1038,44 +998,30 @@ async def brief(
         groq_provider(settings) as ai,
     ):
         await provider.connect()
-        await asyncio.to_thread(upgrade_database, path)
-        database = Database.from_path(path)
-        try:
-            async with database.session() as session:
-                service = BriefService(
-                    session=session,
-                    application=ApplicationService(
-                        provider,
-                        MessageRepository(session),
-                        SyncRunRepository(session),
-                        AccountRepository(session),
-                        threads=ThreadService(session, provider),
-                    ),
-                    bodies=BodyService(provider, limit=settings.ai_body_character_limit),
-                    analysis=AnalysisService(session, ai, batch_size=settings.ai_batch_size),
-                    digests=DigestService(session),
-                    consent_gate=(
-                        _NeverAsks() if automatic else CliConsentGate(assume_yes=assume_yes)
-                    ),
-                    clock=lambda: now,
-                )
-                result = await service.generate(
-                    tz_key=tz.key,
-                    include_ids=include_ids,
-                    exclude_ids=exclude_ids,
-                    shortlist_limit=owner.preferences.shortlist_limit,
-                    excluded_senders=owner.preferences.excluded_senders,
-                    important_senders=owner.preferences.important_senders,
-                    local_date=window.local_date,
-                    automatic=automatic,
-                )
-                links, proposals = (
-                    await _brief_extras(session, result.digest)
-                    if show and result.digest is not None
-                    else ({}, {})
-                )
-        finally:
-            await database.dispose()
+        async with owner.database() as database, database.session() as session:
+            service = compose_brief(
+                session,
+                provider,
+                ai,
+                settings,
+                consent_gate=NeverAsks() if automatic else CliConsentGate(assume_yes=assume_yes),
+                clock=lambda: now,
+            )
+            result = await service.generate(
+                tz_key=tz.key,
+                include_ids=include_ids,
+                exclude_ids=exclude_ids,
+                shortlist_limit=owner.preferences.shortlist_limit,
+                excluded_senders=owner.preferences.excluded_senders,
+                important_senders=owner.preferences.important_senders,
+                local_date=window.local_date,
+                automatic=automatic,
+            )
+            links, proposals = (
+                await _brief_extras(session, result.digest)
+                if show and result.digest is not None
+                else ({}, {})
+            )
         model = ai.model_name
     print(f"Inbox date: {window.local_date} ({window.timezone_name})")
     if result.status is BriefStatus.READY_FOR_REVIEW and not _refresh_failed(result):
@@ -1108,12 +1054,14 @@ async def _brief_extras(
     return links, proposals
 
 
-async def _open_existing(path: Path) -> Database | None:
+@contextlib.asynccontextmanager
+async def _existing_database(path: Path) -> AsyncIterator[Database | None]:
     """The migrated database, or None when it doesn't exist; it is never created here."""
     if not await asyncio.to_thread(path.exists):
-        return None
-    await asyncio.to_thread(upgrade_database, path)
-    return Database.from_path(path)
+        yield None
+        return
+    async with migrated_database(path) as database:
+        yield database
 
 
 async def briefs_list(
@@ -1126,11 +1074,10 @@ async def briefs_list(
     """
     explicit = resolve_timezone(timezone) if timezone and timezone.strip() else None
     path = database_path or AppPaths.from_qt().database_path
-    database = await _open_existing(path)
-    if database is None:
-        print("No saved briefs.")
-        return 0
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            print("No saved briefs.")
+            return 0
         async with database.session() as session:
             if explicit is not None:
                 zone = explicit
@@ -1150,8 +1097,6 @@ async def briefs_list(
                 if account.provider == ProviderKind.GMAIL.value
             ]
             missed = {email: await history.missed_days(email, today) for email in accounts}
-    finally:
-        await database.dispose()
     if not summaries:
         print("No saved briefs.")
     for summary in summaries:
@@ -1171,11 +1116,10 @@ async def briefs_show(date_text: str, *, account: str | None, database_path: Pat
     """Print one saved brief as brief --show does, with its coverage line; offline."""
     day = parse_brief_date(date_text)
     path = database_path or AppPaths.from_qt().database_path
-    database = await _open_existing(path)
-    if database is None:
-        print(_NO_BRIEF)
-        return 3
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            print(_NO_BRIEF)
+            return 3
         async with database.session() as session:
             history = BriefHistory(session)
             if account is None:
@@ -1186,8 +1130,6 @@ async def briefs_show(date_text: str, *, account: str | None, database_path: Pat
                 account = accounts[0] if accounts else None
             digest = None if account is None else await history.get(account, day)
             links, proposals = ({}, {}) if digest is None else await _brief_extras(session, digest)
-    finally:
-        await database.dispose()
     if digest is None:
         print(_NO_BRIEF)
         return 3
@@ -1250,60 +1192,55 @@ async def actions(
     """
     zone = resolve_timezone(timezone) if timezone and timezone.strip() else None
     path = database_path or AppPaths.from_qt().database_path
-    await asyncio.to_thread(upgrade_database, path)
-    database = Database.from_path(path)
-    try:
-        async with database.session() as session:
-            if zone is None and action in _ZONED_ACTIONS:
-                try:
-                    zone = owner_zone(await PreferencesService(session).get())
-                except PreferencesUnavailableError:
-                    await session.rollback()
-                    print("Saved preferences could not be read; showing the system time zone.")
-            if action in _PROPOSAL_ACTIONS:
-                return await _proposals_command(
-                    session, action, proposal_id, zone or resolve_timezone(None)
-                )
-            service = ActionService(session)
-            if action == "accept" and into is not None:
-                assert suggestion_id is not None
-                current = await service.get(into)
-                try:
-                    added = await service.accept_into(suggestion_id, into, current.revision)
-                except ActionConflictError as exc:
-                    print(str(exc))  # Static, such as a suggestion owned by another action.
-                    return 3
-                title = _terminal_safe(added.action.title)
-                if not added.changed:
-                    print(f"Already added to: {title}.")
-                    return 0
-                print(f"Added to: {title} ({added.action.public_id})")
-                return 0
-            if action == "accept":
-                assert suggestion_id is not None
-                accepted = await service.accept(suggestion_id)
-                print(f"Accepted: {accepted.title} ({accepted.public_id})")
-                return 0
-            if action == "dismiss":
-                assert suggestion_id is not None
-                await service.dismiss(suggestion_id)
-                print("Dismissed.")
-                return 0
-            if action == "seen":
-                assert public_id is not None
-                current = await service.get(public_id)
-                marked = await service.mark_thread_seen(public_id, current.revision)
-                unchanged = marked.revision == current.revision
-                print("Nothing new in its threads." if unchanged else "Marked seen.")
-                return 0
-            listed = await service.list_actions(ActionFilter(view))
-            total = (
-                await service.count_actions(ActionFilter.COMPLETED)
-                if view == ActionFilter.COMPLETED.value and len(listed) >= COMPLETED_LIST_LIMIT
-                else len(listed)
+    async with migrated_database(path) as database, database.session() as session:
+        if zone is None and action in _ZONED_ACTIONS:
+            try:
+                zone = owner_zone(await PreferencesService(session).get())
+            except PreferencesUnavailableError:
+                await session.rollback()
+                print("Saved preferences could not be read; showing the system time zone.")
+        if action in _PROPOSAL_ACTIONS:
+            return await _proposals_command(
+                session, action, proposal_id, zone or resolve_timezone(None)
             )
-    finally:
-        await database.dispose()
+        service = ActionService(session)
+        if action == "accept" and into is not None:
+            assert suggestion_id is not None
+            current = await service.get(into)
+            try:
+                added = await service.accept_into(suggestion_id, into, current.revision)
+            except ActionConflictError as exc:
+                print(str(exc))  # Static, such as a suggestion owned by another action.
+                return 3
+            title = _terminal_safe(added.action.title)
+            if not added.changed:
+                print(f"Already added to: {title}.")
+                return 0
+            print(f"Added to: {title} ({added.action.public_id})")
+            return 0
+        if action == "accept":
+            assert suggestion_id is not None
+            accepted = await service.accept(suggestion_id)
+            print(f"Accepted: {accepted.title} ({accepted.public_id})")
+            return 0
+        if action == "dismiss":
+            assert suggestion_id is not None
+            await service.dismiss(suggestion_id)
+            print("Dismissed.")
+            return 0
+        if action == "seen":
+            assert public_id is not None
+            current = await service.get(public_id)
+            marked = await service.mark_thread_seen(public_id, current.revision)
+            unchanged = marked.revision == current.revision
+            print("Nothing new in its threads." if unchanged else "Marked seen.")
+            return 0
+        listed = await service.list_actions(ActionFilter(view))
+        total = (
+            await service.count_actions(ActionFilter.COMPLETED)
+            if view == ActionFilter.COMPLETED.value and len(listed) >= COMPLETED_LIST_LIMIT
+            else len(listed)
+        )
     if not listed:
         print("No actions.")
         return 0
@@ -1449,18 +1386,13 @@ async def drafts(
 ) -> int:
     """List drafts, or export one to stdout or a new file; needs no Gmail or AI access."""
     path = database_path or AppPaths.from_qt().database_path
-    await asyncio.to_thread(upgrade_database, path)
-    database = Database.from_path(path)
-    try:
-        async with database.session() as session:
-            service = DraftService(session)
-            if action == "list":
-                summaries = await service.list_summaries()
-            else:
-                assert public_id is not None
-                draft = await service.get(public_id)
-    finally:
-        await database.dispose()
+    async with migrated_database(path) as database, database.session() as session:
+        service = DraftService(session)
+        if action == "list":
+            summaries = await service.list_summaries()
+        else:
+            assert public_id is not None
+            draft = await service.get(public_id)
     if action == "list":
         if not summaries:
             print("No drafts.")
@@ -1499,14 +1431,13 @@ def _refresh_text(minutes: int | None) -> str:
 async def _automatic_analysis_text(path: Path, *, exists: bool) -> str:
     """The connected account's automatic-analysis permission, read locally; nothing is
     created when there is no database."""
-    database = await _open_existing(path) if exists else None
-    if database is None:
+    if not exists:
         return await _connected_permission_text(None)
-    try:
+    async with _existing_database(path) as database:
+        if database is None:
+            return await _connected_permission_text(None)
         async with database.session() as session:
             return await _connected_permission_text(session)
-    finally:
-        await database.dispose()
 
 
 async def _connected_permission_text(session: AsyncSession | None) -> str:
@@ -1539,7 +1470,7 @@ async def preferences_show(*, database_path: Path | None) -> int:
     settings = _load_settings()
     path = database_path or AppPaths.from_qt().database_path
     exists = await asyncio.to_thread(path.exists)
-    preferences = await _preferences(path)
+    preferences, _ = await _preferences(path)
     if not exists:
         print("No database yet: these are the defaults.")
     elif preferences.updated_at_utc is None:

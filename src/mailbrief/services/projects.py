@@ -1,15 +1,15 @@
 """Create, organize and archive owner projects without changing or deleting their tasks."""
 
-import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.services.writes import commit_once
 from mailbrief.storage.projects import ProjectRepository, area_from_row, project_from_row
 from mailbrief.storage.tables import LifeAreaTable, ProjectTable
 
@@ -19,24 +19,16 @@ class ProjectConflictError(ValueError):
 
 
 class ProjectService:
-    def __init__(
-        self, session: AsyncSession, *, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
-    ) -> None:
+    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = utc_now) -> None:
         self.session = session
         self.repository = ProjectRepository(session)
         self.clock = clock
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         try:
-            result = await operation(normalize_utc(self.clock()))
-            await self.session.commit()
-            return result
+            return await commit_once(self.session, self.clock, operation)
         except StaleDataError:
-            await self.session.rollback()
             raise ProjectConflictError("Organization changed; reload it and try again.") from None
-        except BaseException:
-            await self.session.rollback()
-            raise
 
     async def list_areas(self) -> tuple[LifeArea, ...]:
         return await self.repository.areas()
@@ -63,7 +55,7 @@ class ProjectService:
     async def create_area(self, edit: AreaEdit) -> LifeArea:
         async def run(now: datetime) -> LifeArea:
             row = LifeAreaTable(
-                public_id=str(uuid.uuid4()),
+                public_id=new_public_id(),
                 name=edit.name,
                 notes=edit.notes,
                 revision=1,
@@ -108,7 +100,7 @@ class ProjectService:
             if edit.area_public_id is not None:
                 await self._area(edit.area_public_id)
             row = ProjectTable(
-                public_id=str(uuid.uuid4()),
+                public_id=new_public_id(),
                 name=edit.name,
                 notes=edit.notes,
                 area_public_id=edit.area_public_id,

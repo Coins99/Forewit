@@ -1,8 +1,6 @@
 """The preferences row: defaults when absent, fresh reads, and replacing unreadable rows."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -32,22 +30,6 @@ EDIT = PreferencesEdit(
     ai_max_requests_per_run=5,
     ai_timeout_seconds=90.5,
 )
-
-
-@pytest.fixture
-async def database(tmp_path: Path) -> AsyncIterator[Database]:
-    database = Database.from_path(tmp_path / "preferences.sqlite3")
-    await database.create_schema_for_tests()
-    try:
-        yield database
-    finally:
-        await database.dispose()
-
-
-@pytest.fixture
-async def session(database: Database) -> AsyncIterator[AsyncSession]:
-    async with database.session() as session:
-        yield session
 
 
 async def save(session: AsyncSession, edit: PreferencesEdit = EDIT) -> None:

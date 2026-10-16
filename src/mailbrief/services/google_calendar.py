@@ -11,19 +11,20 @@ counts and codes only.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.common import normalize_utc
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.google_calendar import (
     CalendarSyncResult,
     GoogleCalendarInfo,
     GoogleCoverage,
     GoogleEvent,
 )
+from mailbrief.infra.tasks import running
 from mailbrief.ports.calendar import CalendarReader
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
@@ -33,6 +34,7 @@ from mailbrief.ports.errors import (
 )
 from mailbrief.services.calendar import day_window
 from mailbrief.services.sync import sanitize_error_code
+from mailbrief.services.writes import committed
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 
 logger = logging.getLogger(__name__)
@@ -44,10 +46,6 @@ CONCURRENCY: Final = 3
 # Account-wide errors end a sync. Any other failure, a calendar Google refuses included,
 # is that calendar's alone: the token already holds both calendar permissions.
 _STOPPING: Final = (AuthenticationRequiredError, ProviderRateLimitError)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def sync_window(day: date) -> tuple[date, date]:
@@ -86,7 +84,7 @@ class CalendarSyncService:
         session: AsyncSession,
         reader: CalendarReader,
         *,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._session = session
         self._reader = reader
@@ -128,8 +126,7 @@ class CalendarSyncService:
         stopped: str | None = None
         throttled = False
         done: set[str] = set()
-        tasks = [asyncio.create_task(read(calendar)) for calendar in shown]
-        try:
+        async with running(read(calendar) for calendar in shown) as tasks:
             for finished in asyncio.as_completed(tasks):
                 calendar, outcome = await finished
                 if outcome is None:
@@ -152,10 +149,6 @@ class CalendarSyncService:
                     )
                     synced += 1
                 done.add(calendar.calendar_id)
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
         if throttled:
             waiting = [rows[c.calendar_id] for c in shown if c.calendar_id not in done]
             await self._saved(self._repository.mark_checked(waiting, first_day, last_day, now))
@@ -173,13 +166,7 @@ class CalendarSyncService:
 
     async def _saved[T](self, change: Awaitable[T]) -> T:
         """Commit one change to the cache, or roll it back and raise."""
-        try:
-            result = await change
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-        return result
+        return await committed(self._session, change)
 
     async def clear(self) -> None:
         """Forget the cache, as disconnecting Google Calendar does."""
@@ -188,9 +175,4 @@ class CalendarSyncService:
 
 async def forget_cache(session: AsyncSession) -> None:
     """Forget every cached Google calendar and event; no reader or network is needed."""
-    try:
-        await GoogleCalendarRepository(session).clear()
-        await session.commit()
-    except BaseException:
-        await session.rollback()
-        raise
+    await committed(session, GoogleCalendarRepository(session).clear())

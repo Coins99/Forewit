@@ -4,7 +4,8 @@ import asyncio
 import contextlib
 import itertools
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
+from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 from typing import Final, Protocol, assert_never
@@ -53,6 +54,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningStatus,
 )
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -383,6 +385,15 @@ class DesktopBackend(Protocol):
     async def undo_calendar_changes(self, batch: AppliedBatch) -> None: ...
 
 
+class _Gone(Enum):
+    """What MainWindow._unless_stale returns when the change didn't happen."""
+
+    GONE = auto()
+
+
+_GONE: Final = _Gone.GONE
+
+
 # Raised when the brief, an action or a draft changed since it was shown; the window reloads.
 _STALE = (
     ActionConflictError,
@@ -706,7 +717,7 @@ class MainWindow(QMainWindow):
         # A new day's reload of the actions and Briefs, waiting for the window to be free.
         self._day_refresh_pending = False
         # Carryover and overdue labels use the owner's local day.
-        self.now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self.now: Callable[[], datetime] = utc_now
         self.zone = resolve_timezone(None)
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)
@@ -1512,6 +1523,20 @@ class MainWindow(QMainWindow):
         self.status.setText("That changed or is no longer available; the view was reloaded.")
         await self._refresh_views()
 
+    async def _unless_stale[T](self, call: Awaitable[T], *, explain: bool = False) -> T | _Gone:
+        """``call``'s result, or _GONE when what it changes is stale: then the view reloads
+        and says so. With ``explain``, an action conflict shows its own static message."""
+        try:
+            return await call
+        except _STALE as exc:
+            if explain and isinstance(exc, ActionConflictError):
+                log_failure(exc)
+                self.status.setText(str(exc))  # Static; names no action or mail.
+                await self._refresh_views()
+            else:
+                await self._stale(exc)
+            return _GONE
+
     def _start_from_link(self, operation: Callable[[], Awaitable[None]]) -> None:
         """Brief links stay clickable while busy, so a refused click says why."""
         if not self.start(operation, cancellable=False) and not self._closing:
@@ -1524,10 +1549,8 @@ class MainWindow(QMainWindow):
             self._start_from_link(lambda: self._dismiss_suggestion(suggestion_id))
 
     async def _accept_suggestion(self, suggestion_id: int) -> None:
-        try:
-            action = await self.backend.accept_suggestion(suggestion_id)
-        except _STALE as exc:
-            await self._stale(exc)
+        action = await self._unless_stale(self.backend.accept_suggestion(suggestion_id))
+        if action is _GONE:
             return
         public_id, revision = action.public_id, action.revision
         self._offer_undo("Undo accept", lambda: self.backend.unaccept_action(public_id, revision))
@@ -1540,15 +1563,10 @@ class MainWindow(QMainWindow):
     async def _accept_into(self, suggestion_id: int, public_id: str, revision: int) -> None:
         """Add the suggestion's email to an action that continues its thread, with Undo when
         that changed anything."""
-        try:
-            result = await self.backend.accept_into(suggestion_id, public_id, revision)
-        except ActionConflictError as exc:
-            log_failure(exc)
-            self.status.setText(str(exc))  # Static; names no action or mail.
-            await self._refresh_views()
-            return
-        except _STALE as exc:
-            await self._stale(exc)
+        result = await self._unless_stale(
+            self.backend.accept_into(suggestion_id, public_id, revision), explain=True
+        )
+        if result is _GONE:
             return
         action = result.action
         if not result.changed:  # Already there: nothing to undo.
@@ -1583,15 +1601,10 @@ class MainWindow(QMainWindow):
 
     async def _apply_proposal(self, proposal_id: int, revision: int) -> None:
         """Apply a proposal the owner chose, at the action revision they saw, with Undo."""
-        try:
-            action = await self.backend.apply_proposal(proposal_id, revision)
-        except ActionConflictError as exc:
-            log_failure(exc)
-            self.status.setText(str(exc))  # Static; names no action or mail.
-            await self._refresh_views()
-            return
-        except _STALE as exc:
-            await self._stale(exc)
+        action = await self._unless_stale(
+            self.backend.apply_proposal(proposal_id, revision), explain=True
+        )
+        if action is _GONE:
             return
         applied_revision = action.revision
 
@@ -1603,25 +1616,15 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     async def _dismiss_proposal(self, proposal_id: int) -> None:
-        try:
-            await self.backend.dismiss_proposal(proposal_id)
-        except ActionConflictError as exc:
-            log_failure(exc)
-            self.status.setText(str(exc))
-            await self._refresh_views()
-            return
-        except _STALE as exc:
-            await self._stale(exc)
+        dismiss = self.backend.dismiss_proposal(proposal_id)
+        if await self._unless_stale(dismiss, explain=True) is _GONE:
             return
         self._offer_undo("Undo dismiss", lambda: self.backend.restore_proposal(proposal_id))
         self.status.setText("Proposal dismissed. It won't be proposed again.")
         await self._refresh_views()
 
     async def _dismiss_suggestion(self, suggestion_id: int) -> None:
-        try:
-            await self.backend.dismiss_suggestion(suggestion_id)
-        except _STALE as exc:
-            await self._stale(exc)
+        if await self._unless_stale(self.backend.dismiss_suggestion(suggestion_id)) is _GONE:
             return
         self._offer_undo("Undo dismiss", lambda: self.backend.restore_suggestion(suggestion_id))
         self.status.setText("Suggestion dismissed. It won't be suggested again for this email.")
@@ -1804,10 +1807,10 @@ class MainWindow(QMainWindow):
             self.action_editor.keep_open(_BUSY)
 
     async def _complete_action(self, action: Action) -> None:
-        try:
-            done = await self.backend.complete_action(action.public_id, action.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        done = await self._unless_stale(
+            self.backend.complete_action(action.public_id, action.revision)
+        )
+        if done is _GONE:
             return
 
         async def undo() -> None:
@@ -1818,10 +1821,10 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     async def _reopen_action(self, action: Action) -> None:
-        try:
-            opened = await self.backend.reopen_action(action.public_id, action.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        opened = await self._unless_stale(
+            self.backend.reopen_action(action.public_id, action.revision)
+        )
+        if opened is _GONE:
             return
 
         async def undo() -> None:
@@ -1832,10 +1835,10 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     async def _delete_action(self, action: Action) -> None:
-        try:
-            await self.backend.delete_action(action.public_id, action.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        if (
+            await self._unless_stale(self.backend.delete_action(action.public_id, action.revision))
+            is _GONE
+        ):
             return
         public_id = action.public_id
 
@@ -1847,10 +1850,10 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     async def _mark_seen(self, action: Action) -> None:
-        try:
-            marked = await self.backend.mark_thread_seen(action.public_id, action.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        marked = await self._unless_stale(
+            self.backend.mark_thread_seen(action.public_id, action.revision)
+        )
+        if marked is _GONE:
             return
         self._offer_undo()  # Like an edit, it has no undo; an older offer could be stale.
         self.status.setText(f"Marked seen: {marked.title}.")
@@ -2173,10 +2176,8 @@ class MainWindow(QMainWindow):
         try:
             if not await self._save_inline_draft():
                 return
-            try:
-                draft = await self.backend.get_draft(public_id)
-            except _STALE as exc:
-                await self._stale(exc)
+            draft = await self._unless_stale(self.backend.get_draft(public_id))
+            if draft is _GONE:
                 return
             self._edit_draft(draft)
         finally:
@@ -2246,10 +2247,10 @@ class MainWindow(QMainWindow):
         self.calendar_panel.select_event(saved.public_id)
 
     async def _delete_event(self, event: CalendarEvent) -> None:
-        try:
-            await self.backend.delete_event(event.public_id, event.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        if (
+            await self._unless_stale(self.backend.delete_event(event.public_id, event.revision))
+            is _GONE
+        ):
             return
         public_id = event.public_id
 
@@ -2818,10 +2819,10 @@ class MainWindow(QMainWindow):
             and editor.draft.public_id == summary.public_id
         ):
             summary = summary.model_copy(update={"revision": editor.draft.revision})
-        try:
-            await self.backend.delete_draft(summary.public_id, summary.revision)
-        except _STALE as exc:
-            await self._stale(exc)
+        if (
+            await self._unless_stale(self.backend.delete_draft(summary.public_id, summary.revision))
+            is _GONE
+        ):
             return
         if (
             editor.embedded
