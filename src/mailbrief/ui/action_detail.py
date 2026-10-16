@@ -13,8 +13,10 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QPushButton,
     QScrollArea,
@@ -36,8 +38,9 @@ from mailbrief.ui.action_text import (
 from mailbrief.ui.brief_detail import DETAIL_MAX_WIDTH
 from mailbrief.ui.brief_list import NO_SUBJECT
 from mailbrief.ui.deadline_text import day_text, moment_text
+from mailbrief.ui.hairline import HairlineDivider
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
-from mailbrief.ui.theme import SMALL_PX, TEXT_PX, TITLE_PX
+from mailbrief.ui.theme import SMALL_PX, TEXT_PX
 
 EMPTY_TEXT: Final = {
     ActionFilter.OPEN: "No open actions. Create a task or accept a suggestion in a brief.",
@@ -112,7 +115,7 @@ def _button_row(name: str, *buttons: QPushButton) -> QWidget:
 
 def _heading(text: str) -> QWidget:
     """A section's caption: app text, muted."""
-    label = plain_label(text, tone="muted", px=SMALL_PX)
+    label = plain_label(text, tone="muted", px=9)
     label.setObjectName("actionSectionHeading")
     return label
 
@@ -139,8 +142,8 @@ class ActionDetailPane(QScrollArea):
         # A readable measure on wide windows; the scroll area keeps it at the left.
         content.setMaximumWidth(DETAIL_MAX_WIDTH)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(44, 30, 44, 32)
+        layout.setSpacing(16)
         # K: the window's Sync and review already takes S.
         self.seen_button = outline_button("Mar&k seen", "seenButton", mnemonic=True)
         self.seen_button.setToolTip("Clear the new-in-thread and you-replied notes.")
@@ -152,31 +155,39 @@ class ActionDetailPane(QScrollArea):
             "Open s&ource", "sourceButton", mnemonic=True, icon_name="external-link"
         )
         self.edit_button = outline_button("&Edit…", "editButton", mnemonic=True)
-        self.complete_button = outline_button("Com&plete", "completeButton", mnemonic=True)
-        self.delete_button = outline_button("De&lete", "deleteButton", mnemonic=True)
+        self.complete_button = outline_button(
+            "Com&plete", "completeButton", mnemonic=True, primary=True, icon_name="check"
+        )
+        self.delete_button = outline_button(
+            "De&lete", "deleteButton", mnemonic=True, icon_name="trash"
+        )
+        self.edit_button.setProperty("variant", "ghost")
+        self.delete_button.setProperty("variant", "ghost")
         self.draft_button = outline_button(
-            "Dra&ft…", "draftButton", mnemonic=True, icon_name="pencil"
+            "Dra&ft reply", "draftButton", mnemonic=True, icon_name="pencil"
         )
         self.empty = wrap_label("", tone="muted", px=TEXT_PX)
         self.empty.setObjectName("actionEmpty")
         self._top = _Section("actionSummary")
+        self._activity_summary = _Section("actionActivitySummary")
         self._seen_row = _button_row("seenRow", self.seen_button)
         self._proposals = _Section("actionProposals")
         self._proposals_row = _button_row("proposalsRow", self.proposals_button)
         self._sources = _Section("actionSources")
         self._source_row = _button_row("sourceRow", self.source_button)
         self._later_sources = _Section("actionLaterSources")
-        self._footer = _button_row(
-            "actionFooter",
-            self.edit_button,
-            self.complete_button,
-            self.delete_button,
-            self.draft_button,
-        )
+        self._footer = QWidget()
+        self._footer.setObjectName("actionFooter")
+        self._footer_layout = QGridLayout(self._footer)
+        self._footer_layout.setContentsMargins(0, 0, 0, 0)
+        self._footer_layout.setSpacing(8)
+        self._arrange_footer(4)
         # Created in display order, which is also the Tab order of the buttons.
         for widget in (
             self.empty,
             self._top,
+            self._footer,
+            self._activity_summary,
             self._seen_row,
             self._proposals,
             self._proposals_row,
@@ -185,24 +196,43 @@ class ActionDetailPane(QScrollArea):
             self._later_sources,
         ):
             layout.addWidget(widget)
-        layout.addSpacing(_SECTION_GAP)
-        layout.addWidget(self._footer)
         layout.addStretch(1)
         self.setWidget(content)
         self.title: QWidget | None = None
         self._shown: str | None = None  # The public ID of the action shown.
         self.show_empty(ActionFilter.OPEN)
 
+    def _arrange_footer(self, columns: int) -> None:
+        buttons = self._footer_buttons()
+        for number, button in enumerate(buttons):
+            self._footer_layout.addWidget(
+                button, number // columns, number % columns, Qt.AlignmentFlag.AlignLeft
+            )
+        for column in range(5):
+            self._footer_layout.setColumnStretch(column, 1 if column == columns else 0)
+        for first, second in zip(buttons, buttons[1:], strict=False):
+            QWidget.setTabOrder(first, second)
+
+    def _footer_buttons(self) -> list[QPushButton]:
+        leading = [self.complete_button, self.draft_button]
+        if self.draft_button.property("variant") == "primary":
+            leading.reverse()
+        return [*leading, self.edit_button, self.delete_button]
+
+    def arrange_controls(self) -> None:
+        self._arrange_footer(4 if self.viewport().width() >= 480 else 2)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.arrange_controls()
+
     def all_buttons(self) -> list[QPushButton]:
         """Every button, shown or not, in display order."""
         return [
+            *self._footer_buttons(),
             self.seen_button,
             self.proposals_button,
             self.source_button,
-            self.edit_button,
-            self.complete_button,
-            self.delete_button,
-            self.draft_button,
         ]
 
     def buttons(self) -> list[QPushButton]:
@@ -217,7 +247,13 @@ class ActionDetailPane(QScrollArea):
         self.title = None
         self.empty.setText(EMPTY_TEXT[view])
         self.empty.show()
-        for section in (self._top, self._proposals, self._sources, self._later_sources):
+        for section in (
+            self._top,
+            self._activity_summary,
+            self._proposals,
+            self._sources,
+            self._later_sources,
+        ):
             section.set_widgets(())
         for row in (self._seen_row, self._proposals_row, self._source_row, self._footer):
             row.hide()
@@ -226,11 +262,11 @@ class ActionDetailPane(QScrollArea):
         """Show ``action``; another action than the one shown starts at the top."""
         details = action_details(action, today=today, zone=zone, now=now)
         self.empty.hide()
-        self.title = wrap_label(action.title, px=TITLE_PX, semibold=True)
+        self.title = wrap_label(action.title, px=23, medium=True)
         self.title.setObjectName("actionTitle")
-        state = wrap_label(state_text(action, details), tone="secondary", px=TEXT_PX)
+        state = wrap_label(state_text(action, details), tone="secondary", px=9)
         state.setObjectName("actionState")
-        top: list[QWidget | int] = [self.title, state, *self._dates(details)]
+        top: list[QWidget | int] = [state, self.title, *self._dates(details)]
         if action.project is not None:
             project = action.project
             organization = "Project: " + project.name
@@ -247,9 +283,63 @@ class ActionDetailPane(QScrollArea):
             label = wrap_label(" · ".join(labels), tone="secondary", px=TEXT_PX)
             label.setObjectName("actionPriorityTags")
             top.append(label)
-        top += self._plan(action, details)
         if action.notes.strip():
-            top += [_SECTION_GAP, _heading("Notes"), wrap_label(action.notes, px=TEXT_PX)]
+            top += [12, wrap_label(action.notes, px=11)]
+        facts = QWidget()
+        facts.setObjectName("actionFacts")
+        facts.setAccessibleName("Action details")
+        facts_layout = QVBoxLayout(facts)
+        facts_layout.setContentsMargins(0, 12, 0, 8)
+        facts_layout.setSpacing(14)
+        facts_layout.addWidget(HairlineDivider())
+        columns = QHBoxLayout()
+        source = action.sources[0] if action.sources else None
+        values = (
+            (
+                (
+                    "WAITING SINCE",
+                    day_text(action.created_at_utc.astimezone(zone).date(), today=today),
+                ),
+                ("FOLLOW-UP", target_text(details) or "No date set"),
+                ("SOURCE", (source.subject or NO_SUBJECT) if source else "Manual task"),
+            )
+            if details.waiting
+            else (
+                (
+                    "OWNER",
+                    "You" if action.ownership is ActionOwnership.MINE else "Waiting for someone",
+                ),
+                ("PROJECT", action.project.name if action.project else "Unassigned"),
+                ("SOURCE EMAIL", (source.subject or NO_SUBJECT) if source else "Manual task"),
+            )
+        )
+        for caption, value in values:
+            column = QVBoxLayout()
+            column.setSpacing(6)
+            column.addWidget(plain_label(caption, tone="muted", px=8))
+            column.addWidget(wrap_label(value, px=10))
+            column.addStretch(1)
+            columns.addLayout(column, 1)
+        facts_layout.addLayout(columns)
+        facts_layout.addWidget(HairlineDivider())
+        top.append(facts)
+        if details.waiting:
+            callout = QWidget()
+            callout.setObjectName("waitingFollowUp")
+            callout.setAccessibleName("Suggested follow-up")
+            callout.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            copy = QVBoxLayout(callout)
+            copy.setContentsMargins(14, 12, 14, 12)
+            copy.setSpacing(5)
+            copy.addWidget(plain_label("Suggested follow-up", px=11, medium=True))
+            copy.addWidget(
+                wrap_label(
+                    "Draft a short check-in when you're ready to follow up.", tone="muted", px=9
+                )
+            )
+            top.append(callout)
+        summary = top
+        top = self._plan(action, details)
         activity = [text for text in (details.activity, details.replied) if text is not None]
         if activity:
             top += [_SECTION_GAP, _heading("Thread")]
@@ -284,7 +374,8 @@ class ActionDetailPane(QScrollArea):
                 label = wrap_label(f"{name}{detail} · {at}{legacy}", tone="secondary", px=SMALL_PX)
                 label.setObjectName("actionActivityEntry")
                 top.append(label)
-        self._top.set_widgets(top)
+        self._top.set_widgets(summary)
+        self._activity_summary.set_widgets(top)
         self._seen_row.setVisible(bool(activity))
         count = len(details.proposals)
         self._proposals.set_widgets(
@@ -301,12 +392,17 @@ class ActionDetailPane(QScrollArea):
         widgets: list[QWidget | int] = []
         if details.due is not None:
             text = f"Due {details.due}" + (" · Overdue" if details.overdue else "")
-            due = wrap_label(text, tone="warning" if details.overdue else "secondary", px=TEXT_PX)
+            due = wrap_label(text, tone="warning" if details.overdue else "secondary", px=9)
             due.setObjectName("actionDeadline")
-            widgets.append(due)
+            badge = QWidget()
+            row = QHBoxLayout(badge)
+            row.setContentsMargins(0, 4, 0, 6)
+            row.addWidget(due)
+            row.addStretch(1)
+            widgets.append(badge)
         target = target_text(details)
         if target is not None:
-            label = wrap_label(target, tone="secondary", px=TEXT_PX)
+            label = wrap_label(target, tone="secondary", px=10)
             label.setObjectName("actionTarget")
             widgets.append(label)
         if details.estimate is not None:
@@ -324,9 +420,9 @@ class ActionDetailPane(QScrollArea):
         ]
         for step in sorted(action.steps, key=lambda step: step.position):
             if step.done:
-                widgets.append(wrap_label(DONE_MARK + step.text, tone="muted", px=TEXT_PX))
+                widgets.append(wrap_label(DONE_MARK + step.text, tone="muted", px=11))
             else:
-                widgets.append(wrap_label(OPEN_MARK + step.text, px=TEXT_PX))
+                widgets.append(wrap_label(OPEN_MARK + step.text, px=11))
         return widgets
 
     def _show_sources(self, action: Action, *, today: date, zone: ZoneInfo) -> None:

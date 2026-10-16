@@ -243,6 +243,7 @@ async def window_for(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     window._apply_owner_preferences(OwnerPreferences(revision=1, time_zone=ZONE.key))
     window.start(window.initialize)
     await finish(window)
+    window.show()
     return window
 
 

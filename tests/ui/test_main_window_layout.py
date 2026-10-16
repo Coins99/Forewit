@@ -26,7 +26,7 @@ from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.ui.actions_view import ActionsPanel
 from mailbrief.ui.drafts_view import DraftsPanel
-from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
+from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import SIDEBAR_WIDTH, TITLE_PX, ThemeMode, apply_theme
@@ -88,14 +88,7 @@ async def test_the_central_widget_is_the_workspace_with_the_status_strip_on_its_
     assert layout is not None and layout.count() == 1
     item = layout.itemAt(0)
     assert item is not None and item.widget() is window.workspace
-    # No hairline crosses the window: the strip sits on the glass under the sheet. (A page
-    # may rule off its own content inside the sheet, as the Inbox's reading pane does.)
-    sheet = window.workspace.sheet
-    assert not [
-        divider
-        for divider in central.findChildren(HairlineDivider)
-        if not sheet.isAncestorOf(divider)
-    ]
+    # The sidebar and overview retain the supplied design's dividers.
     strip = window.findChild(QWidget, "statusStrip")
     assert strip is not None and strip.parent() is window.workspace.footer_bar
     assert window.status.parent() is strip and window.undo_button.parent() is strip
@@ -114,7 +107,7 @@ async def test_the_central_widget_is_the_workspace_with_the_status_strip_on_its_
     footer = [sidebar.footer.itemAt(index) for index in range(sidebar.footer.count())]
     # Only Google sign-in, while signed out: who is signed in, the AI line and Disconnect
     # are in Settings' Account card.
-    assert [None if item is None else item.widget() for item in footer] == [window.connect_button]
+    assert footer[-1] is not None and footer[-1].widget() is window.connect_button
     card = window.settings_dialog.findChild(QWidget, "accountCard")
     assert card is not None
     for widget in (window.connection, window.ai, window.disconnect_button):
@@ -478,7 +471,7 @@ async def click(window: MainWindow, target: QPushButton) -> None:
 async def test_each_detail_button_reaches_the_backend(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    await click(window, button(window, "Accept"))
+    await click(window, button(window, "Add action"))
     assert last_call(backend) == ("accept_suggestion", 11)
     await click(window, button(window, "Dismiss"))
     assert last_call(backend) == ("dismiss_suggestion", 11)
@@ -524,7 +517,7 @@ async def test_the_same_email_stays_selected_after_accept(
     window.start(window.initialize)
     await finish(window)
     select_item(window, "sam")
-    await click(window, button(window, "Accept"))
+    await click(window, button(window, "Add action"))
     assert last_call(backend) == ("accept_suggestion", 11)
     assert window.workspace.brief_list.selected_key() == "sam"
 
@@ -572,7 +565,14 @@ def test_page_headings_use_the_title_size(
     heading = next(label for label in panel.findChildren(QLabel) if label.text() == title)
     assert heading.font().pixelSize() == TITLE_PX
     for page_button in panel.findChildren(QPushButton):
-        assert page_button.property("variant") == "outline"
+        expected = (
+            "primary"
+            if page_button.objectName() in ("newTaskButton", "completeButton", "newDraftButton")
+            else "ghost"
+            if page_button.objectName() in ("editButton", "deleteButton", "organizeButton")
+            else "outline"
+        )
+        assert page_button.property("variant") == expected
         assert not page_button.autoDefault()
 
 

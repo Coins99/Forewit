@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
@@ -23,6 +24,10 @@ from PySide6.QtWidgets import (
 from mailbrief.domain.actions import Action, ActionProposal, ActionStatus
 from mailbrief.domain.analysis import FollowUpKind
 from mailbrief.ui.deadline_text import deadline_text, moment_text
+from mailbrief.ui.dialog_chrome import dialog_heading
+from mailbrief.ui.hairline import HairlineFrame
+from mailbrief.ui.labels import plain_label, short_button_label, wrap_label
+from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
 from mailbrief.ui.lists import ActivatingList
 
 _COMPLETES = {
@@ -96,14 +101,34 @@ class ProposalsDialog(QDialog):
         self._zone = ZoneInfo("UTC")
         self._busy = False
         layout = QVBoxLayout(self)
+        dialog_heading(
+            self,
+            layout,
+            "Follow-up proposals",
+            "Review changes before applying them to your action.",
+        )
         self.heading = _plain()
         layout.addWidget(self.heading)
         self.listing = ActivatingList()
+        self.listing.setFrameShape(QFrame.Shape.NoFrame)
+        self.listing.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.listing.setItemDelegate(DisplayRowDelegate(self.listing))
         self.listing.setAccessibleName("Pending proposals for this action")
         layout.addWidget(self.listing, 1)
+        self.evidence_card = HairlineFrame()
+        self.evidence_card.setObjectName("proposalEvidenceCard")
+        self.evidence_card.setAccessibleName("Selected proposal evidence")
+        evidence = QVBoxLayout(self.evidence_card)
+        evidence.setContentsMargins(0, 0, 0, 0)
+        evidence.addWidget(plain_label("FROM THE EMAIL", tone="muted", px=10))
+        self.evidence = wrap_label("", tone="secondary", px=12)
+        self.evidence.setObjectName("proposalEvidence")
+        evidence.addWidget(self.evidence)
+        layout.addWidget(self.evidence_card)
         layout.addWidget(_plain(HINT))
         buttons = QHBoxLayout()
         self.apply_button = QPushButton("&Apply")
+        self.apply_button.setProperty("variant", "primary")
         self.dismiss_button = QPushButton("&Dismiss")
         self.close_button = QPushButton("&Close")
         for button in (self.apply_button, self.dismiss_button):
@@ -138,7 +163,17 @@ class ProposalsDialog(QDialog):
         self.listing.blockSignals(True)
         self.listing.clear()
         for proposal in self._proposals:
-            self.listing.addItem(QListWidgetItem(proposal_text(proposal, zone, today=today)))
+            received = moment_text(proposal.received_at_utc, zone, today=today)
+            item = QListWidgetItem(proposal_text(proposal, zone, today=today))
+            item.setData(
+                DISPLAY_ROW_ROLE,
+                DisplayRow(
+                    effect_text(proposal, zone, today=today),
+                    f"{proposal.sender_address} · {received}",
+                    proposal.evidence,
+                ),
+            )
+            self.listing.addItem(item)
         self.listing.blockSignals(False)
         ids = [proposal.id for proposal in self._proposals]
         if self._proposals:
@@ -157,6 +192,8 @@ class ProposalsDialog(QDialog):
 
     def _update_buttons(self) -> None:
         chosen = self._selected()
+        self.evidence_card.setVisible(chosen is not None)
+        self.evidence.setText("" if chosen is None else chosen.evidence)
         enabled = chosen is not None and not self._busy
         self.listing.setEnabled(not self._busy)
         self.apply_button.setEnabled(enabled)
@@ -167,7 +204,7 @@ class ProposalsDialog(QDialog):
             return
         effect = effect_text(chosen, self._zone, today=self._today)
         # A fixed mnemonic (A): the effect's own first letter varies with the row.
-        self.apply_button.setText(f"&Apply: {_label(effect)}")
+        self.apply_button.setText(f"&Apply: {short_button_label(effect)}")
         self.apply_button.setAccessibleName(f"Apply: {effect}")
 
     def _apply(self) -> None:

@@ -11,9 +11,10 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ProposalState
 from mailbrief.domain.analysis import DeadlinePrecision, FollowUpKind
-from mailbrief.domain.digests import SECTION_TITLES, DigestItem
+from mailbrief.domain.digests import DigestItem
 from mailbrief.domain.messages import EmailContact
 from mailbrief.ui.brief_list import (
+    BRIEF_SECTION_TITLES,
     KIND_ROLE,
     ROW_ROLE,
     BriefListView,
@@ -23,7 +24,6 @@ from mailbrief.ui.brief_list import (
     build_rows,
     deadline_chip,
     proposal_chip,
-    row_height,
     sender_text,
     sender_with_address,
 )
@@ -38,12 +38,12 @@ def test_rows_add_a_header_whenever_the_section_changes() -> None:
     brief = mockup_digest()
     rows = build_rows(brief.digest, brief.proposals, TODAY, TORONTO)
     assert [(row.kind, row.title) for row in rows] == [
-        ("header", "Actions"),
+        ("header", "Needs attention"),
         ("item", "Q3 budget: approval needed by Friday"),
         ("item", "Contract renewal options"),
-        ("header", "Deadlines"),
+        ("header", "Upcoming deadlines"),
         ("item", "Invoice 2041"),
-        ("header", "Replies in threads you track"),
+        ("header", "New replies"),
         ("item", "Re: Conference deck"),
         ("header", "Highlights"),
         ("item", "Office closed Monday"),
@@ -258,7 +258,7 @@ def test_down_skips_the_next_sections_header(view: BriefListView) -> None:
 
 def test_accessible_text_names_subject_sender_and_chips(view: BriefListView) -> None:
     model = view.model()
-    assert model.index(0, 0).data(Qt.ItemDataRole.AccessibleTextRole) == "Actions"
+    assert model.index(0, 0).data(Qt.ItemDataRole.AccessibleTextRole) == "Needs attention"
     assert model.index(1, 0).data(Qt.ItemDataRole.AccessibleTextRole) == (
         "Q3 budget: approval needed by Friday, from Priya Shah, Due Fri 17:00"
     )
@@ -275,9 +275,9 @@ def test_chips_make_a_row_taller(view: BriefListView) -> None:
     with_chip = delegate.sizeHint(option, view.model().index(1, 0))
     without = delegate.sizeHint(option, view.model().index(2, 0))
     header = delegate.sizeHint(option, view.model().index(0, 0))
-    assert with_chip.height() > without.height() > header.height() > 0
-    assert with_chip.height() == row_height(True)
-    assert without.height() == row_height(False)
+    assert with_chip.height() == without.height() > header.height() > 0
+    proposal = delegate.sizeHint(option, view.model().index(6, 0))
+    assert proposal.height() > without.height()
 
 
 def test_selection_reports_the_email(view: BriefListView) -> None:
@@ -312,7 +312,7 @@ def test_empty_subject_reads_no_subject() -> None:
 
 
 def test_every_section_uses_the_shared_titles() -> None:
-    sections = tuple(SECTION_TITLES)
+    sections = tuple(BRIEF_SECTION_TITLES)
     digest = mockup_digest().digest.model_copy(
         update={
             "items": tuple(
@@ -322,5 +322,5 @@ def test_every_section_uses_the_shared_titles() -> None:
         }
     )
     headers = [row.title for row in build_rows(digest, {}, TODAY, TORONTO) if row.kind == "header"]
-    assert headers == [SECTION_TITLES[section] for section in sections]
-    assert "Decisions" in headers and "Replies in threads you track" in headers
+    assert headers == [BRIEF_SECTION_TITLES[section] for section in sections]
+    assert "Decisions" in headers and "New replies" in headers

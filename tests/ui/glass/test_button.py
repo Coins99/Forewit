@@ -61,8 +61,8 @@ def test_outline_button_makes_glass_pills(qtbot: QtBot, qapp: QApplication, them
     plain = outline_button("Dismiss", "dismissButton")
     assert not isinstance(plain, GlassButton)
     assert plain.property("variant") == "outline"
-    with pytest.raises(ValueError, match="glass"):
-        outline_button("Go", "goButton", primary=True)
+    native_primary = outline_button("Go", "goButton", primary=True)
+    assert native_primary.property("variant") == "primary"
 
 
 def test_a_glass_pill_is_no_taller_than_an_outline_button(

@@ -41,8 +41,10 @@ from mailbrief.domain.calendar_planning import (
 )
 from mailbrief.domain.events import ChangeKind, EventChange, EventEdit
 from mailbrief.ui.deadline_text import day_text
+from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.theme import ui_font
 
 NO_INSTRUCTION: Final = "Say what to change first."
 TOO_LONG: Final = "Keep the instruction to 1,000 characters."
@@ -143,6 +145,7 @@ class PlanningDialog(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plan with AI")
+        self.setFont(ui_font(10))
         self._proposals: tuple[ProposedChange, ...] = ()
         self._ticks: list[bool] = []
         self._overlaps: Overlaps | None = None
@@ -150,6 +153,9 @@ class PlanningDialog(QDialog):
         self._today = date.min  # Both come with the proposals, before any row is shown.
         self._first_use = False
         layout = QVBoxLayout(self)
+        dialog_heading(
+            self, layout, "Plan with AI", "Preview the context and approve the changes you want."
+        )
         # What went wrong or what is needed, above the step so it can't be missed.
         self.status = plain_label("", tone="warning")
         self.status.setObjectName("planningStatus")
@@ -207,7 +213,9 @@ class PlanningDialog(QDialog):
         column.addStretch(1)
         row = QHBoxLayout()
         self.back_button = outline_button("&Back", "planningBackButton", mnemonic=True)
-        self.ask_button = outline_button("Ask &Groq", "planningAskButton", mnemonic=True)
+        self.ask_button = outline_button(
+            "Ask &Groq", "planningAskButton", mnemonic=True, primary=True
+        )
         self.back_button.clicked.connect(lambda: self._show(0))
         self.ask_button.clicked.connect(self._request_ask)
         row.addWidget(self.back_button)
@@ -244,7 +252,7 @@ class PlanningDialog(QDialog):
         column.addWidget(self.list, 1)
         row = QHBoxLayout()
         self.apply_button = outline_button(
-            "&Apply ticked changes", "planningApplyButton", mnemonic=True
+            "&Apply ticked changes", "planningApplyButton", mnemonic=True, primary=True
         )
         self.discard_button = outline_button("&Discard", "planningDiscardButton", mnemonic=True)
         self.apply_button.clicked.connect(self._request_apply)

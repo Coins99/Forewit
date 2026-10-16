@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QStyle, QWidget
 
 from mailbrief.ui.theme import (
     DARK,
+    FONT_FAMILY,
     ICON_NAMES,
     LIGHT,
     ColorScheme,
@@ -117,7 +118,7 @@ def test_medium_font_resolves_to_bundled_weight(qapp: QApplication, themed: None
     apply_theme(qapp)
     font = ui_font(13, medium=True)
     assert QFontInfo(font).weight() == 500
-    assert QFontInfo(font).family() == "Inter"
+    assert QFontInfo(font).family() == "DM Sans"
     assert font.pixelSize() == 13
 
 
@@ -125,7 +126,7 @@ def test_semibold_font_resolves_to_bundled_weight(qapp: QApplication, themed: No
     apply_theme(qapp)
     font = ui_font(20, semibold=True)
     assert QFontInfo(font).weight() == 600
-    assert QFontInfo(font).family() == "Inter"
+    assert QFontInfo(font).family() == FONT_FAMILY
     with pytest.raises(ValueError):
         ui_font(13, medium=True, semibold=True)
     assert ui_metrics(20, semibold=True) is not ui_metrics(20, medium=True)

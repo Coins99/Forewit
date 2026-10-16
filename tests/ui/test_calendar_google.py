@@ -122,7 +122,7 @@ def test_visible_mnemonics_stay_unique(panel: CalendarPanel, mode: str) -> None:
         )
         if button.isVisibleTo(panel)
     ]
-    letters = [b.text()[b.text().index("&") + 1].casefold() for b in buttons]
+    letters = [b.text()[b.text().index("&") + 1].casefold() for b in buttons if "&" in b.text()]
     assert len(set(letters)) == len(letters)
     assert not set(letters) & set("scdlrutm")
 
@@ -139,6 +139,7 @@ def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     result = MainWindow(backend)
     result.now = lambda: NOW
     qtbot.addWidget(result)
+    result.show()
     return result
 
 
@@ -185,7 +186,9 @@ async def test_an_older_sign_in_offers_allow_then_syncs(
     await finish(window)
     assert backend.calendar_calls == [("allow_calendar",), ("sync_calendar", MONDAY)]
     assert window.status.text() == "Google Calendar updated: 0 events from 1 calendar."
-    assert panel.refresh_button.isVisibleTo(panel) and not panel.allow_button.isVisibleTo(panel)
+    assert not panel.refresh_button.isVisibleTo(window)  # Calendar actions belong to its header.
+    window._show_page("calendar")
+    assert panel.refresh_button.isVisibleTo(window) and not panel.allow_button.isVisibleTo(panel)
     assert google_rows(window)
 
 

@@ -3,7 +3,7 @@
 import math
 from typing import Final
 
-from PySide6.QtCore import QPointF, QSize, Qt, QTextBoundaryFinder
+from PySide6.QtCore import QPointF, QSize, Qt, QTextBoundaryFinder, Signal
 from PySide6.QtGui import (
     QFontMetricsF,
     QPainter,
@@ -117,12 +117,10 @@ def outline_button(
     accessible name, never a tooltip. ``px`` sets the font size, ``icon_name`` adds a
     bundled icon in the text colour, and ``accessible_name`` is what screen readers say
     (without it, Qt reads the button's text). With ``glass`` it is a Liquid Glass pill
-    (GlassButton); ``primary`` tints the one primary action and needs ``glass``.
+    (GlassButton); ``primary`` tints the one primary action.
     """
     if mnemonic and shorten:
         raise ValueError("A shortened label can't carry a mnemonic.")
-    if primary and not glass:
-        raise ValueError("Only a glass button can be primary.")
     if mnemonic:
         shown = text
     elif shorten:
@@ -134,6 +132,8 @@ def outline_button(
     else:
         button = QPushButton(shown)
         button.setProperty("variant", "outline")
+    if primary and not glass:
+        button.setProperty("variant", "primary")
     button.setObjectName(name)
     button.setAutoDefault(False)
     if shorten:
@@ -152,6 +152,14 @@ def outline_button(
         follow_theme(button, tint)
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))
     return button
+
+
+def primary_action(button: QPushButton) -> None:
+    """Apply the primary variant to controls supplied by native Qt button boxes."""
+    button.setProperty("variant", "primary")
+    button.style().unpolish(button)
+    button.style().polish(button)
+    button.update()
 
 
 class ElidedLabel(QLabel):
@@ -211,6 +219,8 @@ class WrapLabel(QLabel):
     font. With a ``line_height``, each line takes that many times the font's size, its
     text centred in it, but never less than the font's own line."""
 
+    text_changed = Signal(str)
+
     def __init__(self, text: str = "", *, line_height: float | None = None) -> None:
         super().__init__()
         self._layouts: dict[float, tuple[QTextLayout, float, float]] = {}
@@ -229,6 +239,7 @@ class WrapLabel(QLabel):
         self._layouts.clear()
         self.setAccessibleName(text)
         self.updateGeometry()
+        self.text_changed.emit(text)
 
     def _layout(self, width: float) -> tuple[QTextLayout, float, float]:
         """The text laid out at ``width``: the layout, its height and its widest line."""

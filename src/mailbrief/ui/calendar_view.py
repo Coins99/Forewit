@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange
+from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
 from mailbrief.ui.calendar_layout import (
@@ -36,10 +36,11 @@ from mailbrief.ui.calendar_layout import (
     month_start,
     shown_month,
 )
-from mailbrief.ui.deadline_text import MONTH_NAMES, day_text, month_day
+from mailbrief.ui.deadline_text import MONTH_NAMES, day_text, full_day_text, month_day
 from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label
+from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, AgendaRowDelegate, DisplayRow
 from mailbrief.ui.lists import ActivatingList
-from mailbrief.ui.theme import TEXT_PX, TITLE_PX, ui_font
+from mailbrief.ui.theme import TEXT_PX, TITLE_PX, paused_collection, ui_font
 
 __all__ = [
     "CalendarPanel",
@@ -160,6 +161,7 @@ class CalendarPanel(QWidget):
     view_requested = Signal(str, bool)
     google_requested = Signal(str)
     plan_requested = Signal()
+    google_preview_requested = Signal(object)
 
     def __init__(self, view: CalendarView = CalendarView.WEEK) -> None:
         super().__init__()
@@ -173,6 +175,7 @@ class CalendarPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         top = QHBoxLayout()
+        top.setContentsMargins(24, 8, 24, 8)
         # It elides rather than widen the window: a month's name is long.
         self.heading = ElidedLabel("Calendar", px=TITLE_PX)
         self.heading.setFont(ui_font(TITLE_PX, semibold=True))
@@ -183,7 +186,11 @@ class CalendarPanel(QWidget):
         self.next_button = outline_button(_WEEK_STEPS[2], "nextWeekButton", mnemonic=True)
         for button in (self.previous_button, self.this_week_button, self.next_button):
             top.addWidget(button)
-        layout.addLayout(top)
+        toolbar = QWidget()
+        toolbar.setObjectName("calendarToolbar")
+        toolbar.setFixedHeight(50)
+        toolbar.setLayout(top)
+        layout.addWidget(toolbar)
         bar = QHBoxLayout()
         self.views = QTabBar()
         self.views.setObjectName("calendarViews")
@@ -205,7 +212,11 @@ class CalendarPanel(QWidget):
         for button, kind in ((self.allow_button, ALLOW), (self.refresh_button, REFRESH)):
             bar.addWidget(button)
             button.clicked.connect(lambda _checked=False, chosen=kind: self._request_google(chosen))
-        layout.addLayout(bar)
+        self.heading.hide()
+        top.removeWidget(self.heading)
+        top.insertLayout(0, bar, 1)
+        self.views.setFixedWidth(176)
+        self.google_status.setFont(ui_font(9))
         self.stack = QStackedWidget()
         self.stack.setObjectName("calendarStack")
         self.week_grid = WeekGrid()
@@ -218,7 +229,11 @@ class CalendarPanel(QWidget):
         self.list.setObjectName("calendarList")
         self.list.setAccessibleName("Calendar week")
         self.list.currentRowChanged.connect(lambda _row: self._selection_moved())
-        self.list.itemActivated.connect(lambda _item: self._request(OPEN))
+        self.agenda_delegate = AgendaRowDelegate(self.list)
+        self.list.setItemDelegate(self.agenda_delegate)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.itemActivated.connect(lambda _item: self._preview_selected())
+        self.list.itemClicked.connect(lambda _item: self._preview_selected())
         list_layout.addWidget(self.list, 1)
         for page in (self.week_grid, self.month_grid, list_page):
             self.stack.addWidget(page)
@@ -237,6 +252,8 @@ class CalendarPanel(QWidget):
             "Open &in Google Calendar", "openGoogleEventButton", mnemonic=True
         )
         self.plan_button = outline_button("Plan with &AI", "planCalendarButton", mnemonic=True)
+        self.new_button.setText("New event")
+        self.new_button.setProperty("variant", "primary")
         for button in (
             self.new_button,
             self.open_button,
@@ -246,6 +263,23 @@ class CalendarPanel(QWidget):
         ):
             buttons.addWidget(button)
         buttons.addStretch(1)  # Buttons keep their own width.
+        buttons.setContentsMargins(24, 12, 24, 12)
+        self.plan_button.setText("Plan with AI")
+        self.plan_button.setFont(ui_font(10))
+        for button in (
+            self.new_button,
+            self.open_button,
+            self.delete_button,
+            self.open_google_button,
+        ):
+            buttons.removeWidget(button)
+            button.hide()
+        legend = plain_label(
+            "Your events    ? Google Calendar    ? Action dates", tone="muted", px=9
+        )
+        legend.setObjectName("calendarLegend")
+        legend.setAccessibleName(MARKER_NOTE)
+        buttons.addWidget(legend)
         layout.addLayout(buttons)
         self.previous_button.clicked.connect(lambda: self._request_period(-1))
         self.next_button.clicked.connect(lambda: self._request_period(1))
@@ -338,7 +372,10 @@ class CalendarPanel(QWidget):
         self._rows = []
         self.list.blockSignals(True)
         try:
-            self.list.clear()
+            with paused_collection():
+                while self.list.count():
+                    item = self.list.takeItem(0)
+                    del item
             day = shown.first_day
             while day <= shown.last_day:
                 self._rows.append((day, None))
@@ -346,6 +383,8 @@ class CalendarPanel(QWidget):
                 heading.setFlags(Qt.ItemFlag.ItemIsEnabled)  # Read, but never selected.
                 heading.setFont(ui_font(TEXT_PX, medium=True))
                 self.list.addItem(heading)
+                heading.setHidden(True)
+                first_entry = True
                 for entry in day_rows(shown, day, zone):
                     self._rows.append((day, entry))
                     text = (
@@ -353,7 +392,43 @@ class CalendarPanel(QWidget):
                         if isinstance(entry, ActionMarker)
                         else event_text(entry, day, zone, today)
                     )
-                    self.list.addItem(QListWidgetItem(text))
+                    item = QListWidgetItem(text)
+                    if isinstance(entry, ActionMarker):
+                        when = "Target" if entry.kind is MarkerKind.TARGET else "Deadline"
+                        preview = entry.kind.value.title()
+                    else:
+                        when = (
+                            "All day"
+                            if entry.all_day
+                            else clock(entry.starts_at_utc, zone)
+                            if entry.starts_at_utc is not None
+                            else ""
+                        )
+                        preview = (
+                            entry.calendar_name
+                            if isinstance(entry, GoogleEvent)
+                            else "Your calendar"
+                        )
+                    item.setData(
+                        DISPLAY_ROW_ROLE,
+                        DisplayRow(
+                            title=entry.action_title
+                            if isinstance(entry, ActionMarker)
+                            else entry.title,
+                            meta=when,
+                            preview=preview,
+                            date_tile=full_day_text(day, today=today) if first_entry else "",
+                            accent=(
+                                "google"
+                                if isinstance(entry, GoogleEvent)
+                                else "marker"
+                                if isinstance(entry, ActionMarker)
+                                else "event"
+                            ),
+                        ),
+                    )
+                    first_entry = False
+                    self.list.addItem(item)
                 day += timedelta(days=1)
         finally:
             self.list.blockSignals(False)
@@ -366,7 +441,7 @@ class CalendarPanel(QWidget):
                 self._select_day(previous[0])
         self.empty.setText(EMPTY_MONTH if self._shown_month else EMPTY)
         self.empty.setVisible(not shown.events and not shown.markers and not shown.google_events)
-        self.note.setVisible(bool(shown.markers))
+        self.note.hide()
         self._show_heading()
         self._selection_moved()
 
@@ -416,6 +491,11 @@ class CalendarPanel(QWidget):
         else:
             self._select_day(day)
 
+    def _preview_selected(self) -> None:
+        entry = self._entry()
+        if isinstance(entry, CalendarEvent | GoogleEvent):
+            self.google_preview_requested.emit(entry)
+
     def _activate(self, day: object, entry: object) -> None:
         """A double-click or Return in a grid: an event opens (Google's in Google
         Calendar), and an empty day asks for a new event on it."""
@@ -425,10 +505,8 @@ class CalendarPanel(QWidget):
         if entry is None:
             if self._shown is not None:
                 self.event_requested.emit(NEW, day)
-        elif isinstance(entry, CalendarEvent):
-            self._request(OPEN)
-        elif isinstance(entry, GoogleEvent):
-            self._request_open_google()
+        elif isinstance(entry, CalendarEvent | GoogleEvent):
+            self._preview_selected()
 
     def _show_more(self, day: object) -> None:
         """ "+N more": the List view, on that day's week, shows all of the day's entries.
@@ -462,8 +540,15 @@ class CalendarPanel(QWidget):
         for button, text in zip(
             (self.previous_button, self.this_week_button, self.next_button), steps, strict=True
         ):
-            button.setText(text)
+            button.setText(
+                "Today"
+                if button is self.this_week_button
+                else "\u2039"
+                if button is self.previous_button
+                else "\u203a"
+            )
             button.setAccessibleName(text.replace("&", ""))
+            button.setFixedWidth(52 if button is self.this_week_button else 30)
         self._show_heading()
 
     def _show_heading(self) -> None:

@@ -50,7 +50,7 @@ def test_the_backdrop_follows_the_size_and_scheme(
     assert (backdrop.key.width, backdrop.key.height) == (workspace.width(), workspace.height())
     assert backdrop.key.scheme is ColorScheme.STUDIO and backdrop.key.mode is ThemeMode.DARK
     workspace.resize(700, 540)
-    assert workspace.backdrop is not None and workspace.backdrop.key.width == 700
+    assert workspace.backdrop is not None and workspace.backdrop.key.width == workspace.width()
     apply_theme(qapp, ThemeMode.LIGHT, ColorScheme.PLUM)
     assert workspace.backdrop is not None
     assert workspace.backdrop.key.scheme is ColorScheme.PLUM
@@ -72,7 +72,7 @@ def test_the_header_and_sidebar_are_glass(
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
-def test_studio_glass_shows_its_colour_field(
+def test_studio_chrome_uses_the_flat_template_surfaces(
     workspace: ThreePaneWorkspace, qapp: QApplication, mode: ThemeMode
 ) -> None:
     """Studio's glass is calm (a flat backdrop with no streaks) but not empty: its pools of
@@ -83,9 +83,8 @@ def test_studio_glass_shows_its_colour_field(
     header = workspace.header.grab().toImage()
     sidebar = workspace.sidebar.grab().toImage()
     row = header_row(header)
-    assert len(set(row)) > 1  # The field flows across the header.
-    assert at(sidebar, 64, workspace.sidebar.height() - 20) not in row
-    assert glass.opaque not in row  # It isn't the solid fallback.
+    assert set(row) == {current_tokens().panel}
+    assert at(sidebar, 64, workspace.sidebar.height() - 140) == current_tokens().sidebar
 
 
 @pytest.mark.parametrize("mode", [GlassMode.REDUCED_TRANSPARENCY, GlassMode.INCREASED_CONTRAST])

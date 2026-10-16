@@ -30,7 +30,6 @@ from mailbrief.ui.calendar_layout import (
 from mailbrief.ui.calendar_view import (
     EMPTY_MONTH,
     NEW,
-    OPEN,
     CalendarPanel,
     month_title,
     week_start,
@@ -284,6 +283,8 @@ def test_the_week_grid_chooses_and_opens_through_the_page(
     panel: CalendarPanel, qtbot: QtBot
 ) -> None:
     asked: list[tuple[str, object]] = []
+    previews: list[object] = []
+    panel.google_preview_requested.connect(previews.append)
     panel.event_requested.connect(lambda kind, value: asked.append((kind, value)))
     panel.show_range(week_range(), TORONTO, TODAY)
     grid = panel.week_grid
@@ -311,7 +312,8 @@ def test_the_week_grid_chooses_and_opens_through_the_page(
     QTest.mouseDClick(
         grid.hours, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, empty.toPoint()
     )
-    assert asked == [(OPEN, selected), (NEW, MONDAY + timedelta(days=5))]
+    assert asked == [(NEW, MONDAY + timedelta(days=5))]
+    assert previews == [selected]
     # Overlapping blocks sit side by side.
     tuesday = [hit for hit in hits if hit.day == MONDAY + timedelta(days=1)]
     review, dentist = sorted(tuesday, key=lambda hit: hit.rect.left())
@@ -330,6 +332,8 @@ def test_the_week_grid_s_keyboard(panel: CalendarPanel) -> None:
     QTest.keyClick(grid, Qt.Key.Key_Right)
     assert grid.selection() == (TODAY + timedelta(days=1), None)
     asked: list[tuple[str, object]] = []
+    previews: list[object] = []
+    panel.google_preview_requested.connect(previews.append)
     panel.event_requested.connect(lambda kind, value: asked.append((kind, value)))
     QTest.keyClick(grid, Qt.Key.Key_Return)  # An empty day: a new event on it.
     assert asked == [(NEW, TODAY + timedelta(days=1))]
@@ -344,7 +348,7 @@ def test_the_month_grid_shows_more_and_moves_months(panel: CalendarPanel, qtbot:
     fill(backend)
     panel.show_range(backend._range(*month_days(TODAY), TORONTO), TORONTO, TODAY)
     assert panel.heading.text() == "Calendar · October 2026"
-    assert panel.this_week_button.text() == "This mont&h"
+    assert panel.this_week_button.text() == "Today"
     grid = panel.month_grid
     busy = [hit for hit in grid.hits() if hit.day == TODAY]
     assert any(hit.more for hit in busy)  # Today holds more than its tile shows.
@@ -438,10 +442,13 @@ def test_the_month_grid_steps_to_and_opens_an_item_behind_more(panel: CalendarPa
     QTest.keyClick(grid, Qt.Key.Key_Down, Qt.KeyboardModifier.AltModifier)
     assert panel._entry() == entries[1]
     asked: list[tuple[str, object]] = []
+    previews: list[object] = []
+    panel.google_preview_requested.connect(previews.append)
     panel.event_requested.connect(lambda kind, value: asked.append((kind, value)))
     panel.select_entry(entry_key(proposal), TODAY)
     QTest.keyClick(grid, Qt.Key.Key_Return)  # Opens it, though nothing paints it.
-    assert asked == [(OPEN, proposal)]
+    assert asked == []
+    assert previews == [proposal]
 
 
 def test_the_week_grid_scrolls_a_chosen_block_into_view(panel: CalendarPanel) -> None:

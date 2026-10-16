@@ -14,13 +14,16 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -48,6 +51,8 @@ from mailbrief.domain.drafts import (
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
+from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.theme import ui_font
 
 DEBOUNCE_MS = 1_500
 MAX_WAIT_MS = 10_000
@@ -124,8 +129,13 @@ class DraftEditor(QDialog):
         # Its pickers and boxes open behind this cover, never modal, so quitting works.
         self.dialog_guard = DialogGuard(self)
         self.setWindowTitle("Draft")
+        self.setObjectName("draftEditorDialog")
+        self.setFont(ui_font(10))
+        self.setAccessibleName("Draft editor")
         self.resize(720, 640)
         self.draft: Draft | None = None  # As last saved; its revision is what writes send.
+        self.embedded = False
+        self.reply_mode = False
         self._zone = ZoneInfo("UTC")
         self._loading = False
         self._dirty = False  # Changed since the last text sent to be saved.
@@ -137,7 +147,25 @@ class DraftEditor(QDialog):
         self._discard_armed = False
         self._versions: tuple[DraftVersionInfo, ...] = ()
         self._picker: QFileDialog | None = None
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        self._root = root
+        root.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        content = QWidget()
+        self.scroll_area.setWidget(content)
+        root.addWidget(self.scroll_area)
+        layout = QVBoxLayout(content)
+        self._content_layout = layout
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        self.heading = plain_label("Draft editor", px=21, medium=True)
+        self.heading.setObjectName("draftEditorHeading")
+        layout.addWidget(self.heading)
+        self.description = plain_label(
+            "Write locally. Your changes save as you type.", tone="muted", px=12
+        )
+        layout.addWidget(self.description)
         context = QHBoxLayout()
         self.context = _plain()
         context.addWidget(self.context, 1)
@@ -161,39 +189,73 @@ class DraftEditor(QDialog):
         form.addRow("", self.recipient_warning)
         self.title_label = QLabel("&Subject")
         self.title_edit = QLineEdit()
+        self.title_edit.setObjectName("draftSubject")
         self.title_edit.setMaxLength(DRAFT_TITLE_MAX_CHARS)
         self.title_label.setBuddy(self.title_edit)
         form.addRow(self.title_label, self.title_edit)
+        title_row = form.takeRow(self.title_edit)
+        form.insertRow(0, self.title_label, self.title_edit)
+        del title_row
         self.body = QPlainTextEdit()
+        self.body.setObjectName("draftMessage")
+        self.body.setMinimumHeight(160)
         self.body.setAccessibleName("Body")
         self.body.setTabChangesFocus(True)
-        form.addRow("&Body", self.body)
+        self.body_label = QLabel("&Body")
+        self.body_label.setBuddy(self.body)
         self.counter = _plain()
-        form.addRow("", self.counter)
         self.placeholder_line = _plain()
-        form.addRow("", self.placeholder_line)
         self.missing_line = _plain()
-        form.addRow("", self.missing_line)
-        layout.addWidget(self._fields, 1)
-        buttons = QHBoxLayout()
+        layout.addWidget(self._fields)
+        self.reply_recipient = plain_label("", px=13)
+        self.reply_recipient.setObjectName("replyRecipient")
+        self.reply_recipient.hide()
+        layout.addWidget(self.reply_recipient)
+        layout.addWidget(self.body_label)
+        layout.addWidget(self.body, 1)
+        for line in (self.counter, self.placeholder_line, self.missing_line):
+            layout.addWidget(line)
+        buttons = QGridLayout()
+        self._buttons = buttons
         self.copy_text_button = QPushButton("Copy te&xt")
         self.copy_subject_button = QPushButton("Copy s&ubject")
         self.export_button = QPushButton("&Export…")
         self.versions_button = QPushButton("&Versions…")
         self.checkpoint_button = QPushButton("Save versio&n")
+        self.checkpoint_button.setProperty("variant", "primary")
         self.ai_button = QPushButton("Write with A&I…")
         self.close_button = QPushButton("C&lose")
+        for number, button in enumerate(
+            (
+                self.copy_text_button,
+                self.copy_subject_button,
+                self.export_button,
+                self.versions_button,
+                self.checkpoint_button,
+                self.ai_button,
+                self.close_button,
+            )
+        ):
+            buttons.addWidget(button, number // 3, number % 3)
+        layout.addLayout(buttons)
+        self.more_button = outline_button("More", "draftMoreButton")
+        self.more_button.setAccessibleName("More draft tools")
+        self.more_menu = QMenu(self.more_button)
+        self._more_actions = []
         for button in (
             self.copy_text_button,
             self.copy_subject_button,
             self.export_button,
             self.versions_button,
-            self.checkpoint_button,
             self.ai_button,
-            self.close_button,
         ):
-            buttons.addWidget(button)
-        layout.addLayout(buttons)
+            action = self.more_menu.addAction(button.text().replace("&", ""))
+            action.triggered.connect(button.click)
+            self._more_actions.append((action, button))
+        self.more_menu.aboutToShow.connect(self._update_more)
+        self.more_button.setMenu(self.more_menu)
+        self.more_button.hide()
+        buttons.addWidget(self.more_button, 0, 0)
         self.save_as_new_button = QPushButton("Save as ne&w draft")
         self.save_as_new_button.hide()
         layout.addWidget(self.save_as_new_button)
@@ -227,7 +289,29 @@ class DraftEditor(QDialog):
         self.ai_panel.hide()
         layout.addWidget(self.ai_panel)
         self.status = _plain()
+        self.status.setFont(ui_font(9))
         layout.addWidget(self.status)
+        self.editor_header = QWidget()
+        self.editor_header.setObjectName("draftEditorHeader")
+        header_layout = QVBoxLayout(self.editor_header)
+        header_layout.setContentsMargins(23, 16, 23, 16)
+        layout.removeWidget(self.heading)
+        header_layout.addWidget(self.heading)
+        root.insertWidget(0, self.editor_header)
+        self.editor_footer = QWidget()
+        self.editor_footer.setObjectName("draftEditorFooter")
+        footer_layout = QVBoxLayout(self.editor_footer)
+        footer_layout.setContentsMargins(23, 12, 23, 10)
+        layout.removeItem(buttons)
+        footer_layout.addLayout(buttons)
+        layout.removeWidget(self.status)
+        footer_layout.addWidget(self.status)
+        root.addWidget(self.editor_footer)
+        self.cc_options = self.more_menu.addAction("Show Cc")
+        self.cc_options.triggered.connect(lambda: self._form.setRowVisible(self.cc_edit, True))
+        source_action = self.more_menu.addAction("Open source in Gmail")
+        source_action.triggered.connect(self.gmail_button.click)
+        self._more_actions.append((source_action, self.gmail_button))
         self._debounce = self._timer(debounce_ms)
         self._max_wait = self._timer(max_wait_ms)
         self._retry = self._timer(retry_ms)
@@ -249,6 +333,96 @@ class DraftEditor(QDialog):
         self.ai_panel.prepare_requested.connect(self._prepare_ai)
         self.ai_panel.send_requested.connect(self._send_ai)
         self.ai_panel.cancel_requested.connect(self._cancel_ai)
+
+    def set_embedded(self, parent: QWidget | None, *, window: QWidget) -> None:
+        """Use the same autosave/version editor in the Drafts pane or a guarded dialog."""
+        self.embedded = parent is not None
+        self.setProperty("inline", self.embedded)
+        self.reply_mode = parent is not None and parent.objectName() == "inlineReplyCard"
+        self.setProperty("reply", self.reply_mode)
+        self.body.setMinimumHeight(160)
+        self.body.setMaximumHeight(16777215)
+        self.reply_recipient.setVisible(self.reply_mode)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        self.setParent(parent or window)
+        self.setWindowFlags(Qt.WindowType.Widget if parent is not None else Qt.WindowType.Dialog)
+        self.heading.setText("DRAFT · NOT SENT" if self.embedded else "Draft editor")
+        self.heading.setFont(ui_font(9 if self.embedded else 21, medium=True))
+        self.editor_header.setFixedHeight(49 if self.embedded else 68)
+        self.editor_footer.setMinimumHeight(58)
+        if (header_layout := self.editor_header.layout()) is not None:
+            header_layout.setContentsMargins(23, 16, 23, 16)
+        if (footer_layout := self.editor_footer.layout()) is not None:
+            footer_layout.setContentsMargins(23, 12, 23, 10)
+        self._content_layout.setContentsMargins(23, 5 if self.embedded else 16, 23, 12)
+        self._content_layout.setSpacing(0 if self.embedded else 12)
+        self.context.setVisible(not self.embedded)
+        self.description.setVisible(not self.embedded)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._fields.setProperty("inline", self.embedded)
+        self._fields.style().unpolish(self._fields)
+        self._fields.style().polish(self._fields)
+        self.title_edit.setFont(ui_font(19 if self.embedded else 13, medium=self.embedded))
+        self.body.setFont(ui_font(11 if self.embedded else 13))
+        self.body.setProperty("reply", self.reply_mode)
+        self.title_label.setVisible(not self.embedded)
+        self.body_label.setVisible(not self.embedded)
+        self.more_button.setVisible(self.embedded)
+        for button in (
+            self.copy_text_button,
+            self.copy_subject_button,
+            self.export_button,
+            self.versions_button,
+            self.close_button,
+        ):
+            button.setVisible(not self.embedded)
+        self.checkpoint_button.setText("Save draft" if self.embedded else "Save versio&n")
+        for field in (self.title_edit, self.body):
+            field.setProperty("inline", self.embedded)
+            field.style().unpolish(field)
+            field.style().polish(field)
+        self.counter.setVisible(not self.embedded)
+        if self.embedded:
+            self._buttons.addWidget(self.checkpoint_button, 0, 2, Qt.AlignmentFlag.AlignRight)
+            self._buttons.addWidget(self.more_button, 0, 1, Qt.AlignmentFlag.AlignRight)
+            self.ai_button.hide()
+            for number in range(3):
+                self._buttons.setColumnStretch(number, 1 if number == 0 else 0)
+            self._fields.setVisible(not self.reply_mode)
+            if self.reply_mode:
+                self.setFixedHeight(290)
+                self.body.setFixedHeight(130)
+                self.editor_header.setFixedHeight(40)
+                for section in (self.editor_header, self.editor_footer):
+                    if (section_layout := section.layout()) is not None:
+                        section_layout.setContentsMargins(16, 10, 16, 10)
+                self._content_layout.setContentsMargins(16, 0, 16, 0)
+                self.close_button.setText("Cancel")
+                self.close_button.show()
+                self._buttons.addWidget(self.more_button, 0, 0, Qt.AlignmentFlag.AlignLeft)
+                self._buttons.addWidget(self.close_button, 0, 1, Qt.AlignmentFlag.AlignRight)
+        else:
+            self._fields.show()
+            self.close_button.setText("C&lose")
+            for number, button in enumerate(
+                (
+                    self.copy_text_button,
+                    self.copy_subject_button,
+                    self.export_button,
+                    self.versions_button,
+                    self.checkpoint_button,
+                    self.ai_button,
+                    self.close_button,
+                )
+            ):
+                self._buttons.addWidget(button, number // 3, number % 3)
+            for column in range(3):
+                self._buttons.setColumnStretch(column, 0)
+
+    def _update_more(self) -> None:
+        for action, button in self._more_actions:
+            action.setEnabled(button.isEnabled())
 
     def _timer(self, interval_ms: int) -> QTimer:
         timer = QTimer(self)
@@ -307,9 +481,17 @@ class DraftEditor(QDialog):
         for field in (self.to_edit, self.cc_edit, self.recipient_warning):
             self._form.setRowVisible(field, email)
         self.title_label.setText("&Subject" if email else "&Title")
-        self.copy_subject_button.setVisible(email)
+        self.copy_subject_button.setVisible(email and not self.embedded)
         self._show_context(draft)
+        self.context.setVisible(not self.embedded)
+        self.gmail_button.setVisible(not self.embedded and bool(draft.sources))
+        if self.embedded:
+            self._form.setRowVisible(self.cc_edit, email and bool(draft.cc_text))
+            self.heading.setText(
+                "REPLY DRAFT · NOT SENT" if self.reply_mode else "DRAFT · NOT SENT"
+            )
         self._set_text(draft.content())
+        self.reply_recipient.setText("To " + draft.to_text)
         self.save_as_new_button.hide()
         self.versions_panel.hide()
         self.confirm_panel.hide()
@@ -317,9 +499,11 @@ class DraftEditor(QDialog):
         self.ai_panel.reset()
         self.ai_panel.hide()
         self.missing_line.clear()
+        self.missing_line.hide()
         self._update_buttons()
         self.status.setText(f"Saved {self._time(draft)}")
-        (self.body if draft.title else self.title_edit).setFocus()
+        if not self.embedded or self.reply_mode or not draft.title:
+            (self.body if draft.title else self.title_edit).setFocus()
 
     def _show_context(self, draft: Draft) -> None:
         parts: list[str] = []
@@ -334,6 +518,7 @@ class DraftEditor(QDialog):
             parts.append(f"For action: “{draft.action_title}”")
         self.context.setText(" · ".join(parts) or "Not linked to an email or action.")
         self.gmail_button.setVisible(source is not None and gmail_link(source) is not None)
+        self.gmail_button.setEnabled(source is not None and gmail_link(source) is not None)
 
     def _set_text(self, content: DraftEdit) -> None:
         self._loading = True
@@ -371,12 +556,15 @@ class DraftEditor(QDialog):
     def _update_live(self) -> None:
         body = self.body.toPlainText()
         self.counter.setText(f"{len(body):,} / {DRAFT_BODY_MAX_CHARS:,} characters")
+        self.counter.setVisible(not self.embedded or len(body) > DRAFT_BODY_MAX_CHARS - 1000)
         warnings = recipient_warnings(f"{self.to_edit.text()},{self.cc_edit.text()}")
         self.recipient_warning.setText(
             "Check these recipients: " + "; ".join(warnings) if warnings else ""
         )
+        self._form.setRowVisible(self.recipient_warning, bool(warnings))
         found = self._placeholders()
         self.placeholder_line.setText("Placeholders to fill: " + ", ".join(found) if found else "")
+        self.placeholder_line.setVisible(bool(found))
 
     def _placeholders(self) -> tuple[str, ...]:
         email = self.draft is not None and self.draft.kind in EMAIL_KINDS
@@ -456,9 +644,14 @@ class DraftEditor(QDialog):
     def _set_locked(self, locked: bool) -> None:
         self._locked = locked
         self._fields.setEnabled(not locked)
+        self.body.setEnabled(not locked)
         self.close_button.setEnabled(not locked)
         self.save_as_new_button.setEnabled(not locked)
         self._update_buttons()
+
+    def set_switching(self, switching: bool) -> None:
+        """Freeze typing while the owner-requested draft switch saves and loads."""
+        self._set_locked(switching)
 
     def _checkpoint(self) -> None:
         if self.current_edit() is None:
@@ -631,6 +824,7 @@ class DraftEditor(QDialog):
         self.missing_line.setText(
             "Missing context to check: " + "; ".join(missing) if missing else ""
         )
+        self.missing_line.setVisible(bool(missing))
         before = f"; your previous text is version v{previous}" if previous is not None else ""
         self._finish_ai(f"New version v{number} from Groq{before}.")
         if not self.versions_panel.isHidden():

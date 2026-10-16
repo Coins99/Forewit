@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.labels import button_label, outline_button, wrap_label
 from mailbrief.ui.lists import ActivatingList
 
@@ -34,6 +35,7 @@ class ProjectsDialog(QDialog):
         self._selected: Project | LifeArea | None = None
         self._binding = False
         layout = QVBoxLayout(self)
+        dialog_heading(self, layout, "Projects and life areas")
         self.kind = QComboBox()
         self.kind.setObjectName("organizationKind")
         self.kind.setAccessibleName("Projects or life areas")
@@ -80,7 +82,7 @@ class ProjectsDialog(QDialog):
         layout.addWidget(self.status)
         row = QHBoxLayout()
         self.new = outline_button("New", "newOrganization")
-        self.save = outline_button("Save", "saveOrganization")
+        self.save = outline_button("Save", "saveOrganization", primary=True)
         self.discard = outline_button("Discard edits", "discardOrganizationEdits")
         self.archive = outline_button("Archive project", "archiveProject")
         self.delete_area = outline_button("Remove area", "removeArea")

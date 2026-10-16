@@ -340,9 +340,11 @@ async def test_today_gallery(
     window.resize(*size)
     window.show()
     qtbot.waitExposed(window)
+    assert not window.day_panel.isVisible()
+    window.day_toggle.click()
     assert window.day_panel.isVisible()
     # However narrow, the cards never push the brief off the page.
-    assert window.workspace.brief_list.height() > window.day_panel.height()
+    assert window.workspace.brief_list.height() > window.day_area.height()
     save_shot(window.grab(), f"today-day-{size[0]}-{mode}")
 
 

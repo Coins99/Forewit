@@ -66,6 +66,8 @@ def require_resources(names: Iterable[str], revisions: Iterable[str]) -> None:
         "mailbrief/ui/theme/fonts/Inter-Medium.ttf",
         "mailbrief/ui/theme/fonts/Inter-SemiBold.ttf",
         "mailbrief/ui/theme/fonts/OFL.txt",
+        "mailbrief/ui/theme/fonts/DM-Sans.ttf",
+        "mailbrief/ui/theme/fonts/DM-Sans-OFL.txt",
         "mailbrief/ui/theme/icons/LICENSE",
         "mailbrief/resources/MailBrief.ico",
         "mailbrief/resources/THIRD_PARTY_NOTICES.txt",
@@ -86,6 +88,11 @@ def require_resources(names: Iterable[str], revisions: Iterable[str]) -> None:
             "external-link",
             "mail",
             "database",
+            "sparkles",
+            "plus",
+            "bookmark",
+            "check",
+            "trash",
         )
     }
     if required - present:

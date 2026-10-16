@@ -50,6 +50,42 @@ class Tokens:
     primary_fill: str  # The one primary button of a screen.
     on_primary: str  # Its text.
 
+    @property
+    def sidebar(self) -> str:
+        return self.canvas
+
+    @property
+    def nav_selection(self) -> str:
+        return "#e3e8e6" if self is _TOKENS[ColorScheme.STUDIO, ThemeMode.LIGHT] else self.selection
+
+    @property
+    def primary(self) -> str:
+        return self.primary_fill
+
+    @property
+    def primary_text(self) -> str:
+        return self.on_primary
+
+    @property
+    def summary(self) -> str:
+        return "#f7f9fc" if self is _TOKENS[ColorScheme.STUDIO, ThemeMode.LIGHT] else self.card
+
+    @property
+    def surface_alt(self) -> str:
+        return "#fbfcfb" if self is _TOKENS[ColorScheme.STUDIO, ThemeMode.LIGHT] else self.canvas
+
+    @property
+    def success_fg(self) -> str:
+        return (
+            "#2e7659"
+            if self is _TOKENS[ColorScheme.STUDIO, ThemeMode.LIGHT]
+            else self.text_secondary
+        )
+
+    @property
+    def overlay(self) -> str:
+        return "#731a211d"
+
 
 @dataclass(frozen=True, slots=True)
 class Tint:
@@ -130,21 +166,21 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
         on_primary="#ffffff",
     ),
     (ColorScheme.STUDIO, ThemeMode.LIGHT): Tokens(
-        canvas="#f5f5f7",
+        canvas="#f5f7f6",
         panel="#ffffff",
-        selection="#ebebef",
-        hairline="#d6d6d6",
+        selection="#edf3ff",
+        hairline="#dfe3df",
         border_strong="#86868b",
-        accent_border="#0071e3",
-        text="#1d1d1f",
-        text_secondary="#515154",
-        text_muted="#68686d",
-        warning_fg="#b64400",
-        warning_bg="#fff1e6",
-        accent_fg="#0066cc",
-        accent_bg="#e8f1fb",
-        card="#f5f5f7",
-        primary_fill="#0071e3",
+        accent_border="#2f62d4",
+        text="#202421",
+        text_secondary="#59615c",
+        text_muted="#69716c",
+        warning_fg="#b64b39",
+        warning_bg="#fff1ed",
+        accent_fg="#2f62d4",
+        accent_bg="#edf3ff",
+        card="#f5f7f6",
+        primary_fill="#2f62d4",
         on_primary="#ffffff",
     ),
     (ColorScheme.SLATE, ThemeMode.DARK): Tokens(
@@ -857,7 +893,9 @@ PILL_RADIUS: Final = 14
 TAB_RADIUS: Final = 12  # Tabs are segments of a pill.
 FIELD_RADIUS: Final = 8  # Text fields, combo boxes and date and time fields.
 MENU_ITEM_RADIUS: Final = 6  # Menu items and tooltips.
-SIDEBAR_WIDTH: Final = 128
+SIDEBAR_WIDTH: Final = 214
+BODY_PX: Final = 11
+META_PX: Final = 9
 TEXT_PX: Final = 13
 READING_PX: Final = 14  # An email's summary in the reading pane.
 SMALL_PX: Final = 12
