@@ -12,10 +12,20 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.config import Settings
 from mailbrief.storage.database import Database
 
 # Ensure Qt runs in offscreen mode in headless test environments
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide the developer's own MAILBRIEF_ settings, such as an OAuth client path exported
+    in their shell, so every test starts from the defaults; a test sets what it needs."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(f"MAILBRIEF_{name.upper()}", raising=False)
+
 
 REAL_CONNECT = sqlite3.connect
 
