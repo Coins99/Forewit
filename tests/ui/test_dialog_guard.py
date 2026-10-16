@@ -33,6 +33,22 @@ def centre(widget: QWidget, window: QWidget) -> QPoint:
     return widget.mapTo(window, widget.rect().center())
 
 
+def click_at(window: QWidget, point: QPoint) -> None:
+    """Hit-test the window and click its receiver, using receiver-local coordinates.
+
+    Avoid windowHandle(): on Cocoa its PySide wrapper can have the wrong type. Sending
+    directly to the top-level QWidget would bypass child hit-testing and miss the button.
+    """
+    receiver = window.childAt(point)
+    assert receiver is not None
+    QTest.mouseClick(
+        receiver,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        receiver.mapFrom(window, point),
+    )
+
+
 async def test_dialogs_open_without_a_modal_session(window: MainWindow) -> None:
     await window.initialize()
     window.page_shortcuts["calendar"].activated.emit()
@@ -61,16 +77,14 @@ async def test_the_cover_takes_the_windows_clicks_and_shortcuts(window: MainWind
     guard = window.dialog_guard
     point = centre(window.calendar_panel.new_button, window)
     assert window.childAt(point) is guard
-    handle = window.windowHandle()
-    assert handle is not None
-    QTest.mouseClick(handle, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    click_at(window, point)
     assert not window.event_editor.isVisible()  # New event, under the cover, wasn't pressed.
     QTest.keyClick(guard, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
     assert window.workspace.current_page() == "calendar"  # Ctrl+1 (Today) didn't fire.
 
     window.planning_dialog.reject()
     assert window.childAt(point) is not guard
-    QTest.mouseClick(handle, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    click_at(window, point)
     assert window.event_editor.isVisible()  # The same click, with no dialog, presses it.
 
 

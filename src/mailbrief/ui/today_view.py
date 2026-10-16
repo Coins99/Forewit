@@ -37,7 +37,14 @@ from mailbrief.ui.deadline_text import day_text, deadline_text
 from mailbrief.ui.hairline import HairlineFrame, paint_focus_ring
 from mailbrief.ui.labels import plain_label, wrap_label
 from mailbrief.ui.lists import ActivatingList
-from mailbrief.ui.theme import SMALL_PX, TEXT_PX, current_tokens, ui_font, ui_metrics
+from mailbrief.ui.theme import (
+    SMALL_PX,
+    TEXT_PX,
+    current_tokens,
+    paused_collection,
+    ui_font,
+    ui_metrics,
+)
 
 # A card shows this many rows before its list scrolls.
 VISIBLE_ROWS: Final = 3
@@ -217,7 +224,13 @@ class _Card(HairlineFrame):
 
     def show_rows(self, rows: list[tuple[DayRow, object]]) -> None:
         """Each row and what it opens; the heading counts them."""
-        self.list.clear()
+        # As in Calendar, remove each item before releasing its wrapper and Python data.
+        # QListWidget.clear() deletes them inside Qt's bulk reset; collecting Python
+        # objects during that native traversal can crash on Cocoa.
+        with paused_collection():
+            while self.list.count():
+                item = self.list.takeItem(0)
+                del item
         for row, target in rows:
             item = QListWidgetItem(row.text())
             item.setData(ROW_ROLE, row)
