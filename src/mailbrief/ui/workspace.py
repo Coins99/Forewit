@@ -215,13 +215,12 @@ def coverage_short(brief: DailyDigest | SavedBriefSummary, today: date) -> str:
 
 
 class _StatusLabel(ElidedLabel):
-    """Asks for its whole text's width, but can shrink to nothing: a long status elides
-    instead of widening the window."""
+    """Prefer the whole text on one line, eliding only when the header is too narrow."""
 
     def sizeHint(self) -> QSize:
         margins = self.contentsMargins()
         # Elision measures fractional widths, so round up: a whole-pixel width can fall a
-        # fraction short and elide a status that fits.
+        # fraction short and elide a title that fits.
         text = " ".join(self.text().split())
         width = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(text))
         return QSize(width + margins.left() + margins.right(), super().sizeHint().height())
@@ -384,7 +383,8 @@ class HeaderBar(GlassChrome):
         self.date = ElidedLabel(tone="muted", px=CAPTION_PX)
         self.date.setText("Your daily workspace")
         self.date.setObjectName("pageHeaderDate")
-        self.title = plain_label("Today’s brief", px=24, medium=True)
+        self.title = _StatusLabel("Today’s brief", px=24)
+        self.title.setFont(ui_font(24, medium=True))
         self.title.setObjectName("pageHeaderTitle")
         headings.addWidget(self.date)
         self.title_line = QWidget()
@@ -410,10 +410,10 @@ class HeaderBar(GlassChrome):
         policy.setRetainSizeWhenHidden(True)
         self.refresh_icon.setSizePolicy(policy)
         title_row.addWidget(self.refresh_icon)
-        self.status = _StatusLabel(tone="muted", px=10)
+        self.status = ElidedLabel(tone="muted", px=10)
         self.status.setObjectName("headerStatus")
-        title_row.addWidget(self.status)
-        title_row.addStretch(1)
+        # Reserve the title's preferred width before giving the status the remaining space.
+        title_row.addWidget(self.status, 1)
         self.alert = HeaderAlert()
         layout.addWidget(self.alert)
         # Widgets the window adds, right of the status: 2 + the layout's 6 makes 8.
