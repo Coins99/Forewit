@@ -71,7 +71,9 @@ def editor(qtbot: QtBot) -> Iterator[ActionEditor]:
 
 def saved(editor: ActionEditor) -> list[tuple[Action, ActionEdit, list[StepEdit] | None]]:
     found: list[tuple[Action, ActionEdit, list[StepEdit] | None]] = []
-    editor.save_requested.connect(lambda action, edit, steps: found.append((action, edit, steps)))
+    editor.save_requested.connect(
+        lambda action, edit, steps, _repeat: found.append((action, edit, steps))
+    )
     return found
 
 
@@ -590,7 +592,7 @@ def test_a_bad_tag_keeps_the_dialog_open_and_names_no_tag(editor: ActionEditor) 
 
 def test_a_new_task_starts_without_priority_or_tags(editor: ActionEditor) -> None:
     created: list[ActionEdit] = []
-    editor.create_requested.connect(lambda edit, _steps: created.append(edit))
+    editor.create_requested.connect(lambda edit, _steps, _rule: created.append(edit))
     editor.new_task(TODAY)
     assert (editor.priority.currentText(), editor.tags.text()) == ("Not set", "")
     editor.title.setText("Water plants")

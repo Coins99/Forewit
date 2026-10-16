@@ -80,7 +80,7 @@ def make_source(**overrides: object) -> ActionSource:
 
 
 def test_stored_values_are_stable() -> None:
-    assert [status.value for status in ActionStatus] == ["open", "completed"]
+    assert [status.value for status in ActionStatus] == ["open", "completed", "skipped"]
     assert [state.value for state in SuggestionState] == ["pending", "accepted", "dismissed"]
     assert [view.value for view in ActionFilter] == ["open", "waiting", "completed"]
 

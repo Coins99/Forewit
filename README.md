@@ -123,6 +123,7 @@ checks and pull request guidance.
 - [Manual tasks and activity history](docs/p1-manual-tasks.md)
 - [Projects and life areas](docs/p1-projects-life-areas.md)
 - [Priorities, tags and filters](docs/p1-priorities-tags.md)
+- [Repeating tasks](docs/p1-recurring-tasks.md)
 - [Drafts, notes and AI writing](docs/m7-drafts.md)
 - [Preferences, brief history and daily operation](docs/m8-daily-operation.md)
 - [Project status and milestone documentation](docs/project-status.md)

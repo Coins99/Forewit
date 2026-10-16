@@ -3,8 +3,9 @@
 This P1 slice is B03 in the [feature inventory](future-feature-inventory.md): find and
 order work without needing a deadline. It builds on manual tasks
 ([p1-manual-tasks.md](p1-manual-tasks.md)) and projects and life areas
-([p1-projects-life-areas.md](p1-projects-life-areas.md)). Recurring tasks (B05) are the
-remaining P1 slice. Owner desktop acceptance of this slice is still pending.
+([p1-projects-life-areas.md](p1-projects-life-areas.md)). Repeating tasks (B05) follow it
+([p1-recurring-tasks.md](p1-recurring-tasks.md)). Owner desktop acceptance of this slice is
+still pending.
 
 ## Priority
 
@@ -32,7 +33,8 @@ the tag after the last comma from the tags already in use.
   each tag once.
 - A tag keeps the spelling other live tasks already use. Typing `home` on a new task, when
   another task has `Home`, saves `Home`. Respelling a tag a task already has, such as
-  `home` to `Home`, respells it on every live task, as one revision of each. A deleted
+  `home` to `Home`, respells it on every live task, as one revision of each, recorded as
+  `tag_respelled` on the other tasks (an edit of the task itself is `edited`). A deleted
   task's tags take the live spelling when it's restored.
 - A tag is at most 40 characters and can't contain a comma. A task has at most 10 tags. A
   refused tag keeps the editor open with every field as typed. The message never repeats

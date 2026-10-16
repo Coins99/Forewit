@@ -34,6 +34,7 @@ EXPORT_TABLES = (
     "action_activity",
     "action_steps",
     "action_tags",
+    "action_series",
     "action_sources",
     "action_proposals",
     "drafts",

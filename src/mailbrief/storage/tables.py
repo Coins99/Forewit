@@ -35,6 +35,7 @@ from mailbrief.domain.preferences import (
     REFRESH_INTERVALS,
     SHORTLIST_LIMIT_MAX,
 )
+from mailbrief.domain.recurrence import RepeatFrequency
 from mailbrief.storage.types import UTCDateTime
 
 NAMING_CONVENTION = {
@@ -58,6 +59,9 @@ _PROPOSAL_KIND_CHECK = "kind IN ('new_deadline','cancelled','delivered')"
 _PROPOSAL_STATE_CHECK = "state IN ('pending','applied','dismissed')"
 _PRIORITY_CHECK = (
     f"priority IS NULL OR priority IN ({', '.join(repr(item.value) for item in ActionPriority)})"
+)
+_REPEAT_FREQUENCY_CHECK = (
+    f"frequency IN ({', '.join(repr(item.value) for item in RepeatFrequency)})"
 )
 _REFRESH_INTERVAL_CHECK = (
     "refresh_interval_minutes IS NULL OR refresh_interval_minutes IN "
@@ -457,6 +461,60 @@ class ProjectTable(Base):
     __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
 
 
+class ActionSeriesTable(Base):
+    """A repeating task's series (B05): its rule, and the template its later occurrences are
+    made from. Its occurrences are ordinary actions; the series has no account and is never
+    deleted with one of them, so their history stays together."""
+
+    __tablename__ = "action_series"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_action_series_public_id"),
+        CheckConstraint(_REPEAT_FREQUENCY_CHECK, name="frequency_known"),
+        CheckConstraint(
+            "CASE WHEN frequency = 'weekly' THEN weekday_mask BETWEEN 1 AND 127"
+            " ELSE weekday_mask = 0 END",
+            name="weekdays_weekly",
+        ),
+        CheckConstraint(
+            "(frequency = 'monthly_day') = (month_day IS NOT NULL)"
+            " AND (month_day IS NULL OR month_day BETWEEN 1 AND 31)",
+            name="month_day_monthly",
+        ),
+        CheckConstraint(_OWNERSHIP_CHECK, name="ownership_known"),
+        CheckConstraint(_PRIORITY_CHECK, name="priority_known"),
+        CheckConstraint(
+            f"estimate_minutes IS NULL OR estimate_minutes BETWEEN 1 AND {ESTIMATE_MAX_MINUTES}",
+            name="estimate_minutes_range",
+        ),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    frequency: Mapped[str] = mapped_column(String(16), nullable=False)
+    weekday_mask: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    month_day: Mapped[int | None] = mapped_column(Integer)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    # The template: what a later occurrence starts with. Its date comes from the rule.
+    project_public_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.public_id", ondelete="SET NULL")
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    ownership: Mapped[str] = mapped_column(String(16), nullable=False)
+    priority: Mapped[str | None] = mapped_column(String(16))
+    effort: Mapped[str | None] = mapped_column(String(16))
+    estimate_minutes: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    steps_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    tags_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    ended_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())  # Repeats stopped.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
+
 class ActionTable(DeadlineColumns, Base):
     """An action the owner accepted.
 
@@ -467,7 +525,7 @@ class ActionTable(DeadlineColumns, Base):
     __tablename__ = "actions"
     __table_args__ = (
         UniqueConstraint("public_id", name="uq_actions_public_id"),
-        CheckConstraint("status IN ('open','completed')", name="status_known"),
+        CheckConstraint("status IN ('open','completed','skipped')", name="status_known"),
         CheckConstraint(_OWNERSHIP_CHECK, name="ownership_known"),
         CheckConstraint(_PRECISION_CHECK, name="deadline_precision_known"),
         CheckConstraint("revision >= 1", name="revision_positive"),
@@ -476,7 +534,10 @@ class ActionTable(DeadlineColumns, Base):
             name="estimate_minutes_range",
         ),
         CheckConstraint(_PRIORITY_CHECK, name="priority_known"),
+        # One occurrence per series and date, so making the next one twice makes one.
+        UniqueConstraint("series_id", "occurrence_date", name="uq_actions_series_occurrence"),
         Index("ix_actions_status", "status"),
+        Index("ix_actions_follows_action_id", "follows_action_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -504,6 +565,15 @@ class ActionTable(DeadlineColumns, Base):
     )
     # The owner's "seen" watermark for later messages in the action's threads (ADR 0015).
     thread_seen_until_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # A repeating task's series and this occurrence's own date in it (B05), and the
+    # occurrence whose completion or skip made this one.
+    series_id: Mapped[int | None] = mapped_column(
+        ForeignKey("action_series.id", ondelete="SET NULL")
+    )
+    occurrence_date: Mapped[date | None] = mapped_column(Date)
+    follows_action_id: Mapped[int | None] = mapped_column(
+        ForeignKey("actions.id", ondelete="SET NULL")
+    )
 
 
 class ActionTagTable(Base):

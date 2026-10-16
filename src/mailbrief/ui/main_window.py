@@ -92,6 +92,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
+from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
@@ -108,6 +109,7 @@ from mailbrief.services.actions import (
     AcceptedInto,
     ActionConflictError,
     ActionNotFoundError,
+    ActionRepeatError,
     DecisionSnapshot,
     SuggestionNotFoundError,
 )
@@ -151,6 +153,7 @@ from mailbrief.ui.actions_view import (
     PROPOSALS,
     REOPEN,
     SEEN,
+    SKIP,
     ActionsPanel,
 )
 from mailbrief.ui.appearance import (
@@ -327,7 +330,9 @@ class DesktopBackend(Protocol):
     async def count_grouped_actions(
         self, view: ActionFilter, group: str, group_id: str | None
     ) -> int: ...
-    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action: ...
+    async def create_action(
+        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+    ) -> Action: ...
     async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
         self,
@@ -335,8 +340,10 @@ class DesktopBackend(Protocol):
         revision: int,
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
+        repeat: RepeatEdit | None = None,
     ) -> Action: ...
     async def complete_action(self, public_id: str, revision: int) -> Action: ...
+    async def skip_action(self, public_id: str, revision: int) -> Action: ...
     async def reopen_action(self, public_id: str, revision: int) -> Action: ...
     async def delete_action(self, public_id: str, revision: int) -> None: ...
     async def restore_action(self, public_id: str) -> Action: ...
@@ -1654,6 +1661,8 @@ class MainWindow(QMainWindow):
             self.start(lambda: self._complete_action(action), cancellable=False)
         elif kind == REOPEN:
             self.start(lambda: self._reopen_action(action), cancellable=False)
+        elif kind == SKIP:
+            self.start(lambda: self._skip_action(action), cancellable=False)
         elif kind == DELETE:
             self.start(lambda: self._delete_action(action), cancellable=False)
         elif kind == SEEN:
@@ -1777,14 +1786,22 @@ class MainWindow(QMainWindow):
         if self.action_editor.embedded:
             self.actions_panel.detail_host.setCurrentWidget(self.actions_panel.detail)
 
-    def _request_create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
-        started = self.start(lambda: self._create_action(edit, steps), cancellable=False)
+    def _request_create_action(
+        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+    ) -> None:
+        started = self.start(lambda: self._create_action(edit, steps, repeat), cancellable=False)
         if not started and not self._closing:
             self.action_editor.keep_open(_BUSY)
 
-    async def _create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> None:
+    async def _create_action(
+        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+    ) -> None:
         try:
-            created = await self.backend.create_action(edit, steps)
+            created = await self.backend.create_action(edit, steps, repeat)
+        except ActionRepeatError as exc:
+            if not self._closing:
+                self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
+            return
         except Exception:
             if not self._closing:
                 self.action_editor.keep_open(_EDITOR_FAILED)
@@ -1800,11 +1817,23 @@ class MainWindow(QMainWindow):
         self.actions_panel.select_action(created.public_id)
 
     def _request_save_action(
-        self, action: Action, edit: ActionEdit, steps: Sequence[StepEdit] | None
+        self,
+        action: Action,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit] | None,
+        repeat: RepeatEdit | None = None,
     ) -> None:
-        started = self.start(lambda: self._save_action(action, edit, steps), cancellable=False)
+        started = self.start(
+            lambda: self._save_action(action, edit, steps, repeat), cancellable=False
+        )
         if not started and not self._closing:
             self.action_editor.keep_open(_BUSY)
+
+    def _next_repeat(self, closed: Action) -> str:
+        """ "Next Fri Oct 16." when closing a repeating task made its next occurrence, else
+        nothing."""
+        day = None if closed.repeat is None else closed.repeat.next_date
+        return "" if day is None else f" Next {day_text(day, today=self._local_today())}."
 
     async def _complete_action(self, action: Action) -> None:
         done = await self._unless_stale(
@@ -1817,7 +1846,21 @@ class MainWindow(QMainWindow):
             await self.backend.undo_action_status(done.public_id, done.revision)
 
         self._offer_undo("Undo complete", undo)
-        self.status.setText(f"Completed: {done.title}.")
+        self.status.setText(f"Completed: {done.title}.{self._next_repeat(done)}")
+        await self._refresh_views()
+
+    async def _skip_action(self, action: Action) -> None:
+        skipped = await self._unless_stale(
+            self.backend.skip_action(action.public_id, action.revision)
+        )
+        if skipped is _GONE:
+            return
+
+        async def undo() -> None:
+            await self.backend.undo_action_status(skipped.public_id, skipped.revision)
+
+        self._offer_undo("Undo skip", undo)
+        self.status.setText(f"Skipped: {skipped.title}.{self._next_repeat(skipped)}")
         await self._refresh_views()
 
     async def _reopen_action(self, action: Action) -> None:
@@ -1860,11 +1903,21 @@ class MainWindow(QMainWindow):
         await self._refresh_views()
 
     async def _save_action(
-        self, action: Action, edit: ActionEdit, steps: Sequence[StepEdit] | None
+        self,
+        action: Action,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit] | None,
+        repeat: RepeatEdit | None = None,
     ) -> None:
         """The editor closes only once the save succeeds; otherwise it keeps the edits."""
         try:
-            saved = await self.backend.save_action(action.public_id, action.revision, edit, steps)
+            saved = await self.backend.save_action(
+                action.public_id, action.revision, edit, steps, repeat
+            )
+        except ActionRepeatError as exc:
+            if not self._closing:
+                self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
+            return
         except _STALE as exc:
             if not self._closing:
                 self.action_editor.keep_open(_EDITOR_STALE)

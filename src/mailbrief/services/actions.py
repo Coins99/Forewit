@@ -8,8 +8,10 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.actions import (
     MAX_ACTION_STEPS,
@@ -33,6 +35,8 @@ from mailbrief.domain.analysis import (
 )
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
+from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
+from mailbrief.services.recurrence import RepeatError, Repeats
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
 from mailbrief.storage.projects import ProjectRepository
@@ -49,6 +53,16 @@ _NOT_FOUND: Final = "That action was not found."
 _SUGGESTION_NOT_FOUND: Final = "That suggestion was not found."
 _STALE: Final = "The action changed since it was loaded; reload it and try again."
 _UNDO_ADD: Final = "Only an unchanged addition can be undone."
+_UNDO_STATUS: Final = "Only an unchanged completion, skip or reopening can be undone."
+# The changes undo_status() reverses: each records the status before it.
+_UNDOABLE: Final = frozenset(
+    kind.value
+    for kind in (
+        ActionActivityKind.COMPLETED,
+        ActionActivityKind.REOPENED,
+        ActionActivityKind.SKIPPED,
+    )
+)
 _LATEST: Final = datetime.max.replace(tzinfo=UTC)
 COMPLETED_LIST_LIMIT: Final = 200  # The newest completed actions a list shows by default.
 MAX_THREAD_LINKS: Final = 3  # The actions named for one email, most urgent first.
@@ -64,6 +78,10 @@ class SuggestionNotFoundError(LookupError):
 
 class ActionConflictError(ValueError):
     """The action changed since it was read, or the change is not allowed now."""
+
+
+class ActionRepeatError(ActionConflictError):
+    """The repeat settings can't be applied; the static message says why, for the owner."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +170,9 @@ class ActionService:
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
     A method taking ``expected_revision`` raises ActionConflictError when the action's
-    revision differs, so a stale screen never overwrites a newer change.
+    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates a
+    repeating task's occurrences; by default the owner's saved zone is read when one is
+    needed (see Repeats).
     """
 
     def __init__(
@@ -161,14 +181,27 @@ class ActionService:
         *,
         clock: Callable[[], datetime] = utc_now,
         id_factory: Callable[[], str] = new_public_id,
+        zone: ZoneInfo | None = None,
     ) -> None:
         self._session = session
         self._clock = clock
         self._id_factory = id_factory
         self._repository = ActionRepository(session)
+        self._repeats = Repeats(session, self._repository, zone=zone, id_factory=id_factory)
+
+    async def _apply_repeat(self, row: ActionTable, repeat: RepeatEdit, now: datetime) -> None:
+        try:
+            await self._repeats.apply(row, repeat, now)
+        except RepeatError as error:
+            raise ActionRepeatError(str(error)) from None
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        return await commit_once(self._session, self._clock, operation)
+        try:
+            return await commit_once(self._session, self._clock, operation)
+        except StaleDataError:
+            raise ActionRepeatError(
+                "The repeat changed since it was loaded; reload it and try again."
+            ) from None
 
     async def _suggestion(
         self, suggestion_id: int
@@ -251,10 +284,16 @@ class ActionService:
         await self._repository.set_tags(row.id, names)
         for other in respelt.values():
             touch(other, now)
-            await self._repository.record_activity(other, ActionActivityKind.EDITED, now)
+            await self._repository.record_activity(other, ActionActivityKind.TAG_RESPELLED, now)
 
-    async def create(self, edit: ActionEdit, steps: Sequence[StepEdit] = ()) -> Action:
-        """Create a task with no account or email source, using the same plan and workflow."""
+    async def create(
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit] = (),
+        repeat: RepeatRule | None = None,
+    ) -> Action:
+        """Create a task with no account or email source, using the same plan and workflow.
+        With ``repeat`` it is the first occurrence of a new series (see Repeats.apply)."""
 
         async def run(now: datetime) -> Action:
             listed = _check_step_list(steps)
@@ -275,13 +314,17 @@ class ActionService:
             await self._repository.add_action(row)
             await self._apply_tags(row, edit, now)
             await self._apply_steps(row, steps, listed, now)
+            if repeat is not None:
+                await self._apply_repeat(row, RepeatEdit(rule=repeat), now)
             await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
             return await self._load(row)
 
         return await self._write(run)
 
     async def undo_status(self, public_id: str, expected_revision: int) -> Action:
-        """Undo the latest completion/reopening, retaining the original completion time."""
+        """Undo the latest completion, skip or reopening, retaining the original completion
+        time. Undoing a repeating task's completion or skip withdraws the occurrence it made
+        while that one is untouched."""
 
         async def run(now: datetime) -> Action:
             row = await self._live(public_id, expected_revision)
@@ -289,16 +332,17 @@ class ActionService:
             if (
                 latest is None
                 or latest.revision != expected_revision
-                or latest.kind
-                not in (ActionActivityKind.COMPLETED.value, ActionActivityKind.REOPENED.value)
+                or latest.kind not in _UNDOABLE
                 or latest.previous_status is None
             ):
-                raise ActionConflictError(
-                    "Only an unchanged completion or reopening can be undone."
-                )
+                raise ActionConflictError(_UNDO_STATUS)
             previous_status, previous_completed = row.status, row.completed_at_utc
             row.status = latest.previous_status
             row.completed_at_utc = latest.previous_completed_at_utc
+            if row.status == ActionStatus.OPEN.value:
+                await self._repeats.withdraw(row)
+            else:
+                await self._repeats.follow(row, now)  # Undoing a reopening closes it again.
             touch(row, now)
             await self._repository.record_activity(
                 row,
@@ -554,8 +598,10 @@ class ActionService:
         expected_revision: int,
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
+        repeat: RepeatEdit | None = None,
     ) -> Action:
-        """Apply an edit and, when given, a new plan together, as one revision."""
+        """Apply an edit and, when given, a new plan and repeat settings together, as one
+        revision. Without ``repeat`` a repeating task's series is left as it was."""
 
         async def run(now: datetime) -> Action:
             listed = [] if steps is None else _check_step_list(steps)
@@ -565,6 +611,8 @@ class ActionService:
             await self._apply_tags(row, edit, now)
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)
+            if repeat is not None:
+                await self._apply_repeat(row, repeat, now)
             touch(row, now)
             await self._repository.record_activity(row, ActionActivityKind.EDITED, now)
             return await self._load(row)
@@ -572,37 +620,60 @@ class ActionService:
         return await self._write(run)
 
     async def complete(self, public_id: str, expected_revision: int) -> Action:
-        """Complete an open action; its steps are left as they are."""
+        """Complete an open action; its steps are left as they are. A repeating task's next
+        occurrence is made with it (Repeats.follow)."""
 
         async def run(now: datetime) -> Action:
             row = await self._live(public_id, expected_revision)
             if row.status != ActionStatus.OPEN.value:
                 raise ActionConflictError("The action is already completed.")
-            previous_status, previous_completed = row.status, row.completed_at_utc
-            row.status = ActionStatus.COMPLETED.value
-            row.completed_at_utc = now
-            touch(row, now)
-            await self._repository.record_activity(
-                row,
-                ActionActivityKind.COMPLETED,
-                now,
-                previous_status=previous_status,
-                previous_completed_at_utc=previous_completed,
-            )
-            return await self._load(row)
+            return await self._close(row, ActionStatus.COMPLETED, now)
 
         return await self._write(run)
 
-    async def reopen(self, public_id: str, expected_revision: int) -> Action:
-        """Reopen a completed action."""
+    async def skip(self, public_id: str, expected_revision: int) -> Action:
+        """Skip an open occurrence of a repeating task: it closes without being done, and
+        its series makes the next one. Only a task whose series still repeats is skipped."""
 
         async def run(now: datetime) -> Action:
             row = await self._live(public_id, expected_revision)
-            if row.status != ActionStatus.COMPLETED.value:
+            if row.status != ActionStatus.OPEN.value:
+                raise ActionConflictError("Only an open task can be skipped.")
+            if not await self._repeats.repeating(row):
+                raise ActionConflictError("Only a repeating task can be skipped.")
+            return await self._close(row, ActionStatus.SKIPPED, now)
+
+        return await self._write(run)
+
+    async def _close(self, row: ActionTable, status: ActionStatus, now: datetime) -> Action:
+        previous_status, previous_completed = row.status, row.completed_at_utc
+        row.status = status.value
+        row.completed_at_utc = now if status is ActionStatus.COMPLETED else None
+        touch(row, now)
+        await self._repository.record_activity(
+            row,
+            ActionActivityKind.COMPLETED
+            if status is ActionStatus.COMPLETED
+            else ActionActivityKind.SKIPPED,
+            now,
+            previous_status=previous_status,
+            previous_completed_at_utc=previous_completed,
+        )
+        await self._repeats.follow(row, now)
+        return await self._load(row)
+
+    async def reopen(self, public_id: str, expected_revision: int) -> Action:
+        """Reopen a completed or skipped action. A repeating task's next occurrence, made
+        when it closed, is withdrawn while it is untouched (Repeats.withdraw)."""
+
+        async def run(now: datetime) -> Action:
+            row = await self._live(public_id, expected_revision)
+            if row.status == ActionStatus.OPEN.value:
                 raise ActionConflictError("The action is already open.")
             previous_status, previous_completed = row.status, row.completed_at_utc
             row.status = ActionStatus.OPEN.value
             row.completed_at_utc = None
+            await self._repeats.withdraw(row)
             touch(row, now)
             await self._repository.record_activity(
                 row,

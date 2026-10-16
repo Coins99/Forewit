@@ -10,6 +10,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import date, datetime
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,11 +28,12 @@ from mailbrief.domain.analysis import (
     MessageAnalysis,
     deadline_due_at,
 )
-from mailbrief.domain.common import normalize_utc, utc_now
+from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.messages import NormalizedMessage, ProviderKind, is_own_message
 from mailbrief.services.actions import ActionConflictError, touch, urgency
 from mailbrief.services.analysis import PlannedMessage
 from mailbrief.services.deadlines import ResolvedDeadline, suggest_target_for
+from mailbrief.services.recurrence import Repeats
 from mailbrief.services.threads import own_addresses
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository
@@ -171,13 +173,22 @@ class ProposalService:
     """Stores, lists and decides follow-up proposals.
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
+    A proposal that completes a repeating task makes its next occurrence, counted from
+    today in ``zone`` (by default the owner's saved zone), as completing it would.
     """
 
-    def __init__(self, session: AsyncSession, *, clock: Callable[[], datetime] = utc_now) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        clock: Callable[[], datetime] = utc_now,
+        zone: ZoneInfo | None = None,
+    ) -> None:
         self._session = session
         self._clock = clock
         self._proposals = ProposalRepository(session)
         self._actions = ActionRepository(session)
+        self._repeats = Repeats(session, self._actions, zone=zone, id_factory=new_public_id)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         return await commit_once(self._session, self._clock, operation)
@@ -359,6 +370,7 @@ class ProposalService:
             else:
                 action.status = ActionStatus.COMPLETED.value
                 action.completed_at_utc = now
+                await self._repeats.follow(action, now)
             row.source_added = await self._add_source(action, row)
             row.state = ProposalState.APPLIED.value
             row.decided_at_utc = now
@@ -428,6 +440,8 @@ class ProposalService:
                 or row.applied_revision != expected_revision
             ):
                 raise ActionConflictError(_UNDO)
+            if action.status != ActionStatus.OPEN.value:
+                await self._repeats.withdraw(action)
             _restore(action, saved)
             if row.source_added and await self._actions.source_count(action.id) > 1:
                 await self._actions.remove_source(action.id, row.provider_message_id)

@@ -19,6 +19,7 @@ from sqlalchemy import ColumnElement, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import QueryableAttribute
 
+from mailbrief.domain.actions import ActionStatus
 from mailbrief.domain.drafts import DraftKind, first_line
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.search import (
@@ -97,7 +98,8 @@ class SearchService:
         return SearchResults(hits=tuple(hits), more=frozenset(more))
 
     async def _actions(self, terms: Sequence[str], limit: int) -> list[SearchHit]:
-        """Live actions, open ones first, then the most recently changed."""
+        """Live actions, open ones first, then the most recently changed. A skipped occurrence
+        of a repeating task is in no Actions view, so it isn't found either."""
         in_steps = [
             ActionTable.id.in_(
                 select(ActionStepTable.action_id).where(_contains(ActionStepTable.text, term))
@@ -112,7 +114,11 @@ class SearchService:
         )
         rows = await self._session.scalars(
             select(ActionTable)
-            .where(ActionTable.deleted_at_utc.is_(None), matches)
+            .where(
+                ActionTable.deleted_at_utc.is_(None),
+                ActionTable.status != ActionStatus.SKIPPED.value,
+                matches,
+            )
             .order_by(
                 case((ActionTable.status == "open", 0), else_=1),
                 ActionTable.updated_at_utc.desc(),
