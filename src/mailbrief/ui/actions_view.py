@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.actions import Action, ActionFilter, tag_key
+from mailbrief.domain.actions import Action, ActionFilter, ActionStatus, tag_key
 from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.projects import LifeArea, Project
 from mailbrief.ui.action_detail import ActionDetailPane
@@ -52,6 +52,7 @@ from mailbrief.ui.action_text import (
     completed_text,
     gmail_source,
     priority_text,
+    repeat_short,
     tags_text,
     target_text,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "PROPOSALS",
     "REOPEN",
     "SEEN",
+    "SKIP",
     "ActionList",
     "ActionRow",
     "ActionRowDelegate",
@@ -100,6 +102,7 @@ REOPEN = "reopen"
 DELETE = "delete"
 SEEN = "seen"
 PROPOSALS = "proposals"
+SKIP = "skip"
 
 NO_DATES: Final = "No target or deadline"
 _TAB_NAMES = {
@@ -109,6 +112,13 @@ _TAB_NAMES = {
 }
 
 _Index = QModelIndex | QPersistentModelIndex
+
+
+def can_skip(action: Action) -> bool:
+    """Whether Skip applies: an open occurrence of a task that still repeats."""
+    return (
+        action.status is ActionStatus.OPEN and action.repeat is not None and not action.repeat.ended
+    )
 
 
 def describe(action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> str:
@@ -133,6 +143,8 @@ def describe_details(action: Action, facts: ActionDetails) -> str:
         details.append(f"{facts.steps_done}/{facts.steps} steps")
     if action.tags:
         details.append("tagged " + ", ".join(action.tags))
+    if (repeat := repeat_short(action)) is not None:
+        details.append(repeat.lower())
     if facts.waiting:
         details.append("waiting for someone")
     if facts.overdue:
@@ -174,6 +186,7 @@ def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
             None if facts.due is None else f"Due {facts.due}",
             priority_text(action.priority),
             f"{facts.steps_done}/{facts.steps} steps" if facts.steps else None,
+            repeat_short(action),
         )
         if text is not None
     ]
@@ -312,7 +325,7 @@ class ActionsPanel(QWidget):
     """Lists actions per view beside the selected one's detail, and asks the window to act;
     it changes nothing itself.
 
-    ``action_requested(kind, action)`` carries EDIT, COMPLETE, REOPEN, DELETE, SEEN or
+    ``action_requested(kind, action)`` carries EDIT, COMPLETE, REOPEN, DELETE, SEEN, SKIP or
     PROPOSALS and the selected Action, and ``draft_requested(kind, action)`` a DraftKind and
     the Action. Opening a source needs no backend, so the panel does it directly.
     """
@@ -450,6 +463,7 @@ class ActionsPanel(QWidget):
         self.edit_button = detail.edit_button
         self.complete_button = detail.complete_button
         self.delete_button = detail.delete_button
+        self.skip_button = detail.skip_button
         self.source_button = detail.source_button
         self.seen_button = detail.seen_button
         self.proposals_button = detail.proposals_button
@@ -470,6 +484,7 @@ class ActionsPanel(QWidget):
         self.edit_button.clicked.connect(lambda: self._request(EDIT))
         self.complete_button.clicked.connect(self._complete_or_reopen)
         self.delete_button.clicked.connect(lambda: self._request(DELETE))
+        self.skip_button.clicked.connect(self._skip)
         self.seen_button.clicked.connect(self._mark_seen)
         self.proposals_button.clicked.connect(self._show_proposals)
         self.source_button.clicked.connect(self._open_source)
@@ -658,6 +673,8 @@ class ActionsPanel(QWidget):
         enabled = action is not None and not self._busy
         for button in (self.edit_button, self.complete_button, self.delete_button):
             button.setEnabled(enabled)
+        self.detail.set_can_skip(not completed and action is not None and can_skip(action))
+        self.skip_button.setEnabled(enabled)
         self.source_button.setEnabled(action is not None and gmail_source(action) is not None)
         self.seen_button.setEnabled(enabled and action is not None and has_activity(action))
         self.proposals_button.setEnabled(
@@ -680,6 +697,11 @@ class ActionsPanel(QWidget):
 
     def _complete_or_reopen(self) -> None:
         self._request(REOPEN if self.view() is ActionFilter.COMPLETED else COMPLETE)
+
+    def _skip(self) -> None:
+        action = self.selected()
+        if action is not None and can_skip(action):
+            self._request(SKIP)
 
     def _mark_seen(self) -> None:
         action = self.selected()

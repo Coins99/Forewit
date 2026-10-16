@@ -39,12 +39,14 @@ from mailbrief.domain.actions import (
     Action,
     ActionEdit,
     ActionPriority,
+    ActionStatus,
     StepEdit,
     normalize_tags,
 )
 from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
 from mailbrief.domain.projects import Project
-from mailbrief.ui.deadline_text import length_text, parse_length
+from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
+from mailbrief.ui.deadline_text import FULL_WEEKDAYS, WEEKDAYS, length_text, parse_length
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import outline_button, plain_label, primary_action
@@ -63,6 +65,15 @@ _PRIORITIES: tuple[tuple[ActionPriority | None, str], ...] = (
     (ActionPriority.MEDIUM, "Medium"),
     (ActionPriority.LOW, "Low"),
 )
+_REPEATS: tuple[tuple[RepeatFrequency | None, str], ...] = (
+    (None, "Doesn't repeat"),
+    (RepeatFrequency.DAILY, "Every day"),
+    (RepeatFrequency.WEEKLY, "Every week on…"),
+    (RepeatFrequency.MONTHLY_DAY, "Every month on day…"),
+    (RepeatFrequency.MONTHLY_LAST, "On the last day of each month"),
+)
+NO_WEEKDAY: Final = "Choose at least one day of the week."
+ENDS_FIRST: Final = "The repeat ends before the task's date. Choose a later end date."
 _STEP_ID = Qt.ItemDataRole.UserRole
 NO_ESTIMATE: Final = "Not set"
 BAD_ESTIMATE: Final = "Type an estimate like 45, 1.5h, 1h 30 or 1:30, or clear it."
@@ -109,6 +120,22 @@ class EstimateBox(QSpinBox):
         quarters = value // _QUARTER if steps > 0 else -(-value // _QUARTER)
         self.setValue((quarters + steps) * _QUARTER)
         self.selectAll()
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if takes_wheel(self, event):
+            super().wheelEvent(event)
+
+
+class DayBox(QSpinBox):
+    """A day of the month for a monthly repeat; like the other fields, the wheel changes it
+    only while it has focus."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("taskRepeatDay")
+        self.setAccessibleName("Day of the month")
+        self.setRange(1, 31)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if takes_wheel(self, event):
@@ -171,15 +198,17 @@ def _deadline(action: Action, owner_zone: ZoneInfo | None) -> str:
 
 
 class ActionEditor(QDialog):
-    """``save_requested(action, edit, steps)``: steps is None when the plan is unchanged.
+    """``save_requested(action, edit, steps, repeat)``: steps is None when the plan is
+    unchanged, and repeat a RepeatEdit, or None for a closed task, whose repeat can't change.
+    ``create_requested(edit, steps, rule)`` carries the new task's RepeatRule, or None.
 
     The dialog validates what it can; the service still checks every bound and the revision.
     After asking, it stays open and locked until the window calls finish_saved(), which
     closes it, or keep_open(), which unlocks it with every field as the owner left it.
     """
 
-    save_requested = Signal(object, object, object)
-    create_requested = Signal(object, object)
+    save_requested = Signal(object, object, object, object)
+    create_requested = Signal(object, object, object)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -192,6 +221,8 @@ class ActionEditor(QDialog):
         self.embedded = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
+        self._today = date.today()  # Replaced by the owner's day whenever the editor opens.
+        self._later_offered = False  # The task repeats, so its edit can go to later repeats.
         self._busy = False  # Another operation is running, so Save waits.
         self._saving = False  # This dialog's save is running, so nothing can change.
         layout = QVBoxLayout(self)
@@ -253,6 +284,49 @@ class ActionEditor(QDialog):
         target_row.addWidget(self.has_target)
         target_row.addWidget(self.target)
         form.addRow("Target", target_row)
+        self.repeat = QComboBox()
+        self.repeat.setObjectName("taskRepeat")
+        self.repeat.setAccessibleName("How the task repeats")
+        for _frequency, name in _REPEATS:
+            self.repeat.addItem(name)
+        self.month_day = DayBox()
+        self.repeat_ends = QCheckBox("Unt&il")
+        self.repeat_ends.setObjectName("taskRepeatEnds")
+        self.repeat_ends.setAccessibleName("The repeat has an end date")
+        self.repeat_end = QDateEdit()
+        self.repeat_end.setObjectName("taskRepeatEnd")
+        self.repeat_end.setAccessibleName("The last date it repeats on")
+        self.repeat_end.setCalendarPopup(True)
+        self.repeat_end.setDisplayFormat("yyyy-MM-dd")
+        self.repeat_ends.toggled.connect(self.repeat_end.setEnabled)
+        repeat_label = QLabel("R&epeats")
+        repeat_label.setBuddy(self.repeat)
+        repeat_row = QHBoxLayout()
+        repeat_row.addWidget(self.repeat)
+        repeat_row.addWidget(self.month_day)
+        repeat_row.addWidget(self.repeat_ends)
+        repeat_row.addWidget(self.repeat_end, 1)
+        form.addRow(repeat_label, repeat_row)
+        self.weekdays = QWidget()
+        self.weekdays.setObjectName("taskRepeatWeekdays")
+        self.weekdays.setAccessibleName("Days of the week it repeats on")
+        weekday_row = QHBoxLayout(self.weekdays)
+        weekday_row.setContentsMargins(0, 0, 0, 0)
+        self.weekday_boxes: list[QCheckBox] = []
+        for short, full in zip(WEEKDAYS, FULL_WEEKDAYS, strict=True):
+            box = QCheckBox(short)
+            box.setAccessibleName(full)
+            weekday_row.addWidget(box)
+            self.weekday_boxes.append(box)
+        weekday_row.addStretch(1)
+        form.addRow("On", self.weekdays)
+        self.later_too = QCheckBox("Change later repeats too")
+        self.later_too.setObjectName("taskRepeatLater")
+        self.later_too.setAccessibleName(
+            "Change later repeats too: they start from this task's details, but not its date"
+        )
+        form.addRow("", self.later_too)
+        self.repeat.currentIndexChanged.connect(self._repeat_changed)
         self.deadline = _plain("")
         form.addRow("Deadline", self.deadline)
         self.suggested = _plain("")
@@ -393,6 +467,11 @@ class ActionEditor(QDialog):
             (picked.year(), picked.month(), picked.day()) if self.has_target.isChecked() else None,
             self.notes.toPlainText(),
             tuple(self._current_steps()),
+            self.repeat.currentIndex(),
+            self.month_day.value(),
+            tuple(box.isChecked() for box in self.weekday_boxes),
+            self.repeat_ends.isChecked() and self.repeat_end.date().toString(Qt.DateFormat.ISODate),
+            self.later_too.isChecked(),
         )
 
     def has_unsaved_input(self) -> bool:
@@ -438,6 +517,16 @@ class ActionEditor(QDialog):
             or "no source"
         )
         self.notes.setPlainText(action.notes)
+        self._today = today
+        repeat = action.repeat
+        is_open = action.status is ActionStatus.OPEN
+        self._later_offered = repeat is not None and not repeat.ended and is_open
+        self._set_repeat(
+            None if repeat is None or repeat.ended else repeat.rule, action.target_date or today
+        )
+        for control in (self.repeat, self.month_day, self.repeat_ends, self.weekdays):
+            control.setEnabled(is_open)  # A closed task's repeat can't change.
+        self.repeat_end.setEnabled(is_open and self.repeat_ends.isChecked())
         self.steps.clear()
         for step in action.steps:
             self._append_step(step.text, step.done, step.step_id)
@@ -466,12 +555,90 @@ class ActionEditor(QDialog):
         self.suggested.setText("no target was suggested")
         self.sources.setText("Manual task")
         self.notes.clear()
+        self._today = today
+        self._later_offered = False
+        self._set_repeat(None, today)
+        for control in (self.repeat, self.month_day, self.repeat_ends, self.weekdays):
+            control.setEnabled(True)
         self.steps.clear()
         self._original = []
         self.status.clear()
         self._update_step_buttons()
         self._loaded_input = self._input()
         self.title.setFocus()
+
+    def _set_repeat(self, rule: RepeatRule | None, day: date) -> None:
+        """Show ``rule``, or no repeat; ``day`` (the task's date, or today) fills the day of
+        the month and the end date it offers."""
+        self.month_day.setValue(rule.month_day if rule and rule.month_day else day.day)
+        chosen = set(rule.weekdays) if rule is not None else set()
+        for number, box in enumerate(self.weekday_boxes):
+            box.setChecked(number in chosen)
+        end = None if rule is None else rule.end_date
+        self.repeat_ends.setChecked(end is not None)
+        self.repeat_end.setEnabled(end is not None)
+        shown = end or day
+        self.repeat_end.setDate(QDate(shown.year, shown.month, shown.day))
+        self.later_too.setChecked(True)
+        index = [frequency for frequency, _ in _REPEATS].index(
+            None if rule is None else rule.frequency
+        )
+        self.repeat.setCurrentIndex(index)
+        self._repeat_changed(index)
+
+    def _repeat_changed(self, index: int) -> None:
+        """Show what the chosen repeat needs; a weekly one starts on the task's weekday."""
+        frequency = _REPEATS[index][0]
+        weekly = frequency is RepeatFrequency.WEEKLY
+        if weekly and not any(box.isChecked() for box in self.weekday_boxes):
+            day = self._picked_target() or self._today
+            self.weekday_boxes[day.weekday()].setChecked(True)
+        self.month_day.setVisible(frequency is RepeatFrequency.MONTHLY_DAY)
+        self.repeat_ends.setVisible(frequency is not None)
+        self.repeat_end.setVisible(frequency is not None)
+        self._form.setRowVisible(self.weekdays, weekly)
+        self._form.setRowVisible(self.later_too, self._later_offered and frequency is not None)
+
+    def _picked_target(self) -> date | None:
+        if not self.has_target.isChecked():
+            return None
+        picked = self.target.date()
+        return date(picked.year(), picked.month(), picked.day())
+
+    def _rule(self) -> RepeatRule | None:
+        """The repeat chosen; raises ValueError, with the reason, for one that can't be."""
+        frequency = _REPEATS[self.repeat.currentIndex()][0]
+        if frequency is None:
+            return None
+        weekdays = (
+            tuple(number for number, box in enumerate(self.weekday_boxes) if box.isChecked())
+            if frequency is RepeatFrequency.WEEKLY
+            else ()
+        )
+        if frequency is RepeatFrequency.WEEKLY and not weekdays:
+            raise ValueError(NO_WEEKDAY)
+        end = self.repeat_end.date()
+        ends = date(end.year(), end.month(), end.day()) if self.repeat_ends.isChecked() else None
+        start = self._picked_target()
+        if self._action is not None and self._action.repeat is not None:
+            start = self._action.repeat.occurrence_date  # Moving the target doesn't move it.
+        if ends is not None and ends < (start or self._today):
+            raise ValueError(ENDS_FIRST)
+        return RepeatRule(
+            frequency=frequency,
+            weekdays=weekdays,
+            month_day=self.month_day.value() if frequency is RepeatFrequency.MONTHLY_DAY else None,
+            end_date=ends,
+        )
+
+    def _repeat_edit(self, action: Action, rule: RepeatRule | None) -> RepeatEdit | None:
+        if action.status is not ActionStatus.OPEN:
+            return None
+        return RepeatEdit(
+            rule=rule,
+            series_revision=None if action.repeat is None else action.repeat.series_revision,
+            later_too=rule is not None and self._later_offered and self.later_too.isChecked(),
+        )
 
     def set_projects(self, projects: tuple[Project, ...]) -> None:
         self._projects = projects
@@ -620,6 +787,11 @@ class ActionEditor(QDialog):
         except ValueError as exc:
             self.status.setText(str(exc))  # The model's own words, which name no tag.
             return
+        try:
+            rule = self._rule()
+        except ValueError as exc:
+            self.status.setText(str(exc))
+            return
         self.estimate.interpretText()  # Take what is typed, as leaving the field would.
         picked = self.target.date()
         project_id = self.project.currentData()
@@ -647,6 +819,6 @@ class ActionEditor(QDialog):
         self._set_saving(True)
         self.status.setText("Saving…")
         if self._creating:
-            self.create_requested.emit(edit, plan or [])
-        else:
-            self.save_requested.emit(action, edit, plan)
+            self.create_requested.emit(edit, plan or [], rule)
+        elif action is not None:
+            self.save_requested.emit(action, edit, plan, self._repeat_edit(action, rule))

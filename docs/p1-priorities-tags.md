@@ -3,8 +3,9 @@
 This P1 slice is B03 in the [feature inventory](future-feature-inventory.md): find and
 order work without needing a deadline. It builds on manual tasks
 ([p1-manual-tasks.md](p1-manual-tasks.md)) and projects and life areas
-([p1-projects-life-areas.md](p1-projects-life-areas.md)). Recurring tasks (B05) are the
-remaining P1 slice. Owner desktop acceptance of this slice is still pending.
+([p1-projects-life-areas.md](p1-projects-life-areas.md)). Repeating tasks (B05) follow it
+([p1-recurring-tasks.md](p1-recurring-tasks.md)). Owner desktop acceptance of this slice is
+still pending.
 
 ## Priority
 

@@ -928,6 +928,54 @@ def test_project_organization_renders(
             assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
 
 
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_repeating_task_renders(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """A weekly task on the Actions page, with Skip, and in the editor with its weekdays."""
+    from mailbrief.domain.actions import ActionRepeat, ActionStatus
+    from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule
+    from mailbrief.ui.action_editor import ActionEditor
+    from tests.factories import make_action
+
+    apply_theme(qapp, mode)
+    workspace = build(qtbot)
+    panel = ActionsPanel()
+    weekly = make_action(
+        title="Put the bins out",
+        sources=(),
+        target_date=TODAY,
+        created_at_utc=ACTIONS_NOW,
+        repeat=ActionRepeat(
+            series_public_id="6c2e1e1f-4a5d-4b4f-9a6f-1d7c9a8b3e21",
+            series_revision=2,
+            rule=RepeatRule(frequency=RepeatFrequency.WEEKLY, weekdays=(1, 4)),
+            occurrence_date=TODAY,
+            previous_date=date(2026, 10, 2),
+            previous_status=ActionStatus.COMPLETED,
+        ),
+    )
+    panel.show_actions(ActionFilter.OPEN, (weekly,), today=TODAY, zone=OWNER_ZONE, now=ACTIONS_NOW)
+    workspace.add_page("actions", panel)
+    workspace.show_page("actions")
+    workspace.sidebar.set_current("actions")
+    workspace.resize(*SIZES["desktop"])
+    show(qtbot, workspace)
+    assert panel.skip_button.isVisible()
+    images = {"page-repeating": workspace.grab()}
+    editor = ActionEditor(workspace)
+    editor.edit(weekly, TODAY, OWNER_ZONE)
+    show(qtbot, editor)
+    assert not editor.weekdays.isHidden() and not editor.later_too.isHidden()
+    images["dialog-task-repeat"] = editor.grab()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        for name, image in images.items():
+            dpr = image.devicePixelRatio()
+            assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
+
+
 def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
     """The daily home, the mailbox, flagged and deferred work, drafts and history, then
     Calendar set apart below a divider; Ctrl+1 to Ctrl+7 follow the same order."""

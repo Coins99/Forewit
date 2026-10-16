@@ -161,6 +161,12 @@ class ActionDetailPane(QScrollArea):
         self.delete_button = outline_button(
             "De&lete", "deleteButton", mnemonic=True, icon_name="trash"
         )
+        # I: the other letters of "Skip" are taken by the window's Sync, Complete and
+        # Complete's p.
+        self.skip_button = outline_button("Sk&ip", "skipButton", mnemonic=True)
+        self.skip_button.setToolTip("Skip this one; the next repeat comes as usual.")
+        self.skip_button.setProperty("variant", "ghost")
+        self._can_skip = False
         self.edit_button.setProperty("variant", "ghost")
         self.delete_button.setProperty("variant", "ghost")
         self.draft_button = outline_button(
@@ -203,24 +209,53 @@ class ActionDetailPane(QScrollArea):
         self.show_empty(ActionFilter.OPEN)
 
     def _arrange_footer(self, columns: int) -> None:
+        for button in self.all_footer_buttons():
+            self._footer_layout.removeWidget(button)
+        self.skip_button.setVisible(self._can_skip)
         buttons = self._footer_buttons()
         for number, button in enumerate(buttons):
             self._footer_layout.addWidget(
                 button, number // columns, number % columns, Qt.AlignmentFlag.AlignLeft
             )
-        for column in range(5):
+        for column in range(6):
             self._footer_layout.setColumnStretch(column, 1 if column == columns else 0)
         for first, second in zip(buttons, buttons[1:], strict=False):
             QWidget.setTabOrder(first, second)
 
-    def _footer_buttons(self) -> list[QPushButton]:
-        leading = [self.complete_button, self.draft_button]
+    def all_footer_buttons(self) -> list[QPushButton]:
+        """The footer's buttons, Skip included whether it is shown or not."""
+        leading = [self.complete_button, self.skip_button, self.draft_button]
         if self.draft_button.property("variant") == "primary":
-            leading.reverse()
+            leading = [self.draft_button, self.complete_button, self.skip_button]
         return [*leading, self.edit_button, self.delete_button]
 
+    def _footer_buttons(self) -> list[QPushButton]:
+        """The footer's buttons as laid out: Skip only for a task that can be skipped."""
+        return [
+            button
+            for button in self.all_footer_buttons()
+            if button is not self.skip_button or self._can_skip
+        ]
+
+    def set_can_skip(self, can_skip: bool) -> None:
+        """Offer Skip, for an open occurrence of a task that still repeats."""
+        if can_skip != self._can_skip:
+            self._can_skip = can_skip
+            self.arrange_controls()
+
     def arrange_controls(self) -> None:
-        self._arrange_footer(4 if self.viewport().width() >= 480 else 2)
+        buttons = self._footer_buttons()
+        width = self.viewport().width()
+        if len(buttons) > 4:  # Skip too: one row while every button's own width fits.
+            content = self.widget()
+            margins = content.contentsMargins() if content is not None else None
+            room = min(width, DETAIL_MAX_WIDTH) - (
+                0 if margins is None else margins.left() + margins.right()
+            )
+            needed = sum(button.sizeHint().width() for button in buttons) + 8 * (len(buttons) - 1)
+            self._arrange_footer(len(buttons) if needed <= room else 2)
+        else:
+            self._arrange_footer(4 if width >= 480 else 2)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -229,7 +264,7 @@ class ActionDetailPane(QScrollArea):
     def all_buttons(self) -> list[QPushButton]:
         """Every button, shown or not, in display order."""
         return [
-            *self._footer_buttons(),
+            *self.all_footer_buttons(),
             self.seen_button,
             self.proposals_button,
             self.source_button,
@@ -363,6 +398,7 @@ class ActionDetailPane(QScrollArea):
                         reversed_name = {
                             "created": "creation",
                             "completed": "completion",
+                            "skipped": "skip",
                             "reopened": "reopening",
                             "deleted": "deletion",
                             "source_added": "email addition",
@@ -409,6 +445,11 @@ class ActionDetailPane(QScrollArea):
             label = wrap_label(details.estimate, tone="secondary", px=TEXT_PX)
             label.setObjectName("actionEstimate")
             widgets.append(label)
+        for line, name in ((details.repeat, "actionRepeat"), (details.previous, "actionPrevious")):
+            if line is not None:
+                label = wrap_label(line, tone="secondary", px=TEXT_PX)
+                label.setObjectName(name)
+                widgets.append(label)
         return widgets
 
     def _plan(self, action: Action, details: ActionDetails) -> list[QWidget | int]:

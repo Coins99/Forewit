@@ -81,8 +81,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - P1 priorities, tags and filters (B03) implemented, awaiting owner desktop acceptance: an
   optional owner priority (high/medium/low) that orders tasks with the same dates, and up
   to 10 tags per task in `action_tags`, matched by `tag_key`, offered by the Actions filter.
-  Migration 0020 follows 0019. Recurring tasks (B05) are the remaining P1 slice. See
-  `docs/p1-priorities-tags.md`.
+  Migration 0020 follows 0019. See `docs/p1-priorities-tags.md`.
+- P1 repeating tasks (B05) implemented, awaiting owner desktop acceptance: a task can repeat
+  daily, weekly on chosen weekdays, monthly on a day or on the last day, until an optional
+  end date. A series (`action_series`, the rule and a template) has one open occurrence at a
+  time, an ordinary task; completing or skipping it makes the next (`services/recurrence.py`).
+  Migration 0021 follows 0020. See `docs/p1-recurring-tasks.md`.
 - Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
@@ -284,6 +288,15 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   live tasks already use; respelling one a task has respells it on every live task, a
   revision of each. Tags change only through `ActionRepository.set_tags` and
   `respell_tag` (ORM rows).
+- Repeating tasks (B05): each occurrence is an ordinary task, and closing one never rewrites
+  another's history. The next occurrence is made in the transaction that completes or skips
+  one, from the series' template (never from the occurrence just closed), dated by the rule's
+  first date after both its occurrence date and today in the owner's zone, so missed dates
+  are never created. There is at most one per series and date, and at most one live next
+  occurrence per occurrence. Reopen and undo remove a next occurrence only while it is
+  untouched (open, live, revision 1). The target date reschedules an occurrence; the
+  occurrence date never changes. AI runs never touch a series; a proposal that completes an
+  occurrence makes its next one, as completing it would.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.

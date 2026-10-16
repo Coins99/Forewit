@@ -13,7 +13,21 @@ from mailbrief.domain.actions import (
     ActionStatus,
 )
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.ui.deadline_text import day_text, deadline_text, length_text, weekday
+from mailbrief.domain.recurrence import (
+    ALL_WEEKDAYS,
+    WORKING_WEEKDAYS,
+    RepeatFrequency,
+    RepeatRule,
+    next_occurrence,
+)
+from mailbrief.ui.deadline_text import (
+    FULL_WEEKDAYS,
+    WEEKDAYS,
+    day_text,
+    deadline_text,
+    length_text,
+    weekday,
+)
 from mailbrief.ui.proposals_view import pending_proposals
 
 
@@ -40,6 +54,8 @@ class ActionDetails:
     replied: str | None
     proposals: tuple[ActionProposal, ...]
     completed: date | None
+    repeat: str | None  # "Repeats every Mon and Wed", or "Repeats stopped".
+    previous: str | None  # The occurrence it follows: "Follows Wed Oct 14 · Skipped".
     today: date  # The owner's day, which decides whether a date names its year.
 
 
@@ -66,6 +82,16 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
             day = _when(thread.owner_replied_at_utc, today=today, zone=zone, clock=False)
             replied = f"you replied {day}"
     completed = action.completed_at_utc
+    repeat = previous = None
+    if action.repeat is not None:
+        repeat = (
+            "Repeats stopped" if action.repeat.ended else repeat_text(action.repeat.rule, today)
+        )
+        if action.repeat.previous_date is not None and action.repeat.previous_status is not None:
+            previous = (
+                f"Follows {day_text(action.repeat.previous_date, today=today)} · "
+                + _CLOSED[action.repeat.previous_status]
+            )
     return ActionDetails(
         target=action.target_date,
         target_reason=TARGET_REASON_TEXT[reason] if keeps_reason and reason is not None else None,
@@ -82,8 +108,79 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         replied=replied,
         proposals=pending_proposals(action),
         completed=None if completed is None else completed.astimezone(zone).date(),
+        repeat=repeat,
+        previous=previous,
         today=today,
     )
+
+
+_CLOSED: dict[ActionStatus, str] = {
+    ActionStatus.OPEN: "Open",
+    ActionStatus.COMPLETED: "Done",
+    ActionStatus.SKIPPED: "Skipped",
+}
+
+
+def _ordinal(number: int) -> str:
+    suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10)
+    return f"{number}{suffix or 'th'}"
+
+
+def _join(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def rule_text(rule: RepeatRule) -> str:
+    """How a rule repeats, without its end: "every day", "every Mon and Wed", "every
+    weekday", "on the 31st of each month (not in shorter months)"."""
+    match rule.frequency:
+        case RepeatFrequency.DAILY:
+            return "every day"
+        case RepeatFrequency.WEEKLY:
+            if rule.weekdays == ALL_WEEKDAYS:
+                return "every day"
+            if rule.weekdays == WORKING_WEEKDAYS:
+                return "every weekday"
+            if len(rule.weekdays) == 1:
+                return "every " + FULL_WEEKDAYS[rule.weekdays[0]]
+            return "every " + _join([WEEKDAYS[day] for day in rule.weekdays])
+        case RepeatFrequency.MONTHLY_DAY:
+            day = rule.month_day or 1
+            text = f"on the {_ordinal(day)} of each month"
+            return text + " (not in shorter months)" if day > 28 else text
+        case RepeatFrequency.MONTHLY_LAST:
+            return "on the last day of each month"
+
+
+def repeat_text(rule: RepeatRule, today: date) -> str:
+    """The rule as the detail pane says it: "Repeats every day until Fri Oct 30"."""
+    text = "Repeats " + rule_text(rule)
+    if rule.end_date is not None:
+        text += f" until {day_text(rule.end_date, today=today)}"
+    return text
+
+
+def repeat_short(action: Action) -> str | None:
+    """A list row's word for a repeating task: "Repeats daily", "weekly" or "monthly"."""
+    repeat = action.repeat
+    if repeat is None or repeat.ended:
+        return None
+    match repeat.rule.frequency:
+        case RepeatFrequency.DAILY:
+            return "Repeats daily"
+        case RepeatFrequency.WEEKLY:
+            return "Repeats daily" if repeat.rule.weekdays == ALL_WEEKDAYS else "Repeats weekly"
+        case _:
+            return "Repeats monthly"
+
+
+def next_repeat(action: Action, today: date) -> date | None:
+    """The date of the occurrence completing or skipping ``action`` today makes, as the
+    service works it out; None when it makes none."""
+    repeat = action.repeat
+    if repeat is None or repeat.ended:
+        return None
+    return next_occurrence(repeat.rule, repeat.occurrence_date, today)
 
 
 PRIORITY_TEXT: dict[ActionPriority, str] = {

@@ -24,7 +24,6 @@ from mailbrief.domain.analysis import (
     TargetReason,
 )
 from mailbrief.domain.briefs import AnalysisOutcome
-from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
 from mailbrief.domain.messages import (
     AccountIdentity,
     EmailContact,
@@ -32,6 +31,7 @@ from mailbrief.domain.messages import (
     ProviderKind,
     RankedMessage,
 )
+from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.analysis import PlannedMessage
 from mailbrief.services.proposals import (

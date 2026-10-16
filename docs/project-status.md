@@ -17,8 +17,9 @@ later use after Microsoft Entra access is resolved.
   ([estimates](p1-manual-tasks.md#estimates)), awaiting owner desktop acceptance.
   Priorities and tags (B03) are implemented, awaiting owner desktop acceptance: a priority
   orders tasks with the same dates, and the Actions filter offers each tag
-  ([priorities and tags](p1-priorities-tags.md)). Recurring tasks are the remaining P1
-  slice.
+  ([priorities and tags](p1-priorities-tags.md)). Repeating tasks (B05) are implemented,
+  awaiting owner desktop acceptance: daily, weekly or monthly, with skip and reschedule, one
+  open occurrence at a time ([repeating tasks](p1-recurring-tasks.md)).
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

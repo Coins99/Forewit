@@ -62,6 +62,7 @@ from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage,
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
+from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
@@ -145,6 +146,7 @@ class FakeBackend(FakeDrafts):
         self.calls = 0
         self.loads = 0
         self.action_calls: list[tuple[object, ...]] = []
+        self.repeats: list[RepeatRule | RepeatEdit | None] = []  # Each create's or save's.
         self.action_fail: Exception | None = None
         self.list_calls = 0
         self.list_fail: Exception | None = None
@@ -411,7 +413,10 @@ class FakeBackend(FakeDrafts):
     ) -> int:
         return len(await self.list_grouped_actions(view, group, group_id))
 
-    async def create_action(self, edit: ActionEdit, steps: Sequence[StepEdit]) -> Action:
+    async def create_action(
+        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+    ) -> Action:
+        self.repeats.append(repeat)
         await self._act("create_action", edit, steps)
         return make_action(title=edit.title, notes=edit.notes, target_date=edit.target_date)
 
@@ -425,12 +430,18 @@ class FakeBackend(FakeDrafts):
         revision: int,
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
+        repeat: RepeatEdit | None = None,
     ) -> Action:
+        self.repeats.append(repeat)
         await self._act("save_action", public_id, revision, edit, steps)
         return make_action(title=edit.title, revision=revision + 1)
 
     async def complete_action(self, public_id: str, revision: int) -> Action:
         await self._act("complete_action", public_id, revision)
+        return make_action(revision=revision + 1)
+
+    async def skip_action(self, public_id: str, revision: int) -> Action:
+        await self._act("skip_action", public_id, revision)
         return make_action(revision=revision + 1)
 
     async def reopen_action(self, public_id: str, revision: int) -> Action:
