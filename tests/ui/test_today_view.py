@@ -2,12 +2,15 @@
 opening each one on its own page."""
 
 import asyncio
+import gc
+import weakref
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QStandardItem, QStandardItemModel
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 from pytestqt.qtbot import QtBot
 
@@ -199,6 +202,43 @@ def test_empty_cards_say_so(qtbot: QtBot) -> None:
     panel.show_summary(None, ZONE)
     assert panel.summary is None and panel.attention.heading.text() == "Needs attention"
     assert panel.attention.count.text() == "0"
+
+
+def test_refresh_releases_item_data_outside_collection(qtbot: QtBot) -> None:
+    panel = DayPanel()
+    qtbot.addWidget(panel)
+    collected: list[bool] = []
+    row = DayRow("Old task", "Today")
+    finalizer = weakref.finalize(row, lambda: collected.append(gc.isenabled()))
+    panel.attention.show_rows([(row, ("action", "old", False))])
+    del row
+    enabled = gc.isenabled()
+
+    panel.attention.show_rows([])
+
+    assert not finalizer.alive  # The list no longer owns the row's Python data.
+    assert collected == [False]
+    assert gc.isenabled() == enabled
+    assert panel.attention.list.count() == 0
+
+
+def test_repeated_refresh_keeps_only_current_rows_and_activates_once(qtbot: QtBot) -> None:
+    panel = DayPanel()
+    qtbot.addWidget(panel)
+    actions: list[tuple[str, bool]] = []
+    panel.action_requested.connect(lambda key, waiting: actions.append((key, waiting)))
+    for number in range(50):
+        panel.show_summary(summary(), ZONE)
+        panel.attention.list.setCurrentRow(0)
+        QTest.keyClick(panel.attention.list, Qt.Key.Key_Return)
+        assert actions == [(OVERDUE.public_id, False)] * (number + 1)
+        panel.show_summary(None, ZONE)
+        assert panel.attention.list.count() == 0
+        assert panel.attention.list.currentItem() is None
+    panel.show_summary(summary(), ZONE)
+    assert rows(panel, "attention") == [
+        attention_row(item, ZONE, TODAY).text() for item in summary().attention
+    ]
 
 
 def test_activating_a_row_asks_to_open_its_record(qtbot: QtBot) -> None:
