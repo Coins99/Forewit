@@ -359,7 +359,7 @@ async def test_offline_browsing_shows_the_last_sync_in_the_owner_s_zone(
     )
     window.cached_dialog.today = lambda: date(2026, 9, 4)
     window.cached_dialog.show_page(page)
-    text = window.cached_dialog.status.text()
+    text = window.cached_dialog.status.accessibleName()
     assert "Fri Sep 4 (America/Toronto)" in text
     assert "last complete sync: Fri Sep 4, 08:00." in text
 

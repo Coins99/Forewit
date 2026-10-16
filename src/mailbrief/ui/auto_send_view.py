@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX, AutoSendStatus
 from mailbrief.services.brief import disclosure_lines, permission_sentence
+from mailbrief.ui.dialog_chrome import dialog_heading
 
 INTRO = (
     "By default an automatic refresh only checks Gmail, follows the threads of your open "
@@ -51,6 +52,7 @@ class AutoSendDialog(QDialog):
         self.resize(580, 440)
         self._status: AutoSendStatus | None = None
         layout = QVBoxLayout(self)
+        dialog_heading(self, layout, "Automatic analysis")
         layout.addWidget(_plain(INTRO))
         form = QFormLayout()
         self.limit = QSpinBox()
@@ -64,6 +66,7 @@ class AutoSendDialog(QDialog):
         layout.addWidget(self.disclosure, 1)
         buttons = QHBoxLayout()
         self.save_button = QPushButton("&Save")
+        self.save_button.setProperty("variant", "primary")
         self.cancel_button = QPushButton("&Cancel")
         buttons.addWidget(self.save_button)
         buttons.addWidget(self.cancel_button)

@@ -47,6 +47,7 @@ def window(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
     result.zone = ZoneInfo("UTC")
     result.now = lambda: datetime(2026, 9, 28, 15, tzinfo=UTC)
     qtbot.addWidget(result)
+    result.show()
     return result
 
 
@@ -541,6 +542,35 @@ async def test_new_task_button_saves_without_gmail(
     assert edit.notes == "Bring a notebook"
     assert edit.target_date == date(2026, 10, 12)
     assert window.status.text() == "Created: Plan next week."
+    assert not editor.has_unsaved_input()
+    window.actions_panel.new_task_button.click()
+    assert editor.isVisible()
+    assert editor.title.text() == ""
+    assert editor.notes.toPlainText() == ""
+    assert not editor.has_target.isChecked()
+    assert editor.steps.count() == 0
+    editor.title.setText("A different task")
+    editor._save()
+    await finish(window)
+    assert backend.action_calls[-1][0] == "create_action"
+    assert window.status.text() == "Created: A different task."
+
+
+async def test_cancelled_inline_task_does_not_resume(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    window._request_new_task()
+    editor = window.action_editor
+    editor.title.setText("Discard this task")
+    editor.notes.setPlainText("Discard these notes")
+    editor.reject()
+    assert not editor.has_unsaved_input()
+    window._request_new_task()
+    assert editor.isVisible()
+    assert editor.title.text() == ""
+    assert editor.notes.toPlainText() == ""
+    assert backend.action_calls == []
 
 
 async def test_new_task_shortcut_cancel_and_failed_save(

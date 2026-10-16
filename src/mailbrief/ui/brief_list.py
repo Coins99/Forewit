@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.actions import ActionProposal, ProposalState
 from mailbrief.domain.analysis import DeadlinePrecision, FollowUpKind
-from mailbrief.domain.digests import SECTION_TITLES, DailyDigest, DigestItem
+from mailbrief.domain.digests import DailyDigest, DigestItem, DigestSection
 from mailbrief.domain.messages import EmailContact
 from mailbrief.ui.deadline_text import month_day, weekday
 from mailbrief.ui.hairline import (
@@ -49,10 +49,11 @@ from mailbrief.ui.hairline import (
 )
 from mailbrief.ui.labels import cut_text
 from mailbrief.ui.theme import (
+    BODY_PX,
     CAPTION_PX,
+    META_PX,
     RADIUS,
     SMALL_PX,
-    TEXT_PX,
     Tokens,
     current_tokens,
     ui_font,
@@ -60,6 +61,13 @@ from mailbrief.ui.theme import (
 )
 
 NO_SUBJECT: Final = "(no subject)"
+BRIEF_SECTION_TITLES: Final = {
+    DigestSection.ACTIONS: "Needs attention",
+    DigestSection.DEADLINES: "Upcoming deadlines",
+    DigestSection.DECISIONS: "Decisions",
+    DigestSection.HIGHLIGHTS: "Highlights",
+    DigestSection.FOLLOW_UPS: "New replies",
+}
 _UNRESOLVED_CHARS: Final = 24
 # A timed deadline up to this many days after the brief's day is named by its weekday.
 _WEEKDAY_DAYS: Final = 6
@@ -67,7 +75,7 @@ _WEEKDAY_DAYS: Final = 6
 # Two-line rows, in the brief list and the run page's shortlist: padding, and the gap above
 # the chip row (logical px).
 ROW_PAD_V: Final = 10
-ROW_PAD_H: Final = 14
+ROW_PAD_H: Final = 18
 CHIP_GAP: Final = 4
 SINGLE_LINE: Final = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) | int(
     Qt.TextFlag.TextSingleLine
@@ -99,6 +107,7 @@ class BriefRow:
     item: DigestItem | None
     sender: str
     chips: tuple[Chip, ...]
+    count: int = 0
 
 
 def sender_text(contact: EmailContact) -> str:
@@ -172,7 +181,8 @@ def build_rows(
     for item in digest.items:
         if item.section is not section:
             section = item.section
-            rows.append(BriefRow("header", SECTION_TITLES[section], None, "", ()))
+            count = sum(found.section is section for found in digest.items)
+            rows.append(BriefRow("header", BRIEF_SECTION_TITLES[section], None, "", (), count))
         chips = tuple(
             chip
             for chip in (
@@ -300,8 +310,8 @@ def row_height(has_chips: bool) -> int:
     chip row when there is one."""
     height = (
         ROW_PAD_V
-        + ui_metrics(TEXT_PX, medium=True).height()
-        + ui_metrics(TEXT_PX).height()
+        + ui_metrics(BODY_PX, medium=True).height()
+        + ui_metrics(META_PX).height()
         + ROW_PAD_V
         + 1  # The hairline.
     )
@@ -353,8 +363,8 @@ def paint_lines(
 ) -> int:
     """The title, 13 px Medium and elided to ``width``, then ``subtitle`` (a sender or a meta
     line) as given, 13 px (callers fit it to ``width``). Returns the y below the subtitle."""
-    title_metrics = ui_metrics(TEXT_PX, medium=True)
-    painter.setFont(ui_font(TEXT_PX, medium=True))
+    title_metrics = ui_metrics(BODY_PX, medium=True)
+    painter.setFont(ui_font(BODY_PX, medium=True))
     painter.setPen(QColor(title_color))
     painter.drawText(
         QRect(left, top, width, title_metrics.height()),
@@ -362,8 +372,8 @@ def paint_lines(
         elided(title, title_metrics, width),
     )
     top += title_metrics.height()
-    subtitle_metrics = ui_metrics(TEXT_PX)
-    painter.setFont(ui_font(TEXT_PX))
+    subtitle_metrics = ui_metrics(META_PX)
+    painter.setFont(ui_font(META_PX))
     painter.setPen(QColor(subtitle_color))
     painter.drawText(QRect(left, top, width, subtitle_metrics.height()), SINGLE_LINE, subtitle)
     return top + subtitle_metrics.height()
@@ -406,26 +416,71 @@ class BriefItemDelegate(QStyledItemDelegate):
         rect: QRect = option.rect
         state: QStyle.StateFlag = option.state
         painter.save()
+        painter.setClipRect(rect)
         if row.kind == "header":
-            paint_header(painter, rect, row.title, tokens)
+            painter.setFont(ui_font(META_PX, medium=True))
+            painter.setPen(QColor(tokens.text_muted))
+            height = ui_metrics(META_PX).height()
+            target = QRect(rect.left() + ROW_PAD_H, rect.top() + _HEADER_ABOVE, 0, height)
+            target.setRight(rect.right() - ROW_PAD_H)
+            painter.drawText(target, SINGLE_LINE, row.title.upper())
+            painter.drawText(
+                target,
+                int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                str(row.count),
+            )
             painter.restore()
             return
         paint_selection(painter, rect, state, tokens)
-        width = max(0, rect.width() - ELIDE_MARGIN)
-        left = rect.left() + ROW_PAD_H
+        left = rect.left() + 25
+        width = max(0, rect.width() - 51)
+        top = rect.top() + 12
+        warning = next((chip for chip in row.chips if chip.tone is ChipTone.WARNING), None)
+        if warning is not None or (row.item and row.item.section is DigestSection.HIGHLIGHTS):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.warning_fg if warning else tokens.text_muted))
+            painter.drawRoundedRect(QRectF(rect.left() + 13, top + 2, 3, 28), 1.5, 1.5)
+        title_width = width
+        if warning is not None:
+            metrics = ui_metrics(8, medium=True)
+            status_width = min(width // 2, metrics.horizontalAdvance(warning.text))
+            painter.setFont(ui_font(8, medium=True))
+            painter.setPen(QColor(tokens.warning_fg))
+            painter.drawText(
+                QRect(left + width - status_width, top, status_width, 15),
+                SINGLE_LINE,
+                elided(warning.text, metrics, status_width),
+            )
+            title_width = max(0, width - status_width - 8)
         top = paint_lines(
             painter,
             left,
-            rect.top() + ROW_PAD_V,
-            width,
+            top,
+            title_width,
             row.title,
-            elided(row.sender, ui_metrics(TEXT_PX), width),
+            elided(row.sender, ui_metrics(META_PX), width),
             title_color=tokens.text,
             subtitle_color=tokens.text_secondary,
         )
-        if row.chips:
-            paint_chips(painter, row.chips, left, top + CHIP_GAP)
-        paint_separator(painter, rect, tokens)
+        if row.item is not None:
+            metrics = ui_metrics(META_PX)
+            painter.setFont(ui_font(META_PX))
+            painter.setPen(QColor(tokens.text_muted))
+            painter.drawText(
+                QRect(left, top + 4, width, metrics.height()),
+                SINGLE_LINE,
+                elided(row.item.summary, metrics, width),
+            )
+            top += metrics.height() + 4
+        extra = tuple(chip for chip in row.chips if chip.tone is not ChipTone.WARNING)
+        if extra:
+            paint_chips(painter, extra, left, top + CHIP_GAP)
+        if state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            painter.setPen(QColor(tokens.text_muted))
+            painter.setFont(ui_font(15))
+            painter.drawText(
+                QRect(rect.right() - 23, rect.top(), 15, rect.height()), SINGLE_LINE, "›"
+            )
         paint_focus_ring(painter, rect, state, tokens.accent_fg)
         painter.restore()
 
@@ -435,8 +490,15 @@ class BriefItemDelegate(QStyledItemDelegate):
         if not isinstance(row, BriefRow):
             return QSize(width, 0)
         if row.kind == "header":
-            return QSize(width, header_height())
-        return QSize(width, row_height(bool(row.chips)))
+            return QSize(width, _HEADER_ABOVE + ui_metrics(META_PX).height() + _HEADER_BELOW)
+        extra = any(chip.tone is not ChipTone.WARNING for chip in row.chips)
+        return QSize(
+            width,
+            28
+            + ui_metrics(BODY_PX, medium=True).height()
+            + 2 * ui_metrics(META_PX).height()
+            + (CHIP_GAP + chip_height() if extra else 0),
+        )
 
 
 def page_detail(view: QAbstractItemView, bar: QScrollBar | None, event: QKeyEvent) -> bool:

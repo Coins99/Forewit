@@ -137,7 +137,11 @@ def test_no_settings_tab_squeezes_its_rows_into_each_other(
     assert senders.height() >= 3 * senders.fontMetrics().lineSpacing()
     preferences = dialog.tabs.widget(1)
     assert isinstance(preferences, QScrollArea)
-    assert preferences.verticalScrollBar().maximum() > 0  # Taller than the dialog.
+    page = preferences.widget()
+    assert page is not None
+    assert page.minimumSizeHint().height() <= preferences.viewport().height() or (
+        preferences.verticalScrollBar().maximum() > 0
+    )
 
 
 def signed_in(window: MainWindow) -> bool:

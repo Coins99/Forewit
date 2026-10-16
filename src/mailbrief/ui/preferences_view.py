@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -47,6 +49,7 @@ from mailbrief.domain.preferences import (
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.ui.deadline_text import day_text
 from mailbrief.ui.drafting_panel import LENGTH_CHOICES, TONE_CHOICES
+from mailbrief.ui.labels import wrap_label
 
 # Each AI limit's field, label and range; the spin box's minimum is one below the range
 # and means "use the default".
@@ -94,10 +97,7 @@ SENDERS_PADDING: Final = 12
 
 
 def _plain(text: str = "") -> QLabel:
-    label = QLabel(text)
-    label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(True)
-    return label
+    return wrap_label(text)
 
 
 def _default_text(name: str) -> str:
@@ -140,6 +140,7 @@ class PreferencesPanel(QWidget):
         lines = self.senders.fontMetrics().lineSpacing()
         self.senders.setMinimumHeight(3 * lines + SENDERS_PADDING)
         self.senders.setMaximumHeight(110)
+        self.senders.setMinimumHeight(72)
         form.addRow("&Excluded senders", self.senders)
         form.addRow(
             "",
@@ -203,9 +204,17 @@ class PreferencesPanel(QWidget):
             self.ai_limits[name] = box
             form.addRow(label, box)
         form.addRow("", _plain(_ENVIRONMENT_NOTE))
-        layout.addWidget(self.form_fields)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("preferencesScroll")
+        self.scroll_area.setAccessibleName("Preference fields")
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setWidget(self.form_fields)
+        layout.addWidget(self.scroll_area, 1)
         buttons = QHBoxLayout()
         self.save_button = QPushButton("Save &preferences")
+        self.save_button.setProperty("variant", "primary")
         self.reset_button = QPushButton("Reset to defaults")
         buttons.addWidget(self.save_button)
         buttons.addWidget(self.reset_button)

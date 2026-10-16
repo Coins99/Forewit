@@ -98,6 +98,7 @@ async def test_offline_browsing_filters_pages_and_renders_preview_as_text(
     backend = CachedBackend()
     window = MainWindow(backend)
     qtbot.addWidget(window)
+    window.show()
     window.start(window.initialize)
     await finish(window)
     forbidden = AsyncMock(side_effect=AssertionError("No Gmail connection during offline browsing"))
@@ -107,13 +108,15 @@ async def test_offline_browsing_filters_pages_and_renders_preview_as_text(
     viewer = window.cached_dialog
     assert viewer.isVisible()
     assert '<img src="https://evil.example">' in viewer.details.toPlainText()
-    assert "may be stale" in viewer.status.text()
+    assert "may be stale" in viewer.status.accessibleName()
     # Times read as everywhere else in the window, not as ISO.
     assert re.search(
-        r"\nReceived: [A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})?, \d\d:\d\d\n",
-        viewer.details.toPlainText(),
+        r"RECEIVED [A-Z]{3} [A-Z]{3} \d+(, \d{4})?, \d\d:\d\d",
+        "RECEIVED " + viewer.saved_received.text().upper(),
     )
-    assert re.match(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})? \(UTC\) · ", viewer.status.text())
+    assert re.match(
+        r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d+(, \d{4})? \(UTC\) · ", viewer.status.accessibleName()
+    )
     assert not viewer.source.isEnabled()  # The factory's Outlook link cannot open from Gmail UI.
     viewer.next.click()
     await finish(window)
@@ -148,6 +151,38 @@ class OneAccountBackend(FakeBackend):
             has_more=False,
             messages=(),
         )
+
+
+async def test_saved_mail_status_does_not_announce_an_old_page(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = OneAccountBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window.show()
+    window.start(window.initialize)
+    await finish(window)
+    window.cached_button.click()
+    await finish(window)
+    viewer = window.cached_dialog
+    assert "may be stale" in viewer.status.accessibleName()
+    viewer.begin_load()
+    assert viewer.status.text() == "Loading saved metadata…"
+    assert viewer.status.accessibleName() == ""
+
+    viewer.show_page(await backend.cached_messages(1, viewer.today()))
+    monkeypatch.setattr(
+        backend, "cached_messages", AsyncMock(side_effect=RuntimeError("synthetic failure"))
+    )
+    viewer.request_page(0)
+    await finish(window)
+    assert viewer.status.text() == window.status.text()
+    assert "Operation failed" in viewer.status.text()
+    assert viewer.status.accessibleName() == ""
+
+    viewer.configure(())
+    assert "No cached Gmail accounts" in viewer.status.text()
+    assert viewer.status.accessibleName() == ""
 
 
 async def test_browse_saved_mail_opens_on_today_in_your_time_zone(qtbot: QtBot) -> None:

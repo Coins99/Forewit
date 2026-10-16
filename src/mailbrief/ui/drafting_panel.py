@@ -95,6 +95,7 @@ class DraftingPanel(QWidget):
         self.instructions.setPlaceholderText("For example: accept, and ask for the numbers.")
         self.instructions.setTabChangesFocus(True)
         self.instructions.setMaximumHeight(80)
+        self.instructions.setMinimumHeight(70)
         form.addRow("&Instructions", self.instructions)
         self.instructions_counter = _plain()
         form.addRow("", self.instructions_counter)
@@ -105,12 +106,14 @@ class DraftingPanel(QWidget):
         preview = QVBoxLayout(self.preview)
         preview.setContentsMargins(0, 0, 0, 0)
         self.preview_text = QPlainTextEdit()
+        self.preview_text.setMinimumHeight(120)
         self.preview_text.setReadOnly(True)
         self.preview_text.setAccessibleName("What will be sent")
         preview.addWidget(self.preview_text)
         self.agree_box = QCheckBox("I agree to send these parts to Groq for AI drafting")
         preview.addWidget(self.agree_box)
         self.send_button = QPushButton("Send to Groq")
+        self.send_button.setProperty("variant", "primary")
         preview.addWidget(self.send_button)
         layout.addWidget(self.preview)
         self.working = _plain()
@@ -161,6 +164,7 @@ class DraftingPanel(QWidget):
     def reset(self) -> None:
         """Back to choosing: the form is editable and there is no preview."""
         self.form.setEnabled(True)
+        self.form.show()
         self.continue_button.show()
         self.continue_button.setEnabled(True)
         self.preview.hide()
@@ -204,6 +208,7 @@ class DraftingPanel(QWidget):
     def show_preview(self, preview: DraftingPreview, lines: tuple[str, ...]) -> None:
         """Show exactly what will be sent; first use needs the consent box ticked."""
         self._first_use = preview.first_use
+        self.form.hide()
         self.continue_button.hide()
         self.working.hide()
         self.preview_text.setPlainText("\n".join(lines))

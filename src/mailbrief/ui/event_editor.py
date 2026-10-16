@@ -43,7 +43,8 @@ from mailbrief.domain.events import (
 )
 from mailbrief.ui.deadline_text import length_text
 from mailbrief.ui.fields import takes_wheel
-from mailbrief.ui.labels import plain_label
+from mailbrief.ui.labels import plain_label, primary_action
+from mailbrief.ui.theme import ui_font
 
 DATE_FORMAT: Final = "yyyy-MM-dd"
 TIME_FORMAT: Final = "HH:mm"
@@ -295,6 +296,9 @@ class EventEditor(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Event")
+        self.setObjectName("eventEditorDialog")
+        self.setAccessibleName("Event editor")
+        self.resize(520, 520)
         self._event: CalendarEvent | None = None
         self._zone = ZoneInfo("UTC")
         self._busy = False  # Another operation is running, so Save waits.
@@ -311,8 +315,19 @@ class EventEditor(QDialog):
         self._timed: tuple[datetime, datetime] | None = None
         self._whole_days: tuple[datetime, datetime] | None = None
         layout = QVBoxLayout(self)
+        self.setFont(ui_font(10))
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        self.kicker = plain_label("NEW EVENT", tone="muted", px=9)
+        self.kicker.setObjectName("eventEditorKicker")
+        self.heading = plain_label("Add to your calendar", px=21, medium=True)
+        self.heading.setObjectName("eventEditorHeading")
+        layout.addWidget(self.kicker)
+        layout.addWidget(self.heading)
+        layout.addWidget(plain_label("Keep an event on your local calendar.", tone="muted", px=10))
         self._fields = QWidget()
         form = QFormLayout(self._fields)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         form.setContentsMargins(0, 0, 0, 0)
         self.title = QLineEdit()
         self.title.setObjectName("eventTitle")
@@ -349,6 +364,7 @@ class EventEditor(QDialog):
         self.notes.setObjectName("eventNotes")
         self.notes.setAccessibleName("Notes")
         self.notes.setTabChangesFocus(True)
+        self.notes.setFixedHeight(82)
         self.notes.textChanged.connect(self._edited_elsewhere)
         form.addRow("Notes", self.notes)
         layout.addWidget(self._fields)
@@ -360,7 +376,9 @@ class EventEditor(QDialog):
         )
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
-        layout.addWidget(self.buttons)
+        layout.addWidget(self.buttons, 0, Qt.AlignmentFlag.AlignLeft)
+        if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
+            primary_action(save)
         self._update_buttons()
         self._loaded_input = self._input()
 
@@ -402,9 +420,13 @@ class EventEditor(QDialog):
     def edit_new(self, day: date, now: datetime, zone: ZoneInfo) -> None:
         """Start a new one-hour event on ``day``."""
         start = suggested_start(day, now, zone)
+        self.kicker.setText("NEW EVENT")
+        self.heading.setText("Add to your calendar")
         self._event = None
         self._zone = zone
         self.setWindowTitle("New event")
+        if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
+            save.setText("Create event")
         self.title.setText("")
         self.notes.setPlainText("")
         self._load(start, start + _DEFAULT_LENGTH, all_day=False)
@@ -415,6 +437,10 @@ class EventEditor(QDialog):
         self._event = event
         self._zone = zone
         self.setWindowTitle("Edit event")
+        if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
+            save.setText("Save changes")
+        self.kicker.setText("EVENT DETAILS")
+        self.heading.setText("Edit event")
         self.title.setText(event.title)
         self.notes.setPlainText(event.notes)
         if event.start_date is not None and event.last_date is not None:

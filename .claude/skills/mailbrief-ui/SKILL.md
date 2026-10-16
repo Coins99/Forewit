@@ -5,6 +5,14 @@ description: Use for any change to MailBrief's desktop UI under src/mailbrief/ui
 
 # MailBrief desktop UI
 
+The October 15 Today-template alignment supersedes the older default-frame geometry and
+typography below: the sidebar is 214 px, the default header/sidebar use flat surfaces,
+and the bundled reading font is DM Sans (Inter remains for tabular figures). Ported pages
+use compact list/body/meta sizes from the template. See `docs/ui-redesign.md` and the
+updated Studio renders. Guarded center dialogs and right drawers use their own template
+layout instead of `DialogSheet`; other native dialogs and appearance choices retain the
+shared controls. Plain-text, non-modal, ownership and Qt-lifetime rules still apply.
+
 Read AGENTS.md first; its invariants win. Component specs and the token table are in
 `references/spec.md`. The default look is Studio (`docs/ui/studio.md`: white and Studio
 Mist grey, one blue, Semibold titles, glass pills, filled cards with no borders or
