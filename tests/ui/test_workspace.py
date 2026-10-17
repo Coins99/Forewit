@@ -360,6 +360,52 @@ def test_the_header_alert_shows_once_and_never_widens_it(qtbot: QtBot) -> None:
     assert header.alert.isHidden() and not header.alert.toolTip()
 
 
+@pytest.mark.parametrize("month", ["October", "September"])
+@pytest.mark.parametrize("width", [680, 1100])
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_calendar_header_keeps_the_month_and_year_on_one_line(
+    qtbot: QtBot, qapp: QApplication, themed: None, month: str, width: int, mode: ThemeMode
+) -> None:
+    apply_theme(qapp, mode)
+    workspace = build_calendar(qtbot)
+    title = workspace.header.title
+    title.setText(f"Calendar · {month} 2026")
+    workspace.header.set_status("Checked Gmail at 09:14 " * 20)
+    workspace.resize(width, 520)
+    show(qtbot, workspace)
+
+    assert not title.wordWrap()
+    assert title.width() >= title.fontMetrics().horizontalAdvance(title.text())
+    assert title.height() >= title.fontMetrics().height()
+    origin = title.mapTo(workspace.header, title.rect().topLeft())
+    assert workspace.header.rect().contains(origin)
+    assert origin.y() + title.height() <= workspace.header.height()
+    assert title.accessibleName() == title.text()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        image = workspace.grab()
+        dpr = image.devicePixelRatio()
+        assert image.save(
+            str(Path(folder) / f"calendar-heading-{month}-{width}-{mode.value}-{dpr:g}x.png")
+        )
+
+
+def test_header_elides_instead_of_widening_for_an_oversized_title(qtbot: QtBot) -> None:
+    workspace = build_calendar(qtbot)
+    workspace.resize(680, 520)
+    show(qtbot, workspace)
+    original_width = workspace.width()
+    title = workspace.header.title
+    title.setText("Calendar · September 2026 " * 20)
+    QApplication.processEvents()
+
+    assert workspace.width() == original_width
+    assert title.width() < title.fontMetrics().horizontalAdvance(title.text())
+    assert title.height() >= title.fontMetrics().height()
+    assert title.accessibleName() == title.text()
+
+
 def test_sidebar_footer_order_and_mnemonics(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     sidebar = workspace.sidebar

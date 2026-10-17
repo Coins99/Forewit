@@ -12,8 +12,19 @@ from datetime import date
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QPointF, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import (
+    QEvent,
+    QModelIndex,
+    QObject,
+    QPersistentModelIndex,
+    QPointF,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QColor, QPainter, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -186,6 +197,7 @@ class _Card(HairlineFrame):
         self.setObjectName(name)
         self.setAccessibleName(title)
         self._title = title
+        self._visible_rows = VISIBLE_ROWS
         layout = QVBoxLayout(self)
         # The layout's margins are the card's only padding: the rows' selection reaches
         # near the card's edge, and their text lines up with the heading, inside the
@@ -212,7 +224,7 @@ class _Card(HairlineFrame):
         self.list.setAccessibleName(title)
         self.list.setFrameShape(QFrame.Shape.NoFrame)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
         self.list.setUniformItemSizes(True)
         self.list.setItemDelegate(DayRowDelegate(self.list))
         layout.addWidget(self.list)
@@ -245,9 +257,33 @@ class _Card(HairlineFrame):
         self.list.setVisible(bool(rows))
         self.empty.setVisible(not rows)
         if rows:
-            shown = min(len(rows), VISIBLE_ROWS)
-            height = sum(self.list.sizeHintForRow(number) for number in range(shown))
-            self.list.setFixedHeight(height + 2 * self.list.frameWidth())
+            self.set_visible_rows(self._visible_rows)
+
+    def list_height(self, rows: int) -> int:
+        shown = min(self.list.count(), rows)
+        return sum(self.list.sizeHintForRow(number) for number in range(shown)) + (
+            2 * self.list.frameWidth()
+        )
+
+    def set_visible_rows(self, rows: int) -> None:
+        self._visible_rows = rows
+        if self.list.count():
+            height = self.list_height(rows)
+            if self.list.minimumHeight() != height or self.list.maximumHeight() != height:
+                self.list.setFixedHeight(height)
+
+    def preview_height(self, rows: int, width: int) -> int:
+        """Measure the card without changing any geometry while choosing a row budget."""
+        layout = self.layout()
+        assert layout is not None
+        height = (
+            layout.totalHeightForWidth(width)
+            if layout.hasHeightForWidth()
+            else layout.totalSizeHint().height()
+        )
+        if self.list.count():
+            height += self.list_height(rows) - self.list.minimumHeight()
+        return height
 
 
 class DayPanel(QWidget):
@@ -257,6 +293,7 @@ class DayPanel(QWidget):
 
     action_requested = Signal(str, bool)
     event_requested = Signal(object)
+    content_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -280,6 +317,7 @@ class DayPanel(QWidget):
         if summary is None:
             for card in (self.attention, self.agenda, self.replies):
                 card.show_rows([])
+            self.content_changed.emit()
             return
         today = summary.day
         self.attention.show_rows(
@@ -300,6 +338,25 @@ class DayPanel(QWidget):
         self.replies.show_rows(
             [(reply_row(action), _action_target(action)) for action in summary.replies]
         )
+        self.content_changed.emit()
+
+    def preview_height(self, rows: int, width: int) -> int:
+        layout = self.layout()
+        assert layout is not None
+        margins = layout.contentsMargins()
+        card_width = max(0, (width - margins.left() - margins.right() - 2 * layout.spacing()) // 3)
+        return (
+            margins.top()
+            + margins.bottom()
+            + max(
+                card.preview_height(rows, card_width)
+                for card in (self.attention, self.agenda, self.replies)
+            )
+        )
+
+    def set_visible_rows(self, rows: int) -> None:
+        for card in (self.attention, self.agenda, self.replies):
+            card.set_visible_rows(rows)
 
     def _activated(self, item: QListWidgetItem) -> None:
         target = item.data(_TARGET)
@@ -309,6 +366,67 @@ class DayPanel(QWidget):
             self.action_requested.emit(str(target[1]), bool(target[2]))
         else:
             self.event_requested.emit(target)
+
+
+class DayOverview(QWidget):
+    """Fit complete preview rows above the brief, with scrolling only inside each card."""
+
+    def __init__(self, panel: DayPanel, brief: QWidget) -> None:
+        super().__init__()
+        self.setObjectName("dayOverview")
+        self.setAccessibleName("Your day")
+        self.panel = panel
+        self._brief = brief
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 12)  # Clear space above the brief's filter strip.
+        layout.setSpacing(0)
+        layout.addWidget(panel)
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit)
+        panel.content_changed.connect(self._schedule_fit)
+        panel.installEventFilter(self)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.installEventFilter(self)
+        self._fit()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.FontChange,
+            QEvent.Type.StyleChange,
+        ):
+            self._schedule_fit()
+        return False
+
+    def _schedule_fit(self) -> None:
+        if self.isVisible():
+            self._fit_timer.start(0)
+
+    def _fit(self) -> None:
+        parent = self.parentWidget()
+        if parent is None or not self.isVisible():
+            return
+        layout = self.layout()
+        assert layout is not None
+        gap = layout.contentsMargins().bottom()
+        # Leave most of the Today page for the filter strip and brief. On a short window,
+        # show fewer complete rows instead of clipping the cards or adding an outer scroll.
+        # These two heights share the room left after the filter strip and brief heading.
+        # Keeping the preview within half of that room also preserves the brief's list.
+        budget = min(parent.height() // 3, (self.height() + self._brief.height()) // 2)
+        rows = VISIBLE_ROWS
+        while rows > 1 and self.panel.preview_height(rows, self.width()) + gap > budget:
+            rows -= 1
+        height = self.panel.preview_height(rows, self.width()) + gap
+        self.panel.set_visible_rows(rows)
+        if self.minimumHeight() != height or self.maximumHeight() != height:
+            self.setFixedHeight(height)
 
 
 def _action_target(action: Action) -> tuple[str, str, bool]:

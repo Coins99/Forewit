@@ -259,6 +259,9 @@ class ActionRowDelegate(QStyledItemDelegate):
             )
             left = rect.left() + 56
         else:
+            if not row.muted and state & QStyle.StateFlag.State_Selected:
+                painter.setPen(hairline_pen(tokens.accent_fg))
+                painter.setBrush(QColor(tokens.accent_fg))
             painter.drawEllipse(QRectF(rect.left() + 18, rect.top() + 14, 18, 18))
         if row.muted:
             painter.setPen(QColor(tokens.text_secondary))

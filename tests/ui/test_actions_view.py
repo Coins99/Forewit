@@ -49,7 +49,7 @@ from mailbrief.ui.actions_view import (
     describe,
 )
 from mailbrief.ui.brief_list import ROW_ROLE, Chip, ChipTone, row_height
-from mailbrief.ui.theme import apply_theme
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
 from tests.factories import make_action, make_proposal
 from tests.ui.window_wait import show as show_window
 
@@ -481,7 +481,7 @@ def test_each_item_keeps_describe_s_text_and_carries_its_row(panel: ActionsPanel
     assert item.toolTip() == ""
 
 
-def paint(row: ActionRow, rect: QRect, *, selected: bool) -> QImage:
+def paint(row: ActionRow, rect: QRect, *, selected: bool, focused: bool = True) -> QImage:
     """``row`` painted at ``rect`` on a transparent 400 × 200 image."""
     image = QImage(400, 200, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.transparent)
@@ -493,16 +493,35 @@ def paint(row: ActionRow, rect: QRect, *, selected: bool) -> QImage:
     option.rect = rect
     state = QStyle.StateFlag.State_Enabled
     if selected:
-        state |= (
-            QStyle.StateFlag.State_Selected
-            | QStyle.StateFlag.State_HasFocus
-            | QStyle.StateFlag.State_KeyboardFocusChange
-        )
+        state |= QStyle.StateFlag.State_Selected
+    if selected and focused:
+        state |= QStyle.StateFlag.State_HasFocus | QStyle.StateFlag.State_KeyboardFocusChange
     option.state = state
     painter = QPainter(image)
     ActionRowDelegate().paint(painter, option, model.index(0, 0))
     painter.end()
     return image
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+@pytest.mark.parametrize("focused", [False, True])
+def test_selected_action_circle_fills_without_marking_it_complete(
+    qapp: QApplication, themed: None, mode: ThemeMode, focused: bool
+) -> None:
+    apply_theme(qapp, mode)
+    rect = QRect(40, 50, 300, row_height(False))
+    row = ActionRow(title="Selected task", meta="", chips=(), muted=False)
+    # Sample inside the circle, away from both its outline and a completion checkmark.
+    point = QPoint(rect.left() + 27, rect.top() + 18)
+    selected = paint(row, rect, selected=True, focused=focused)
+    unselected = paint(row, rect, selected=False)
+    assert selected.pixelColor(point).name() == current_tokens().accent_fg
+    assert unselected.pixelColor(point).alpha() == 0
+
+    completed = ActionRow(title="Completed task", meta="", chips=(), muted=True)
+    for chosen in (False, True):
+        image = paint(completed, rect, selected=chosen, focused=focused)
+        assert image.pixelColor(point).name() == current_tokens().nav_selection
 
 
 @pytest.mark.parametrize("selected", [False, True])

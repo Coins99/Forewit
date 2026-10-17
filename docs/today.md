@@ -1,6 +1,6 @@
 # Today: your day at a glance
 
-The **Today** page opens with **Your day**, three cards above the brief. They come from
+Choose **Your day** on the **Today** page to expand three cards above the brief. They come from
 what is already on this computer, so they show with Gmail disconnected, with no AI set up
 and offline. Nothing in them is sent anywhere or written.
 
@@ -20,7 +20,9 @@ and offline. Nothing in them is sent anywhere or written.
 - **New replies**: open actions whose threads have messages from others since you last
   marked them seen, latest first, with how many and who wrote last.
 
-Each card's heading counts its rows. Three rows show and the rest scroll. Double-click a
+Each card's heading counts its rows. Up to three complete rows show and the rest scroll
+inside that card. The expanded section fits its content; shorter windows show one or two
+rows to leave room for the brief, and empty cards stay compact. Double-click a
 row, or select it and press Return or Enter, to open it: an action on the Actions page
 (Waiting when someone else does it), or an event in this week of the Calendar page. When a
 project or area filter on Actions hides the action, the filter goes back to All tasks first.
