@@ -223,7 +223,7 @@ from mailbrief.ui.theme import (
     current_scheme,
     system_mode,
 )
-from mailbrief.ui.today_view import DayPanel
+from mailbrief.ui.today_view import DayOverview, DayPanel
 from mailbrief.ui.weak import weak_method
 from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
 
@@ -894,13 +894,7 @@ class MainWindow(QMainWindow):
         self.day_panel = DayPanel()
         self.day_panel.action_requested.connect(self._open_day_action)
         self.day_panel.event_requested.connect(self._open_day_event)
-        self.day_area = QScrollArea()
-        self.day_area.setObjectName("dayOverviewScroll")
-        self.day_area.setAccessibleName("Your day")
-        self.day_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.day_area.setWidgetResizable(True)
-        self.day_area.setMaximumHeight(128)
-        self.day_area.setWidget(self.day_panel)
+        self.day_area = DayOverview(self.day_panel, workspace.brief_list)
         workspace.today_top.addWidget(self.day_area)
         self.day_area.hide()
         self.day_toggle = outline_button("Your day", "dayOverviewToggle")

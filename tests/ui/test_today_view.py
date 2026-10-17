@@ -11,7 +11,7 @@ import pytest
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QStandardItem, QStandardItemModel
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
+from PySide6.QtWidgets import QApplication, QScrollArea, QStyleOptionViewItem
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import Action, ActionFilter, ThreadActivity
@@ -384,8 +384,109 @@ async def test_today_gallery(
     window.day_toggle.click()
     assert window.day_panel.isVisible()
     # However narrow, the cards never push the brief off the page.
-    assert window.workspace.brief_list.height() > window.day_area.height()
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    assert_complete_day_cards(window)
     save_shot(window.grab(), f"today-day-{size[0]}-{mode}")
+
+
+def assert_complete_day_cards(window: MainWindow) -> None:
+    """The entire card and its readable contents fit; only the item list can scroll."""
+    assert not isinstance(window.day_area, QScrollArea)
+    panel = window.day_panel
+    assert window.day_area.rect().contains(panel.geometry())
+    assert window.day_area.height() - panel.geometry().bottom() > 6
+    for card in (panel.attention, panel.agenda, panel.replies):
+        assert panel.rect().contains(card.geometry())
+        assert card.rect().contains(card.heading.geometry())
+        assert card.rect().contains(card.count.geometry())
+        if card.list.count():
+            listing = card.list
+            assert card.rect().contains(listing.geometry())
+            row_height = listing.sizeHintForRow(0)
+            assert listing.viewport().height() % row_height == 0
+            assert 1 <= listing.viewport().height() // row_height <= VISIBLE_ROWS
+            assert listing.horizontalScrollBar().maximum() == 0
+        else:
+            assert card.rect().contains(card.empty.geometry())
+            assert card.empty.height() >= card.empty.heightForWidth(card.empty.width())
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+@pytest.mark.parametrize("count", [0, 1, 3, 5])
+async def test_day_preview_fits_content_and_recovers_after_resizing(
+    qtbot: QtBot,
+    qapp: QApplication,
+    themed: None,
+    backend: FakeBackend,
+    mode: ThemeMode,
+    count: int,
+) -> None:
+    apply_theme(qapp, mode=mode)
+    window = window_for(qtbot, backend)
+    window.start(window.initialize)
+    await finish(window)
+    window._show_page("today")
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    data = summary(
+        attention=tuple(
+            AttentionItem(
+                action=task(30 + number, "Long task title " * 10, target_date=TODAY),
+                reason=AttentionReason.PLANNED_TODAY,
+            )
+            for number in range(count)
+        ),
+        replies=(),
+        calendar=CalendarRange(first_day=TODAY, last_day=TODAY, events=(), markers=()),
+    )
+    window.day_panel.show_summary(data, ZONE)
+    window.day_toggle.click()
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    QApplication.processEvents()
+    assert_complete_day_cards(window)
+    tall_height = window.day_area.height()
+    listing = window.day_panel.attention.list
+    tall_rows_height = listing.height()
+
+    window.resize(1100, 520)
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    QApplication.processEvents()
+    assert_complete_day_cards(window)
+    assert window.day_area.height() <= tall_height
+    if count:
+        assert listing.height() <= tall_rows_height
+        listing.setFocus()
+        QTest.keyClick(listing, Qt.Key.Key_End)
+        assert listing.currentRow() == count - 1
+        assert listing.viewport().rect().contains(listing.visualItemRect(listing.currentItem()))
+    save_shot(window.grab(), f"today-day-compact-{count}-{mode}")
+
+    window.day_toggle.click()
+    assert not window.day_panel.isVisible()
+    window.resize(1100, 800)
+    window.day_toggle.click()
+    qtbot.waitUntil(lambda: window.day_area.height() == tall_height)
+    assert_complete_day_cards(window)
+    if count:
+        assert listing.currentRow() == count - 1
+        assert listing.height() == tall_rows_height
+
+    # Data changes while expanded must change its allocation too, without another toggle.
+    window.day_panel.show_summary(None, ZONE)
+    if count:
+        qtbot.waitUntil(lambda: window.day_area.height() < tall_height)
+    QApplication.processEvents()
+    assert_complete_day_cards(window)
+    assert window.day_panel.attention.count.text() == "0"
+    window.day_panel.show_summary(data, ZONE)
+    qtbot.waitUntil(lambda: window.day_area.height() == tall_height)
+    assert_complete_day_cards(window)
+
+    if count == 3:
+        apply_theme(qapp, mode=ThemeMode.LIGHT if mode is ThemeMode.DARK else ThemeMode.DARK)
+        QApplication.processEvents()
+        assert_complete_day_cards(window)
 
 
 async def test_a_finished_run_reads_the_day_again(qtbot: QtBot, backend: FakeBackend) -> None:
