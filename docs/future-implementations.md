@@ -1,4 +1,4 @@
-# MailBrief future implementations
+# Forewit future implementations
 
 Research and repository review: 2026-10-11. Reviewed checkout: `afdbff6`.
 Status: proposed product and implementation plan; no application features implemented
@@ -36,13 +36,13 @@ Recommended decisions:
 There is no single industry standard for a personal planner. This research separates
 documented product patterns (Todoist, Notion, Sunsama, Datadog, Actual Budget and
 Loop), formal specifications (iCalendar and W3C accessibility guidance), and
-MailBrief-specific engineering recommendations. Recommendations are inferences
+Forewit-specific engineering recommendations. Recommendations are inferences
 from those sources and the inspected code, not claims that every product uses the
 same architecture. Vendor examples are precedents, not endorsements or required
 integrations. Sources were accessed on the date above; recheck changing APIs,
 packages and licensing before an implementation milestone.
 
-## 2. Current MailBrief: architecture and frontend audit
+## 2. Current Forewit: architecture and frontend audit
 
 ### 2.1 Verified foundations and gaps
 
@@ -218,7 +218,7 @@ closed-app alerts.
 ### 3.4 Email and communication — D01–D08
 
 **Observed constraint.** Gmail read-only access allows reading; draft management
-and sending use different scopes. MailBrief currently has only read-only Gmail.
+and sending use different scopes. Forewit currently has only read-only Gmail.
 [Gmail scope definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
 **Recommend.** Preserve existing briefs, consent, sender exclusions, selected body
@@ -869,7 +869,7 @@ dashboard from scratch and perform a weekly review. During the trial, record:
 
 Suggested gate: complete capture → plan → completion → chart → weekly review
 without unexplained data loss, unexplained totals or required re-entry of the same
-task inside MailBrief. External tools can still be needed for capabilities outside
+task inside Forewit. External tools can still be needed for capabilities outside
 POC scope; record those gaps rather than pretending feature parity.
 
 ## 8. Risk decisions and validation plan
@@ -920,13 +920,13 @@ appearing in more than one cluster has a shared dependency rather than duplicate
 | A01–A08 | 3.1, 4, 6 | Sunsama, SQLite | Day plans and canonical records; bounded search; optional reflections. |
 | B01–B12 | 3.2, 4 | Todoist, Notion, iCalendar | Existing actions extended; recurrence instances, typed organization and views. |
 | C01–C10 | 3.3, 4, 6 | RFC 5545, Google Calendar, OR-Tools, Qt | Events/blocks/sessions separate; verified availability and permissions. |
-| D01–D08 | 3.4, 2 | Gmail documentation and current accepted MailBrief ADRs | Existing minimized analysis; owner decisions; new scopes deferred. |
+| D01–D08 | 3.4, 2 | Gmail documentation and current accepted Forewit ADRs | Existing minimized analysis; owner decisions; new scopes deferred. |
 | E01–E06 | 3.5, 4 | Obsidian, Notion | Existing owner writing plus typed links; assets need explicit storage policy. |
 | F01–F06 | 3.6, 5 | Loop, OpenTelemetry concepts | Measurements and expectations separate; typed units and aggregates. |
 | G01–G11 | 3.7, 5, 6 | Datadog, Notion, Qt, PyQtGraph, W3C | Validated query → explainable result → renderer/table. |
 | H01–H07 | 3.8, 4 | Actual Budget, Plaid, Document AI | Forecast/proposal/transaction distinctions and reviewed reconciliation. |
 | I01–I03 | 3.9, 4 | Google People API | Owner-curated people and reviewed links; no automatic sharing. |
-| J01–J07 | 3.10, 4, 8 | Notion, AWS, OWASP; existing MailBrief consent ADRs | Capability consent, typed proposals, idempotent rules and execution checks. |
+| J01–J07 | 3.10, 4, 8 | Notion, AWS, OWASP; existing Forewit consent ADRs | Capability consent, typed proposals, idempotent rules and execution checks. |
 | K01–K07 | 3.11, 5, 6, 8 | Notion, Ink & Switch, W3C, Qt, SQLAlchemy | Optional depth, portable local data, revisions and accessible controls. |
 | L01–L02 | 3.12, 8 | Notion permissions, local-first research | Separate identity/access/sync design; deferred. |
 | S01–S08 | 3.13 | General-task/calendar sources, Document AI, Canvas, Anki | Shelved extensions over shared foundations; no POC student UI. |
@@ -935,7 +935,7 @@ appearing in more than one cluster has a shared dependency rather than duplicate
 
 All links below are primary documentation, standards, project-owner repositories
 or first-party research. Product behavior descriptions are kept brief; most of this
-document consists of original MailBrief recommendations. No paid tier, current
+document consists of original Forewit recommendations. No paid tier, current
 price, market-share ranking or claim of a universally best product is needed.
 
 | Source | Used to assess |
@@ -964,7 +964,7 @@ price, market-share ranking or claim of a universally best product is needed.
 Limitations: general Qt documentation currently resolves to newer Qt pages in some
 cases; the Graphs embedding example was separately checked for the project's 6.11
 series. No candidate plotting library was installed, packaged or benchmarked.
-Research establishes patterns and constraints, not usability results for MailBrief.
+Research establishes patterns and constraints, not usability results for Forewit.
 Licensing/API/custody decisions are revisited before adoption. Existing owner live
 acceptance and proposed new milestones remain separate.
 

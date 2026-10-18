@@ -4,7 +4,7 @@ Reviewed 2026-10-11. Scope: the uncommitted single-executable implementation aga
 `main` at `e122fa8`, including build/check scripts, archive provenance, resource generation,
 release staging/workflows, application entrypoint, shared locks and frozen smoke scenarios.
 This is an author review with regression checks, not an independent review of every
-MailBrief feature or evidence of owner live acceptance.
+Forewit feature or evidence of owner live acceptance.
 
 ## Conclusion
 

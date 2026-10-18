@@ -24,6 +24,9 @@ dependencies = [
 ]
 
 [project.scripts]
+forewit = "mailbrief.app:main"
+forewit-ms-diagnostic = "mailbrief.diagnostics.microsoft:main"
+forewit-gmail-diagnostic = "mailbrief.diagnostics.gmail:main"
 mailbrief = "mailbrief.app:main"
 mailbrief-ms-diagnostic = "mailbrief.diagnostics.microsoft:main"
 mailbrief-gmail-diagnostic = "mailbrief.diagnostics.gmail:main"

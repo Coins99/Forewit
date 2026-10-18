@@ -378,7 +378,7 @@ class PlanningDialog(QDialog):
             dropped = (
                 "1 suggestion was" if plan.ignored == 1 else f"{plan.ignored} suggestions were"
             )
-            notes.append(f"{dropped} left out because MailBrief couldn't use it.")
+            notes.append(f"{dropped} left out because Forewit couldn't use it.")
         self.message.setText(" ".join(notes))
         self._say("")
         self._show(3)

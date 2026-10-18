@@ -426,7 +426,7 @@ async def test_a_briefs_page_that_can_t_be_reloaded_doesn_t_fail_the_run(
     assert backend.automatic_calls == 1
     text = window.status.text()
     assert text.startswith("Checked Gmail at 10:02. 2 new messages are ready to review.")
-    assert text.endswith("The view could not be refreshed; restart MailBrief to see the latest.")
+    assert text.endswith("The view could not be refreshed; restart Forewit to see the latest.")
     assert "failed" not in text  # The run itself succeeded.
     assert window.workspace.current_page() == "briefs"
 
@@ -997,7 +997,7 @@ async def test_a_permission_can_not_be_saved_while_another_operation_runs(
     window._request_set_auto_send(2)
 
     assert backend.permission_saves == []
-    assert window.status.text() == "MailBrief is busy; try again in a moment."
+    assert window.status.text() == "Forewit is busy; try again in a moment."
     release.set()
     await finish(window)
 

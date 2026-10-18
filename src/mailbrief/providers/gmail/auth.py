@@ -43,7 +43,7 @@ _TOKEN_MESSAGES = TokenMessages(
     invalid="Google returned an invalid token response.",
     token_type="Google returned an unsupported token type.",
     missing_scope="Gmail read-only access was not granted.",
-    extra_scope="Google gave MailBrief more than read-only access. Remove MailBrief at "
+    extra_scope="Google gave Forewit more than read-only access. Remove Forewit at "
     "myaccount.google.com/permissions, then connect Gmail again.",
 )
 

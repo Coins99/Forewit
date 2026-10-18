@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QGuiApplication
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.config import Settings
@@ -17,6 +19,18 @@ from mailbrief.storage.database import Database
 
 # Ensure Qt runs in offscreen mode in headless test environments
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture(autouse=True)
+def restore_application_identity() -> Iterator[None]:
+    """Application construction must not leak display or persistence names to another test."""
+    organization = QCoreApplication.organizationName()
+    application = QCoreApplication.applicationName()
+    display = QGuiApplication.applicationDisplayName()
+    yield
+    QCoreApplication.setOrganizationName(organization)
+    QCoreApplication.setApplicationName(application)
+    QGuiApplication.setApplicationDisplayName(display)
 
 
 @pytest.fixture(autouse=True)

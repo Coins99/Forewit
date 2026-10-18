@@ -137,7 +137,7 @@ def test_release_version_must_match_runtime(tmp_path: Path) -> None:
 @pytest.mark.parametrize("changed", ["commit", "executable", "lockfile"])
 def test_manifest_verification_cannot_relabel_a_build(tmp_path: Path, changed: str) -> None:
     root = Path(__file__).resolve().parents[2]
-    executable = tmp_path / "MailBrief.exe"
+    executable = tmp_path / "Forewit.exe"
     executable.write_bytes(b"Synthetic original build")
     manifest = {
         "format": 1,

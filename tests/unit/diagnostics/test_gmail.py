@@ -191,7 +191,7 @@ def test_a_key_missing_failure_keeps_the_saved_brief_note_on_its_own_line(
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[-2:] == [
-        "No usable Groq API key is saved. Run: mailbrief-gmail-diagnostic ai-key set",
+        "No usable Groq API key is saved. Run: forewit-gmail-diagnostic ai-key set",
         "Your last saved brief for today is unchanged.",
     ]
 

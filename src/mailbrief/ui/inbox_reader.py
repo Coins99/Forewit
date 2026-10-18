@@ -45,7 +45,7 @@ from mailbrief.ui.theme import (
 WANT: Final = "Should have been in my brief"
 UNWANT: Final = "Remove mark"
 WANTED_NOTE: Final = (
-    "You marked this as one that should have been in your brief. MailBrief now ranks this "
+    "You marked this as one that should have been in your brief. Forewit now ranks this "
     "sender's mail higher, unless you've left out more of it than you wanted."
 )
 PREVIEW_NOTE: Final = "Gmail's short preview. Open in Gmail to read the whole email."

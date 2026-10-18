@@ -518,7 +518,7 @@ async def test_a_click_while_busy_is_refused_with_a_reason(
 
     detail(window).proposal_requested.emit(APPLY, 3, 4)
 
-    assert window.status.text() == "MailBrief is busy; try again in a moment."
+    assert window.status.text() == "Forewit is busy; try again in a moment."
     assert backend.action_calls == []
     release.set()
     await finish(window)

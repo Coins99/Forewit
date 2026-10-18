@@ -245,10 +245,10 @@ def test_note_and_message_exports() -> None:
         ({"title": "Re: Budget / Q3?"}, "Re Budget Q3.md"),
         ({"title": "Café plan_v2.final"}, "Café plan_v2.final.md"),
         ({"title": "a" * 100}, "a" * 80 + ".md"),
-        ({"title": "★ ☆ ✓"}, "mailbrief-draft.md"),
+        ({"title": "★ ☆ ✓"}, "forewit-draft.md"),
         ({"title": "...hidden..."}, "hidden.md"),
-        ({"title": "con"}, "mailbrief-draft.md"),
-        ({"title": "LPT1.backup"}, "mailbrief-draft.md"),
+        ({"title": "con"}, "forewit-draft.md"),
+        ({"title": "LPT1.backup"}, "forewit-draft.md"),
         ({}, "Untitled note.md"),
     ],
 )

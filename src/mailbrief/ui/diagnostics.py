@@ -102,7 +102,7 @@ def configuration_guidance(exc: ConfigurationError) -> str:
     if "This build has no Google sign-in configuration" in message:
         return (
             "This build does not include Google sign-in configuration. "
-            "Use a configured MailBrief build, or choose a custom Desktop OAuth file in Settings."
+            "Use a configured Forewit build, or choose a custom Desktop OAuth file in Settings."
         )
     if "MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH" in message:
         return "Choose the downloaded Google Desktop OAuth client JSON file in Settings."

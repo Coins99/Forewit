@@ -245,7 +245,7 @@ def test_the_preview_counts_the_messages_a_run_may_send() -> None:
 
     assert (preview.message_count, preview.first_use, preview.reused_count) == (3, False, 0)
     lines = disclosure_lines(preview)
-    assert lines[0] == "MailBrief will send 3 messages to Groq (test-model) for analysis."
+    assert lines[0] == "Forewit will send 3 messages to Groq (test-model) for analysis."
     assert "Your consent is remembered" not in " ".join(lines)  # It was given earlier.
     assert "Enable Zero Data Retention." in lines
 

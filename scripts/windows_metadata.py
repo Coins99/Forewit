@@ -82,13 +82,13 @@ def write_resources(root: Path, directory: Path) -> tuple[Path, Path]:
         + ", mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0,0)), "
         "kids=[StringFileInfo([StringTable('040904B0', ["
         f"StringStruct('FileVersion', '{version}'), StringStruct('ProductVersion', '{version}'), "
-        "StringStruct('ProductName', 'MailBrief'), StringStruct('FileDescription', 'MailBrief'), "
-        "StringStruct('OriginalFilename', 'MailBrief.exe')])]), "
+        "StringStruct('ProductName', 'Forewit'), StringStruct('FileDescription', 'Forewit'), "
+        "StringStruct('OriginalFilename', 'Forewit.exe')])]), "
         "VarFileInfo([VarStruct('Translation', "
         "[1033, 1200])])])\n",
         encoding="utf-8",
     )
-    notices = ["MailBrief\n", (root / "LICENSE").read_text("utf-8")]
+    notices = ["Forewit\n", (root / "LICENSE").read_text("utf-8")]
     for path in (
         "src/mailbrief/ui/theme/fonts/OFL.txt",
         "src/mailbrief/ui/theme/fonts/DM-Sans-OFL.txt",

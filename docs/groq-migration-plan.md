@@ -6,7 +6,7 @@ separate migration PR; automated verification and live acceptance tracked in
 
 ## Outcome and baseline
 
-Make Groq the AI provider for MailBrief's consented daily brief, with secure key
+Make Groq the AI provider for Forewit's consented daily brief, with secure key
 storage, validated extraction, bounded requests and free-tier operation. Keep the
 existing Gmail, ranking, evidence checking, deadline handling and digest pipeline.
 Desktop UI work remains in M5.

@@ -187,7 +187,7 @@ def test_first_brief_asks_then_saves_and_prints_counts_only(
     assert run_brief(path) == 0
 
     output = capsys.readouterr().out
-    assert "MailBrief will send 1 message to Groq (test-model)" in output
+    assert "Forewit will send 1 message to Groq (test-model)" in output
     assert "plain-text body, cut to at most 4,000 characters" in output  # The default limit.
     assert PRIVACY_NOTICE in output  # Groq's notice, word for word.
     assert "8,000" not in output
@@ -224,7 +224,7 @@ def test_a_repeat_brief_with_yes_reuses_everything(
     assert route.call_count == 1
     assert "analyzed 0, reused 1, failed 0" in output
     assert "AI: nothing sent this run" in output
-    assert "MailBrief will send" not in output
+    assert "Forewit will send" not in output
 
 
 def test_usage_limit_saves_partial_results_and_cached_results_use_no_budget(
@@ -339,7 +339,7 @@ def test_a_later_brief_asks_before_sending(
     output = capsys.readouterr().out
     assert prompts[1] == "Send? [y/N] "
     assert route.call_count == 1 + sent
-    assert "MailBrief will send 1 message to Groq (test-model)" in output
+    assert "Forewit will send 1 message to Groq (test-model)" in output
     if code == 6:
         assert "Nothing was sent. No brief saved." in output
 
@@ -402,7 +402,7 @@ def test_a_rejected_key_exits_4_with_the_ai_key_hint(
     assert "Brief: analysis_failed; items: 0" in output
     assert "AI: Groq / test-model; requests: 1; tokens in/out: ? / ?" in output
     assert "nothing sent" not in output
-    outcome = lines.index("Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set")
+    outcome = lines.index("Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set")
     assert lines[outcome + 1 :] == [
         "Groq detail: HTTP 401, code invalid_api_key",
         "Your last saved brief for today is unchanged.",
@@ -521,7 +521,7 @@ def test_a_partial_brief_names_the_provider_error(
     assert not any("nothing sent" in line for line in lines)
     outcome = lines.index("Saved. Bodies were not stored.")
     assert lines[outcome + 1] == (
-        "Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set"
+        "Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set"
     )
     assert lines[outcome + 2] == "Groq detail: HTTP 401, code invalid_api_key"
 
@@ -707,12 +707,12 @@ def test_without_a_usable_key_nothing_is_asked_or_sent(
     output = capsys.readouterr().out
     assert route.call_count == 0
     assert prompts == []
-    assert "MailBrief will send" not in output
+    assert "Forewit will send" not in output
     assert "Brief: analysis_failed; items: 0" in output
     assert "AI: nothing sent this run" in output
     lines = output.splitlines()
     outcome = lines.index(
-        "No usable Groq API key is saved. Run: mailbrief-gmail-diagnostic ai-key set"
+        "No usable Groq API key is saved. Run: forewit-gmail-diagnostic ai-key set"
     )
     assert lines[outcome + 1] == "Your last saved brief for today is unchanged."
 

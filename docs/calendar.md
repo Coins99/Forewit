@@ -6,7 +6,7 @@ in [ADR 0018](adr/0018-calendar.md).
 
 ## Week, Month and List
 
-Choose how the page shows your days with the tabs under its title; MailBrief remembers
+Choose how the page shows your days with the tabs under its title; Forewit remembers
 your choice on this computer.
 
 - **Week**: a week of hours, as a calendar app shows it. Timed events are blocks in their
@@ -32,7 +32,7 @@ the Month view Page Up and Page Down change the month.
 hides it, with Undo. Events are kept on this computer, in backups and in **Export all
 writing**. Deadlines and target dates come from your open actions and change only there.
 **This week** (or **This month**) shows the current week (or month) from then on, so a new
-week moves the page on by itself. While MailBrief is busy with something else, such as a
+week moves the page on by itself. While Forewit is busy with something else, such as a
 review waiting for you, you can still move between weeks and months and open or add
 events; Save and **Delete event** wait until it finishes.
 
@@ -48,10 +48,10 @@ moves an event.
 
 ## Google Calendar, read-only
 
-MailBrief can show your Google calendars beside your own events. It only reads: nothing in
-MailBrief can change, move or delete a Google event.
+Forewit can show your Google calendars beside your own events. It only reads: nothing in
+Forewit can change, move or delete a Google event.
 
-**Set up once**, in the Google Cloud project whose Desktop OAuth client MailBrief uses for
+**Set up once**, in the Google Cloud project whose Desktop OAuth client Forewit uses for
 Gmail:
 
 1. In **APIs & Services > Library**, enable the **Google Calendar API**.
@@ -66,7 +66,7 @@ There is one Google sign-in for Gmail and Calendar (ADR 0019), kept in Gmail's e
 OS credential vault. Google Calendar refreshes after every Sync and review and every
 automatic run, as well as from the Calendar page.
 
-**What MailBrief reads and keeps.** For each calendar shown in Google Calendar's own list
+**What Forewit reads and keeps.** For each calendar shown in Google Calendar's own list
 (and always your primary one), the events of a ten-week window around the week you're
 looking at: titles, times and links. Descriptions, locations, guests and meeting details
 are never requested. Calendars shared with you as free/busy only, and working-location
@@ -77,14 +77,14 @@ while it waits for your browser; quitting stops them too. What was already read 
 
 **Disconnect** (in **Settings**, under Account) forgets the one sign-in and the saved
 Google events. It does
-not revoke MailBrief's access in your Google account; do that at
+not revoke Forewit's access in your Google account; do that at
 myaccount.google.com/permissions if you want to. The saved Google events also go when
 Google rejects the sign-in (it expired, or you revoked it), when Calendar access is taken
 away, and when you restore a backup, since an old schedule would look current.
 
-MailBrief only ever asks Google for read-only access to Gmail and Calendar. If Google's
+Forewit only ever asks Google for read-only access to Gmail and Calendar. If Google's
 answer grants more, for example because this client was once given wider access, the
-sign-in is refused and nothing is saved: remove MailBrief at
+sign-in is refused and nothing is saved: remove Forewit at
 myaccount.google.com/permissions, then connect Gmail again.
 
 **Open in Google Calendar** opens the selected Google event in your browser.
@@ -99,7 +99,7 @@ the dentist to Friday at 10" or "block two hours tomorrow morning for the deck".
    (without titles, or with them) and your open actions' deadlines and target dates. Your
    instruction stays until changes from it are applied, so after Discard you can ask again.
 2. **Preview what is sent** lists each part and its size. When you send Google Calendar
-   times and MailBrief's saved copy misses some of the four weeks, or is more than 15
+   times and Forewit's saved copy misses some of the four weeks, or is more than 15
    minutes old, it reads Google first; the preview says when the times cover only some of
    the days. The first time, tick the consent box; then choose **Ask Groq**. Cancel request
    stops it, and so does closing the dialog (Close or Esc). If something goes wrong, the

@@ -85,7 +85,7 @@ async def test_a_busy_click_on_a_brief_link_says_so(qtbot: QtBot, link: str) -> 
     else:
         detail(window).suggestion_requested.emit(link, 7)
 
-    assert window.status.text() == "MailBrief is busy; try again in a moment."
+    assert window.status.text() == "Forewit is busy; try again in a moment."
     window.cancel()
     assert window.task is not None
     await window.task

@@ -11,7 +11,7 @@ From source, use Python 3.13:
 
 ```powershell
 uv sync --locked --all-groups
-uv run mailbrief
+uv run forewit
 ```
 
 Open **Settings** to choose a Google **Desktop app** OAuth client JSON file and
@@ -29,14 +29,14 @@ waits for the write to finish before disposing application resources.
 
 The colour scheme (Settings > Appearance: Studio, Slate, Graphite, Ocean, Sage, Plum or
 Rose) and the mode (Follow the system, Light or Dark) change at once and are saved in
-their own `appearance.json` beside the database. MailBrief follows the system's light or
+their own `appearance.json` beside the database. Forewit follows the system's light or
 dark mode by default, and changes with it while it runs. A missing or unreadable file
-gives Studio following the system, and a failed save keeps the colours until MailBrief
+gives Studio following the system, and a failed save keeps the colours until Forewit
 closes. Studio is described in `docs/ui/studio.md`.
 
 The glass header, sidebar and buttons follow the system's accessibility settings. With
 Reduce transparency they're solid; with Increase contrast they're solid with clear edges;
-with Reduce motion they don't lift or spring. MailBrief checks again whenever it becomes
+with Reduce motion they don't lift or spring. Forewit checks again whenever it becomes
 the active app. In the same tab, Glass can be "Always solid" and Motion can be "Reduce
 motion" whatever the system says; neither can turn a system setting off. An unknown
 value in `appearance.json` resets only that setting.
@@ -76,7 +76,7 @@ Since PR #21 the window is the three-pane workspace
 - Ctrl+K (Cmd+K on macOS) opens **Go to or search**: commands, and search across your
   actions, drafts, notes, events and saved mail ([Go to or search](search.md)).
 - Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open the sidebar's pages in order: Today,
-  Inbox, Actions, Waiting, Drafts, Briefs and Calendar. Briefs says so instead while MailBrief is busy or before local storage loads.
+  Inbox, Actions, Waiting, Drafts, Briefs and Calendar. Briefs says so instead while Forewit is busy or before local storage loads.
 
 ## Daily workflow
 
@@ -86,7 +86,7 @@ not require provider credentials. Gmail and AI configuration have separate statu
 labels.
 
 Connect Gmail, then choose **Sync and review**. The run takes two steps on its own page,
-while the sidebar stays on Today. Step 1, **Choose what MailBrief reads**, lists all ranked
+while the sidebar stays on Today. Step 1, **Choose what Forewit reads**, lists all ranked
 messages from today's Inbox. Automatic suggestions are prechecked; add or remove messages,
 up to ten in total, and continue. Rank scores and reasons appear in row tooltips.
 The service independently rejects invalid IDs, duplicates and oversized selections.
@@ -133,13 +133,13 @@ uv run python scripts/build_desktop.py
 uv run python scripts/check_package.py
 ```
 
-- Windows: `out/dist/MailBrief/MailBrief.exe` inside an **onedir** package. Keep
-  the entire `MailBrief` folder together, including `_internal`.
+- Windows: `out/dist/Forewit/Forewit.exe` inside an **onedir** package. Keep
+  the entire `Forewit` folder together, including `_internal`.
 - Windows single file: add `--onefile` to the build command. Copy only
-  `out/dist/onefile/MailBrief.exe` to the Desktop. Verify with
-  `check_package.py --layout onefile --executable out/dist/onefile/MailBrief.exe`.
+  `out/dist/onefile/Forewit.exe` to the Desktop. Verify with
+  `check_package.py --layout onefile --executable out/dist/onefile/Forewit.exe`.
   See [single-file setup, persistence and updates](windows-executable.md).
-- macOS: `out/dist/MailBrief.app`, built on macOS for the build machine's
+- macOS: `out/dist/Forewit.app`, built on macOS for the build machine's
   architecture. Release signing/notarization is not configured.
 
 The build includes Qt, timezone/TLS resources, explicit dynamic database imports,
@@ -212,13 +212,13 @@ The desktop takes a per-profile Qt lock before opening storage. A second copy ex
 with an already-running notice; a live process's lock never expires by age.
 Window close and Qt Quit defer exit until pending work and database cleanup finish.
 
-Before upgrading an existing database, MailBrief writes a consistent SQLite backup
+Before upgrading an existing database, Forewit writes a consistent SQLite backup
 (including committed WAL data) beside it as `mailbrief.sqlite3.pre-upgrade-*.sqlite3`.
 No backup is made for a new or current database. A failed backup stops the upgrade;
 unknown/newer revisions are rejected before modification. Backups are never overwritten
 or automatically deleted, so retries preserve the original. They contain the same
 private cached metadata and derived content as the database; keep them in the profile.
-To recover, close MailBrief and all diagnostic CLIs, preserve the failed database and
+To recover, close Forewit and all diagnostic CLIs, preserve the failed database and
 its `-wal`/`-shm` files elsewhere, and copy the chosen backup to `mailbrief.sqlite3`
 with no old sidecars remaining. Reopen with the compatible app version. This is manual
 recovery, not an automatic rollback; retain backups until the upgraded app is verified.
@@ -228,7 +228,7 @@ If loading fails, the window explains that storage may be newer or unreadable an
 and labeled with its account. Provider failures give specific recovery steps.
 
 `desktop.log` in the application-data folder rotates at 128 KiB with two older files.
-It records exception types and known MailBrief error codes only, without exception
+It records exception types and known Forewit error codes only, without exception
 messages, tracebacks, credentials, account identifiers or email content.
 
 ## First launch of development packages

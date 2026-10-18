@@ -80,7 +80,7 @@ class Settings(BaseSettings):
             if BUNDLED_GOOGLE_CLIENT.is_file():
                 return BUNDLED_GOOGLE_CLIENT
             raise ConfigurationError(
-                "This build has no Google sign-in configuration. Use a configured MailBrief build. "
+                "This build has no Google sign-in configuration. Use a configured Forewit build. "
                 "Set MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH to use a custom Desktop OAuth client file."
             )
         return self.gmail_oauth_client_path.expanduser()

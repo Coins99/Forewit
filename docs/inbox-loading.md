@@ -71,7 +71,7 @@ Local validation on 2026-10-13:
 - Ruff lint/format and mypy for Windows and macOS pass.
 - Full regression run: 4,012 passed, four platform/intentional skips, and one recovery
   subprocess failure. The shared Python environment's editable install pointed at the
-  older `MailBrief` checkout, so that subprocess rejected the new schema. Setting
+  older `Forewit` checkout, so that subprocess rejected the new schema. Setting
   `PYTHONPATH` to this worktree's `src` corrected the test environment without changing
   application code. The recovery module then passed 70 tests with one platform skip.
 - All other subprocess-test modules and the final loading/search, Inbox, command-palette,

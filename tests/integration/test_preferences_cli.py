@@ -79,7 +79,7 @@ def test_show_on_a_fresh_database_prints_the_defaults_and_creates_nothing(
         "Excluded senders: none",
         "Important senders: none",
         "Drafting defaults: tone neutral, length medium",
-        "Refresh when MailBrief starts: no",
+        "Refresh when Forewit starts: no",
         "Refresh while running: off",
         "Automatic analysis: unavailable until you give consent "
         "(analyze once with Sync and review)",

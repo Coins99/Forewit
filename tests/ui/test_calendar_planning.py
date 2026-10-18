@@ -168,7 +168,7 @@ async def test_preview_consent_review_apply_and_undo(
 
     assert dialog.pages.currentIndex() == 3 and dialog.list.count() == 3
     assert dialog.message.text() == (
-        "Done. 1 suggestion was left out because MailBrief couldn't use it."
+        "Done. 1 suggestion was left out because Forewit couldn't use it."
     )
     item = dialog.list.item(2)
     assert item is not None

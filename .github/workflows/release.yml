@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: MailBrief-release-${{ github.sha }}
+          name: Forewit-release-${{ github.sha }}
           path: out/release
       - name: Verify transferred asset hashes and identity
         env:
@@ -65,6 +65,6 @@ jobs:
             # An API/auth failure must not be mistaken for an absent release.
             grep -q 'release not found' out/release-error.txt
             gh release create "$RELEASE_TAG" out/release/* --draft --verify-tag \
-              --title "MailBrief $RELEASE_TAG - Windows portable candidate" \
+              --title "Forewit $RELEASE_TAG - Windows portable candidate" \
               --notes-file out/release/README.txt
           fi

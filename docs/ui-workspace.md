@@ -23,7 +23,7 @@ Run each check on Windows and on macOS, and note the date, platform and build.
       skip the section headings, Return opens the row once, Esc closes, and Cmd+Q still
       quits with it open ([Go to or search](search.md)).
 - [ ] Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open Today, Inbox, Actions, Waiting,
-      Drafts, Briefs and Calendar, in the sidebar's order; Briefs says MailBrief is busy while a run is in progress.
+      Drafts, Briefs and Calendar, in the sidebar's order; Briefs says Forewit is busy while a run is in progress.
 - [ ] The focus ring is visible on every stop, and Return or Enter opens a row once.
 - [ ] In the brief list, Page Up and Page Down scroll the selected email while the whole
       list fits, and page the list when it scrolls.
@@ -52,7 +52,7 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] With the Mac set to another language (System Settings → General → Language &
       Region, another language first in the list), dates read in English everywhere,
       including the month and weekday names in the calendar pop-ups (Saved mail's date
-      and the action editor's target date). Check it both after opening MailBrief from
+      and the action editor's target date). Check it both after opening Forewit from
       Finder and after starting it from Terminal. On Windows, check the same with another
       Windows display language.
 - [ ] A draft or brief from another year shows its year: in Drafts ("updated Wed Dec 3,
@@ -95,4 +95,4 @@ Run each check on Windows and on macOS, and note the date, platform and build.
 - [ ] **Saved mail** opens the offline browser on today in your time zone, and works
       without a connection.
 - [ ] **Data** opens Data and recovery; a backup and its verification succeed, and
-      MailBrief reports itself busy while one runs.
+      Forewit reports itself busy while one runs.

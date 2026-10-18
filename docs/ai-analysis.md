@@ -1,6 +1,6 @@
 # AI analysis and the daily brief (M4)
 
-`mailbrief-gmail-diagnostic brief` syncs today's Inbox, reads the shortlisted bodies in
+`forewit-gmail-diagnostic brief` syncs today's Inbox, reads the shortlisted bodies in
 memory, asks for your consent, sends minimized messages to Groq, validates every answer
 in Python and saves the day's brief to SQLite. Bodies are never stored.
 
@@ -13,22 +13,22 @@ consented to and limited like any other message
 
 Create a key in [Groq Console](https://console.groq.com/keys). Keep the organization on
 its free plan initially. Enable **Zero Data Retention** in **Data Controls** before
-sending private mail; MailBrief cannot verify this remote setting. Without ZDR, Groq
+sending private mail; Forewit cannot verify this remote setting. Without ZDR, Groq
 may retain content for reliability/abuse monitoring for up to 30 days, with legal
 exceptions. Usage metadata is retained even with ZDR. See
 [Groq data controls](https://console.groq.com/docs/your-data).
 
-1. Save your Groq API key: `uv run mailbrief-gmail-diagnostic ai-key set` (input is hidden).
+1. Save your Groq API key: `uv run forewit-gmail-diagnostic ai-key set` (input is hidden).
    It is kept only in Windows Credential Manager or the macOS Keychain, under
    `MailBrief.Groq`. `ai-key status` says whether one is saved; `ai-key clear` removes it.
 2. Set `MAILBRIEF_GROQ_MODEL` to `openai/gpt-oss-120b`, which supports strict Structured Outputs on Groq.
-   This model name does not require an OpenAI API account. MailBrief asks `openai/gpt-oss-*`
+   This model name does not require an OpenAI API account. Forewit asks `openai/gpt-oss-*`
    models for low reasoning effort, because their reasoning shares the output limit with
    the answer; other models get no reasoning setting, since Groq rejects values a model
    does not support.
 3. Optional settings. When a variable is unset, your saved preference applies, else the
    default; set them in Settings > Preferences and check them with
-   `mailbrief-gmail-diagnostic preferences show` ([M8 preferences](m8-daily-operation.md#preferences-parts-12)).
+   `forewit-gmail-diagnostic preferences show` ([M8 preferences](m8-daily-operation.md#preferences-parts-12)).
 
 | Variable | Default | Range | Effect |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ exceptions. Usage metadata is retained even with ZDR. See
 | `MAILBRIEF_AI_BODY_CHARACTER_LIMIT` | 4000 | 1-8000 | Prepared body characters per email |
 | `MAILBRIEF_AI_BATCH_SIZE` | 1 | 1-10 | Messages per call |
 
-Then run `uv run mailbrief-gmail-diagnostic brief`. It accepts the same `--timezone`,
+Then run `uv run forewit-gmail-diagnostic brief`. It accepts the same `--timezone`,
 `--include`, `--exclude`, `--database` and `--silent-only` options as `sync`, plus `--yes`,
 `--show` (below) and `--date YYYY-MM-DD`, which briefs one of the previous 7 days instead
 of today ([brief history](m8-daily-operation.md#brief-history-and-catch-up-part-3)).
@@ -46,13 +46,13 @@ of today ([brief history](m8-daily-operation.md#brief-history-and-catch-up-part-
 PowerShell example (replace the model and Gmail client path with your own):
 
 ```powershell
-uv run mailbrief-gmail-diagnostic ai-key set
-uv run mailbrief-gmail-diagnostic ai-key status
+uv run forewit-gmail-diagnostic ai-key set
+uv run forewit-gmail-diagnostic ai-key status
 $env:MAILBRIEF_GROQ_MODEL = "openai/gpt-oss-120b"
 $env:MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH = "C:\path\to\gmail-client.json"
 $env:MAILBRIEF_AI_MAX_REQUESTS_PER_RUN = "5"
 $env:MAILBRIEF_AI_MAX_OUTPUT_TOKENS = "4000"
-uv run mailbrief-gmail-diagnostic brief
+uv run forewit-gmail-diagnostic brief
 ```
 
 The key is saved across sessions in the OS vault. The `$env:` settings above apply to this
@@ -61,17 +61,17 @@ verifies access. Never pass the key as a command argument or put it into a repos
 
 The key is read from the vault only when a brief has something to send, and then only once
 per run. A fully cached rerun or an empty Inbox works without it. Without a usable key
-(none saved, or the credential store cannot be read), MailBrief asks nothing and sends
+(none saved, or the credential store cannot be read), Forewit asks nothing and sends
 nothing: new messages are left out with "No usable Groq API key is saved. Run:
-mailbrief-gmail-diagnostic ai-key set", and cached items still make a brief.
+forewit-gmail-diagnostic ai-key set", and cached items still make a brief.
 
 ## Usage and spending limits
 
-MailBrief enforces the request cap on each Groq provider connection, which is one `brief`
+Forewit enforces the request cap on each Groq provider connection, which is one `brief`
 run in the CLI. Batches, individual fallback calls and HTTP retries all share the same
 counter. When a message sent on its own gets an unusable answer, it is sent once more after
 every other message has had its first attempt; a message Groq rejects is not sent again. Failed requests also count. Cached analyses consume no requests. At the cap,
-MailBrief stops making requests, retains successful analyses and reports a partial brief
+Forewit stops making requests, retains successful analyses and reports a partial brief
 (exit 4), or preserves the previous brief if nothing could be analyzed.
 
 The example above permits at most five requests with at most 4,000 output tokens each.
@@ -84,7 +84,7 @@ for `openai/gpt-oss-120b` are 30 requests/minute, 1,000/day, 8,000 tokens/minute
 that prompts, schemas and output reservations fit the token allowance. See
 [Groq rate limits](https://console.groq.com/docs/rate-limits).
 
-MailBrief paces itself from Groq's rate-limit headers. After each call, if the remaining
+Forewit paces itself from Groq's rate-limit headers. After each call, if the remaining
 token allowance (`x-ratelimit-remaining-tokens`) is smaller than that call used (prompt
 plus completion), the next call first waits for the token window to reset
 (`x-ratelimit-reset-tokens`). An exhausted request or token allowance does the same. A
@@ -94,7 +94,7 @@ reached; retry later." and keeps the results already saved.
 If you later enable paid usage, an organization owner can set a monthly USD limit in
 **Groq Console > Settings > Billing > Limits** and add alerts. This applies across all
 keys in the organization. Spend tracking is delayed 10-15 minutes, so some overshoot is
-possible. MailBrief treats `blocked_api_access` as terminal and does not retry it.
+possible. Forewit treats `blocked_api_access` as terminal and does not retry it.
 See [Groq spending limits](https://console.groq.com/docs/spend-limits).
 
 ## What is sent, and what never is
@@ -111,7 +111,7 @@ message outside the shortlist. Empty or unreadable bodies are skipped. Requests 
 environment variables. Groq privacy controls are configured in its console, not with
 an OpenAI `store=false` request parameter.
 
-What is stored: MailBrief never stores full email bodies, beyond the short preview snippet
+What is stored: Forewit never stores full email bodies, beyond the short preview snippet
 Gmail supplies with each message's metadata, which has been kept since M2; for a very
 short email that snippet can be the whole text. Derived content is bounded: a summary is
 at most 240 characters, an action at most 1,000, and evidence at most 300 and strictly
@@ -183,7 +183,7 @@ Schema version 7 adds two fields to each result
 - `follow_up_evidence`: for any signal other than `none`, a passage copied from the subject
   or body, at most 160 characters; `null` otherwise.
 
-MailBrief checks the signal like evidence. The email's own quote is fitted first (at most
+Forewit checks the signal like evidence. The email's own quote is fitted first (at most
 300 characters), then the follow-up quote, then the suggestions' quotes, all within the
 email's 600-character total and under 80% of its body. A follow-up quote that is shorter
 than 2 or longer than 160 characters, doesn't appear in the email or doesn't fit what is
@@ -195,7 +195,7 @@ one of your open actions whose thread the email continues; see
 ## Deadlines
 
 The model copies the deadline phrase and reports its date, time and zone as written.
-MailBrief checks that the phrase appears in the email and resolves it itself:
+Forewit checks that the phrase appears in the email and resolves it itself:
 
 - **Exact**: a date and a time, in UTC or a region zone such as `America/Chicago` that the
   email itself writes, or in your zone when the phrase names no zone.
@@ -206,7 +206,7 @@ MailBrief checks that the phrase appears in the email and resolves it itself:
 A zone the model reports is checked in this order:
 
 1. If the email's subject or body writes it, and it is UTC or a region zone, it is used.
-2. Otherwise, if it equals your own zone, it counts as no reported zone: MailBrief sends
+2. Otherwise, if it equals your own zone, it counts as no reported zone: Forewit sends
    your zone with each email, so the model may simply echo it.
 3. Any other reported zone keeps only the date.
 
@@ -272,7 +272,7 @@ counts HTTP attempts, including failed and retried ones, so it matches what
 `MAILBRIEF_AI_MAX_REQUESTS_PER_RUN` limits: a 500 followed by a success is 2 requests,
 and a call refused by that limit before sending is none. Token counts are `?` when Groq
 reported none. "AI: nothing sent this run" means no HTTP request was made (for example,
-all results were cached, all bodies were empty or no key was available). MailBrief shows no
+all results were cached, all bodies were empty or no key was available). Forewit shows no
 cost estimates; check usage in your Groq dashboard.
 
 ## Troubleshooting
@@ -285,7 +285,7 @@ error code, when Groq sent a safe one; Groq's own error text is never shown or s
 - **"Groq refused this network"** (`Groq detail: HTTP 403, code network_blocked`): Groq's
   edge rejected the connection before checking the key, as it does for many VPN, proxy and
   data-centre networks. Try your usual home or mobile connection. `network_blocked` is a
-  code MailBrief assigns when Groq's 403 asks you to check your network settings; Groq
+  code Forewit assigns when Groq's 403 asks you to check your network settings; Groq
   itself sends no code, and its text is never shown or stored.
 - **"Groq denied access (network, region, permission or quota)"**: check billing, quota,
   project permissions and whether Groq serves your region. For HTTP 403, check in Groq
@@ -297,7 +297,7 @@ error code, when Groq sent a safe one; Groq's own error text is never shown or s
   `MAILBRIEF_AI_MAX_OUTPUT_TOKENS`, or lower `MAILBRIEF_AI_BATCH_SIZE`.
 - **"Groq couldn't finish some answers within the output limit"** (`AI_OUTPUT_INCOMPLETE`):
   Groq answered HTTP 400 `json_validate_failed`, which means it couldn't finish a valid
-  answer, usually because it ran out of output tokens. MailBrief treats this as an
+  answer, usually because it ran out of output tokens. Forewit treats this as an
   incomplete answer, not a rejected request: a batch is split and a single message is
   tried once more. Try again, or raise `MAILBRIEF_AI_MAX_OUTPUT_TOKENS`. Every other 400
   is still reported as a rejected request.

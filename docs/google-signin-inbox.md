@@ -5,7 +5,7 @@ to download an OAuth file. The app opens the system browser, uses the existing
 PKCE and loopback flow, and stores each user's refresh credential only in the OS
 vault. Gmail remains read-only; optional Google Calendar access uses the same sign-in.
 
-After sign-in, and on restoring a session at launch, MailBrief first displays up to
+After sign-in, and on restoring a session at launch, Forewit first displays up to
 50 cached Inbox messages, then requests one Gmail page of up to 50 IDs and their
 metadata. There is no received-date cutoff. **Load 100 more** requests one additional
 page and appends messages without duplicates. A page can contain fewer messages
@@ -28,7 +28,7 @@ body, attachment or AI call is made by browsing or searching. Daily briefs still
 cover one local day and retain their existing consent rules.
 
 Select an email and choose **Should have been in my brief** when the review should have
-suggested it: MailBrief then ranks that sender's mail higher, and the page counts the emails
+suggested it: Forewit then ranks that sender's mail higher, and the page counts the emails
 you wanted in the last 14 days that the review didn't suggest. The mark stays on this
 computer; see [Ranking](ranking.md#should-have-been-in-my-brief).
 

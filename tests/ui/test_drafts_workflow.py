@@ -484,7 +484,7 @@ async def test_a_failed_draft_list_refresh_says_so(
     backend.draft_list_fail = RuntimeError("locked")
     await window.initialize()
     assert window.status.text().endswith(
-        "The view could not be refreshed; restart MailBrief to see the latest."
+        "The view could not be refreshed; restart Forewit to see the latest."
     )
 
 

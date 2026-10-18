@@ -42,11 +42,11 @@ recorded in [ADR 0011](adr/0011-actions-and-suggestions.md).
 ## CLI
 
 ```bash
-uv run mailbrief-gmail-diagnostic brief --show          # suggestions show as [pending #N]
-uv run mailbrief-gmail-diagnostic actions accept N
-uv run mailbrief-gmail-diagnostic actions accept N --into PUBLIC_ID   # M8: add to an action
-uv run mailbrief-gmail-diagnostic actions dismiss N
-uv run mailbrief-gmail-diagnostic actions list [--view open|waiting|completed] [--timezone ZONE]
+uv run forewit-gmail-diagnostic brief --show          # suggestions show as [pending #N]
+uv run forewit-gmail-diagnostic actions accept N
+uv run forewit-gmail-diagnostic actions accept N --into PUBLIC_ID   # M8: add to an action
+uv run forewit-gmail-diagnostic actions dismiss N
+uv run forewit-gmail-diagnostic actions list [--view open|waiting|completed] [--timezone ZONE]
 ```
 
 `actions` never contacts Gmail or the AI. Pass `--database PATH` to use another database.
@@ -94,7 +94,7 @@ never evidence.
    Rerun `brief --database <tmp path> --yes --show`: the accepted suggestion shows
    `[accepted]`, the dismissed one is gone, and `AI: nothing sent this run`.
 3. [ ] Desktop: accept a suggestion, then edit its target date and steps and check one
-   step off. Restart MailBrief: the action is unchanged. Sync and review again: the
+   step off. Restart Forewit: the action is unchanged. Sync and review again: the
    edits survive and the dismissed suggestion is not offered.
 4. [ ] The next day, the open action shows "carried over" without any new email.
 5. [ ] Undo works once for each of accept, dismiss, complete, reopen and delete.

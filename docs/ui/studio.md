@@ -1,4 +1,4 @@
-# Studio: MailBrief's default look
+# Studio: Forewit's default look
 
 Studio follows the supplied Today web template. The desktop retains the owner's saved
 colour scheme and light/dark/system mode choices; the other schemes remain available.
@@ -6,7 +6,7 @@ See [web-design alignment](../ui-redesign.md) for layout, workflow adaptations a
 verification commands.
 
 The default header and sidebar use flat surfaces, with a compact daily overview, shared
-page headers and inline task/draft editors. MailBrief's existing native pill controls,
+page headers and inline task/draft editors. Forewit's existing native pill controls,
 consent, recovery and additional workflows remain available. Reduced transparency,
 increased contrast and reduced motion remain supported for the alternative glass schemes.
 
@@ -21,3 +21,6 @@ The synthetic fixtures render the current 1100 by 720 desktop in
 [project dialog](studio-dialog.png). The [Today preview](today-redesign-light.png) is also
 used in the README. Regenerate them with the UI screenshot checks after an approved
 visual change; keep scratch galleries and test logs out of Git.
+
+Current application screenshots use Forewit. Older design mockups linked from the
+workspace specification are historical references and may retain the MailBrief name.

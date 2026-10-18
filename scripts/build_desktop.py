@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from mailbrief import __version__
+from mailbrief.branding import DISPLAY_NAME
 
 # Direct script execution puts scripts/, not the project root, on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,7 +30,7 @@ def main() -> int:
     )
     options = parser.parse_args()
     if sys.platform not in {"win32", "darwin"}:
-        raise SystemExit("Build MailBrief on Windows or macOS.")
+        raise SystemExit("Build Forewit on Windows or macOS.")
     root = Path(__file__).resolve().parents[1]
     output = root / "out"
     if options.onefile and sys.platform != "win32":
@@ -41,11 +42,11 @@ def main() -> int:
     spec = output / "spec" / mode if options.onefile else output / "spec"
     # PyInstaller replaces these generated targets; reject redirected output locations.
     for target in (
-        output / "dist" / "MailBrief",
-        output / "dist" / "MailBrief.app",
+        output / "dist" / "Forewit",
+        output / "dist" / "Forewit.app",
         output / "build",
         output / "spec",
-        dist / "MailBrief.exe",
+        dist / "Forewit.exe",
         work,
         spec,
         output / "resources",
@@ -60,7 +61,7 @@ def main() -> int:
         "--onefile" if options.onefile else "--onedir",
         "--console" if options.console else "--windowed",
         "--name",
-        "MailBrief",
+        DISPLAY_NAME,
         "--noupx",
         "--disable-windowed-traceback",
         "--paths",
@@ -117,7 +118,7 @@ def main() -> int:
         command.extend(["--icon", str(icon), "--version-file", str(metadata)])
         for asset in (icon, icon.with_name("THIRD_PARTY_NOTICES.txt")):
             command.extend(["--add-data", f"{asset}:mailbrief/resources"])
-    executable = dist / "MailBrief.exe"
+    executable = dist / "Forewit.exe"
     if options.onefile:
         executable.unlink(missing_ok=True)
         executable.with_suffix(".manifest.json").unlink(missing_ok=True)
@@ -128,11 +129,13 @@ def main() -> int:
     if result == 0 and options.onefile:
         write_manifest(root, executable)
     if result == 0 and sys.platform == "darwin":
-        bundle = output / "dist" / "MailBrief.app"
+        bundle = output / "dist" / "Forewit.app"
         plist = bundle / "Contents" / "Info.plist"
         with plist.open("rb") as stream:
             metadata = plistlib.load(stream)
         metadata.update(
+            CFBundleName=DISPLAY_NAME,
+            CFBundleDisplayName=DISPLAY_NAME,
             CFBundleShortVersionString=__version__,
             CFBundleVersion=__version__,
             LSMinimumSystemVersion="15.0",

@@ -69,7 +69,7 @@ REFRESH_CHOICES: tuple[tuple[str, int | None], ...] = (
 )
 _REFRESH_NOTE = (
     "A refresh checks Gmail and follows the threads of your open actions, then tells you how "
-    "many messages are ready to review. It runs only while MailBrief is open, only for "
+    "many messages are ready to review. It runs only while Forewit is open, only for "
     "today, and sends nothing to Groq unless you allow automatic analysis."
 )
 _AUTO_OFF = "Off — every run asks you first"
@@ -172,12 +172,12 @@ class PreferencesPanel(QWidget):
             self.length.addItem(name)
         self.length.setAccessibleName("Default drafting length")
         form.addRow("Drafting len&gth", self.length)
-        self.refresh_on_launch = QCheckBox("&Review today's mail when MailBrief starts")
+        self.refresh_on_launch = QCheckBox("&Review today's mail when Forewit starts")
         form.addRow(self.refresh_on_launch)
         self.refresh_interval = QComboBox()
         for name, _minutes in REFRESH_CHOICES:
             self.refresh_interval.addItem(name)
-        self.refresh_interval.setAccessibleName("Refresh while MailBrief is running")
+        self.refresh_interval.setAccessibleName("Refresh while Forewit is running")
         form.addRow("Refresh &while running", self.refresh_interval)
         self.auto_line = _plain(_AUTO_OFF)
         self.auto_line.setAccessibleName("Automatic analysis")

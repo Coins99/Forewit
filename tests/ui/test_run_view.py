@@ -149,7 +149,7 @@ def assert_no_sideways_scrolling(window: MainWindow) -> None:
 async def test_each_step_shows_its_heading(window: MainWindow) -> None:
     await reviewing(window)
     assert texts(window.review_panel, "stepCaption") == ["Step 1 of 2"]
-    assert texts(window.review_panel, "stepTitle") == ["Choose what MailBrief reads"]
+    assert texts(window.review_panel, "stepTitle") == ["Choose what Forewit reads"]
     assert window.review_panel.isVisible() and not window.consent_panel.isVisible()
     column = window.findChild(QWidget, "runColumn")
     assert column is not None and 0 < column.width() <= 760  # A centred column.

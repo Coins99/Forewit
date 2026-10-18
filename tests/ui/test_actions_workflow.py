@@ -160,7 +160,7 @@ async def test_a_failed_refresh_after_a_saved_change_says_so_once(
 
     assert window.status.text() == (
         "Completed: Approve the proposal. "
-        "The view could not be refreshed; restart MailBrief to see the latest."
+        "The view could not be refreshed; restart Forewit to see the latest."
     )
     assert not window.undo_button.isHidden()  # The change was saved, so it can be undone.
 
@@ -224,7 +224,7 @@ async def test_a_failed_refresh_after_a_dismiss_keeps_the_message_and_notes_it_o
 
     assert window.status.text() == (
         "Suggestion dismissed. It won't be suggested again for this email. "
-        "The view could not be refreshed; restart MailBrief to see the latest."
+        "The view could not be refreshed; restart Forewit to see the latest."
     )
     assert window.undo_button.text() == "&Undo dismiss"  # The dismissal itself was saved.
 
@@ -472,7 +472,7 @@ async def test_a_save_while_another_operation_runs_keeps_the_editor_open(
     )
 
     assert editor.isVisible()
-    assert editor.status.text() == "MailBrief is busy; try again in a moment."
+    assert editor.status.text() == "Forewit is busy; try again in a moment."
     assert edits(window) == EDITED
     assert editor.title.isEnabled()
     assert backend.action_calls == []

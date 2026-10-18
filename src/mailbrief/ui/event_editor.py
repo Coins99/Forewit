@@ -54,7 +54,7 @@ TOO_LONG: Final = "An event can last at most 31 days."
 NOTES_TOO_LONG: Final = "Notes can hold at most 10,000 characters."
 UNUSABLE: Final = "These details can't be saved; check them and try again."
 BAD_TIME: Final = "Type a time as HH:mm, for example 09:30."
-WAITING: Final = "MailBrief is busy; Save works again once it finishes."
+WAITING: Final = "Forewit is busy; Save works again once it finishes."
 _STEP_MINUTES: Final = 15
 STEP: Final = timedelta(minutes=_STEP_MINUTES)
 _STEPS_A_DAY: Final = 96

@@ -161,7 +161,7 @@ async def test_the_request_is_strict_and_minimized(
 def test_the_privacy_notice_is_unchanged_for_groq_users(provider: GroqProvider) -> None:
     expected = (
         "Enable Zero Data Retention in Groq Console Data Controls before sending private "
-        "mail. MailBrief cannot verify that setting. Without it, reliability/abuse logs may "
+        "mail. Forewit cannot verify that setting. Without it, reliability/abuse logs may "
         "retain content for up to 30 days (or longer when legally required). Usage metadata "
         "is retained."
     )

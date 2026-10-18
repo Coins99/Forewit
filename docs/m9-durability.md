@@ -15,7 +15,7 @@ Create backup, export writing and export diagnostics require a new destination o
 the app's data folder. Existing files are refused, including a file created during
 publication. Verify checks an archive without changing your saved data.
 
-Restore validates before showing its explicit confirmation, then closes MailBrief,
+Restore validates before showing its explicit confirmation, then closes Forewit,
 drains pending work and disposes SQLite before replacing the database. The folder
 lock stays held throughout. Recovery revalidates and requires the same reviewed
 archive metadata/checksum; swapping even another valid backup after confirmation
@@ -88,7 +88,7 @@ part of the owner's platform acceptance.
 
 ## Create a backup
 
-Close MailBrief to include the latest autosaved writing, then run:
+Close Forewit to include the latest autosaved writing, then run:
 
 ```powershell
 uv run python -m mailbrief.diagnostics.backup PATH_TO_DATABASE PATH_TO_NEW_BACKUP.zip
@@ -123,10 +123,10 @@ and exit normally. Other tools using the database must also be closed. Restore a
 the desktop's data-folder lock; Gmail diagnostic database commands now hold that same
 lock for their entire run. A running desktop or diagnostic command refuses recovery.
 
-That shared lock also changes everyday use of `mailbrief-gmail-diagnostic`. A command
+That shared lock also changes everyday use of `forewit-gmail-diagnostic`. A command
 that uses the database (`sync`, `bodies`, `brief`, `actions`, `drafts`, `preferences`
 and the others) exits with code 5 while the desktop is open, and launching the desktop
-while such a command runs reports that MailBrief or a diagnostic command is using its
+while such a command runs reports that Forewit or a diagnostic command is using its
 data. The lock file is created beside the database, so `--database` must point into a
 folder you can write, even for commands that only read.
 

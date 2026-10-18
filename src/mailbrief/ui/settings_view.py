@@ -70,7 +70,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         # Its pickers and boxes open behind this cover, never modal, so quitting works.
         self.dialog_guard = DialogGuard(self)
-        self.setWindowTitle("MailBrief settings")
+        self.setWindowTitle("Forewit settings")
         self.resize(640, 620)
         layout = QVBoxLayout(self)
         dialog_heading(self, layout, "Settings", "Manage connections, AI and your preferences.")
@@ -86,7 +86,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(self.fields)
         self.oauth_path = QLineEdit()
         self.oauth_path.setObjectName("customGoogleOAuthPath")
-        self.oauth_path.setPlaceholderText("Optional: leave blank to use MailBrief Google sign-in")
+        self.oauth_path.setPlaceholderText("Optional: leave blank to use Forewit Google sign-in")
         self.oauth_path.setAccessibleName("Google Desktop OAuth client file")
         self.browse_button = QPushButton("&Browse…")
         path_row = QHBoxLayout()
@@ -115,7 +115,7 @@ class SettingsDialog(QDialog):
         form.addRow(self.revoke_button)
         connection_layout.addWidget(self.fields)
         notice = QLabel(
-            "Sign in with Google using MailBrief's configuration. A custom Desktop OAuth "
+            "Sign in with Google using Forewit's configuration. A custom Desktop OAuth "
             "client file is optional for development builds. Choose a Groq model that supports "
             "Structured Outputs. Enable Zero Data Retention in Groq Console before sending mail. "
             "Only the file location and model are saved in desktop settings. "

@@ -8,7 +8,7 @@ Daily summaries and UI wiring follow in later milestones.
 ## 1. Create a Google Desktop OAuth client
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or
-   select a project for personal MailBrief development.
+   select a project for personal Forewit development.
 2. Enable the Gmail API for that project.
 3. In Google Auth Platform, configure the application branding and consent
    audience. For a personal Gmail account use External; while publishing status
@@ -34,12 +34,12 @@ downloaded JSON. See [Google's desktop OAuth documentation](https://developers.g
 
 ## 2. Configure and connect
 
-In PowerShell from the MailBrief project directory:
+In PowerShell from the Forewit project directory:
 
 ```powershell
 uv sync --locked --all-groups
 $env:MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH = 'C:\private\mailbrief-google-desktop.json'
-uv run mailbrief-gmail-diagnostic fetch
+uv run forewit-gmail-diagnostic fetch
 ```
 
 Replace the example path with your downloaded file's actual location. The
@@ -54,7 +54,7 @@ On macOS, in Terminal from the project directory:
 uv sync --locked --all-groups
 export MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH="$HOME/private/mailbrief-google-desktop.json"
 test -f "$MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH" && echo found
-uv run mailbrief-gmail-diagnostic fetch
+uv run forewit-gmail-diagnostic fetch
 ```
 
 The `export` applies only to that Terminal window, and `found` must print before you
@@ -78,12 +78,12 @@ Close the command, open another PowerShell or Terminal window, set the same clie
 then run:
 
 ```powershell
-uv run mailbrief-gmail-diagnostic fetch --silent-only
+uv run forewit-gmail-diagnostic fetch --silent-only
 ```
 
 It must succeed without opening a browser. Refresh credentials are stored in
 Windows Credential Manager or the macOS Keychain under `MailBrief.Gmail`, never in
-SQLite or token files. Access tokens remain in process memory. MailBrief chooses the
+SQLite or token files. Access tokens remain in process memory. Forewit chooses the
 vault explicitly and refuses plaintext or automatic keyring fallbacks; other operating
 systems are not supported.
 
@@ -107,7 +107,7 @@ test. Tokens can also be revoked or expire for other reasons. See
 ## 4. Disconnect and revoke
 
 ```powershell
-uv run mailbrief-gmail-diagnostic disconnect
+uv run forewit-gmail-diagnostic disconnect
 ```
 
 This removes locally stored Gmail credentials, even if the client JSON is missing
@@ -115,7 +115,7 @@ or malformed. Running it twice is safe. It does not delete messages, local app
 data, or Google's authorization grant. It cannot stop a separate already-running
 process from using an access token already held in memory; close other instances.
 
-To revoke Google's grant too, remove MailBrief from your
+To revoke Google's grant too, remove Forewit from your
 [Google account connections](https://myaccount.google.com/connections). Then a
 silent fetch should ask you to reconnect. Local data removal is a separate future
 application action, not a side effect of disconnect.

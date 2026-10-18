@@ -36,7 +36,7 @@ from tests.ui.test_workflow import FakeBackend
 from tests.ui.window_wait import settle, show
 from tests.ui.workspace_fixtures import ACCOUNT, FINANCE_ACTION, mockup_digest
 
-BUSY = "MailBrief is busy; try again in a moment."
+BUSY = "Forewit is busy; try again in a moment."
 NOW = datetime(2026, 10, 6, 13, 30, tzinfo=UTC)
 
 

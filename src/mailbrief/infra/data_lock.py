@@ -37,7 +37,7 @@ def data_directory_lock(database: Path) -> Iterator[None]:
         acquired = lock.tryLock(0)
         if not acquired:
             raise DataInUseError(
-                "MailBrief's data folder is busy or unavailable. Close the desktop and other "
+                "Forewit's data folder is busy or unavailable. Close the desktop and other "
                 "diagnostic commands, check folder access, then retry."
             )
         yield

@@ -25,7 +25,7 @@ from mailbrief.infra.files import publish_exclusively, sync_directory
 from mailbrief.storage.migrate import migration_config, upgrade_database
 from mailbrief.storage.tables import Base
 
-_INVALID = "The backup is damaged, incompatible or not a MailBrief database."
+_INVALID = "The backup is damaged, incompatible or not a Forewit database."
 
 
 class BackupValidationError(ValueError):

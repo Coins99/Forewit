@@ -117,7 +117,7 @@ jobs:
 
       - name: Verify copied single executable and frozen lifecycle
         if: runner.os == 'Windows'
-        run: uv run python scripts/check_package.py --layout onefile --executable out/dist/onefile/MailBrief.exe
+        run: uv run python scripts/check_package.py --layout onefile --executable out/dist/onefile/Forewit.exe
 
       - name: Stage Windows release assets
         if: runner.os == 'Windows' && inputs.release-tag != ''
@@ -127,13 +127,13 @@ jobs:
 
       - name: Archive macOS app preserving permissions and symlinks
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent out/dist/MailBrief.app out/MailBrief-macOS.zip
+        run: ditto -c -k --sequesterRsrc --keepParent out/dist/Forewit.app out/Forewit-macOS.zip
 
       - name: Upload Windows single executable
         if: runner.os == 'Windows' && inputs.release-tag == ''
         uses: actions/upload-artifact@v7
         with:
-          name: MailBrief-Windows-onefile-${{ github.sha }}
+          name: Forewit-Windows-onefile-${{ github.sha }}
           path: out/dist/onefile/
           if-no-files-found: error
           retention-days: 3
@@ -142,7 +142,7 @@ jobs:
         if: runner.os == 'Windows' && inputs.release-tag != ''
         uses: actions/upload-artifact@v7
         with:
-          name: MailBrief-release-${{ github.sha }}
+          name: Forewit-release-${{ github.sha }}
           path: out/release/
           if-no-files-found: error
           retention-days: 3
@@ -151,7 +151,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: MailBrief-macOS
-          path: out/MailBrief-macOS.zip
+          name: Forewit-macOS
+          path: out/Forewit-macOS.zip
           if-no-files-found: error
           retention-days: 7
