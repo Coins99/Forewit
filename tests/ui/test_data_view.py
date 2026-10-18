@@ -195,7 +195,7 @@ async def test_picker_refuses_data_folder_and_cancellation(
     assert dialog._picker is not None
     dialog._picker.selectFile(str(tmp_path / "new.json"))
     dialog._picker.done(QDialog.DialogCode.Accepted)
-    with pytest.raises(ValueError, match="outside MailBrief"):
+    with pytest.raises(ValueError, match="outside Forewit"):
         await task
     task = asyncio.create_task(dialog.choose("Synthetic verify", "ZIP (*.zip)", save=False))
     await asyncio.sleep(0)
@@ -219,7 +219,7 @@ async def test_backup_inside_data_folder_shows_the_specific_refusal(
     dialog._picker.selectFile(str(tmp_path / "backup.zip"))
     dialog._picker.done(QDialog.DialogCode.Accepted)
     await task
-    assert dialog.status.text() == "Choose a destination outside MailBrief's data folder."
+    assert dialog.status.text() == "Choose a destination outside Forewit's data folder."
     assert not (tmp_path / "backup.zip").exists()
     log_failure.assert_not_called()
 

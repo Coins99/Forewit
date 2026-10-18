@@ -1,9 +1,9 @@
 ---
 name: mailbrief-ui
-description: Use for any change to MailBrief's desktop UI under src/mailbrief/ui, including layout, styling, widgets, icons, fonts, the theme and the three-pane workspace. Gives the design tokens, Qt styling rules, plain-text safety rules and the screenshot review loop.
+description: Use for any change to Forewit's desktop UI under src/mailbrief/ui, including layout, styling, widgets, icons, fonts, the theme and the three-pane workspace. Gives the design tokens, Qt styling rules, plain-text safety rules and the screenshot review loop.
 ---
 
-# MailBrief desktop UI
+# Forewit desktop UI
 
 The October 15 Today-template alignment supersedes the older default-frame geometry and
 typography below: the sidebar is 214 px, the default header/sidebar use flat surfaces,
@@ -28,7 +28,7 @@ shadows), in the system's light or dark mode. Its approved renders are
   `src/mailbrief/ui`. Every scheme passes the contrast tests in both modes.
 - Open a window's dialogs with `MainWindow.dialog_guard.show_dialog(dialog)`, never
   `QDialog.open()`, `exec()` or `setWindowModality()`. On macOS a modal dialog runs an
-  AppKit modal session, which drops Cmd+Q and the Dock's Quit, so MailBrief could only be
+  AppKit modal session, which drops Cmd+Q and the Dock's Quit, so Forewit could only be
   force quit. A file picker or message box opened from a dialog goes through that
   dialog's own `dialog_guard`. A dialog holding typed input implements
   `has_unsaved_input()` and is listed in `MainWindow._unsaved_input()`, so quitting asks

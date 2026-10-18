@@ -1,6 +1,6 @@
 # Liquid Glass
 
-MailBrief's navigation chrome is Liquid Glass, painted with QPainter. The header, the
+Forewit's navigation chrome is Liquid Glass, painted with QPainter. The header, the
 sidebar and the pill buttons are glass. The lists and the reading pane stay opaque, so
 mail is never read through glass. The planner's prototype renders are the visual
 reference; `docs/ui/mockup-three-pane-dark.png` stays the layout reference.
@@ -52,7 +52,7 @@ This page says what was built, why, and what it costs.
 | Increase contrast (macOS, or Windows high contrast) | Solid, with solid rims in `rim_contrast` |
 | Reduce motion (macOS, or Windows "Animation effects" off) | No lift, press or spring |
 
-- **When it's read:** at start, whenever MailBrief becomes the active app and when Qt
+- **When it's read:** at start, whenever Forewit becomes the active app and when Qt
   reports a contrast change. A failed read counts as no preference.
 - **The owner's choices:** Settings > Appearance can make glass "Always solid" or
   "Reduce motion" whatever the system says. Neither can undo a system setting.
@@ -82,10 +82,10 @@ p95 in milliseconds.
 ### Measuring on your machine
 
 ```bash
-MAILBRIEF_PAINT_PROFILE=1 /Applications/MailBrief.app/Contents/MacOS/MailBrief
+MAILBRIEF_PAINT_PROFILE=1 /Applications/Forewit.app/Contents/MacOS/Forewit
 ```
 
-Use MailBrief, then quit. `desktop.log` in MailBrief's data folder then has one line per
+Use Forewit, then quit. `desktop.log` in Forewit's data folder then has one line per
 widget kind, such as `paint widget=GlassButton count=120 p50_ms=0.13 p95_ms=0.20`. The
 count is every paint, and the percentiles cover the last 10,000 of each kind, so memory
 stays flat however long the session. It records nothing else. `tests/ui/glass/test_profile.py` fails if any glass paint's p95
@@ -95,7 +95,7 @@ blurring on every paint.
 ## Not built
 
 - **The time slider** from the plan: the owner kept the 15-minute dropdown (#58).
-- **A segmented control:** MailBrief has no control that needs one yet.
+- **A segmented control:** Forewit has no control that needs one yet.
 - **Refraction, chromatic edges and lenses:** these need per-pixel work that Python and
   QPainter can't do at frame rate, or Qt Quick shaders, which would add Qt modules.
 - **Native materials:** Windows Mica or Acrylic, and macOS `NSGlassEffectView`, would

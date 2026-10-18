@@ -154,10 +154,10 @@ class LoopbackAuthorization:
                         result.set_exception(
                             AuthenticationCancelledError("Google authorization was declined.")
                         )
-                        status, message = "200 OK", "Authorization declined. Return to MailBrief."
+                        status, message = "200 OK", "Authorization declined. Return to Forewit."
                     elif len(query.get("code", [])) == 1:
                         result.set_result(query["code"][0])
-                        status, message = "200 OK", "Authorization received. Return to MailBrief."
+                        status, message = "200 OK", "Authorization received. Return to Forewit."
                     else:
                         status, message = "400 Bad Request", "Missing authorization code."
                     body = message.encode("ascii")

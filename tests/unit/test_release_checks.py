@@ -50,7 +50,7 @@ def test_every_service_module_is_gated() -> None:
     ],
 )
 def test_distribution_audit_refuses_private_files(tmp_path: Path, name: str) -> None:
-    (tmp_path / "MailBrief.exe").write_bytes(b"synthetic binary")
+    (tmp_path / "Forewit.exe").write_bytes(b"synthetic binary")
     audit_distribution(tmp_path)
     (tmp_path / name).write_bytes(b"synthetic private marker")
     with pytest.raises(ValueError, match="private or development"):

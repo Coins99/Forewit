@@ -150,12 +150,12 @@ def main() -> int:
     options = parser.parse_args()
     if sys.platform == "win32":
         default = root / (
-            "out/dist/onefile/MailBrief.exe"
+            "out/dist/onefile/Forewit.exe"
             if options.layout == "onefile"
-            else "out/dist/MailBrief/MailBrief.exe"
+            else "out/dist/Forewit/Forewit.exe"
         )
     elif sys.platform == "darwin" and options.layout == "onedir":
-        default = root / "out/dist/MailBrief.app/Contents/MacOS/MailBrief"
+        default = root / "out/dist/Forewit.app/Contents/MacOS/Forewit"
     else:
         parser.error("Package checks require Windows or a macOS app bundle.")
     executable = (options.executable or default).resolve(strict=True)
@@ -175,7 +175,7 @@ def main() -> int:
         and key.upper() not in {"PYTHONPATH", "PYTHONHOME"}
     }
     environment["QT_QPA_PLATFORM"] = "offscreen"
-    with tempfile.TemporaryDirectory(prefix="MailBrief package check ") as temporary:
+    with tempfile.TemporaryDirectory(prefix="Forewit package check ") as temporary:
         directory = Path(temporary)
         data, cwd, extraction = (directory / name for name in ("profile", "working", "extraction"))
         for target in (data, cwd, extraction):
@@ -185,7 +185,7 @@ def main() -> int:
         if options.layout == "onefile":
             location = directory / "Desktop café 测试"
             location.mkdir()
-            launched = location / "MailBrief.exe"
+            launched = location / "Forewit.exe"
             shutil.copy2(executable, launched)
         for scale in ("1", "2"):
             environment["QT_SCALE_FACTOR"] = scale
@@ -199,7 +199,7 @@ def main() -> int:
             environment["QT_QPA_PLATFORM"] = "windows"
             environment["QT_SCALE_FACTOR"] = "1"
             run_check(launched, data, cwd, environment)
-            renamed = launched.with_name("MailBrief renamed.exe")
+            renamed = launched.with_name("Forewit renamed.exe")
             shutil.copy2(launched, renamed)
             check_locks(launched, renamed, data, cwd, environment)
             upgrade = directory / "upgrade"

@@ -7,7 +7,7 @@ marked passed by synthetic tests. M5 is not accepted until they are recorded her
 ## macOS
 
 - [ ] Run the macOS CI quality/build/package-check job and inspect its result.
-- [ ] Launch `MailBrief.app` on a Mac without the source checkout or Python environment.
+- [ ] Launch `Forewit.app` on a Mac without the source checkout or Python environment.
 - [ ] Configure a Desktop OAuth client and Groq key through Settings; verify Keychain
   access, persistence after restart, key removal and reconnect.
 - [ ] Complete the daily workflow and source-link checks below on macOS.

@@ -47,8 +47,8 @@ macOS (Terminal) or Windows (PowerShell), from the project folder, with the OAut
 set as in `docs/gmail-setup.md`:
 
 ```
-uv run mailbrief-gmail-diagnostic bodies --silent-only
-uv run mailbrief-gmail-diagnostic bodies --silent-only --show-text
+uv run forewit-gmail-diagnostic bodies --silent-only
+uv run forewit-gmail-diagnostic bodies --silent-only --show-text
 ```
 
 The command first syncs today's metadata, exactly like `sync`, then prints one line per
@@ -57,7 +57,7 @@ shortlisted email.
 `--show-text` also prints each email's sender, subject and prepared text, in your terminal
 only. It is never saved or logged, so don't use it on a shared screen.
 
-To review a specific email, add it with `--include <message ID>`. `mailbrief-gmail-diagnostic
+To review a specific email, add it with `--include <message ID>`. `forewit-gmail-diagnostic
 sync --show-metadata` lists today's IDs.
 
 Exit codes: 0 complete; 2 sign-in needed; 3 setup problem; 4 incomplete sync or a failed body;

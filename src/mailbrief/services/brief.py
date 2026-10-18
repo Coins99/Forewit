@@ -90,7 +90,7 @@ def disclosure_lines(preview: TransmissionPreview) -> tuple[str, ...]:
     provider = provider_display_name(preview.provider_name)
     cut = preview.truncated_count
     lines = [
-        f"MailBrief will send {_count(preview.message_count, 'message')} to {provider} "
+        f"Forewit will send {_count(preview.message_count, 'message')} to {provider} "
         f"({preview.model_name}) for analysis.",
         f"{_count(cut, 'message')} {'is' if cut == 1 else 'are'} cut to fit the length limit."
         if cut

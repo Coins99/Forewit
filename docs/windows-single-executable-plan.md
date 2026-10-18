@@ -45,7 +45,7 @@ Broader redistribution still requires confirming all dependency license requirem
 
 ## Outcome and scope
 
-Deliver a Windows x64 `MailBrief.exe` that the owner can download, put on the Desktop,
+Deliver a Windows x64 `Forewit.exe` that the owner can download, put on the Desktop,
 and double-click. It opens the current desktop UI without a console, Python, uv,
 the source checkout, an installer, or a companion dependency folder. It runs as a
 standard user. Windows 11 x64 is the first acceptance target; broader Windows support
@@ -71,7 +71,7 @@ work. Packaging acceptance does not close the M4-M9 live product checklists.
 | --- | --- | --- |
 | `scripts/build_desktop.py` | PyInstaller folder build; explicit migrations, QtSvg, fonts/icons, tzdata and dynamic imports | Add a Windows single-file option and separate output/work/spec locations |
 | `scripts/desktop_entry.py` | Calls the desktop entrypoint | Reuse; change only if an identified frozen startup defect requires it |
-| `src/mailbrief/paths.py` | Qt identity `MailBrief` / `MailBrief`; `AppLocalDataLocation` | Preserve identity, location and database filename |
+| `src/mailbrief/paths.py` | Qt identity `Forewit` / `Forewit`; `AppLocalDataLocation` | Preserve identity, location and database filename |
 | `src/mailbrief/storage/migrate.py` | Bundled revisions via `_MEIPASS`; pre-upgrade SQLite backup | Verify in a single-file process; preserve upgrade protections |
 | `src/mailbrief/ui/theme/assets.py` | Fonts and SVGs beside the module | Verify both assets in the extracted bundle |
 | `src/mailbrief/app.py`, `infra/data_lock.py` | Profile lock; orderly shutdown; restore while lock held | Exercise frozen processes, including renamed executables |
@@ -91,10 +91,10 @@ work. Packaging acceptance does not close the M4-M9 live product checklists.
 
    | Mode | Executable | Work/spec directories |
    | --- | --- | --- |
-   | Existing Windows folder | `out/dist/MailBrief/MailBrief.exe` | Keep existing locations |
-   | Windows single file | `out/dist/onefile/MailBrief.exe` | `out/build/onefile`, `out/spec/onefile` |
-   | Diagnostic single file | `out/dist/onefile-console/MailBrief.exe` | Separate console work/spec subdirectories |
-   | macOS | `out/dist/MailBrief.app` | Existing workflow |
+   | Existing Windows folder | `out/dist/Forewit/Forewit.exe` | Keep existing locations |
+   | Windows single file | `out/dist/onefile/Forewit.exe` | `out/build/onefile`, `out/spec/onefile` |
+   | Diagnostic single file | `out/dist/onefile-console/Forewit.exe` | Separate console work/spec subdirectories |
+   | macOS | `out/dist/Forewit.app` | Existing workflow |
 
 4. In single-file mode use `--onefile --windowed`, retain `--noupx`, and keep the explicit
    resource/import inclusion list on current main. Add a checked-in application `.ico`
@@ -120,7 +120,7 @@ Proposed developer commands after implementation:
 ```powershell
 uv sync --locked --all-groups
 uv run python scripts/build_desktop.py --onefile
-uv run python scripts/check_package.py --executable out/dist/onefile/MailBrief.exe --layout onefile
+uv run python scripts/check_package.py --executable out/dist/onefile/Forewit.exe --layout onefile
 ```
 
 These options are proposed interfaces and do not exist yet. Paths supplied to package
@@ -253,7 +253,7 @@ missing libraries/extraction failures. Logs after startup retain current redacti
 ## Updating and recovery
 
 Initial updates are manual: download the matching architecture, verify its checksum,
-make an application-data backup, close MailBrief completely, then replace the Desktop EXE.
+make an application-data backup, close Forewit completely, then replace the Desktop EXE.
 Keep the previous EXE until the new version is verified. If Windows says the file is in
 use, finish shutdown before replacement; do not overwrite a running image.
 
@@ -283,7 +283,7 @@ Implement delivery in two parts so local packaging can be validated before relea
    against the build manifest. Only that job receives `contents: write` with the workflow's
    `GITHUB_TOKEN`; no personal access token, Gmail key or Groq key is required.
    [Workflow token permissions](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token)
-4. Stage `MailBrief-v<version>-windows-x64.exe`, `SHA256SUMS.txt`, a nonsecret build manifest,
+4. Stage `Forewit-v<version>-windows-x64.exe`, `SHA256SUMS.txt`, a nonsecret build manifest,
    release notes/setup-update instructions and necessary notices. Include the macOS asset
    if that release is advertised as cross-platform. Hash the final downloadable bytes;
    if signing is added later, sign and check before hashing.

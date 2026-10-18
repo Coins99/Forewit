@@ -15,7 +15,10 @@ from mailbrief.storage.recovery import inspect_backup, restore_backup
 
 def main(arguments: Sequence[str] | None = None) -> int:
     """Create, verify or restore a backup without signing in or reading credentials."""
-    parser = argparse.ArgumentParser(description="Back up or restore MailBrief's local database.")
+    parser = argparse.ArgumentParser(
+        prog="python -m mailbrief.diagnostics.backup",
+        description="Back up or restore Forewit's local database.",
+    )
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path, nargs="?")
     mode = parser.add_mutually_exclusive_group()

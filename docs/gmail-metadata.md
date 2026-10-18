@@ -11,7 +11,7 @@ Keep `MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH` set to the Desktop OAuth JSON used for 
 From the project directory, run:
 
 ```powershell
-uv run mailbrief-gmail-diagnostic sync --silent-only --timezone America/Toronto
+uv run forewit-gmail-diagnostic sync --silent-only --timezone America/Toronto
 ```
 
 Omit `--timezone` to use the system timezone. Omit `--silent-only` if you need an
@@ -36,7 +36,7 @@ To intentionally display IDs, subjects, senders, scores and account-aware Gmail
 source links in your terminal:
 
 ```powershell
-uv run mailbrief-gmail-diagnostic sync --silent-only --show-metadata
+uv run forewit-gmail-diagnostic sync --silent-only --show-metadata
 ```
 
 Each item is labelled selected or omitted. Review the omitted items too: local
@@ -44,8 +44,8 @@ ranking is a heuristic, not proof that every important message was selected.
 Copy a displayed message ID to adjust the next run's selection:
 
 ```powershell
-uv run mailbrief-gmail-diagnostic sync --silent-only --include MESSAGE_ID
-uv run mailbrief-gmail-diagnostic sync --silent-only --exclude MESSAGE_ID
+uv run forewit-gmail-diagnostic sync --silent-only --include MESSAGE_ID
+uv run forewit-gmail-diagnostic sync --silent-only --exclude MESSAGE_ID
 ```
 
 Repeat flags for multiple IDs. Includes take priority over automatic ranking;

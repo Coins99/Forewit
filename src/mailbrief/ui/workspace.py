@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.branding import DISPLAY_NAME
 from mailbrief.domain.actions import ActionProposal, ThreadLink
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.digests import (
@@ -374,7 +375,7 @@ class HeaderBar(GlassChrome):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         _styled(self, "headerBar")
-        self.setAccessibleName("MailBrief status")
+        self.setAccessibleName("Forewit status")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(25, 22, 25, 17)
         layout.setSpacing(13)
@@ -692,7 +693,7 @@ class SidebarNav(GlassChrome):
         layout.setContentsMargins(13, 21, 13, 13)
         layout.setSpacing(3)
         self.brand = QWidget()
-        self.brand.setAccessibleName("MailBrief")
+        self.brand.setAccessibleName(DISPLAY_NAME)
         brand_row = QHBoxLayout(self.brand)
         brand_row.setContentsMargins(8, 0, 8, 18)
         brand_row.setSpacing(10)
@@ -705,7 +706,7 @@ class SidebarNav(GlassChrome):
             lambda label: label.setPixmap(icon_pixmap("mail", current_tokens().panel, 16, 2.0)),
         )
         brand_row.addWidget(brand_icon)
-        brand_text = plain_label("MailBrief", px=15, medium=True)
+        brand_text = plain_label(DISPLAY_NAME, px=15, medium=True)
         brand_text.setObjectName("brandLabel")
         brand_row.addWidget(brand_text, 1)
         layout.addWidget(self.brand)
@@ -910,7 +911,7 @@ class ThreePaneWorkspace(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         _styled(self, "workspace")
-        self.setAccessibleName("MailBrief workspace")
+        self.setAccessibleName("Forewit workspace")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)

@@ -1,10 +1,10 @@
-# MailBrief future feature inventory
+# Forewit future feature inventory
 
 Created: 2026-10-11. Product planning inventory, not an implementation commitment.
 
 ## Direction and scope
 
-MailBrief should become a general personal life planner connecting email, tasks,
+Forewit should become a general personal life planner connecting email, tasks,
 projects, calendars, notes, goals and progress dashboards. Student features are
 shelved temporarily. Custom charts and configurable dashboards belong in the
 general-planner proof of concept, although advanced analytics can arrive later.

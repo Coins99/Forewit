@@ -215,14 +215,14 @@ def test_a_number_shows_the_disclosure_and_the_permission_sentence(
     dialog.limit.setValue(3)
 
     lines = dialog.disclosure.text().split("\n\n")
-    assert lines[0] == "MailBrief will send 3 messages to Groq (test-model) for analysis."
+    assert lines[0] == "Forewit will send 3 messages to Groq (test-model) for analysis."
     assert "Enable Zero Data Retention." in lines
     assert lines[-1] == (
         "Automatic runs may send up to 3 messages from owner@example.com to Groq without "
         "asking. Revoke consent in Settings to stop."
     )
     dialog.limit.setValue(1)
-    assert "MailBrief will send 1 message to Groq" in dialog.disclosure.text()
+    assert "Forewit will send 1 message to Groq" in dialog.disclosure.text()
     assert "up to 1 message from owner@example.com" in dialog.disclosure.text()
     dialog.limit.setValue(0)
     assert dialog.disclosure.text() == OFF_TEXT

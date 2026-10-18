@@ -50,7 +50,7 @@ OAuth tokens and API keys stay in the OS credential vault. Backups are not encry
 Export saves actions, activity, projects, life areas, drafts, notes and calendar events,
 including deleted records, source snapshots and saved versions, as portable UTF-8 JSON.
 Keep backups and exports private.
-Restore validates and upgrades the archive, closes MailBrief, keeps a pre-restore copy
+Restore validates and upgrades the archive, closes Forewit, keeps a pre-restore copy
 beside the database, and clears automatic AI permission. Relaunch after restoring.
 Device setup (OAuth client path and model) and vault credentials are configured separately.
 
@@ -59,7 +59,7 @@ briefs and sync records. Source snapshots, writing and remembered decisions surv
 Removing an account also removes its saved AI consent; credentials are unchanged.
 Permanently removing deleted writing removes its steps, sources, proposals and versions;
 live and completed writing survives. Restore from a backup to recover permanent deletions.
-MailBrief never sends mail or writes to Gmail.
+Forewit never sends mail or writes to Gmail.
 
 If saving fails: stop editing, check free disk space and folder access, then retry.
 If an upgrade fails: keep the original and its pre-upgrade copy, fix storage access and retry.
@@ -74,7 +74,7 @@ Enable Groq Zero Data Retention in its console before approving real mail transm
 Use Tab/Shift+Tab to navigate, Alt+underlined letter for buttons, and Escape to close.
 """
 
-_INSIDE_DATA = "Choose a destination outside MailBrief's data folder."
+_INSIDE_DATA = "Choose a destination outside Forewit's data folder."
 
 
 class DestinationInsideDataError(ValueError):
@@ -107,7 +107,7 @@ class DataDialog(QDialog):
         self._picker: QFileDialog | None = None
         self._confirmation: QMessageBox | None = None
         self._storage_available = False
-        self.setWindowTitle("MailBrief — Data and recovery")
+        self.setWindowTitle("Forewit — Data and recovery")
         self.resize(640, 650)
         layout = QVBoxLayout(self)
         dialog_heading(
@@ -281,7 +281,7 @@ class DataDialog(QDialog):
         metadata = await asyncio.to_thread(inspect_backup, path)
         if await self.confirm(
             f"Replace saved data with the backup from {self._backup_time(metadata)}? "
-            "MailBrief will exit, preserve the current database beside it, and clear automatic "
+            "Forewit will exit, preserve the current database beside it, and clear automatic "
             "AI permission. Credentials stay in the vault. Relaunch after the result appears."
         ):
             self.request_restore(path, metadata)
@@ -340,7 +340,7 @@ class DataDialog(QDialog):
                 except Exception as exc:
                     log_failure(exc)
                     self.status.setText(
-                        "Cleanup completed. Views could not refresh; restart MailBrief."
+                        "Cleanup completed. Views could not refresh; restart Forewit."
                     )
                 else:
                     self.status.setText("Reviewed cleanup completed.")

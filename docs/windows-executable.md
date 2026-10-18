@@ -1,6 +1,6 @@
 # Windows desktop executable
 
-The Windows single-file build is `out/dist/onefile/MailBrief.exe`. Copy **only that file**
+The Windows single-file build is `out/dist/onefile/Forewit.exe`. Copy **only that file**
 to your Desktop and double-click it. It bundles Python and the application's libraries;
 no Python installation, source checkout, installer or `_internal` folder is required.
 Initial acceptance targets Windows 11 x64. The build is unsigned.
@@ -8,11 +8,11 @@ Initial acceptance targets Windows 11 x64. The build is unsigned.
 ## Setup and saved data
 
 Configure your Google Desktop OAuth client file and Groq model/key in Settings, then
-connect Gmail. Keep the selected OAuth client JSON in a stable location: MailBrief saves
+connect Gmail. Keep the selected OAuth client JSON in a stable location: Forewit saves
 its path, not a copy of the file. No owner configuration or credentials are in the EXE.
 See [Gmail setup](gmail-setup.md) and [AI setup/consent](ai-analysis.md).
 
-Saved work stays in the existing Qt `AppLocalDataLocation` for the `MailBrief` organization
+Saved work stays in the existing Qt `AppLocalDataLocation` for the `Forewit` organization
 and application. It is independent of the Desktop, executable filename and working
 directory. Tokens and the API key remain in Windows Credential Manager. Moving/renaming
 the EXE retains the same profile; two copies cannot write that profile concurrently.
@@ -28,10 +28,10 @@ Allow a few seconds for the window to appear. Normal exit removes extracted file
 force-stopping a process may leave temporary files. Saved work is never kept there.
 
 For an update, download the Windows x64 file, verify the release's SHA-256, make a data
-backup, close MailBrief completely, then replace the Desktop EXE. Keep the previous
+backup, close Forewit completely, then replace the Desktop EXE. Keep the previous
 executable until the new build is verified. Windows may refuse replacement until shutdown
-finishes. A release filename such as `MailBrief-v0.1.0-windows-x64.exe` can be renamed to
-`MailBrief.exe`.
+finishes. A release filename such as `Forewit-v0.1.0-windows-x64.exe` can be renamed to
+`Forewit.exe`.
 
 Replacing the EXE does not reverse a database upgrade. An older version may refuse a
 newer database. Use a compatible executable and the retained pre-upgrade/M9 backup;
@@ -50,12 +50,12 @@ Run on Windows from the locked Python 3.13 development environment:
 ```powershell
 uv sync --locked --all-groups
 uv run python scripts/build_desktop.py --onefile
-uv run python scripts/check_package.py --layout onefile --executable out/dist/onefile/MailBrief.exe
+uv run python scripts/check_package.py --layout onefile --executable out/dist/onefile/Forewit.exe
 ```
 
 The build generates its multi-size icon from the bundled Tabler mail artwork and current
 theme tokens, plus Windows version information and bundled notices. It creates a
-`MailBrief.manifest.json` with the EXE hash, architecture, dependency/build identity and
+`Forewit.manifest.json` with the EXE hash, architecture, dependency/build identity and
 embedded inventory. A local build records whether the source is dirty; release staging
 refuses dirty or mismatched builds. The inventory checks filenames and required resources,
 not arbitrary disguised secrets; build only from explicit, clean inputs.
@@ -67,14 +67,14 @@ profile locks, backup/export/cleanup, and old/unknown schema checks. No live Gma
 credentials or paid AI are used. Normal-exit extraction cleanup is checked separately.
 
 `--onefile --console` produces the diagnostic build under `out/dist/onefile-console/`.
-The existing default build still produces the full folder at `out/dist/MailBrief/`; its
-dependency folder must stay together. macOS continues using `MailBrief.app`.
+The existing default build still produces the full folder at `out/dist/Forewit/`; its
+dependency folder must stay together. macOS continues using `Forewit.app`.
 
 Notices are embedded and also accompany releases. Export them without overwriting an
 existing file:
 
 ```powershell
-.\MailBrief.exe --export-notices .\MailBrief-notices.txt
+.\Forewit.exe --export-notices .\Forewit-notices.txt
 ```
 
 ## CI and releases

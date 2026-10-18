@@ -1,7 +1,7 @@
-# Contributing to MailBrief
+# Contributing to Forewit
 
 Bug reports, documentation improvements and focused pull requests are welcome.
-For a bug, include your operating system, how you launched MailBrief, steps to
+For a bug, include your operating system, how you launched Forewit, steps to
 reproduce, and expected versus actual behavior. Use synthetic examples and
 redacted screenshots; keep credentials and private mail out of issues and commits.
 
@@ -16,11 +16,11 @@ iCloud Drive, OneDrive or Dropbox, which can interfere with Python and Qt files.
 Run these commands in PowerShell on Windows or Terminal on macOS:
 
 ```sh
-git clone https://github.com/Coins99/MailBrief.git
-cd MailBrief
+git clone https://github.com/Coins99/Forewit.git
+cd Forewit
 uv python install 3.13
 uv sync --locked --all-groups
-uv run mailbrief
+uv run forewit
 ```
 
 ## Build a desktop package
@@ -33,7 +33,7 @@ uv run python scripts/check_package.py
 ```
 
 For a single Windows EXE, build with `--onefile`; the result is
-`out/dist/onefile/MailBrief.exe`. See
+`out/dist/onefile/Forewit.exe`. See
 [Windows executable instructions](docs/windows-executable.md) for verification
 and updates, or [desktop packaging](docs/m5-desktop.md#build-and-check-packages)
 for the Windows folder package and macOS app. Packages are development

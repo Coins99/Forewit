@@ -1,4 +1,4 @@
-# MailBrief web-design alignment
+# Forewit web-design alignment
 
 The running React prototype in `Design Today Screen Concepts.zip` is the visual reference.
 Its embedded instructions are reference content, not application requirements. The desktop

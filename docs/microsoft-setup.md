@@ -1,13 +1,13 @@
 # Microsoft account setup and diagnostic
 
-MailBrief uses Microsoft Entra delegated permissions and the system browser. The
+Forewit uses Microsoft Entra delegated permissions and the system browser. The
 desktop application is a public client: its application (client) ID is public
 configuration, and a client secret must never be created, configured, or shipped.
 
 ## Register the application
 
 1. In the Microsoft Entra admin center, create an app registration named
-   `MailBrief`.
+   `Forewit`.
 2. For supported account types, choose **Accounts in any organizational directory
    and personal Microsoft accounts**.
 3. Under **Authentication**, add the **Mobile and desktop applications** redirect
@@ -20,10 +20,10 @@ In PowerShell, configure the current process and run the diagnostic:
 
 ```powershell
 $env:MAILBRIEF_MICROSOFT_CLIENT_ID = "<application-client-id>"
-uv run mailbrief-ms-diagnostic fetch
+uv run forewit-ms-diagnostic fetch
 ```
 
-The first run opens the system browser. MailBrief requests account selection and
+The first run opens the system browser. Forewit requests account selection and
 consent, fetches `/me`, and retrieves at most the first Inbox metadata page for the
 current UTC day. It never retrieves message bodies or attachments. Successful
 output contains only the account email address and first-page message count:
@@ -38,7 +38,7 @@ Messages in first page: 12
 Close the first process, retain the same environment variable, and run:
 
 ```powershell
-uv run mailbrief-ms-diagnostic fetch --silent-only
+uv run forewit-ms-diagnostic fetch --silent-only
 ```
 
 Success without a browser proves that the encrypted MSAL cache restored the
@@ -46,8 +46,8 @@ session in a fresh process. To remove all cached Microsoft account and token
 records, run:
 
 ```powershell
-uv run mailbrief-ms-diagnostic disconnect
-uv run mailbrief-ms-diagnostic fetch --silent-only
+uv run forewit-ms-diagnostic disconnect
+uv run forewit-ms-diagnostic fetch --silent-only
 ```
 
 The second command should exit with code `3`. Disconnect works without the client
@@ -58,7 +58,7 @@ part of the packaging security audit.
 ## Troubleshooting
 
 - Exit `2`: verify the client ID and application-data access. Encrypted persistence
-  must initialize; MailBrief never falls back to plaintext in production.
+  must initialize; Forewit never falls back to plaintext in production.
 - Exit `3`: the session is absent, expired, ambiguous, or interactive sign-in was
   cancelled. Run `fetch` without `--silent-only`.
 - Exit `4`: the account or tenant has not granted `User.Read` and `Mail.Read`, or a
@@ -71,4 +71,4 @@ part of the packaging security audit.
 Do not paste tokens, the token-cache file, raw Graph responses, or verbose identity
 logs into an issue. Public diagnostic errors are deliberately sanitized. The
 encrypted token cache is stored below Qt's platform-specific local application-data
-directory; tokens are never written to the MailBrief SQLite database.
+directory; tokens are never written to the Forewit SQLite database.

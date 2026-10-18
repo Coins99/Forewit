@@ -1,6 +1,6 @@
-# MailBrief
+# Forewit
 
-MailBrief is a desktop app for Windows and macOS that turns today's important
+Forewit is a desktop app for Windows and macOS that turns today's important
 email into a short brief. Gmail is the first supported mailbox. Outlook code is retained for
 later use after Microsoft Entra access is resolved.
 
@@ -46,7 +46,7 @@ later use after Microsoft Entra access is resolved.
 - M8 implemented, awaiting live acceptance (PR #17): your time zone, messages per brief,
   excluded senders, drafting defaults and AI limits; brief history and catch-up for missed
   days; tracking the threads of open actions, with proposed updates to your actions and
-  replies outside today's Inbox offered in review; and refreshing while MailBrief is open,
+  replies outside today's Inbox offered in review; and refreshing while Forewit is open,
   with automatic analysis only by your explicit permission.
   See [M8 daily operation](m8-daily-operation.md).
 - M9 implemented, awaiting live acceptance: **Data and recovery** provides snapshot
@@ -81,12 +81,12 @@ later use after Microsoft Entra access is resolved.
 
 ## The desktop window
 
-![MailBrief in its dark theme: the header, the sidebar, the brief and the selected email](ui/workspace-dark.png)
+![Forewit in its dark theme: the header, the sidebar, the brief and the selected email](ui/workspace-dark.png)
 
 The screenshot is from before Studio (PR #74) and the Account card (PR #78);
 [Studio](ui/studio.md) shows the current look.
 
-MailBrief is one window with three panes (PR #21):
+Forewit is one window with three panes (PR #21):
 
 - **Header**: when Gmail was last checked, then **Sync and review**, and **Cancel** while
   something runs.
@@ -101,7 +101,7 @@ MailBrief is one window with three panes (PR #21):
 - **Status strip**: the latest status along the bottom, with **Undo** after a change you
   can reverse.
 
-**Sync and review** runs in two steps on its own page. Step 1, **Choose what MailBrief
+**Sync and review** runs in two steps on its own page. Step 1, **Choose what Forewit
 reads**: only the messages you leave checked have their bodies downloaded. Step 2,
 **Approve sending to Groq**: approve or decline what will be sent; Decline starts focused.
 

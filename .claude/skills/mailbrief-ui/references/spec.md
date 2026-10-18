@@ -1,8 +1,8 @@
-# MailBrief UI specification
+# Forewit UI specification
 
 ## Tokens
 
-Each `ColorScheme` has a dark and a light set (`tokens_for(mode, scheme)`), and MailBrief
+Each `ColorScheme` has a dark and a light set (`tokens_for(mode, scheme)`), and Forewit
 applies the one that matches the system's mode unless the owner keeps one (see Changing
 scheme and mode):
 
@@ -138,7 +138,7 @@ them.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
 - **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`).
-  Every button in MailBrief looks like Settings' Disconnect: a pill of glass at rest,
+  Every button in Forewit looks like Settings' Disconnect: a pill of glass at rest,
   wherever it sits. A `GlassButton` paints itself; `ThemeStyle` draws every other push
   button as the same pill (see Buttons, lists and tabs).
   - **Size:** its label (and icon) plus `PAD_X` (10 px) each side and `PAD_Y` (6 px)
@@ -204,7 +204,7 @@ them.
     solid) and Motion (Follow the system, or Reduce motion). They can add solid glass or
     stillness but never undo the system's, and increased contrast always wins.
 - **`GlassAccessibility`** (`accessibility.py`, in `MainWindow`) applies them at once and
-  again whenever MailBrief becomes the active app (after System Settings, say) or Qt
+  again whenever Forewit becomes the active app (after System Settings, say) or Qt
   reports a contrast change. It connects to the application's signals; a filter on the
   application would see every event of every object. A change repaints every widget
   inside `paused_collection()`.
@@ -482,7 +482,7 @@ The brief list's chips keep their shorter forms (see Brief list).
 
 ## Workspace (`ui/workspace.py`)
 
-- `HeaderBar`: objectName `headerBar`, margins 16, 8, 16, 8; "MailBrief" 15px Semibold
+- `HeaderBar`: objectName `headerBar`, margins 16, 8, 16, 8; "Forewit" 15px Semibold
   (`TITLE_BAR_PX`), a stretch, a 16px refresh icon (text_secondary), the status and the window's widgets.
   The status is an `ElidedLabel` (12px, secondary, `headerStatus`): it asks for its text's
   width but shrinks to nothing, so a long status never widens the header; its accessible
@@ -669,7 +669,7 @@ The brief list's chips keep their shorter forms (see Brief list).
   today, so a new week moves the page on. Reading weeks doesn't go through `start()`: while
   another operation runs, the weeks, New event, Open, Open in Google Calendar and Plan with
   AI still work (the newest read of the week wins), and Delete event, Allow and Refresh
-  wait. The editor's Save waits too, and its status line says `WAITING` ("MailBrief is
+  wait. The editor's Save waits too, and its status line says `WAITING` ("Forewit is
   busy; Save works again once it finishes."). Allow, Refresh and the page's quiet syncs
   can be cancelled, and quitting stops them.
   `EventEditor` is a dialog (title, All day, Starts and Ends as a
@@ -851,7 +851,7 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
 
 ## Run page (`ui/run_view.py`, `ui/main_window.py`)
 
-- Step 1, `review_panel`: "Step 1 of 2" (11px muted) over "Choose what MailBrief reads"
+- Step 1, `review_panel`: "Step 1 of 2" (11px muted) over "Choose what Forewit reads"
   (20px Semibold), the hint (a secondary `WrapLabel`), the shortlist and Continue, a
   `variant="primary"` button left-aligned. The run column's margins are 24, 20, 24, 20. Step 2, `consent_panel`: "Step 2 of 2" over
   "Approve sending to Groq", the disclosure (a `WrapLabel`) in a `HairlineFrame` card,
@@ -879,7 +879,7 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
 - No horizontal scroll bar (`ScrollBarAlwaysOff`), and rows have no width of their own,
   so list mode gives them the viewport's width and no hidden horizontal range exists.
   Scrolling is per pixel.
-- Check box: MailBrief paints its own inside the style's `SE_ItemViewItemCheckIndicator`
+- Check box: Forewit paints its own inside the style's `SE_ItemViewItemCheckIndicator`
   rect, so the inherited `editorEvent` still handles clicks and Space, with
   `paint_check_box` from `ui/theme/indicators.py`, as the theme style paints every check
   box. Unchecked: a radius-4 rounded square with a cosmetic 1px `border_strong` outline.

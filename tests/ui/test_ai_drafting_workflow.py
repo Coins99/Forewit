@@ -99,7 +99,7 @@ async def test_first_use_previews_asks_for_consent_then_writes_a_new_version(
     assert call[2].instructions == "Make it a list."  # type: ignore[attr-defined]
     assert backend.draft_calls[-1][0] == "autosave_draft"  # Saved before the preview.
     preview_text = editor.ai_panel.preview_text.toPlainText()
-    assert preview_text.startswith("MailBrief will send these parts to Groq (fake-model)")
+    assert preview_text.startswith("Forewit will send these parts to Groq (fake-model)")
     assert "- Your current text: title and body: 12 characters" in preview_text
     assert "Enable Zero Data Retention first." in preview_text
     assert not editor.ai_panel.send_button.isEnabled()

@@ -899,11 +899,11 @@ def test_disclosure_lines() -> None:
         lines=(PreviewLine(label="Your current text: title and body", characters=1_234),),
     )
     lines = disclosure_lines(preview)
-    assert lines[0] == "MailBrief will send these parts to Groq (m) to write this draft:"
+    assert lines[0] == "Forewit will send these parts to Groq (m) to write this draft:"
     assert "- Your current text: title and body: 1,234 characters" in lines
     assert (
         "It never sends the sender's address, To or Cc, other emails, attachments, your other "
-        "drafts or actions, Gmail or MailBrief IDs, or credentials. The parts listed above are "
+        "drafts or actions, Gmail or Forewit IDs, or credentials. The parts listed above are "
         "sent as written, so any addresses, links or numbers inside them are sent too."
     ) in lines
     assert "Enable Zero Data Retention." in lines

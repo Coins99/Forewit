@@ -260,7 +260,7 @@ def test_a_carried_message_that_fails_keeps_the_earlier_brief_and_exits_4(
         "1 new message is also ready."
     )
     assert lines[sentence + 1 :] == [
-        "Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set",
+        "Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set",
         "Groq detail: HTTP 401, code invalid_api_key",
         "Your last saved brief for today is unchanged.",
     ]
@@ -471,7 +471,7 @@ def test_granting_shows_the_disclosure_and_asks_for_a_typed_yes(
     assert consent(path, "auto-send", "3") == 0
 
     output = capsys.readouterr().out
-    assert "MailBrief will send 3 messages to Groq (test-model) for analysis." in output
+    assert "Forewit will send 3 messages to Groq (test-model) for analysis." in output
     assert "plain-text body, cut to at most 4,000 characters" in output
     assert "Zero Data Retention" in output
     assert "Automatic runs may send up to 3 messages from me@example.com to Groq" in output
@@ -518,7 +518,7 @@ def test_yes_skips_the_question_but_not_the_disclosure(
     assert consent(path, "auto-send", "1", "--yes") == 0
 
     output = capsys.readouterr().out
-    assert "MailBrief will send 1 message to Groq" in output
+    assert "Forewit will send 1 message to Groq" in output
     assert "may send up to 1 message from me@example.com" in output
 
 
@@ -594,7 +594,7 @@ def test_status_and_preferences_show_the_permission(
 
     assert gmail.main(show) == 0
     output = capsys.readouterr().out
-    assert "Refresh when MailBrief starts: yes\n" in output
+    assert "Refresh when Forewit starts: yes\n" in output
     assert "Refresh while running: every 2 hours\n" in output
     assert (
         "Automatic analysis: unavailable until you give consent (analyze once with Sync and "
@@ -636,7 +636,7 @@ def test_preferences_show_names_each_refresh_interval(
 
     output = capsys.readouterr().out
     assert f"Refresh while running: {text}\n" in output
-    assert "Refresh when MailBrief starts: no\n" in output
+    assert "Refresh when Forewit starts: no\n" in output
 
 
 # Declines

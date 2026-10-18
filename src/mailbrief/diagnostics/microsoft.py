@@ -10,6 +10,7 @@ from typing import cast
 
 from pydantic import ValidationError
 
+from mailbrief.branding import MICROSOFT_COMMAND
 from mailbrief.config import Settings
 from mailbrief.domain.messages import MessagePage
 from mailbrief.errors import ConfigurationError
@@ -38,7 +39,7 @@ class _ExitCode(IntEnum):
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mailbrief-ms-diagnostic",
+        prog=MICROSOFT_COMMAND,
         description="Validate Microsoft authentication and one Inbox metadata page.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -103,7 +104,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             settings = Settings()
             asyncio.run(_run_fetch(settings, paths, silent_only=bool(parsed.silent_only)))
     except (ValidationError, ConfigurationError):
-        return _failure("MailBrief configuration is invalid.", _ExitCode.CONFIGURATION)
+        return _failure("Forewit configuration is invalid.", _ExitCode.CONFIGURATION)
     except (AuthenticationCancelledError, AuthenticationRequiredError):
         return _failure("Microsoft authentication is required.", _ExitCode.AUTHENTICATION)
     except ProviderPermissionError:

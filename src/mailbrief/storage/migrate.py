@@ -28,7 +28,7 @@ def migration_config(path: Path) -> "Config":
     root = Path(bundle) if isinstance(bundle, str) else Path(__file__).resolve().parents[3]
     if not (root / "migrations" / "env.py").is_file():
         raise ConfigurationError(
-            "Migration resources are unavailable; reinstall MailBrief or use the project checkout."
+            "Migration resources are unavailable; reinstall Forewit or use the project checkout."
         )
     config = Config()
     config.set_main_option("script_location", str(root / "migrations").replace("%", "%%"))

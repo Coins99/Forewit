@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.branding import GMAIL_COMMAND
 from mailbrief.config import Settings
 from mailbrief.domain.actions import (
     TARGET_REASON_TEXT,
@@ -165,11 +166,11 @@ _SETUP_UNAVAILABLE = (
 )
 _AI_ERROR_MESSAGES = {
     "AI_USAGE_LIMIT": (
-        "MailBrief's AI request limit for this run was reached. "
+        "Forewit's AI request limit for this run was reached. "
         "Review MAILBRIEF_AI_MAX_REQUESTS_PER_RUN before running again."
     ),
     "AI_KEY_MISSING": KEY_MISSING_MESSAGE,
-    "AI_AUTH_FAILED": "Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set",
+    "AI_AUTH_FAILED": "Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set",
     "AI_NETWORK_BLOCKED": (
         "Groq refused this network. Groq blocks many VPN, proxy and data-centre connections; "
         "try your usual home or mobile connection."
@@ -534,7 +535,7 @@ async def _auto_send(session: AsyncSession, limit: int, *, assume_yes: bool) -> 
     )
     noun = "message" if limit == 1 else "messages"
     print(f"Saved. Automatic runs may now send up to {limit} {noun} without asking.")
-    print("Turn it off with: mailbrief-gmail-diagnostic ai-consent auto-send 0")
+    print("Turn it off with: forewit-gmail-diagnostic ai-consent auto-send 0")
     return 0
 
 
@@ -737,7 +738,7 @@ async def drafts_generate(
         print("Placeholders: " + (", ".join(found) if found else "none"))
         for item in outcome.missing_context:
             print(f"Missing context: {item}")
-        print(f"See the text with: mailbrief-gmail-diagnostic drafts export {public_id}")
+        print(f"See the text with: forewit-gmail-diagnostic drafts export {public_id}")
     elif outcome.status is DraftingStatus.DECLINED:
         print("Nothing was sent. The draft is unchanged.")
     elif outcome.status is DraftingStatus.CANCELLED:
@@ -1493,7 +1494,7 @@ async def preferences_show(*, database_path: Path | None) -> int:
         f"Drafting defaults: tone {preferences.draft_tone.value}, "
         f"length {preferences.draft_length.value}"
     )
-    print(f"Refresh when MailBrief starts: {'yes' if preferences.refresh_on_launch else 'no'}")
+    print(f"Refresh when Forewit starts: {'yes' if preferences.refresh_on_launch else 'no'}")
     print(f"Refresh while running: {_refresh_text(preferences.refresh_interval_minutes)}")
     print(f"Automatic analysis: {await _automatic_analysis_text(path, exists=exists)}")
     print("AI limits (a MAILBRIEF_AI_* variable wins over a saved value):")
@@ -1545,7 +1546,7 @@ def _add_day_options(parser: argparse.ArgumentParser) -> None:
 
 def main(arguments: Sequence[str] | None = None) -> int:
     """Return predictable exit codes without dumping provider payloads or secrets."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog=GMAIL_COMMAND, description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     fetch = commands.add_parser("fetch", help="Verify Gmail identity; M1 does not fetch mail.")
     fetch.add_argument("--silent-only", action="store_true", help="Never open a browser.")

@@ -116,10 +116,10 @@ def disclosure_lines(preview: DraftingPreview) -> tuple[str, ...]:
     """Plain sentences describing a generation, shared by the CLI and the desktop."""
     provider = provider_display_name(preview.provider)
     lines = [
-        f"MailBrief will send these parts to {provider} ({preview.model}) to write this draft:",
+        f"Forewit will send these parts to {provider} ({preview.model}) to write this draft:",
         *(f"- {line.label}: {line.characters:,} characters" for line in preview.lines),
         "It never sends the sender's address, To or Cc, other emails, attachments, your other "
-        "drafts or actions, Gmail or MailBrief IDs, or credentials. The parts listed above are "
+        "drafts or actions, Gmail or Forewit IDs, or credentials. The parts listed above are "
         "sent as written, so any addresses, links or numbers inside them are sent too.",
         "An email's body is downloaded from Gmail for this draft only and is never saved.",
         "Your own text is saved as a version first; the result becomes a new version.",
@@ -128,7 +128,7 @@ def disclosure_lines(preview: DraftingPreview) -> tuple[str, ...]:
     if preview.first_use:
         lines.append(
             "Your consent to AI drafting is remembered until you revoke it (Settings, or "
-            "mailbrief-gmail-diagnostic ai-consent revoke)."
+            "forewit-gmail-diagnostic ai-consent revoke)."
         )
     return tuple(lines)
 

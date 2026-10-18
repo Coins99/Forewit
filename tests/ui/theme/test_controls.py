@@ -256,7 +256,7 @@ def test_every_dialog_has_the_home_screen_s_sheet(
     it, with no square corner, and the dialog's own layout inside the sheet."""
     apply_theme(qapp, mode)
     tokens = current_tokens()
-    for dialog in (QDialog(), QMessageBox(QMessageBox.Icon.NoIcon, "MailBrief", "Discard?")):
+    for dialog in (QDialog(), QMessageBox(QMessageBox.Icon.NoIcon, "Forewit", "Discard?")):
         qtbot.addWidget(dialog)
         dialog.setLayout(dialog.layout() or QVBoxLayout())
         dialog.resize(320, 200)

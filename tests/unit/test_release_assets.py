@@ -10,7 +10,7 @@ from scripts.stage_release import validate_tag, verify
 
 
 def candidate(directory: Path) -> None:
-    name = "MailBrief-v0.1.0-windows-x64.exe"
+    name = "Forewit-v0.1.0-windows-x64.exe"
     executable = directory / name
     executable.write_bytes(b"Synthetic release executable")
     manifest = {
@@ -39,7 +39,7 @@ def test_candidate_hashes_and_identity(tmp_path: Path) -> None:
 
 def test_modified_executable_refused(tmp_path: Path) -> None:
     candidate(tmp_path)
-    (tmp_path / "MailBrief-v0.1.0-windows-x64.exe").write_bytes(b"Changed after verification")
+    (tmp_path / "Forewit-v0.1.0-windows-x64.exe").write_bytes(b"Changed after verification")
     with pytest.raises(ValueError, match="checksum"):
         verify(tmp_path, "synthetic-commit", "v0.1.0")
 

@@ -68,7 +68,7 @@ def sampler(scheme: ColorScheme, mode: ThemeMode, dpr: float) -> QImage:
         paint_panel(painter, area, glass, backdrop, area)
     painter.fillRect(content, QColor(tokens.panel))
     painter.setPen(QColor(tokens.text))
-    painter.drawText(QRectF(14, 0, 200, HEADER), Qt.AlignmentFlag.AlignVCenter, "MailBrief")
+    painter.drawText(QRectF(14, 0, 200, HEADER), Qt.AlignmentFlag.AlignVCenter, "Forewit")
     top = (HEADER - PILL_HEIGHT) / 2
     left = WIDTH - 12 - pill_width("Sync and review") - 8 - pill_width("Cancel")
     left = pill(painter, left, top, "Sync and review", primary=True)

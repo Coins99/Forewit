@@ -1,4 +1,14 @@
-# MailBrief agent guide
+# Forewit agent guide
+
+## Branding and compatibility
+
+Forewit is the public product name; `mailbrief` remains the Python package and
+distribution. Keep Qt's organization/application names `MailBrief`, the current
+data paths, `MailBrief.*` vault entries, `MAILBRIEF_*` configuration and secrets,
+`com.mailbrief.desktop`, and machine-readable backup/export formats unchanged.
+Use `mailbrief.branding` for the display name and canonical command names. The
+original `mailbrief*` commands remain supported aliases. Historical ADRs and
+archived material retain the original project name.
 
 This is the single source of truth for AI agents working in this repository. Read it
 first, then only the files your task needs. If another document disagrees with this
@@ -11,27 +21,27 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Gmail is the active provider. Microsoft (Outlook/Graph) code is dormant: keep it
   compiling and its tests passing, but do not extend it unless a task says so.
 - Done: M1 Gmail OAuth and secure restore; M2 Inbox metadata sync, ranking and
-  shortlist review (`mailbrief-gmail-diagnostic sync`).
+  shortlist review (`forewit-gmail-diagnostic sync`).
 - Implemented, live acceptance recorded in `docs/m3-validation.md`: M3 shortlisted-body
-  reading and preparation (`mailbrief-gmail-diagnostic bodies`, `docs/gmail-bodies.md`).
+  reading and preparation (`forewit-gmail-diagnostic bodies`, `docs/gmail-bodies.md`).
 - Implemented, awaiting live acceptance: M4 consented AI analysis and the saved daily brief
-  (`mailbrief-gmail-diagnostic brief`, `docs/ai-analysis.md`).
+  (`forewit-gmail-diagnostic brief`, `docs/ai-analysis.md`).
 - Implemented, awaiting platform/human acceptance: M5 workflow, settings, full-Inbox
   shortlist review, offline metadata browser and native packages. See `docs/m5-desktop.md`
   and `docs/m5-acceptance.md` for validation and the remaining checks. Scope remains
   in `docs/mvp-plan.md` and `docs/email-implementation-plan.md`.
 - Implemented, awaiting live acceptance: M6 AI action suggestions, accepted actions with
   editable plans and target dates, open/waiting/completed lists and undo (desktop, plus
-  `brief --show` and `mailbrief-gmail-diagnostic actions`). See `docs/m6-actions.md` and
+  `brief --show` and `forewit-gmail-diagnostic actions`). See `docs/m6-actions.md` and
   ADR 0011.
 - M7 implemented, awaiting live acceptance: replies, emails, notes and messages with
   autosave, versions, copy and export, and AI drafting with Groq from context the owner
-  chooses (desktop, plus `mailbrief-gmail-diagnostic drafts`). See `docs/m7-drafts.md`,
+  chooses (desktop, plus `forewit-gmail-diagnostic drafts`). See `docs/m7-drafts.md`,
   ADR 0012 and ADR 0013.
 - M8 implemented (merged in PR #17), awaiting live acceptance, built in nine parts
   (`docs/m8-daily-operation.md`); preferences (Parts 1–2) implemented, awaiting live
   acceptance: time zone, messages per brief, sender exclusions, drafting defaults and AI
-  limits, in the Settings Preferences tab and `mailbrief-gmail-diagnostic preferences show`.
+  limits, in the Settings Preferences tab and `forewit-gmail-diagnostic preferences show`.
   See ADR 0014. Brief history and bounded catch-up (Part 3) implemented, awaiting live
   acceptance: the desktop Briefs page and `brief --date`, `briefs list` and
   `briefs show`. Thread tracking backend (Part 4) implemented, awaiting live acceptance:
@@ -59,7 +69,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `python -m mailbrief.diagnostics.backup`. Restore retains a pre-restore snapshot,
   clears automatic AI permission and never touches credentials. Gmail diagnostic
   database commands hold `desktop.lock` for their whole run: they exit 5 while the desktop
-  is open, and the desktop reports that MailBrief is busy while one runs. CI enforces the
+  is open, and the desktop reports that Forewit is busy while one runs. CI enforces the
   service coverage target and checks native packages at 100%/200% scale with synthetic
   backup/recovery/export/cleanup.
   See `docs/m9-durability.md` and `docs/m9-live-validation.md`. Do not claim M9 accepted
@@ -116,7 +126,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
   live acceptance: Google Calendar read-only beside the owner's events. Phase 3a: the
   AI planning service, the Groq call and all-or-nothing apply with Undo; 3b, the Plan
-  with AI dialog on the Calendar page. MailBrief's own calendar in Google is phase 4. See
+  with AI dialog on the Calendar page. Forewit's own calendar in Google is phase 4. See
   `docs/calendar.md`.
 
 ## Layout (ports and adapters)
@@ -241,8 +251,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
-  `out/dist/onefile/MailBrief.exe`; check with `check_package.py --layout onefile
-  --executable out/dist/onefile/MailBrief.exe`. Keep the existing Qt profile identity.
+  `out/dist/onefile/Forewit.exe`; check with `check_package.py --layout onefile
+  --executable out/dist/onefile/Forewit.exe`. Keep the existing Qt profile identity.
   `scripts/package_manifest.py` audits embedded resources; `scripts/stage_release.py`
   rejects dirty, mismatched or modified release candidates. Version tags create a draft
   Windows release only. See `docs/windows-executable.md` for pending owner acceptance.
@@ -252,7 +262,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Never write OAuth tokens or API keys to SQLite, logs, exceptions, printed output or
   files. Never write full email bodies there either, beyond the short preview snippet Gmail
   supplies, which SQLite has kept since M2; for a very short email that snippet can be the
-  whole text. The one exception is `mailbrief-gmail-diagnostic bodies --show-text`, which
+  whole text. The one exception is `forewit-gmail-diagnostic bodies --show-text`, which
   prints prepared text to the owner's terminal on explicit request. `brief --show` prints
   derived brief content (sender, subject, summary, action, deadline, link, suggestion
   titles, targets and steps, and the titles and IDs of the actions an email continues) on
@@ -300,7 +310,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.
-  They never store a downloaded incoming body, and MailBrief never inserts quoted incoming
+  They never store a downloaded incoming body, and Forewit never inserts quoted incoming
   history; text the owner types or pastes is stored as entered. They have no account
   foreign key and survive message, cache, account and action deletion; delete is soft and
   restorable. A draft keeps at most 100 versions. Draft text never reaches logs,
@@ -394,7 +404,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - No blocking network or database work on the Qt main thread (M5).
 - Calendar (ADR 0018): AI never changes the calendar by itself, only through proposals the
   owner applies. Deadlines and target dates are never stored as events or moved by them.
-  Google writes go only to the calendar MailBrief creates: never to other calendars, never
+  Google writes go only to the calendar Forewit creates: never to other calendars, never
   guests or invitations. One Google sign-in serves Gmail and Calendar (ADR 0019): it asks
   for `gmail.readonly`, `calendar.events.readonly` and `calendar.calendarlist.readonly`,
   requires only the first, and adds nothing else until phase 4. Every Calendar request names its
@@ -436,7 +446,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Always: kind, tone, length, the owner's instructions (at most 1,000 characters) and
   today's date.
 - Never send the sender's address, To or Cc, other emails, attachments, other drafts or
-  actions, Gmail or MailBrief IDs, or credentials. The chosen parts are sent as written, so
+  actions, Gmail or Forewit IDs, or credentials. The chosen parts are sent as written, so
   addresses, links or numbers inside them are sent too, and the consent text says so.
 - Every generation shows a preview of every part with its size and waits for approval.
   First use needs explicit consent, recorded per provider for the owner (not per account)

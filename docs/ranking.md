@@ -1,6 +1,6 @@
 # Ranking: which emails the review suggests
 
-Before anything is read or sent, MailBrief scores each Inbox message locally from its
+Before anything is read or sent, Forewit scores each Inbox message locally from its
 metadata and suggests the best ones in the review, up to your messages per brief. The
 score is deterministic: the same mail, choices and settings always give the same order.
 Nothing here calls AI, and the review always lets you change the selection.
@@ -8,7 +8,7 @@ Nothing here calls AI, and the review always lets you change the selection.
 ## The rules
 
 Each rule that applies adds or takes away points, in this order, and shows its reason in
-the review (hover a row) and in `mailbrief-gmail-diagnostic sync --show-metadata`.
+the review (hover a row) and in `forewit-gmail-diagnostic sync --show-metadata`.
 
 | Rule | Points | Reason shown |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ again, and mail from an excluded sender never is ([ADR 0017](adr/0017-automatic-
 
 ## Gmail's tabs, stars and bulk mail
 
-MailBrief reads Gmail's category label, its star and three headers with the rest of the
+Forewit reads Gmail's category label, its star and three headers with the rest of the
 metadata, still read-only. A message is bulk mail when it has a `List-Id` or
 `List-Unsubscribe` header, or a `Precedence` of `bulk`, `list` or `junk`. Only whether the
 header is there is kept: unsubscribe links are never stored or shown. Mail cached before this
@@ -55,11 +55,11 @@ In **Settings > Preferences**, **Important senders** takes one address or `@doma
 like **Excluded senders**; `@domain` also covers its subdomains. Their mail gets +30, so it
 is among the first suggestions. A sender can't be in both lists, and when an excluded domain
 covers an important address, the exclusion wins: excluded mail is never read or analyzed.
-`mailbrief-gmail-diagnostic preferences show` lists them.
+`forewit-gmail-diagnostic preferences show` lists them.
 
 ## What your choices teach
 
-For each sender, MailBrief counts what you did in the last 90 days:
+For each sender, Forewit counts what you did in the last 90 days:
 
 - **Wanted**: emails you checked in a review although they weren't suggested (or named with
   `--include`), emails you marked **Should have been in my brief** on the Inbox page, and the

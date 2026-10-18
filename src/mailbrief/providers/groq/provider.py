@@ -62,17 +62,17 @@ BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 # Groq's token window is one minute, so a run waits out a whole window before stopping.
 MAX_RETRY_DELAY_SECONDS = 60.0
 
-AUTH_MESSAGE = "Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set"
+AUTH_MESSAGE = "Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set"
 PERMISSION_MESSAGE = "Groq denied access (network, region, permission or quota)."
 RATE_LIMIT_MESSAGE = "Groq rate limit reached; retry later."
 TIMEOUT_MESSAGE = "Groq did not respond in time."
 CONNECTION_MESSAGE = "Could not reach Groq."
 UNREADABLE_MESSAGE = "Groq returned an unreadable response."
-KEY_MISSING_MESSAGE = "No usable Groq API key is saved. Run: mailbrief-gmail-diagnostic ai-key set"
+KEY_MISSING_MESSAGE = "No usable Groq API key is saved. Run: forewit-gmail-diagnostic ai-key set"
 _VAULT_WARNING = "The Groq API key could not be read from the OS credential store."
 PRIVACY_NOTICE = (
     "Enable Zero Data Retention in Groq Console Data Controls before sending private mail. "
-    "MailBrief cannot verify that setting. Without it, reliability/abuse logs may retain "
+    "Forewit cannot verify that setting. Without it, reliability/abuse logs may retain "
     "content for up to 30 days (or longer when legally required). Usage metadata is retained."
 )
 
@@ -594,7 +594,7 @@ class GroqProvider:
     def _check_budget(self) -> None:
         if self._remaining_requests == 0:
             raise ProviderUsageLimitError(
-                "MailBrief's AI request limit for this run was reached. "
+                "Forewit's AI request limit for this run was reached. "
                 "Review MAILBRIEF_AI_MAX_REQUESTS_PER_RUN before running again."
             )
 

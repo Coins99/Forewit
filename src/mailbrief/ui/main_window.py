@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.branding import DISPLAY_NAME
 from mailbrief.domain.actions import (
     Action,
     ActionEdit,
@@ -415,8 +416,8 @@ _STALE = (
 # Raised when the open draft changed elsewhere; the editor keeps the text.
 _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
 _PICK_ONE = "Select at least one message to analyze, or Cancel."
-_NOT_REFRESHED = "The view could not be refreshed; restart MailBrief to see the latest."
-_BUSY = "MailBrief is busy; try again in a moment."
+_NOT_REFRESHED = "The view could not be refreshed; restart Forewit to see the latest."
+_BUSY = "Forewit is busy; try again in a moment."
 _CANCELLED = "Cancelled. The displayed saved brief is unchanged."
 _BRIEFS_UNAVAILABLE = "Saved briefs open once local storage loads. Choose Retry loading saved data."
 _EDITOR_STALE = (
@@ -828,7 +829,7 @@ class MainWindow(QMainWindow):
         preferences_panel.auto_send_requested.connect(
             lambda: self.start(self._open_auto_send, cancellable=False)
         )
-        self.setWindowTitle("MailBrief")
+        self.setWindowTitle(DISPLAY_NAME)
         self.resize(1100, 720)
         workspace = self.workspace = ThreePaneWorkspace()
         sidebar = workspace.sidebar
@@ -908,7 +909,7 @@ class MainWindow(QMainWindow):
         review_layout = QVBoxLayout(self.review_panel)
         review_layout.setContentsMargins(0, 0, 0, 0)
         review_layout.setSpacing(8)
-        _step_heading(review_layout, "Step 1 of 2", "Choose what MailBrief reads")
+        _step_heading(review_layout, "Step 1 of 2", "Choose what Forewit reads")
         self.review_hint = wrap_label(_review_hint(MAX_SHORTLIST_SIZE), tone="secondary")
         self.review_hint.setObjectName("reviewHint")
         review_layout.addWidget(self.review_hint)
@@ -1063,7 +1064,7 @@ class MainWindow(QMainWindow):
         strip_layout.addWidget(self.undo_button)
         central = QWidget()
         central.setObjectName("mainWindowContent")
-        central.setAccessibleName("MailBrief")
+        central.setAccessibleName("Forewit")
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -3326,12 +3327,12 @@ class MainWindow(QMainWindow):
         """Said in Settings (opening it clears its line), and on the status line when
         Settings is closed: a switch of the Calendar's view saves too."""
         self.settings_dialog.status.setText(
-            "The appearance couldn't be saved. It stays until MailBrief closes."
+            "The appearance couldn't be saved. It stays until Forewit closes."
         )
         if not self.settings_dialog.isVisible():
             self.status.setText(
                 "Your appearance and Calendar view couldn't be saved on this computer. They "
-                "stay until MailBrief closes."
+                "stay until Forewit closes."
             )
 
     def _request_save_preferences(self, preferences: DesktopPreferences) -> None:
@@ -3360,7 +3361,7 @@ class MainWindow(QMainWindow):
         count = await self.backend.revoke_consent()
         self.status.setText(
             f"AI consent revoked for briefs and drafting ({count} consent records). "
-            "MailBrief asks again before sending anything."
+            "Forewit asks again before sending anything."
         )
 
     async def _refresh_ai_status(self) -> None:
@@ -3393,7 +3394,7 @@ class MainWindow(QMainWindow):
             self.ai.setText("AI: waiting for local storage.")
             self.status.setText(
                 "Saved data could not be opened. The database may be newer than this app or "
-                "unreadable. Use the latest MailBrief, check disk access, then Retry loading "
+                "unreadable. Use the latest Forewit, check disk access, then Retry loading "
                 "saved data. Do not delete your database."
             )
             self.workspace.clear("Saved brief unavailable until local storage can be opened.")
@@ -3511,7 +3512,7 @@ class MainWindow(QMainWindow):
             select=message_id,
         )
         self.status.setText(
-            "Marked: MailBrief counts this when ranking its sender's mail."
+            "Marked: Forewit counts this when ranking its sender's mail."
             if wanted
             else "Mark removed."
         )
@@ -4108,7 +4109,7 @@ class MainWindow(QMainWindow):
         if box is None:
             box = QMessageBox(self)
             box.setObjectName("quitConfirmation")
-            box.setWindowTitle("Quit MailBrief")
+            box.setWindowTitle("Quit Forewit")
             box.setIcon(QMessageBox.Icon.Warning)
             box.setTextFormat(Qt.TextFormat.PlainText)
             box.addButton(

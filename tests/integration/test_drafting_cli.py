@@ -115,7 +115,7 @@ def test_first_use_asks_then_writes_a_version_from_the_email(
     output = capsys.readouterr().out
     assert code == 0
     assert prompts == ['Type "yes" to consent and send: ']
-    assert "MailBrief will send these parts to Groq (test-model) to write this draft:" in output
+    assert "Forewit will send these parts to Groq (test-model) to write this draft:" in output
     assert "- The email: subject, sender name, received time and body:" in output
     assert "- Your current text: title and body:" in output
     assert "New version v2 from Groq; your previous text is version v1." in output
@@ -194,7 +194,7 @@ def test_a_groq_failure_leaves_the_draft_and_exits_4(
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[-3:] == [
-        "Groq rejected the API key. Run: mailbrief-gmail-diagnostic ai-key set",
+        "Groq rejected the API key. Run: forewit-gmail-diagnostic ai-key set",
         "Groq detail: HTTP 401, code invalid_api_key",
         "The draft is unchanged.",
     ]

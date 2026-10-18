@@ -1,16 +1,17 @@
-# MailBrief
+# Forewit
 
-MailBrief is a personal desktop app for Windows and macOS that turns important
+Forewit is a personal desktop app for email briefs, tasks, and daily planning.
+It runs on Windows and macOS and turns important
 Gmail messages into a short daily brief with summaries, suggested actions and
 deadlines. Review the messages you want it to read, then choose whether to send
 their prepared text to Groq for AI analysis.
 
-**[Download for Windows (ZIP build)](https://github.com/Coins99/MailBrief/actions/workflows/ci.yml)**
+**[Download for Windows (ZIP build)](https://github.com/Coins99/Forewit/actions/workflows/ci.yml)**
 
 Choose the latest successful **main** build and download its Windows artifact.
 GitHub sign-in is required. [Download and launch instructions](#windows-download-extract-and-run).
 
-![MailBrief showing a daily brief and the selected email](docs/ui/today-redesign-light.png)
+![Forewit showing a daily brief and the selected email](docs/ui/today-redesign-light.png)
 
 The desktop follows the [Today design system](docs/ui-redesign.md), including the visual
 verification record and adaptations for existing workflows.
@@ -32,7 +33,7 @@ verification record and adaptations for existing workflows.
 - Set your time zone, sender exclusions and refresh preferences.
 - Back up and restore local data, and export your writing.
 
-Gmail is the active mailbox provider, with read-only access. MailBrief does not
+Gmail is the active mailbox provider, with read-only access. Forewit does not
 send mail or change your mailbox; drafts stay local until you copy or export them.
 Outlook support is retained in the codebase for later work.
 
@@ -43,14 +44,22 @@ See [project status](docs/project-status.md) for the milestone record and
 
 ## Get started
 
+Forewit retains the internal Python package and distribution name `mailbrief`,
+the `MAILBRIEF_*` environment variables, and the existing MailBrief data profile
+and OS credential entries. Your saved work and sign-ins do not move or reset.
+The preferred source command is `uv run forewit`; the original `mailbrief`,
+`mailbrief-gmail-diagnostic`, and `mailbrief-ms-diagnostic` commands remain aliases
+for `forewit`, `forewit-gmail-diagnostic`, and `forewit-ms-diagnostic` respectively.
+Module commands such as `python -m mailbrief` also remain supported.
+
 ### Windows: download, extract and run
 
-1. Open [MailBrief's CI builds](https://github.com/Coins99/MailBrief/actions/workflows/ci.yml)
+1. Open [Forewit's CI builds](https://github.com/Coins99/Forewit/actions/workflows/ci.yml)
    and choose the latest successful run on **main**.
-2. Under **Artifacts**, download **MailBrief-Windows-onefile-...**. GitHub
+2. Under **Artifacts**, download **Forewit-Windows-onefile-...**. GitHub
    requires you to sign in to download build artifacts.
 3. Right-click the downloaded ZIP and choose **Extract All**.
-4. Open the extracted folder and double-click **MailBrief.exe**. Allow a few
+4. Open the extracted folder and double-click **Forewit.exe**. Allow a few
    seconds for the window to appear, then follow the Gmail and AI setup below.
 
 The EXE includes Python and all application dependencies. No separate Python,
@@ -59,7 +68,7 @@ source code; use the build artifact above to get the runnable app.
 
 Windows build artifacts are kept for three days. These are development builds;
 when a release is published, it will appear on the
-[Releases page](https://github.com/Coins99/MailBrief/releases).
+[Releases page](https://github.com/Coins99/Forewit/releases).
 The current Windows package targets Windows 11 x64. See
 [Windows executable instructions](docs/windows-executable.md) for updates and
 saved-data details.
@@ -77,13 +86,13 @@ and details. The manual setup below applies to development builds without bundle
 
 1. Follow [Gmail setup](docs/gmail-setup.md) to enable the Gmail API and download
    a Google **Desktop app** OAuth client JSON file. Keep that file outside the
-   repository in a stable location; MailBrief saves its path.
-2. Open **Settings** in MailBrief, select the OAuth file and save it. Choose
+   repository in a stable location; Forewit saves its path.
+2. Open **Settings** in Forewit, select the OAuth file and save it. Choose
    **Connect Gmail** and complete sign-in in your browser.
 3. For AI summaries or drafting, follow [AI setup](docs/ai-analysis.md#setup),
    then save your Groq model and API key in **Settings**. Enable Groq Zero Data
    Retention before sending private mail.
-4. Choose **Sync and review**. Select the messages MailBrief may read, then
+4. Choose **Sync and review**. Select the messages Forewit may read, then
    approve or decline sending their prepared text to Groq.
 
 You can view saved briefs and cached metadata offline. New AI summaries and AI
@@ -98,7 +107,7 @@ appear in the resulting brief; choose **Accept** to add one to Actions. Inbox an
 Calendar sync alone do not generate AI suggestions. Automatic analysis needs its own
 explicit permission in Settings.
 
-MailBrief stores cached metadata, saved briefs, actions, drafts, calendar events and
+Forewit stores cached metadata, saved briefs, actions, drafts, calendar events and
 preferences locally in SQLite. Gmail tokens and Groq keys use Windows Credential
 Manager or macOS Keychain. Downloaded incoming email bodies are prepared in memory
 rather than saved as a body cache.
@@ -134,5 +143,5 @@ checks and pull request guidance.
 
 ## License
 
-MailBrief is licensed under the [MIT License](LICENSE). Bundled fonts and icons
+Forewit is licensed under the [MIT License](LICENSE). Bundled fonts and icons
 have their own notices included with desktop packages.

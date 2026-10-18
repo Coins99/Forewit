@@ -6,14 +6,14 @@ what AI drafting may send and keep is [ADR 0013](adr/0013-ai-drafting.md).
 
 ## What it does
 
-- Write four kinds of text inside MailBrief: **replies** and new **emails** (with To, Cc and
+- Write four kinds of text inside Forewit: **replies** and new **emails** (with To, Cc and
   Subject), **notes** and copyable **messages** (with a title).
 - Drafts live on this device. Writing, saving, versions, copying and exporting never contact
   Gmail, Groq or the network. Only **Write with AI** sends anything, and only what you tick
   and approve (see below). Nothing ever writes to your mailbox, and there is no "sent"
   state. Copying or exporting a draft changes nothing else: actions keep their status.
 - A reply is filled in from the cached email only: "Re: <subject>" (unless the subject
-  already starts with "Re:") and the sender in To. MailBrief never downloads the email's
+  already starts with "Re:") and the sender in To. Forewit never downloads the email's
   body for a draft and never inserts quoted history. Text you type or paste is yours and
   is stored exactly as entered.
 - Drafts belong to no account. They keep a snapshot of their email (subject, sender, link,
@@ -79,7 +79,7 @@ what AI drafting may send and keep is [ADR 0013](adr/0013-ai-drafting.md).
 
 **What is always sent:** the draft's kind, the tone, the length, your instructions and
 today's date. **What is never sent:** the sender's address (only their name), To or Cc,
-other emails, attachments, your other drafts or actions, Gmail or MailBrief IDs, or
+other emails, attachments, your other drafts or actions, Gmail or Forewit IDs, or
 credentials. The parts you tick are sent as written, so any addresses, links or numbers
 inside them (in the email's body, your text or the action's notes) are sent too. A part cut
 to fit its limit says "(cut to fit)" in the preview.
@@ -91,7 +91,7 @@ length wrote them. Groq never supplies recipients: To and Cc stay yours. A subje
 only for emails and notes, and only when the draft has no title yet. Facts Groq lacks stay
 as `[[placeholders]]`, and "Missing context to check" lists them.
 
-MailBrief checks every answer before using it: control and format characters are removed,
+Forewit checks every answer before using it: control and format characters are removed,
 quoted history is dropped, the body must be 1 to 8,000 characters, and an answer that copies
 200 or more characters of the email word for word is refused. An unusable answer is tried
 once more. If it still fails, or you decline, cancel, or the draft changed meanwhile, your
@@ -101,12 +101,12 @@ says so (`AI_REFUSED`): change the instructions or context and try again.
 ## CLI
 
 ```bash
-uv run mailbrief-gmail-diagnostic drafts list [--database PATH]
-uv run mailbrief-gmail-diagnostic drafts export ID [--format text|markdown] [--out PATH] [--database PATH]
-uv run mailbrief-gmail-diagnostic drafts generate ID [--use-email] [--use-action] [--use-text] \
+uv run forewit-gmail-diagnostic drafts list [--database PATH]
+uv run forewit-gmail-diagnostic drafts export ID [--format text|markdown] [--out PATH] [--database PATH]
+uv run forewit-gmail-diagnostic drafts generate ID [--use-email] [--use-action] [--use-text] \
     [--tone neutral|warm|formal|direct] [--length short|medium|long] [--instructions TEXT] \
     [--yes] [--silent-only] [--database PATH]
-uv run mailbrief-gmail-diagnostic ai-consent status|revoke [--database PATH]
+uv run forewit-gmail-diagnostic ai-consent status|revoke [--database PATH]
 ```
 
 `drafts list` prints each draft's ID, kind, title, update time and placeholder count,
@@ -132,7 +132,7 @@ unchanged), 6 declined, 130 cancelled. `ai-consent status` also shows drafting c
   adding a version; versions are saved when you ask, around a restore and on Close.
 - Only replies and emails have recipients. Recipients are free text, so a half-typed address
   still saves; warnings are hints, not checks.
-- The database is not encrypted; your OS account protects it, as for the rest of MailBrief.
+- The database is not encrypted; your OS account protects it, as for the rest of Forewit.
 - Deleted drafts stay in the database until M9's retention controls. In the desktop app a
   deleted draft comes back only through Undo.
 - AI drafting shares the brief's Groq settings: the model, `MAILBRIEF_AI_MAX_OUTPUT_TOKENS`

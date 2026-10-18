@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.branding import DISPLAY_NAME
 from mailbrief.domain.actions import (
     TARGET_REASON_TEXT,
     ActionProposal,
@@ -184,7 +185,7 @@ class BriefDetailPane(QScrollArea):
         layout.addSpacing(20)
         summary = QWidget()
         summary.setObjectName("summaryCard")
-        summary.setAccessibleName("MailBrief summary")
+        summary.setAccessibleName("Forewit summary")
         summary.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         summary_layout = QVBoxLayout(summary)
         summary_layout.setContentsMargins(16, 14, 16, 14)
@@ -192,10 +193,10 @@ class BriefDetailPane(QScrollArea):
         summary_header = QHBoxLayout()
         spark = plain_label("")
         spark.setObjectName("summaryIcon")
-        spark.setAccessibleName("MailBrief summary")
+        spark.setAccessibleName("Forewit summary")
         spark.setPixmap(icon_pixmap("sparkles", current_tokens().primary, 15, 2.0))
         summary_header.addWidget(spark)
-        summary_heading = plain_label("MAILBRIEF SUMMARY", px=9, medium=True)
+        summary_heading = plain_label(f"{DISPLAY_NAME.upper()} SUMMARY", px=9, medium=True)
         summary_heading.setObjectName("summaryHeading")
         summary_header.addWidget(summary_heading, 1)
         summary_layout.addLayout(summary_header)

@@ -21,7 +21,7 @@ DRAFT_BODY_MAX_CHARS: Final = 20_000
 MAX_DRAFT_VERSIONS: Final = 100
 PREVIEW_MAX_CHARS: Final = 80
 FILENAME_MAX_CHARS: Final = 80
-FALLBACK_FILENAME: Final = "mailbrief-draft"
+FALLBACK_FILENAME: Final = "forewit-draft"
 
 _PLACEHOLDER = re.compile(r"\[\[([^\[\]\n]{1,60})\]\]")
 _RECIPIENT_SEPARATORS = re.compile(r"[,;]")
@@ -296,7 +296,7 @@ def export_filename(draft: Draft, suffix: str) -> str:
 
     Only letters, digits, spaces and "-_." are kept, runs of spaces become one, and the
     name is at most 80 characters before ``suffix``. A name with nothing left, one made of
-    dots, or one Windows reserves falls back to "mailbrief-draft".
+    dots, or one Windows reserves falls back to "forewit-draft".
     """
     kept = "".join(ch for ch in draft.display_title if ch.isalnum() or ch in " -_.")
     stem = _FILENAME_SPACES.sub(" ", kept).strip(" .")[:FILENAME_MAX_CHARS].rstrip(" .")

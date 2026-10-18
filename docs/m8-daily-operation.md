@@ -6,9 +6,9 @@ a desktop session.
 
 M8 turns the daily brief into something to rely on every day: the owner's preferences, a
 history of saved briefs, follow-up on open actions as their threads continue, and refresh
-while MailBrief runs. The milestone's scope is in
+while Forewit runs. The milestone's scope is in
 [email-implementation-plan.md](email-implementation-plan.md#m8--thread-continuity-and-daily-operation).
-M8 is one pull request ([#17](https://github.com/Coins99/MailBrief/pull/17), branch
+M8 is one pull request ([#17](https://github.com/Coins99/Forewit/pull/17), branch
 `feat/m8-continuity`), built in nine parts.
 
 | Part | What it adds | Schema | Status |
@@ -104,7 +104,7 @@ Groq and the desktop. Run them in order; the exit test comes first.
 4. Include a message by hand in a review, then let an automatic run happen: the message is
    still in the day's brief (one brief per day).
 5. Revoke consent in Settings: the next automatic run only checks Gmail.
-6. Close MailBrief for a day and reopen it with "Refresh when MailBrief starts": one run for
+6. Close Forewit for a day and reopen it with "Refresh when Forewit starts": one run for
    today; yesterday stays missed.
 
 ## Known limits
@@ -138,7 +138,7 @@ Parts 1 and 2 are implemented and await live acceptance. The policy is
 
 ### What it does
 
-Your preferences are saved in the MailBrief database, so the desktop app and the
+Your preferences are saved in the Forewit database, so the desktop app and the
 diagnostic CLI use the same ones, and a backup of the database includes them:
 
 - **Time zone:** when your day starts and ends, and the zone for "carried over", overdue
@@ -188,7 +188,7 @@ actions lists and offline browsing, use the system time zone meanwhile.
 
 ### CLI
 
-- `mailbrief-gmail-diagnostic preferences show [--database PATH]` prints the time zone,
+- `forewit-gmail-diagnostic preferences show [--database PATH]` prints the time zone,
   messages per brief, excluded and important senders one per line, drafting defaults, and
   each AI limit
   with where its value comes from (environment, saved or default). It uses no network and
@@ -358,7 +358,7 @@ Part 4 is implemented and awaits live acceptance. The policy is
 
 ### What it does
 
-- After today's sync or brief, MailBrief reads the Gmail threads of your open actions, both
+- After today's sync or brief, Forewit reads the Gmail threads of your open actions, both
   yours and those waiting for someone, and caches the messages that arrived after each
   action's email. `actions list` then shows how many are new, the latest one and whether
   you replied.
@@ -546,7 +546,7 @@ desktop shows proposals from Part 7.
 
 - **A signal from each analyzed email.** Groq also says whether the email moves a deadline
   (`new_deadline`), cancels a request (`cancelled`) or delivers what was asked (`delivered`),
-  judged from that email alone and with a quote from it. MailBrief checks the quote like
+  judged from that email alone and with a quote from it. Forewit checks the quote like
   other evidence ([ai-analysis.md](ai-analysis.md#follow-up-signal-m8)); a signal it can't
   check is dropped, never the email.
 - **Proposals.** After a brief is saved, each signal becomes a pending proposal for the open
@@ -670,7 +670,7 @@ Part 7 is implemented and awaits live acceptance. It adds no migration (the head
 ### Applying, dismissing and undoing
 
 - Applying, dismissing and undoing each run as one operation, like every other change, so
-  only one runs at a time; a click while MailBrief is busy says so and does nothing.
+  only one runs at a time; a click while Forewit is busy says so and does nothing.
 - **Applying** is exactly Part 6's rule, at the action revision the screen showed: it
   changes only the deadline and suggested target date, or completes the action, and makes
   the email a source. It never touches the title, notes, steps or owner, and never moves a
@@ -768,12 +768,12 @@ cache, so they can be analyzed and propose updates.
 ## Daily operation (Part 8)
 
 Part 8 is implemented and awaits live acceptance. It adds migration `20260930_0012` and
-[ADR 0017](adr/0017-automatic-runs.md). While the desktop is open, MailBrief refreshes on its
+[ADR 0017](adr/0017-automatic-runs.md). While the desktop is open, Forewit refreshes on its
 own. Nothing runs when it is closed, and nothing briefs past days.
 
 ### When runs happen
 
-- In Settings, Preferences: **Refresh when MailBrief starts**, and **Refresh while running**
+- In Settings, Preferences: **Refresh when Forewit starts**, and **Refresh while running**
   (off, every hour, every 2 hours, every 4 hours). Both are off by default.
 - A timer checks the wall clock once a minute, so a run that came due while the computer
   slept starts soon after it wakes, once. Runs coalesce: one at a time, never a pile.
@@ -859,7 +859,7 @@ runs send less.
 3. Uncheck an auto-selected message in a review: later automatic runs never send it, and the
    next review lists it unchecked.
 4. Revoke consent in Settings: the next automatic run only checks Gmail.
-5. Close MailBrief for a day and reopen it with "Refresh when MailBrief starts": one run for
+5. Close Forewit for a day and reopen it with "Refresh when Forewit starts": one run for
    today; yesterday stays missed.
 
 ### For developers

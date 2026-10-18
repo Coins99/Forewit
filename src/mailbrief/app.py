@@ -12,6 +12,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from qasync import QEventLoop
 
+from mailbrief.branding import APP_COMMAND, DISPLAY_NAME
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.paths import AppPaths, configure_qt_identity
 from mailbrief.storage.recovery import BackupValidationError, restore_backup_holding_lock
@@ -53,9 +54,11 @@ def create_application(arguments: Sequence[str] | None = None) -> QApplication:
     configure_qt_identity()
     existing = QApplication.instance()
     if isinstance(existing, QApplication):
+        existing.setApplicationDisplayName(DISPLAY_NAME)
         return existing
 
     application = MailBriefApplication(list(arguments) if arguments is not None else sys.argv)
+    application.setApplicationDisplayName(DISPLAY_NAME)
     icon_path = Path(__file__).parent / "resources" / "MailBrief.ico"
     if icon_path.is_file():
         application.setWindowIcon(QIcon(str(icon_path)))
@@ -88,12 +91,12 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
     lock = create_data_lock(paths.data_dir)
     if not lock.tryLock(0):
         message = (
-            "MailBrief is already running, or a MailBrief diagnostic command is using its "
+            "Forewit is already running, or a Forewit diagnostic command is using its "
             "data. Close it and retry."
             if lock.error() == QLockFile.LockError.LockFailedError
-            else "MailBrief could not lock its data folder. Check folder access and retry."
+            else "Forewit could not lock its data folder. Check folder access and retry."
         )
-        QMessageBox.information(None, "MailBrief", message)
+        QMessageBox.information(None, "Forewit", message)
         return
     handler = None
     try:
@@ -137,13 +140,13 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
                 # Fixed, safe text: archive content never appears in these messages.
                 log_failure(exc)
                 QMessageBox.warning(
-                    None, "MailBrief recovery", f"{exc} The current database was kept."
+                    None, "Forewit recovery", f"{exc} The current database was kept."
                 )
             except Exception as exc:
                 log_failure(exc)
                 QMessageBox.warning(
                     None,
-                    "MailBrief recovery",
+                    "Forewit recovery",
                     "Restore could not finish. "
                     "The current database was kept. Check free space, folder "
                     "access and other database clients, then retry.",
@@ -152,14 +155,12 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
                 retained = f"Previous database: {previous}\n" if previous is not None else ""
                 QMessageBox.information(
                     None,
-                    "MailBrief recovery",
-                    "Backup restored. "
-                    f"{retained}"
-                    "Relaunch MailBrief. Automatic AI permission is off.",
+                    "Forewit recovery",
+                    f"Backup restored. {retained}Relaunch Forewit. Automatic AI permission is off.",
                 )
     except Exception as exc:
         log_failure(exc)
-        QMessageBox.warning(None, "MailBrief", "MailBrief could not start or close cleanly.")
+        QMessageBox.warning(None, "Forewit", "Forewit could not start or close cleanly.")
     finally:
         if handler is not None:
             log_paint_summary()  # Only with MAILBRIEF_PAINT_PROFILE=1.
@@ -170,7 +171,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
 
 def main(arguments: Sequence[str] | None = None) -> int:
     """Launch Qt and asyncio on one responsive event loop."""
-    parser = argparse.ArgumentParser(prog="mailbrief")
+    parser = argparse.ArgumentParser(prog=APP_COMMAND)
     parser.add_argument(
         "--smoke-test-dir",
         type=Path,
