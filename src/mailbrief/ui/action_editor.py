@@ -1,7 +1,7 @@
 """Edit one action: its own fields and its plan, saved together as one revision."""
 
 import re
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -40,10 +40,18 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionPriority,
     ActionStatus,
+    DeadlineChange,
+    DeadlineOrigin,
     StepEdit,
     normalize_tags,
 )
-from mailbrief.domain.analysis import ActionEffort, ActionOwnership, DeadlinePrecision
+from mailbrief.domain.analysis import (
+    ActionEffort,
+    ActionOwnership,
+    DeadlineFields,
+    DeadlinePrecision,
+    TargetReason,
+)
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import (
     ENDS_FIRST,
@@ -53,10 +61,18 @@ from mailbrief.domain.recurrence import (
     ends_before,
     first_occurrence,
 )
-from mailbrief.ui.deadline_text import FULL_WEEKDAYS, WEEKDAYS, length_text, parse_length
+from mailbrief.services.deadlines import target_for_day
+from mailbrief.ui.deadline_text import (
+    FULL_WEEKDAYS,
+    WEEKDAYS,
+    deadline_text,
+    length_text,
+    parse_length,
+)
 from mailbrief.ui.dialog_chrome import dialog_heading
+from mailbrief.ui.event_editor import DateBox
 from mailbrief.ui.fields import takes_wheel
-from mailbrief.ui.labels import outline_button, plain_label, primary_action
+from mailbrief.ui.labels import outline_button, plain_label, primary_action, wrap_label
 from mailbrief.ui.theme import ui_font
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
@@ -85,6 +101,12 @@ NO_ESTIMATE: Final = "Not set"
 BAD_ESTIMATE: Final = "Type an estimate like 45, 1.5h, 1h 30 or 1:30, or clear it."
 _QUARTER: Final = 15
 _TYPING_LENGTH: Final = re.compile(r"[\d\s.,:hoursminte]*", re.IGNORECASE)
+ANY_TIME: Final = "Any time"
+BAD_DEADLINE_TIME: Final = (
+    "Type the deadline's time as HH:mm, for example 17:00, or choose Any time."
+)
+NO_SUGGESTION: Final = "no target was suggested"
+_CLOCK: Final = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 
 
 class EstimateBox(QSpinBox):
@@ -126,6 +148,50 @@ class EstimateBox(QSpinBox):
         quarters = value // _QUARTER if steps > 0 else -(-value // _QUARTER)
         self.setValue((quarters + steps) * _QUARTER)
         self.selectAll()
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if takes_wheel(self, event):
+            super().wheelEvent(event)
+
+
+class DeadlineTimeBox(QComboBox):
+    """A deadline's time of day: Any time, a time from the list in 15-minute steps, or one
+    typed as HH:mm. Like the other fields, the wheel changes it only while it has focus."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("taskDeadlineTime")
+        self.setAccessibleName("Deadline time")
+        self.setEditable(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Tab and click; not the wheel.
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.setCompleter(QCompleter([], self))  # Typing "1" never jumps to a listed "1…".
+        self.setMaxVisibleItems(10)
+        self.setMinimumContentsLength(len(ANY_TIME))
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.addItem(ANY_TIME)
+        for minutes in range(0, 24 * 60, _QUARTER):
+            self.addItem(f"{minutes // 60:02d}:{minutes % 60:02d}")
+        line = self.lineEdit()
+        assert line is not None
+        line.setAccessibleName("Deadline time")
+
+    def clock(self) -> time | None:
+        """The time chosen or typed, or None for Any time (or nothing typed). Raises
+        ValueError, with the reason, for text that isn't a time."""
+        text = self.currentText().strip()
+        if text in ("", ANY_TIME):
+            return None
+        found = _CLOCK.fullmatch(text)
+        if found is None:
+            raise ValueError(BAD_DEADLINE_TIME)
+        return time(int(found[1]), int(found[2]))
+
+    def set_clock(self, value: time | None) -> None:
+        """Show ``value``, or Any time for None."""
+        text = ANY_TIME if value is None else f"{value.hour:02d}:{value.minute:02d}"
+        self.setCurrentIndex(self.findText(text))  # -1, no item, for a time between steps.
+        self.setEditText(text)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if takes_wheel(self, event):
@@ -186,35 +252,70 @@ def _plain(text: str) -> QLabel:
     return label
 
 
-def _deadline(action: Action, owner_zone: ZoneInfo | None) -> str:
-    """An exact deadline in the owner's zone, like the brief, naming the email's own time
-    when the email stated it in another zone."""
-    at, zone = action.deadline_at_utc, action.deadline_timezone
-    if action.deadline_precision is DeadlinePrecision.DATETIME and at and zone:
-        stated = at.astimezone(ZoneInfo(zone))  # The zone the time was stated in, not UTC.
-        shown = at.astimezone(owner_zone) if owner_zone is not None else stated
-        if owner_zone is None or owner_zone.key == zone:
-            return f"{shown.isoformat(timespec='minutes')} (as the email states)"
-        return f"{shown.isoformat(timespec='minutes')} ({stated:%H:%M} {zone} as the email states)"
-    if action.deadline_precision is DeadlinePrecision.DATE and action.deadline_date:
-        return f"{action.deadline_date.isoformat()} (date only)"
-    if action.deadline_text:
-        return f"“{action.deadline_text}” (no specific day)"
-    return "none stated"
+def _deadline_shown(
+    fields: DeadlineFields, zone: ZoneInfo | None
+) -> tuple[date, time | None] | None:
+    """The day and, for an exact deadline, the time the deadline fields show: in the owner's
+    zone ``zone``, or the deadline's own without one. None when it has no day: none at all,
+    or only the email's words."""
+    at, own_zone = fields.deadline_at_utc, fields.deadline_timezone
+    if fields.deadline_precision is DeadlinePrecision.DATETIME and at and own_zone:
+        local = at.astimezone(zone or ZoneInfo(own_zone))
+        return local.date(), time(local.hour, local.minute)
+    if fields.deadline_precision is DeadlinePrecision.DATE and fields.deadline_date:
+        return fields.deadline_date, None
+    return None
+
+
+def _deadline_note(action: Action | None, zone: ZoneInfo | None, today: date) -> str:
+    """What the editor says under the deadline fields: an email's deadline in the email's own
+    words, naming its own time when the email stated it in another zone; or, once the owner
+    replaced or cleared it, what the email said. Nothing for a deadline the owner set alone."""
+    if action is None:
+        return ""
+    if action.deadline_origin is DeadlineOrigin.EMAIL and action.deadline_text:
+        words = f"The email says “{action.deadline_text}”"
+        at, own_zone = action.deadline_at_utc, action.deadline_timezone
+        if action.deadline_precision is DeadlinePrecision.UNRESOLVED:
+            return f"{words}, with no specific day."
+        exact = action.deadline_precision is DeadlinePrecision.DATETIME
+        if exact and at and own_zone and zone is not None and zone.key != own_zone:
+            local = at.astimezone(ZoneInfo(own_zone))  # The zone it was stated in.
+            return f"{words} ({local:%H:%M} {own_zone})."
+        return f"{words}."
+    stated = action.stated_deadline
+    if stated is None:
+        return ""
+    said = f"The email said “{stated.deadline_text}”"
+    if stated.deadline_precision is not DeadlinePrecision.UNRESOLVED:
+        own = ZoneInfo(stated.deadline_timezone or "UTC")
+        if shown := deadline_text(stated, zone or own, today=today):
+            said += f" ({shown})"
+    if action.deadline_origin is DeadlineOrigin.OWNER:
+        return f"You set this deadline. {said}."
+    return f"You cleared the deadline. {said}."
+
+
+def _suggestion_text(day: date | None, reason: TargetReason | None) -> str:
+    if day is None or reason is None:
+        return NO_SUGGESTION
+    return f"{day.isoformat()}, {TARGET_REASON_TEXT[reason]}"
 
 
 class ActionEditor(QDialog):
-    """``save_requested(action, edit, steps, repeat)``: steps is None when the plan is
-    unchanged, and repeat a RepeatEdit, or None for a closed task, whose repeat can't change.
-    ``create_requested(edit, steps, rule)`` carries the new task's RepeatRule, or None.
+    """``save_requested(action, edit, steps, repeat, deadline)``: steps is None when the plan
+    is unchanged, repeat a RepeatEdit, or None for a closed task, whose repeat can't change,
+    and deadline a DeadlineChange, or None when the deadline fields are as they were.
+    ``create_requested(edit, steps, rule, deadline)`` carries the new task's RepeatRule, or
+    None, and its DeadlineChange, or None.
 
     The dialog validates what it can; the service still checks every bound and the revision.
     After asking, it stays open and locked until the window calls finish_saved(), which
     closes it, or keep_open(), which unlocks it with every field as the owner left it.
     """
 
-    save_requested = Signal(object, object, object, object)
-    create_requested = Signal(object, object, object)
+    save_requested = Signal(object, object, object, object, object)
+    create_requested = Signal(object, object, object, object)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -231,6 +332,12 @@ class ActionEditor(QDialog):
         self._later_offered = False  # The task repeats, so its edit can go to later repeats.
         self._busy = False  # Another operation is running, so Save waits.
         self._saving = False  # This dialog's save is running, so nothing can change.
+        self._zone: ZoneInfo | None = None  # The owner's, which deadlines are shown in.
+        self._options = True  # The optional rows are shown (see set_embedded).
+        self._filling = False  # The editor is filling the deadline fields itself.
+        self._back_to_email = False  # Use the email's was chosen and nothing changed since.
+        self._loaded_deadline: tuple[object, ...] | None = None
+        self._shown_suggestion: date | None = None  # The target the Suggested row offers.
         layout = QVBoxLayout(self)
         dialog_heading(self, layout, "Task details", "Keep the task, dates and plan together.")
         # Every field and step control, so one switch locks them all while saving.
@@ -333,8 +440,39 @@ class ActionEditor(QDialog):
         )
         form.addRow("", self.later_too)
         self.repeat.currentIndexChanged.connect(self._repeat_changed)
-        self.deadline = _plain("")
-        form.addRow("Deadline", self.deadline)
+        self.has_deadline = QCheckBox("Due &by")
+        self.has_deadline.setObjectName("taskHasDeadline")
+        self.has_deadline.setAccessibleName("The task has a deadline")
+        self.deadline_date = DateBox()
+        self.deadline_date.setObjectName("taskDeadlineDate")
+        self.deadline_date.setAccessibleName("Deadline date")
+        self.deadline_date.setCalendarPopup(True)
+        self.deadline_date.setDisplayFormat("yyyy-MM-dd")
+        self.deadline_time = DeadlineTimeBox()
+        self.deadline_row = QWidget()
+        self.deadline_row.setObjectName("taskDeadline")
+        deadline_row = QHBoxLayout(self.deadline_row)
+        deadline_row.setContentsMargins(0, 0, 0, 0)
+        deadline_row.addWidget(self.has_deadline)
+        deadline_row.addWidget(self.deadline_date, 1)  # Wide enough for any date, as Target.
+        deadline_row.addWidget(self.deadline_time, 1)
+        form.addRow("Deadline", self.deadline_row)
+        # The email's words for its deadline, or what it said once the owner replaced it.
+        self.deadline = wrap_label(tone="secondary")
+        self.deadline.setObjectName("taskDeadlineNote")
+        self.from_email = outline_button("Use the email's", "taskDeadlineFromEmail")
+        self.from_email.setAccessibleName("Use the email's deadline")
+        self.from_email.setAutoDefault(False)
+        self.deadline_note = QWidget()
+        note_row = QHBoxLayout(self.deadline_note)
+        note_row.setContentsMargins(0, 0, 0, 0)
+        note_row.addWidget(self.deadline, 1, Qt.AlignmentFlag.AlignVCenter)
+        note_row.addWidget(self.from_email, 0, Qt.AlignmentFlag.AlignVCenter)
+        form.addRow("", self.deadline_note)
+        self.has_deadline.toggled.connect(self._deadline_edited)
+        self.deadline_date.dateChanged.connect(self._deadline_edited)
+        self.deadline_time.editTextChanged.connect(self._deadline_edited)
+        self.from_email.clicked.connect(self._use_email_deadline)
         self.suggested = _plain("")
         form.addRow("Suggested", self.suggested)
         self.sources = _plain("")
@@ -444,6 +582,7 @@ class ActionEditor(QDialog):
             save.setText("Create action" if self.embedded else "Save")
 
     def _show_options(self, show: bool) -> None:
+        self._options = show
         for widget in (
             self.priority,
             self.tags,
@@ -451,13 +590,18 @@ class ActionEditor(QDialog):
             self.project,
             self.owner,
             self.effort,
-            self.deadline,
+            self.deadline_row,
             self.suggested,
             self.sources,
         ):
             self._form.setRowVisible(widget, show)
+        self._show_deadline_note()
         for control in (self.plan_heading, self.steps, self.step_controls):
             control.setVisible(show)
+
+    def _show_deadline_note(self) -> None:
+        """The note's row shows with the other options, and only when it says something."""
+        self._form.setRowVisible(self.deadline_note, self._options and bool(self.deadline.text()))
 
     def _input(self) -> tuple[object, ...]:
         """Everything the owner can change here, to tell whether any of it is unsaved."""
@@ -478,6 +622,9 @@ class ActionEditor(QDialog):
             tuple(box.isChecked() for box in self.weekday_boxes),
             self.repeat_ends.isChecked() and self.repeat_end.date().toString(Qt.DateFormat.ISODate),
             self.later_too.isChecked(),
+            self.has_deadline.isChecked()
+            and (self.deadline_date.text(), self.deadline_time.currentText()),
+            self._back_to_email,
         )
 
     def has_unsaved_input(self) -> bool:
@@ -489,7 +636,8 @@ class ActionEditor(QDialog):
         """Show one action's current values; nothing is kept from an earlier edit.
 
         ``today`` is the owner's local date, which the date picker offers when the action
-        has no target. ``zone`` is the owner's, so an exact deadline reads like the brief.
+        has no target. ``zone`` is the owner's, so an exact deadline reads like the brief;
+        without it, an exact deadline shows in the zone it was stated in.
         """
         self.setWindowTitle("Edit action")
         self._creating = False
@@ -506,14 +654,10 @@ class ActionEditor(QDialog):
         self.target.setEnabled(action.target_date is not None)
         shown = action.target_date or action.suggested_target_date or today
         self.target.setDate(QDate(shown.year, shown.month, shown.day))
-        self.deadline.setText(_deadline(action, zone))
-        if action.suggested_target_date is not None and action.target_reason is not None:
-            self.suggested.setText(
-                f"{action.suggested_target_date.isoformat()}, "
-                f"{TARGET_REASON_TEXT[action.target_reason]}"
-            )
-        else:
-            self.suggested.setText("no target was suggested")
+        self._today, self._zone = today, zone
+        self._show_deadline(action, action.target_date or today)
+        self.suggested.setText(_suggestion_text(action.suggested_target_date, action.target_reason))
+        self._shown_suggestion = action.suggested_target_date
         self.sources.setText(
             "; ".join(
                 f"{source.subject or '(no subject)'} — {source.sender_address}"
@@ -523,7 +667,6 @@ class ActionEditor(QDialog):
             or "no source"
         )
         self.notes.setPlainText(action.notes)
-        self._today = today
         repeat = action.repeat
         is_open = action.status is ActionStatus.OPEN
         self._later_offered = repeat is not None and not repeat.ended and is_open
@@ -541,8 +684,8 @@ class ActionEditor(QDialog):
         self._update_step_buttons()
         self._loaded_input = self._input()
 
-    def new_task(self, today: date) -> None:
-        """Open an empty editor; cancelling creates no record."""
+    def new_task(self, today: date, zone: ZoneInfo | None = None) -> None:
+        """Open an empty editor; cancelling creates no record. ``zone`` is the owner's."""
         self._creating = True
         self._action = None
         self._set_saving(False)
@@ -557,11 +700,12 @@ class ActionEditor(QDialog):
         self.has_target.setChecked(False)
         self.target.setEnabled(False)
         self.target.setDate(QDate(today.year, today.month, today.day))
-        self.deadline.setText("none stated")
-        self.suggested.setText("no target was suggested")
+        self._today, self._zone = today, zone
+        self._show_deadline(None, today)
+        self.suggested.setText(NO_SUGGESTION)
+        self._shown_suggestion = None
         self.sources.setText("Manual task")
         self.notes.clear()
-        self._today = today
         self._later_offered = False
         self._set_repeat(None, today)
         for control in (self.repeat, self.month_day, self.repeat_ends, self.weekdays):
@@ -572,6 +716,103 @@ class ActionEditor(QDialog):
         self._update_step_buttons()
         self._loaded_input = self._input()
         self.title.setFocus()
+
+    def _show_deadline(self, action: Action | None, day: date) -> None:
+        """Show ``action``'s deadline (none for a new task) and what the email said; ``day``
+        is the date the fields offer when there is no deadline to show."""
+        self._fill_deadline(None if action is None else _deadline_shown(action, self._zone), day)
+        self.deadline.setText(_deadline_note(action, self._zone, self._today))
+        self.from_email.setVisible(self._offers_email())
+        self._show_deadline_note()
+        self._back_to_email = False
+        self._loaded_deadline = self._deadline_input()
+
+    def _fill_deadline(self, shown: tuple[date, time | None] | None, day: date) -> None:
+        """Put a day and time in the deadline fields, ticked; or, for None, untick them and
+        offer ``day``. Filling isn't an edit of the owner's."""
+        self._filling = True
+        try:
+            picked, clock = shown if shown is not None else (day, None)
+            self.has_deadline.setChecked(shown is not None)
+            self.deadline_date.setDate(QDate(picked.year, picked.month, picked.day))
+            self.deadline_time.set_clock(clock)
+        finally:
+            self._filling = False
+        self._enable_deadline()
+
+    def _enable_deadline(self) -> None:
+        ticked = self.has_deadline.isChecked()
+        self.deadline_date.setEnabled(ticked)
+        self.deadline_time.setEnabled(ticked)
+
+    def _deadline_input(self) -> tuple[object, ...] | None:
+        """The deadline as the fields hold it, or None when unticked."""
+        if not self.has_deadline.isChecked():
+            return None
+        picked = self.deadline_date.date()
+        return (picked.year(), picked.month(), picked.day()), self.deadline_time.currentText()
+
+    def _picked_deadline(self) -> date | None:
+        if not self.has_deadline.isChecked():
+            return None
+        picked = self.deadline_date.date()
+        return date(picked.year(), picked.month(), picked.day())
+
+    def _deadline_edited(self) -> None:
+        """The owner changed the deadline: going back to the email's no longer applies, and
+        the suggested target follows the new day."""
+        self._enable_deadline()
+        if self._filling:
+            return
+        self._back_to_email = False
+        self.from_email.setVisible(self._offers_email())
+        self._follow(self._picked_deadline())
+
+    def _offers_email(self) -> bool:
+        action = self._action
+        return (
+            action is not None
+            and action.stated_deadline is not None
+            and action.deadline_origin is not DeadlineOrigin.EMAIL
+        )
+
+    def _use_email_deadline(self) -> None:
+        """Show the email's deadline again; saving goes back to it (DeadlineChange.from_email)."""
+        action = self._action
+        if action is None or action.stated_deadline is None:
+            return
+        shown = _deadline_shown(action.stated_deadline, self._zone)
+        self._fill_deadline(shown, self._picked_deadline() or action.target_date or self._today)
+        self._back_to_email = True
+        self.from_email.hide()
+        self._follow(None if shown is None else shown[0])
+
+    def _follow(self, due: date | None) -> None:
+        """Suggest a target for a deadline on ``due``, counted from today as the service
+        counts it. A target date that was the suggestion before, or no target when there was
+        none, moves to the new suggestion; a cleared deadline suggests nothing and moves
+        no target."""
+        if due is None:
+            self.suggested.setText(NO_SUGGESTION)
+            self._shown_suggestion = None
+            return
+        suggestion, reason = target_for_day(due, self._today)
+        self.suggested.setText(_suggestion_text(suggestion, reason))
+        if self._picked_target() == self._shown_suggestion:
+            self.has_target.setChecked(True)
+            self.target.setDate(QDate(suggestion.year, suggestion.month, suggestion.day))
+        self._shown_suggestion = suggestion
+
+    def _deadline_change(self) -> DeadlineChange | None:
+        """What saving does to the deadline: nothing when the fields are as they were loaded;
+        raises ValueError, with the reason, for a time that isn't one."""
+        if self._back_to_email:
+            return DeadlineChange.from_email()
+        due = self._picked_deadline()
+        clock = None if due is None else self.deadline_time.clock()
+        if self._deadline_input() == self._loaded_deadline:
+            return None
+        return DeadlineChange.cleared() if due is None else DeadlineChange.to(due, clock)
 
     def _set_repeat(self, rule: RepeatRule | None, day: date) -> None:
         """Show ``rule``, or no repeat; ``day`` (the task's date, or today) fills the day of
@@ -800,6 +1041,7 @@ class ActionEditor(QDialog):
             return
         try:
             rule = self._rule()
+            deadline = self._deadline_change()
         except ValueError as exc:
             self.status.setText(str(exc))
             return
@@ -830,6 +1072,6 @@ class ActionEditor(QDialog):
         self._set_saving(True)
         self.status.setText("Saving…")
         if self._creating:
-            self.create_requested.emit(edit, plan or [], rule)
+            self.create_requested.emit(edit, plan or [], rule, deadline)
         elif action is not None:
-            self.save_requested.emit(action, edit, plan, self._repeat_edit(action, rule))
+            self.save_requested.emit(action, edit, plan, self._repeat_edit(action, rule), deadline)

@@ -1256,6 +1256,8 @@ async def actions(
             item.deadline_text,
             zone,
         )
+        if deadline is not None and item.owner_deadline:
+            deadline += " (set by you)"
         done = sum(step.done for step in item.steps)
         target = item.target_date.isoformat() if item.target_date is not None else "none"
         line = (
@@ -1303,7 +1305,8 @@ def _proposal_kind(proposal: ActionProposal, zone: ZoneInfo) -> str:
         proposal.deadline_text,
         zone,
     )
-    return _terminal_safe(f"new deadline {deadline}")
+    replacing = ", replacing yours" if proposal.replaces_owner_deadline else ""
+    return _terminal_safe(f"new deadline {deadline}{replacing}")
 
 
 def _proposal_line(proposal: ActionProposal, zone: ZoneInfo) -> str:

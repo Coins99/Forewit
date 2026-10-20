@@ -51,11 +51,14 @@ def effect_text(proposal: ActionProposal, zone: ZoneInfo, *, today: date) -> str
     """What applying a proposal does, named by its effect.
 
     A new deadline reads "Set the deadline to Mon Oct 5, 17:00" (an exact time in ``zone``),
-    "... to Mon Oct 5" (a date) or "... to “next Monday”" (words only); a cancellation or
+    "... to Mon Oct 5" (a date) or "... to “next Monday”" (words only), or "Replace your
+    deadline with Mon Oct 5" over a deadline the owner set (B06); a cancellation or
     delivery reads "Complete it (cancelled)" or "Complete it (delivered)".
     """
     if proposal.kind is FollowUpKind.NEW_DEADLINE:
         due = deadline_text(proposal, zone, today=today)
+        if proposal.replaces_owner_deadline:
+            return "Replace your deadline" if due is None else f"Replace your deadline with {due}"
         return "Set the deadline" if due is None else f"Set the deadline to {due}"
     return _COMPLETES[proposal.kind]
 

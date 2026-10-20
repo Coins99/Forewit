@@ -205,7 +205,10 @@ def action_row(number: int, **fields: Any) -> ActionTable:
         "updated_at_utc": NOW,
         "revision": 1,
     }
-    return ActionTable(**(values | fields))
+    values |= fields
+    if values["deadline_precision"] != "none":
+        values.setdefault("deadline_origin", "email")
+    return ActionTable(**values)
 
 
 async def test_range_shows_open_actions_dates_as_markers(

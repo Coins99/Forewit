@@ -19,7 +19,9 @@ later use after Microsoft Entra access is resolved.
   orders tasks with the same dates, and the Actions filter offers each tag
   ([priorities and tags](p1-priorities-tags.md)). Repeating tasks (B05) are implemented,
   awaiting owner desktop acceptance: daily, weekly or monthly, with skip and reschedule, one
-  open occurrence at a time ([repeating tasks](p1-recurring-tasks.md)).
+  open occurrence at a time ([repeating tasks](p1-recurring-tasks.md)). Deadlines the owner
+  sets (B06) are implemented, awaiting owner desktop acceptance: set, change or clear a
+  task's deadline, keeping an email's to go back to ([deadlines](p1-deadlines.md)).
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

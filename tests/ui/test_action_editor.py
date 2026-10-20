@@ -77,6 +77,15 @@ def saved(editor: ActionEditor) -> list[tuple[Action, ActionEdit, list[StepEdit]
     return found
 
 
+def deadline_fields(editor: ActionEditor) -> tuple[bool, str, str]:
+    """Whether the deadline is ticked, and its date and time as the fields show them."""
+    return (
+        editor.has_deadline.isChecked(),
+        editor.deadline_date.date().toString("yyyy-MM-dd"),
+        editor.deadline_time.currentText(),
+    )
+
+
 def button(editor: ActionEditor, which: QDialogButtonBox.StandardButton) -> QPushButton:
     found = editor.buttons.button(which)
     assert found is not None
@@ -92,7 +101,10 @@ def test_it_shows_the_action_as_plain_text(editor: ActionEditor) -> None:
     assert (editor.owner.currentText(), editor.effort.currentText()) == ("Mine", "Hours")
     assert editor.estimate.text() == "1 hr 30 mins"
     assert editor.has_target.isChecked() and editor.target.date() == QDate(2026, 10, 1)
-    assert editor.deadline.text() == "2026-10-02 (date only)"
+    assert deadline_fields(editor) == (True, "2026-10-02", "Any time")
+    assert editor.deadline.text() == "The email says “by Friday”."
+    assert editor.deadline.textFormat() is Qt.TextFormat.PlainText
+    assert editor.from_email.isHidden()
     assert editor.suggested.text() == "2026-10-01, one working day before the deadline"
     assert editor.sources.text() == ("<i>Q3</i> — alex@example.com (no longer in local mail)")
     assert editor.sources.textFormat() is Qt.TextFormat.PlainText
@@ -200,11 +212,13 @@ def test_each_edit_starts_from_the_new_action(editor: ActionEditor) -> None:
     assert editor.steps.count() == 0
     assert editor.sources.text() == "no source"
     assert editor.suggested.text() == "no target was suggested"
-    assert editor.deadline.text() == "none stated"
+    assert deadline_fields(editor) == (False, "2026-09-28", "Any time")
+    assert not editor.deadline_date.isEnabled() and not editor.deadline_time.isEnabled()
+    assert editor.deadline.text() == ""
 
 
 @pytest.mark.parametrize(
-    ("deadline", "shown"),
+    ("deadline", "fields", "note"),
     [
         (
             {
@@ -214,21 +228,24 @@ def test_each_edit_starts_from_the_new_action(editor: ActionEditor) -> None:
                 "deadline_at_utc": datetime(2026, 10, 2, 21, 0, tzinfo=UTC),
                 "deadline_timezone": "America/Toronto",
             },
-            "2026-10-02T17:00-04:00 (as the email states)",
+            (True, "2026-10-02", "17:00"),
+            "The email says “Friday 5 PM”.",
         ),
         (
             {"deadline_text": "soon", "deadline_precision": DeadlinePrecision.UNRESOLVED},
-            "“soon” (no specific day)",
+            (False, "2026-09-28", "Any time"),
+            "The email says “soon”, with no specific day.",
         ),
     ],
     ids=["exact-time-in-its-zone", "unresolved-phrase"],
 )
 def test_a_deadline_is_shown_as_the_email_states_it(
-    editor: ActionEditor, deadline: dict[str, object], shown: str
+    editor: ActionEditor, deadline: dict[str, object], fields: tuple[bool, str, str], note: str
 ) -> None:
     editor.edit(make_action(**deadline), TODAY)
 
-    assert editor.deadline.text() == shown
+    assert deadline_fields(editor) == fields
+    assert editor.deadline.text() == note
 
 
 def test_remove_and_moves_past_either_end_change_nothing(editor: ActionEditor) -> None:
@@ -282,12 +299,14 @@ CHICAGO_FIVE = make_action(
 def test_an_exact_deadline_reads_in_the_owner_s_zone_like_the_brief(editor: ActionEditor) -> None:
     editor.edit(CHICAGO_FIVE, TODAY, ZoneInfo("America/Toronto"))
 
+    assert deadline_fields(editor) == (True, "2026-10-02", "17:00")
     assert editor.deadline.text() == (
-        "2026-10-02T17:00-04:00 (16:00 America/Chicago as the email states)"
+        "The email says “Friday 4 PM Central” (16:00 America/Chicago)."
     )
 
     editor.edit(CHICAGO_FIVE, TODAY, ZoneInfo("America/Chicago"))
-    assert editor.deadline.text() == "2026-10-02T16:00-05:00 (as the email states)"
+    assert deadline_fields(editor) == (True, "2026-10-02", "16:00")
+    assert editor.deadline.text() == "The email says “Friday 4 PM Central”."
 
 
 @pytest.mark.parametrize(
@@ -305,7 +324,7 @@ def test_a_date_deadline_reads_the_same_in_any_owner_zone(
 
     editor.edit(dated, TODAY, None if zone is None else ZoneInfo(zone))
 
-    assert editor.deadline.text() == "2026-10-02 (date only)"
+    assert deadline_fields(editor) == (True, "2026-10-02", "Any time")
 
 
 def test_an_owner_in_utc_sees_utc_and_the_email_s_own_time(editor: ActionEditor) -> None:
@@ -319,9 +338,8 @@ def test_an_owner_in_utc_sees_utc_and_the_email_s_own_time(editor: ActionEditor)
 
     editor.edit(toronto_five, TODAY, ZoneInfo("UTC"))
 
-    assert editor.deadline.text() == (
-        "2026-10-02T21:00+00:00 (17:00 America/Toronto as the email states)"
-    )
+    assert deadline_fields(editor) == (True, "2026-10-02", "21:00")
+    assert editor.deadline.text() == "The email says “Friday 5 PM” (17:00 America/Toronto)."
 
 
 def test_the_rename_hint_names_a_gesture_that_works_on_every_platform(

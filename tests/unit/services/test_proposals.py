@@ -13,6 +13,7 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionFilter,
     ActionStatus,
+    DeadlineOrigin,
     ProposalState,
     StepEdit,
 )
@@ -121,6 +122,8 @@ async def action(
 ) -> str:
     """An action whose sources are these cached messages of ``owner``."""
     values: dict[str, Any] = {"deadline_precision": "none", **fields}
+    if values["deadline_precision"] != "none":
+        values.setdefault("deadline_origin", "email")
     row = await ActionRepository(session).add_action(
         ActionTable(
             public_id=str(uuid.uuid4()),
@@ -819,3 +822,102 @@ async def test_a_completing_proposal_moves_a_repeating_task_on(
     assert [action.public_id for action in await actions.list_actions(ActionFilter.WAITING)] == [
         public_id
     ]
+
+
+# Deadlines the owner set (B06)
+
+OWNER_FRIDAY: dict[str, Any] = {**FRIDAY, "deadline_text": "2026-10-02", "deadline_origin": "owner"}
+
+
+async def test_a_new_deadline_over_the_owner_s_says_so_and_undo_brings_theirs_back(
+    session: AsyncSession, service: ProposalService
+) -> None:
+    owner, public_id, reply = await scene(
+        session, service, FollowUpKind.NEW_DEADLINE, **OWNER_FRIDAY
+    )
+    (proposal,) = await service.pending()
+    assert proposal.replaces_owner_deadline
+    by_message = await service.pending_for_messages("gmail-1@example.com", ["reply"])
+    assert [item.replaces_owner_deadline for item in by_message["reply"]] == [True]
+    assert (await service.get(proposal.id)).replaces_owner_deadline
+
+    applied = await service.apply(proposal.id, 1)
+
+    assert (applied.deadline_origin, applied.deadline_date) == (
+        DeadlineOrigin.EMAIL,
+        date(2026, 10, 5),
+    )
+    undone = await service.undo_apply(proposal.id, applied.revision)
+    assert (undone.deadline_origin, undone.deadline_date, undone.deadline_text) == (
+        DeadlineOrigin.OWNER,
+        date(2026, 10, 2),
+        "2026-10-02",
+    )
+    (pending,) = await service.pending()
+    assert pending.replaces_owner_deadline
+
+
+async def test_a_new_deadline_over_the_email_s_does_not_say_it_replaces_the_owner_s(
+    session: AsyncSession, service: ProposalService
+) -> None:
+    await scene(session, service, FollowUpKind.NEW_DEADLINE)
+
+    (proposal,) = await service.pending()
+
+    assert not proposal.replaces_owner_deadline
+
+
+async def test_an_email_naming_the_deadline_the_owner_replaced_proposes_nothing(
+    session: AsyncSession, service: ProposalService
+) -> None:
+    owner = await account(session)
+    source = email("source", at=SOURCE_AT)
+    await cache(session, owner, source)
+    # The owner moved the email's "next Monday" to Friday.
+    await action(
+        session,
+        owner,
+        [source],
+        **OWNER_FRIDAY,
+        stated_deadline_text="next Monday",
+        stated_deadline_precision="date",
+        stated_deadline_date=date(2026, 10, 5),
+        stated_deadline_timezone=ZONE,
+    )
+    reply = email("reply")
+    row_id = await cache(session, owner, reply)
+
+    created = await service.derive(
+        owner, [planned(reply, signal(FollowUpKind.NEW_DEADLINE), row_id)], ZONE
+    )
+
+    assert created == 0
+    assert await count(session) == 0
+
+
+@pytest.mark.parametrize("dated", [True, False])
+async def test_undoing_an_apply_saved_before_owner_deadlines_infers_the_email_s_origin(
+    session: AsyncSession, service: ProposalService, dated: bool
+) -> None:
+    fields: dict[str, Any] = (
+        {}
+        if dated
+        else {
+            "deadline_text": None,
+            "deadline_precision": "none",
+            "deadline_date": None,
+            "deadline_timezone": None,
+        }
+    )
+    await scene(session, service, FollowUpKind.NEW_DEADLINE, **fields)
+    proposal_id = await only(service)
+    applied = await service.apply(proposal_id, 1)
+    row = await session.get(ActionProposalTable, proposal_id)
+    assert row is not None and row.previous_json is not None
+    row.previous_json = {k: v for k, v in row.previous_json.items() if k != "deadline_origin"}
+    await session.commit()
+
+    undone = await service.undo_apply(proposal_id, applied.revision)
+
+    assert undone.deadline_origin is (DeadlineOrigin.EMAIL if dated else None)
+    assert undone.deadline_date == (date(2026, 10, 2) if dated else None)

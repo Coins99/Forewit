@@ -35,6 +35,7 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionFilter,
     ActionProposal,
+    DeadlineChange,
     StepEdit,
     ThreadLink,
 )
@@ -332,7 +333,11 @@ class DesktopBackend(Protocol):
         self, view: ActionFilter, group: str, group_id: str | None
     ) -> int: ...
     async def create_action(
-        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit],
+        repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action: ...
     async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
@@ -342,6 +347,7 @@ class DesktopBackend(Protocol):
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action: ...
     async def complete_action(self, public_id: str, revision: int) -> Action: ...
     async def skip_action(self, public_id: str, revision: int) -> Action: ...
@@ -1772,7 +1778,7 @@ class MainWindow(QMainWindow):
             self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
             return
         self.action_editor.set_embedded(self.actions_panel.detail_host, window=self)
-        self.action_editor.new_task(self._local_today())
+        self.action_editor.new_task(self._local_today(), self.zone)
         self.actions_panel.detail_host.addWidget(self.action_editor)
         self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
         self.action_editor.show()
@@ -1782,17 +1788,27 @@ class MainWindow(QMainWindow):
             self.actions_panel.detail_host.setCurrentWidget(self.actions_panel.detail)
 
     def _request_create_action(
-        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit],
+        repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> None:
-        started = self.start(lambda: self._create_action(edit, steps, repeat), cancellable=False)
+        started = self.start(
+            lambda: self._create_action(edit, steps, repeat, deadline), cancellable=False
+        )
         if not started and not self._closing:
             self.action_editor.keep_open(_BUSY)
 
     async def _create_action(
-        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit],
+        repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> None:
         try:
-            created = await self.backend.create_action(edit, steps, repeat)
+            created = await self.backend.create_action(edit, steps, repeat, deadline)
         except ActionRepeatError as exc:
             if not self._closing:
                 self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
@@ -1817,9 +1833,10 @@ class MainWindow(QMainWindow):
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> None:
         started = self.start(
-            lambda: self._save_action(action, edit, steps, repeat), cancellable=False
+            lambda: self._save_action(action, edit, steps, repeat, deadline), cancellable=False
         )
         if not started and not self._closing:
             self.action_editor.keep_open(_BUSY)
@@ -1903,11 +1920,12 @@ class MainWindow(QMainWindow):
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> None:
         """The editor closes only once the save succeeds; otherwise it keeps the edits."""
         try:
             saved = await self.backend.save_action(
-                action.public_id, action.revision, edit, steps, repeat
+                action.public_id, action.revision, edit, steps, repeat, deadline
             )
         except ActionRepeatError as exc:
             if not self._closing:

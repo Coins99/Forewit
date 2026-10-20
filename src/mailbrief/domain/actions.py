@@ -3,7 +3,7 @@
 import re
 import unicodedata
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Final, Self
 from zoneinfo import ZoneInfo
@@ -163,6 +163,74 @@ class ProposalState(StrEnum):
     DISMISSED = "dismissed"
 
 
+class DeadlineOrigin(StrEnum):
+    """Who set an action's deadline (B06, ADR 0021): an email, through the suggestion the
+    owner accepted or a follow-up proposal they applied, or the owner."""
+
+    EMAIL = "email"
+    OWNER = "owner"
+
+
+class StatedDeadline(DeadlineFields):
+    """An email's deadline the owner replaced or cleared, kept as the email stated it so
+    they can see it and go back to it (B06)."""
+
+    @model_validator(mode="after")
+    def check_stated(self) -> Self:
+        if self.deadline_precision is DeadlinePrecision.NONE:
+            raise ValueError("a stated deadline is never empty")
+        return self
+
+
+class DeadlineChangeKind(StrEnum):
+    """What the owner does to an action's deadline (B06)."""
+
+    SET = "set"  # A day, and optionally a time, in the owner's zone.
+    CLEAR = "clear"
+    STATED = "stated"  # Go back to the email's deadline.
+
+
+class DeadlineChange(DomainModel):
+    """The owner's change to an action's deadline (B06); leaving it out keeps the deadline.
+
+    ``due_date`` and ``due_time`` are wall-clock values in the owner's zone, and only a SET
+    carries them: a date, and a time of day when the deadline has one.
+    """
+
+    kind: DeadlineChangeKind
+    due_date: date | None = None
+    due_time: time | None = None
+
+    @field_validator("due_time")
+    @classmethod
+    def whole_minutes(cls, value: time | None) -> time | None:
+        if value is not None and value.tzinfo is not None:
+            raise ValueError("a deadline's time is a wall-clock time, without a zone")
+        return None if value is None else value.replace(second=0, microsecond=0)
+
+    @model_validator(mode="after")
+    def check_kind(self) -> Self:
+        if (self.due_date is not None) != (self.kind is DeadlineChangeKind.SET):
+            raise ValueError("only a new deadline has a date, and it must")
+        if self.due_time is not None and self.due_date is None:
+            raise ValueError("a deadline's time needs its date")
+        return self
+
+    @classmethod
+    def to(cls, due_date: date, due_time: time | None = None) -> Self:
+        """Set the deadline to ``due_date``, at ``due_time`` when given."""
+        return cls(kind=DeadlineChangeKind.SET, due_date=due_date, due_time=due_time)
+
+    @classmethod
+    def cleared(cls) -> Self:
+        return cls(kind=DeadlineChangeKind.CLEAR)
+
+    @classmethod
+    def from_email(cls) -> Self:
+        """Go back to the deadline the email stated."""
+        return cls(kind=DeadlineChangeKind.STATED)
+
+
 class ActionRepeat(DomainModel):
     """How a task repeats (B05): its series, the rule, and this occurrence's own date.
 
@@ -291,6 +359,8 @@ class ActionProposal(DeadlineFields):
     received_at_utc: datetime
     web_link: HttpUrl
     created_at_utc: datetime
+    # A new deadline that would replace one the owner set (B06), as the action was loaded.
+    replaces_owner_deadline: bool = False
 
     @field_validator("received_at_utc", "created_at_utc")
     @classmethod
@@ -306,11 +376,18 @@ class ActionProposal(DeadlineFields):
             raise ValueError("only a new-deadline proposal carries a deadline, and it must")
         if (self.suggested_target_date is None) != (self.target_reason is None):
             raise ValueError("suggested_target_date and target_reason must be set together")
+        if self.replaces_owner_deadline and not dated:
+            raise ValueError("only a new deadline replaces the owner's")
         return self
 
 
 class Action(DeadlineFields):
-    """An action the owner accepted and now owns, with its plan and source messages."""
+    """An action the owner accepted and now owns, with its plan and source messages.
+
+    Its deadline is the current one, whoever set it: ``deadline_origin`` says who, and is
+    None exactly when there is none. ``stated_deadline`` is the email's deadline the owner
+    last replaced or cleared, if any (B06).
+    """
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
@@ -323,6 +400,8 @@ class Action(DeadlineFields):
     tags: tuple[str, ...] = Field(default=(), repr=False)  # Sorted by tag_key.
     effort: ActionEffort | None = None
     estimate_minutes: int | None = Field(default=None, ge=1, le=ESTIMATE_MAX_MINUTES)
+    deadline_origin: DeadlineOrigin | None = None
+    stated_deadline: StatedDeadline | None = Field(default=None, repr=False)
     suggested_target_date: date | None = None
     target_reason: TargetReason | None = None
     target_date: date | None = None  # The owner's choice.
@@ -357,7 +436,14 @@ class Action(DeadlineFields):
     def validate_completion(self) -> Self:
         if (self.completed_at_utc is not None) != (self.status is ActionStatus.COMPLETED):
             raise ValueError("completed_at_utc must be set exactly when the action is completed")
+        if (self.deadline_origin is None) != (self.deadline_precision is DeadlinePrecision.NONE):
+            raise ValueError("deadline_origin must be set exactly when there is a deadline")
         return self
+
+    @property
+    def owner_deadline(self) -> bool:
+        """Whether the owner set the current deadline."""
+        return self.deadline_origin is DeadlineOrigin.OWNER
 
     def due_at_utc(self) -> datetime | None:
         """When the deadline falls due; see deadline_due_at."""

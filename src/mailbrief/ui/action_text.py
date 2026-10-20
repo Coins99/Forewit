@@ -41,6 +41,7 @@ class ActionDetails:
     target: date | None
     target_reason: str | None
     due: str | None
+    due_by_owner: bool  # The owner set the deadline (B06), rather than an email.
     estimate: str | None
     steps_done: int
     steps: int
@@ -95,6 +96,7 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         target=action.target_date,
         target_reason=TARGET_REASON_TEXT[reason] if keeps_reason and reason is not None else None,
         due=deadline_text(action, zone, today=today),
+        due_by_owner=action.owner_deadline,
         estimate=estimate_text(action.estimate_minutes),
         steps_done=sum(step.done for step in action.steps),
         steps=len(action.steps),

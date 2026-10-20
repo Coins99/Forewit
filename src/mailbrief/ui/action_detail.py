@@ -427,7 +427,11 @@ class ActionDetailPane(QScrollArea):
     def _dates(self, details: ActionDetails) -> list[QWidget | int]:
         widgets: list[QWidget | int] = []
         if details.due is not None:
-            text = f"Due {details.due}" + (" · Overdue" if details.overdue else "")
+            text = (
+                f"Due {details.due}"
+                + (" · Set by you" if details.due_by_owner else "")
+                + (" · Overdue" if details.overdue else "")
+            )
             due = wrap_label(text, tone="warning" if details.overdue else "secondary", px=9)
             due.setObjectName("actionDeadline")
             badge = QWidget()

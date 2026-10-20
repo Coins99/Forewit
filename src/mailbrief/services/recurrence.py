@@ -72,7 +72,7 @@ class Repeats:
 
     ``zone`` dates occurrences; without one, the owner's saved zone is read from the same
     session the first time a date is needed, and the system's when preferences can't be read,
-    since it only dates a local task."""
+    since it only dates a local task (zone())."""
 
     def __init__(
         self,
@@ -87,14 +87,18 @@ class Repeats:
         self._zone = zone
         self._id_factory = id_factory
 
-    async def _today(self, now: datetime) -> date:
-        """The owner's local date at ``now``."""
+    async def zone(self) -> ZoneInfo:
+        """The owner's zone, which also dates the deadlines they set (B06)."""
         if self._zone is None:
             try:
                 self._zone = owner_zone(await PreferencesService(self._session).get())
             except PreferencesUnavailableError:
                 self._zone = resolve_timezone(None)
-        return now.astimezone(self._zone).date()
+        return self._zone
+
+    async def _today(self, now: datetime) -> date:
+        """The owner's local date at ``now``."""
+        return now.astimezone(await self.zone()).date()
 
     async def _series(self, row: ActionTable) -> ActionSeriesTable | None:
         if row.series_id is None or row.occurrence_date is None:

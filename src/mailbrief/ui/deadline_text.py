@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from mailbrief.domain.actions import Action, ActionProposal
+from mailbrief.domain.actions import Action, ActionProposal, StatedDeadline
 from mailbrief.domain.analysis import ActionSuggestion, DeadlinePrecision
 from mailbrief.domain.digests import DigestItem
 
@@ -118,7 +118,7 @@ def moment_text(moment: datetime, zone: ZoneInfo, *, today: date) -> str:
 
 
 def deadline_text(
-    item: Action | ActionSuggestion | ActionProposal | DigestItem,
+    item: Action | ActionSuggestion | ActionProposal | StatedDeadline | DigestItem,
     zone: ZoneInfo,
     *,
     today: date,

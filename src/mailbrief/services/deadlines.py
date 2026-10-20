@@ -12,6 +12,7 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
+from mailbrief.domain.events import wall_clock
 from mailbrief.text.matching import appears_in
 from mailbrief.text.prepare import clean_generated_text
 
@@ -214,12 +215,40 @@ def suggest_target_for(
         due = deadline.at_utc.astimezone(zone).date()
     else:
         return None, None
-    received = received_at_utc.astimezone(zone).date()
-    if due <= received:
+    return target_for_day(due, received_at_utc.astimezone(zone).date())
+
+
+def target_for_day(due: dt.date, start: dt.date) -> tuple[dt.date, TargetReason]:
+    """The last working day (Monday to Friday) before ``due``, unless that is before
+    ``start`` (the day the email arrived, or today for a deadline the owner sets); then
+    ``due`` itself. There is no holiday calendar."""
+    if due <= start:
         return due, TargetReason.ON_DEADLINE
     working_day = due - dt.timedelta(days=1)
     while working_day.weekday() >= _SATURDAY:
         working_day -= dt.timedelta(days=1)
-    if working_day >= received:
+    if working_day >= start:
         return working_day, TargetReason.WORKING_DAY_BEFORE
     return due, TargetReason.ON_DEADLINE
+
+
+def owner_deadline(due_date: dt.date, due_time: dt.time | None, zone: ZoneInfo) -> ResolvedDeadline:
+    """A deadline the owner set (B06): a day, or a time of day on it, in their zone ``zone``.
+
+    Its text is the day, or the day and the local time, so the deadline reads like any other
+    to whatever shows a phrase, older versions after a downgrade included; the app shows the
+    date instead. A time a clock change skips is read as wall_clock() reads it.
+    """
+    if due_time is None:
+        return ResolvedDeadline(
+            due_date.isoformat(), DeadlinePrecision.DATE, due_date, None, zone.key
+        )
+    at_utc = wall_clock(due_date, due_time, zone).astimezone(dt.UTC)
+    local = at_utc.astimezone(zone)
+    return ResolvedDeadline(
+        f"{local.date().isoformat()} {local:%H:%M}",
+        DeadlinePrecision.DATETIME,
+        local.date(),
+        at_utc,
+        zone.key,
+    )

@@ -3,7 +3,13 @@
 import hashlib
 from datetime import UTC, date, datetime, timedelta
 
-from mailbrief.domain.actions import Action, ActionProposal, ActionStatus, ProposalState
+from mailbrief.domain.actions import (
+    Action,
+    ActionProposal,
+    ActionStatus,
+    DeadlineOrigin,
+    ProposalState,
+)
 from mailbrief.domain.analysis import (
     ActionOwnership,
     ActionSuggestion,
@@ -95,6 +101,8 @@ def make_action(**overrides: object) -> Action:
         "revision": 1,
     }
     values.update(overrides)
+    if values.get("deadline_precision", DeadlinePrecision.NONE) != DeadlinePrecision.NONE:
+        values.setdefault("deadline_origin", DeadlineOrigin.EMAIL)  # Like an accepted email's.
     return Action.model_validate(values)
 
 
