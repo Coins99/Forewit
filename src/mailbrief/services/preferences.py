@@ -160,3 +160,22 @@ def owner_zone(preferences: OwnerPreferences, explicit: str | None = None) -> Zo
     Raises InvalidTimezoneError when an explicit zone is unknown.
     """
     return resolve_timezone(explicit or preferences.time_zone)
+
+
+class OwnerZone:
+    """The zone local-only changes are dated in: repeating tasks' occurrences and the
+    deadlines the owner sets. ``zone`` when given, else the owner's saved zone, read from
+    ``session`` the first time it is needed, else the system's when preferences can't be read,
+    since it only dates the owner's own records."""
+
+    def __init__(self, session: AsyncSession, zone: ZoneInfo | None = None) -> None:
+        self._session = session
+        self._zone = zone
+
+    async def get(self) -> ZoneInfo:
+        if self._zone is None:
+            try:
+                self._zone = owner_zone(await PreferencesService(self._session).get())
+            except PreferencesUnavailableError:
+                self._zone = resolve_timezone(None)
+        return self._zone

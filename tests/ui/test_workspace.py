@@ -1038,7 +1038,6 @@ def test_owner_deadline_renders(
     panel = ActionsPanel()
     moved = make_action(
         title="Send the Q3 deck",
-        deadline_text="2026-10-16 17:00",
         deadline_precision=DeadlinePrecision.DATETIME,
         deadline_date=date(2026, 10, 16),
         deadline_at_utc=datetime(2026, 10, 16, 21, 0, tzinfo=UTC),

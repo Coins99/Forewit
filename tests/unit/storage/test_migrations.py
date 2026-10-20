@@ -1784,7 +1784,7 @@ def test_owner_deadlines_mark_every_existing_deadline_as_the_email_s(tmp_path: P
                 connection.execute(statement)
         # The owner moved the first task's deadline to Monday, as the app stores it.
         connection.execute(
-            "UPDATE actions SET deadline_origin='owner', deadline_text='2026-10-05',"
+            "UPDATE actions SET deadline_origin='owner', deadline_text=NULL,"
             " deadline_date='2026-10-05', stated_deadline_text='by Friday',"
             " stated_deadline_precision='date', stated_deadline_date='2026-10-02',"
             " stated_deadline_timezone='America/Toronto' WHERE id=1"
@@ -1794,7 +1794,7 @@ def test_owner_deadlines_mark_every_existing_deadline_as_the_email_s(tmp_path: P
 
     command.downgrade(config, "20261016_0022")
 
-    # Older versions read the owner's deadline as an ordinary dated one.
+    # Older versions read the owner's deadline as an ordinary dated one, its date as its text.
     assert _query(
         path, "SELECT deadline_text, deadline_precision, deadline_date FROM actions WHERE id=1"
     ) == [("2026-10-05", "date", "2026-10-05")]

@@ -9,6 +9,7 @@ from mailbrief.domain.analysis import (
     DEADLINE_TEXT_MAX_CHARS,
     AnalysisCandidate,
     AnalysisRequest,
+    DeadlineFields,
     DeadlinePrecision,
     TargetReason,
 )
@@ -19,6 +20,7 @@ from mailbrief.text.prepare import clean_generated_text
 _PAST_DAYS = 31
 _FUTURE_DAYS = 366
 _SATURDAY = 5  # date.weekday() of the first weekend day.
+_UTC_ZONE = ZoneInfo("UTC")
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _TIME_PATTERN = re.compile(r"([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?")
 _ZONE_KEY_PATTERN = re.compile(r"[A-Za-z]+(/[A-Za-z0-9_+-]+)+")
@@ -209,13 +211,20 @@ def suggest_target_for(
     arrived; then it is the deadline's day. There is no holiday calendar.
     """
     zone = ZoneInfo(timezone_name)
-    if deadline.precision is DeadlinePrecision.DATE and deadline.date is not None:
-        due = deadline.date
-    elif deadline.precision is DeadlinePrecision.DATETIME and deadline.at_utc is not None:
-        due = deadline.at_utc.astimezone(zone).date()
-    else:
+    due = due_day(deadline, zone)
+    if due is None:
         return None, None
     return target_for_day(due, received_at_utc.astimezone(zone).date())
+
+
+def due_day(deadline: ResolvedDeadline, zone: ZoneInfo) -> dt.date | None:
+    """The day a dated deadline falls due in ``zone``: a date's own day, or an instant's
+    local day; None without a dated deadline."""
+    if deadline.precision is DeadlinePrecision.DATE and deadline.date is not None:
+        return deadline.date
+    if deadline.precision is DeadlinePrecision.DATETIME and deadline.at_utc is not None:
+        return deadline.at_utc.astimezone(zone).date()
+    return None
 
 
 def target_for_day(due: dt.date, start: dt.date) -> tuple[dt.date, TargetReason]:
@@ -232,23 +241,35 @@ def target_for_day(due: dt.date, start: dt.date) -> tuple[dt.date, TargetReason]
     return due, TargetReason.ON_DEADLINE
 
 
+def resolved(fields: DeadlineFields) -> ResolvedDeadline:
+    """A model's deadline as ResolvedDeadline holds one."""
+    return ResolvedDeadline(
+        fields.deadline_text,
+        fields.deadline_precision,
+        fields.deadline_date,
+        fields.deadline_at_utc,
+        fields.deadline_timezone,
+    )
+
+
+def _stored_zone(zone: ZoneInfo) -> ZoneInfo:
+    """``zone`` when a stored deadline can name it, else UTC: the system's zone can have no
+    IANA name (tzlocal calls one it only found as a file "local"), and a stored deadline's
+    zone must load."""
+    try:
+        return ZoneInfo(zone.key) if zone.key else _UTC_ZONE
+    except (KeyError, ValueError, OSError):
+        return _UTC_ZONE
+
+
 def owner_deadline(due_date: dt.date, due_time: dt.time | None, zone: ZoneInfo) -> ResolvedDeadline:
     """A deadline the owner set (B06): a day, or a time of day on it, in their zone ``zone``.
-
-    Its text is the day, or the day and the local time, so the deadline reads like any other
-    to whatever shows a phrase, older versions after a downgrade included; the app shows the
-    date instead. A time a clock change skips is read as wall_clock() reads it.
-    """
+    It has no phrase. A time a clock change skips is read as wall_clock() reads it. A zone
+    without an IANA name is stored as UTC, keeping a date's day and a time's instant."""
+    stored = _stored_zone(zone)
     if due_time is None:
-        return ResolvedDeadline(
-            due_date.isoformat(), DeadlinePrecision.DATE, due_date, None, zone.key
-        )
+        return ResolvedDeadline(None, DeadlinePrecision.DATE, due_date, None, stored.key)
     at_utc = wall_clock(due_date, due_time, zone).astimezone(dt.UTC)
-    local = at_utc.astimezone(zone)
     return ResolvedDeadline(
-        f"{local.date().isoformat()} {local:%H:%M}",
-        DeadlinePrecision.DATETIME,
-        local.date(),
-        at_utc,
-        zone.key,
+        None, DeadlinePrecision.DATETIME, at_utc.astimezone(stored).date(), at_utc, stored.key
     )

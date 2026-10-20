@@ -14,7 +14,6 @@ commit together. Errors carry static messages, and nothing logs task text.
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Final
-from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,12 +28,7 @@ from mailbrief.domain.recurrence import (
     next_occurrence,
     weekday_mask,
 )
-from mailbrief.services.calendar import resolve_timezone
-from mailbrief.services.preferences import (
-    PreferencesService,
-    PreferencesUnavailableError,
-    owner_zone,
-)
+from mailbrief.services.preferences import OwnerZone
 from mailbrief.storage.actions import ActionRepository, series_rule
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import ActionSeriesTable, ActionTable
@@ -70,16 +64,14 @@ def _set_rule(series: ActionSeriesTable, rule: RepeatRule) -> None:
 class Repeats:
     """The repeat side of the owner's task changes, in the caller's session.
 
-    ``zone`` dates occurrences; without one, the owner's saved zone is read from the same
-    session the first time a date is needed, and the system's when preferences can't be read,
-    since it only dates a local task (zone())."""
+    ``zone`` dates occurrences (OwnerZone: by default the owner's saved zone)."""
 
     def __init__(
         self,
         session: AsyncSession,
         repository: ActionRepository,
         *,
-        zone: ZoneInfo | None = None,
+        zone: OwnerZone,
         id_factory: Callable[[], str],
     ) -> None:
         self._session = session
@@ -87,18 +79,9 @@ class Repeats:
         self._zone = zone
         self._id_factory = id_factory
 
-    async def zone(self) -> ZoneInfo:
-        """The owner's zone, which also dates the deadlines they set (B06)."""
-        if self._zone is None:
-            try:
-                self._zone = owner_zone(await PreferencesService(self._session).get())
-            except PreferencesUnavailableError:
-                self._zone = resolve_timezone(None)
-        return self._zone
-
     async def _today(self, now: datetime) -> date:
         """The owner's local date at ``now``."""
-        return now.astimezone(await self.zone()).date()
+        return now.astimezone(await self._zone.get()).date()
 
     async def _series(self, row: ActionTable) -> ActionSeriesTable | None:
         if row.series_id is None or row.occurrence_date is None:

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.domain.actions import Action
 from mailbrief.domain.bodies import BodyStatus
 from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.domain.drafting import (
@@ -89,6 +90,18 @@ _PROBLEM_CODES: Final = {
     DraftingProblem.INVALID_OUTPUT: INVALID_OUTPUT,
     DraftingProblem.REFUSED: REFUSED,
 }
+
+
+def _deadline_words(action: Action, zone: ZoneInfo) -> str | None:
+    """The deadline drafting sends: the email's own words, or, for one the owner set (which
+    has none, B06), its day ("2026-10-02") or its day and time in the owner's zone
+    ("2026-10-02 17:00")."""
+    if not action.owner_deadline:
+        return action.deadline_text
+    if action.deadline_at_utc is not None:
+        local = action.deadline_at_utc.astimezone(zone)
+        return f"{local.date().isoformat()} {local:%H:%M}"
+    return None if action.deadline_date is None else action.deadline_date.isoformat()
 
 
 class DraftingContextError(LookupError):
@@ -340,7 +353,7 @@ class DraftingService:
             title=action.title,
             ownership=action.ownership,
             target_date=action.target_date,
-            deadline_text=action.deadline_text,
+            deadline_text=_deadline_words(action, self._zone),
             steps=tuple(steps),
             notes=notes,
         )

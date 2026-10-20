@@ -1,5 +1,6 @@
 """Edit one action: its own fields and its plan, saved together as one revision."""
 
+import math
 import re
 from datetime import date, time, timedelta
 from typing import Final
@@ -33,6 +34,8 @@ from mailbrief.domain.actions import (
     ACTION_NOTES_MAX_CHARS,
     ACTION_STEP_MAX_CHARS,
     ACTION_TITLE_MAX_CHARS,
+    DEADLINE_FIRST_DAY,
+    DEADLINE_LAST_DAY,
     ESTIMATE_MAX_MINUTES,
     MAX_ACTION_STEPS,
     TARGET_REASON_TEXT,
@@ -70,7 +73,7 @@ from mailbrief.ui.deadline_text import (
     parse_length,
 )
 from mailbrief.ui.dialog_chrome import dialog_heading
-from mailbrief.ui.event_editor import DateBox
+from mailbrief.ui.event_editor import DateBox, TimeBox, parse_clock
 from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import outline_button, plain_label, primary_action, wrap_label
 from mailbrief.ui.theme import ui_font
@@ -106,7 +109,6 @@ BAD_DEADLINE_TIME: Final = (
     "Type the deadline's time as HH:mm, for example 17:00, or choose Any time."
 )
 NO_SUGGESTION: Final = "no target was suggested"
-_CLOCK: Final = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
 
 
 class EstimateBox(QSpinBox):
@@ -154,27 +156,26 @@ class EstimateBox(QSpinBox):
             super().wheelEvent(event)
 
 
-class DeadlineTimeBox(QComboBox):
+class DeadlineTimeBox(TimeBox):
     """A deadline's time of day: Any time, a time from the list in 15-minute steps, or one
-    typed as HH:mm. Like the other fields, the wheel changes it only while it has focus."""
+    typed as HH:mm. It steps as the event editor's times do, Up a quarter hour later and
+    Page Up an hour, the wheel only while it has focus, from whatever time it shows: Up from
+    16:59 is 17:00, and Down from 00:00 is Any time."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__("Deadline")
         self.setObjectName("taskDeadlineTime")
         self.setAccessibleName("Deadline time")
-        self.setEditable(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Tab and click; not the wheel.
-        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.setCompleter(QCompleter([], self))  # Typing "1" never jumps to a listed "1…".
-        self.setMaxVisibleItems(10)
-        self.setMinimumContentsLength(len(ANY_TIME))
-        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.addItem(ANY_TIME)
-        for minutes in range(0, 24 * 60, _QUARTER):
-            self.addItem(f"{minutes // 60:02d}:{minutes % 60:02d}")
         line = self.lineEdit()
         assert line is not None
         line.setAccessibleName("Deadline time")
+        self.setMinimumContentsLength(len(ANY_TIME))
+        marks = range(0, 24 * 60, _QUARTER)
+        self.set_choices(
+            [(ANY_TIME, None), *((f"{mark // 60:02d}:{mark % 60:02d}", None) for mark in marks)]
+        )
+        self.set_clock(None)
+        self.stepped.connect(self._step)
 
     def clock(self) -> time | None:
         """The time chosen or typed, or None for Any time (or nothing typed). Raises
@@ -182,10 +183,10 @@ class DeadlineTimeBox(QComboBox):
         text = self.currentText().strip()
         if text in ("", ANY_TIME):
             return None
-        found = _CLOCK.fullmatch(text)
+        found = parse_clock(text)
         if found is None:
             raise ValueError(BAD_DEADLINE_TIME)
-        return time(int(found[1]), int(found[2]))
+        return found
 
     def set_clock(self, value: time | None) -> None:
         """Show ``value``, or Any time for None."""
@@ -193,9 +194,16 @@ class DeadlineTimeBox(QComboBox):
         self.setCurrentIndex(self.findText(text))  # -1, no item, for a time between steps.
         self.setEditText(text)
 
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if takes_wheel(self, event):
-            super().wheelEvent(event)
+    def _step(self, steps: int) -> None:
+        """Move ``steps`` quarter hours, later when positive: from a time between marks, to
+        the next mark that way. Before 00:00 comes Any time. A half-typed time stays."""
+        try:
+            clock = self.clock()
+        except ValueError:
+            return
+        position = 0.0 if clock is None else 1 + (clock.hour * 60 + clock.minute) / _QUARTER
+        index = math.floor(position) + steps if steps > 0 else math.ceil(position) + steps
+        self.setCurrentIndex(max(0, min(self.count() - 1, index)))
 
 
 class DayBox(QSpinBox):
@@ -294,6 +302,10 @@ def _deadline_note(action: Action | None, zone: ZoneInfo | None, today: date) ->
     if action.deadline_origin is DeadlineOrigin.OWNER:
         return f"You set this deadline. {said}."
     return f"You cleared the deadline. {said}."
+
+
+def _qdate(day: date) -> QDate:
+    return QDate(day.year, day.month, day.day)
 
 
 def _suggestion_text(day: date | None, reason: TargetReason | None) -> str:
@@ -448,9 +460,12 @@ class ActionEditor(QDialog):
         self.deadline_date.setAccessibleName("Deadline date")
         self.deadline_date.setCalendarPopup(True)
         self.deadline_date.setDisplayFormat("yyyy-MM-dd")
+        self.deadline_date.setDateRange(_qdate(DEADLINE_FIRST_DAY), _qdate(DEADLINE_LAST_DAY))
+        self.deadline_date.setKeyboardTracking(False)  # A typed date counts once it's finished.
         self.deadline_time = DeadlineTimeBox()
         self.deadline_row = QWidget()
         self.deadline_row.setObjectName("taskDeadline")
+        self.deadline_row.setAccessibleName("Deadline")
         deadline_row = QHBoxLayout(self.deadline_row)
         deadline_row.setContentsMargins(0, 0, 0, 0)
         deadline_row.addWidget(self.has_deadline)
@@ -464,6 +479,8 @@ class ActionEditor(QDialog):
         self.from_email.setAccessibleName("Use the email's deadline")
         self.from_email.setAutoDefault(False)
         self.deadline_note = QWidget()
+        self.deadline_note.setObjectName("taskDeadlineNoteRow")
+        self.deadline_note.setAccessibleName("The email's deadline")
         note_row = QHBoxLayout(self.deadline_note)
         note_row.setContentsMargins(0, 0, 0, 0)
         note_row.addWidget(self.deadline, 1, Qt.AlignmentFlag.AlignVCenter)
@@ -734,7 +751,7 @@ class ActionEditor(QDialog):
         try:
             picked, clock = shown if shown is not None else (day, None)
             self.has_deadline.setChecked(shown is not None)
-            self.deadline_date.setDate(QDate(picked.year, picked.month, picked.day))
+            self.deadline_date.setDate(_qdate(picked))
             self.deadline_time.set_clock(clock)
         finally:
             self._filling = False
@@ -789,18 +806,17 @@ class ActionEditor(QDialog):
 
     def _follow(self, due: date | None) -> None:
         """Suggest a target for a deadline on ``due``, counted from today as the service
-        counts it. A target date that was the suggestion before, or no target when there was
-        none, moves to the new suggestion; a cleared deadline suggests nothing and moves
-        no target."""
+        counts it. A target date that was the suggestion moves to the new one; no target is
+        ever ticked for the owner, and a cleared deadline suggests nothing and moves none."""
         if due is None:
             self.suggested.setText(NO_SUGGESTION)
             self._shown_suggestion = None
             return
         suggestion, reason = target_for_day(due, self._today)
         self.suggested.setText(_suggestion_text(suggestion, reason))
-        if self._picked_target() == self._shown_suggestion:
-            self.has_target.setChecked(True)
-            self.target.setDate(QDate(suggestion.year, suggestion.month, suggestion.day))
+        target = self._picked_target()
+        if target is not None and target == self._shown_suggestion:
+            self.target.setDate(_qdate(suggestion))
         self._shown_suggestion = suggestion
 
     def _deadline_change(self) -> DeadlineChange | None:
@@ -1019,6 +1035,7 @@ class ActionEditor(QDialog):
         action = self._action
         if (action is None and not self._creating) or self._busy or self._saving:
             return
+        self.deadline_date.interpretText()  # Take a date still being typed, as leaving would.
         title = self.title.text().strip()
         notes = self.notes.toPlainText()
         steps = [step for step in self._current_steps() if step[1]]

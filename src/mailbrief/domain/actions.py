@@ -37,6 +37,12 @@ TAG_MAX_CHARS: Final = 40
 MAX_ACTION_TAGS: Final = 10
 _TAG_SPACES: Final = re.compile(r"\s+")
 
+# The days a deadline the owner sets may fall on (B06): wide enough for any plan, and far
+# from the calendar's ends, where a deadline's due time can't be worked out.
+DEADLINE_FIRST_DAY: Final = date(2000, 1, 1)
+DEADLINE_LAST_DAY: Final = date(2099, 12, 31)
+DEADLINE_OUT_OF_RANGE: Final = "Choose a deadline between 2000 and 2099."
+
 TARGET_REASON_TEXT: Final[dict[TargetReason, str]] = {
     TargetReason.WORKING_DAY_BEFORE: "one working day before the deadline",
     TargetReason.ON_DEADLINE: "on the deadline; no earlier working day was left",
@@ -214,6 +220,10 @@ class DeadlineChange(DomainModel):
             raise ValueError("only a new deadline has a date, and it must")
         if self.due_time is not None and self.due_date is None:
             raise ValueError("a deadline's time needs its date")
+        if self.due_date is not None and not (
+            DEADLINE_FIRST_DAY <= self.due_date <= DEADLINE_LAST_DAY
+        ):
+            raise ValueError(DEADLINE_OUT_OF_RANGE)
         return self
 
     @classmethod
@@ -385,8 +395,9 @@ class Action(DeadlineFields):
     """An action the owner accepted and now owns, with its plan and source messages.
 
     Its deadline is the current one, whoever set it: ``deadline_origin`` says who, and is
-    None exactly when there is none. ``stated_deadline`` is the email's deadline the owner
-    last replaced or cleared, if any (B06).
+    None exactly when there is none. A deadline the owner set is a date or an instant with no
+    phrase. ``stated_deadline`` is the email's deadline the owner last replaced or cleared,
+    if any (B06).
     """
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -444,6 +455,9 @@ class Action(DeadlineFields):
     def owner_deadline(self) -> bool:
         """Whether the owner set the current deadline."""
         return self.deadline_origin is DeadlineOrigin.OWNER
+
+    def has_phrase(self) -> bool:
+        return self.deadline_origin is not DeadlineOrigin.OWNER
 
     def due_at_utc(self) -> datetime | None:
         """When the deadline falls due; see deadline_due_at."""

@@ -39,10 +39,22 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
-from mailbrief.services.deadlines import ResolvedDeadline, owner_deadline, suggest_target_for
+from mailbrief.services.deadlines import (
+    ResolvedDeadline,
+    due_day,
+    owner_deadline,
+    resolved,
+    target_for_day,
+)
+from mailbrief.services.preferences import OwnerZone
 from mailbrief.services.recurrence import RepeatError, Repeats
 from mailbrief.services.writes import commit_once
-from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
+from mailbrief.storage.actions import (
+    ActionRepository,
+    DecisionKey,
+    stated_deadline,
+    suggestion_from_row,
+)
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import (
     AccountTable,
@@ -187,16 +199,6 @@ def _keep_stated(row: ActionTable) -> None:
     row.stated_deadline_timezone = row.deadline_timezone
 
 
-def _stated(row: ActionTable) -> ResolvedDeadline:
-    return ResolvedDeadline(
-        row.stated_deadline_text,
-        DeadlinePrecision(row.stated_deadline_precision),
-        row.stated_deadline_date,
-        row.stated_deadline_at_utc,
-        row.stated_deadline_timezone,
-    )
-
-
 def _is_current(row: ActionTable, deadline: ResolvedDeadline) -> bool:
     """Whether ``deadline`` falls when the action's current one does."""
     return (
@@ -218,9 +220,9 @@ class ActionService:
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
     A method taking ``expected_revision`` raises ActionConflictError when the action's
-    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates a
-    repeating task's occurrences; by default the owner's saved zone is read when one is
-    needed (see Repeats).
+    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates
+    repeating tasks' occurrences and the deadlines the owner sets; by default the owner's
+    saved zone is read when one is needed (OwnerZone).
     """
 
     def __init__(
@@ -235,7 +237,8 @@ class ActionService:
         self._clock = clock
         self._id_factory = id_factory
         self._repository = ActionRepository(session)
-        self._repeats = Repeats(session, self._repository, zone=zone, id_factory=id_factory)
+        self._zone = OwnerZone(session, zone)
+        self._repeats = Repeats(session, self._repository, zone=self._zone, id_factory=id_factory)
 
     async def _apply_repeat(self, row: ActionTable, repeat: RepeatEdit, now: datetime) -> None:
         try:
@@ -259,13 +262,14 @@ class ActionService:
             _clear_deadline(row)
             row.suggested_target_date = row.target_reason = None
             return
-        zone = await self._repeats.zone()
+        zone = await self._zone.get()
         if change.kind is DeadlineChangeKind.STATED:
             if origin == DeadlineOrigin.EMAIL.value:
                 return  # It is the email's already.
-            if row.stated_deadline_precision == DeadlinePrecision.NONE.value:
+            stated = stated_deadline(row)
+            if stated is None:
                 raise ActionConflictError(_NO_STATED)
-            deadline, new_origin = _stated(row), DeadlineOrigin.EMAIL
+            deadline, new_origin = resolved(stated), DeadlineOrigin.EMAIL
         else:
             assert change.due_date is not None  # DeadlineChange checks it.
             deadline = owner_deadline(change.due_date, change.due_time, zone)
@@ -275,9 +279,12 @@ class ActionService:
                 _keep_stated(row)
             new_origin = DeadlineOrigin.OWNER
         _set_deadline(row, deadline, new_origin)
-        target, reason = suggest_target_for(deadline, now, zone.key)
-        row.suggested_target_date = target
-        row.target_reason = None if reason is None else reason.value
+        due = due_day(deadline, zone)
+        if due is None:  # Only the email's words: nothing to count back from.
+            row.suggested_target_date = row.target_reason = None
+            return
+        target, reason = target_for_day(due, now.astimezone(zone).date())
+        row.suggested_target_date, row.target_reason = target, reason.value
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         try:

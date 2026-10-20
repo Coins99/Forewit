@@ -1,23 +1,32 @@
 """Deadlines the owner sets (B06): set, change, clear, go back to the email's, and keep it."""
 
 import asyncio
+import importlib.resources
 import json
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import Action, ActionActivityKind, ActionEdit, DeadlineChange
+from mailbrief.domain.actions import (
+    DEADLINE_OUT_OF_RANGE,
+    Action,
+    ActionActivityKind,
+    ActionEdit,
+    DeadlineChange,
+)
 from mailbrief.domain.actions import DeadlineOrigin as Origin
 from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision, TargetReason
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
 from mailbrief.services.deadlines import owner_deadline
+from mailbrief.services.drafting import _deadline_words
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
-from tests.factories import Clock, Ids
+from tests.factories import Clock, Ids, make_action
 from tests.unit.services.test_actions_service import START, TORONTO, seed
 
 FRIDAY = date(2026, 10, 2)  # START is Monday 28 September, 09:00 in Toronto.
@@ -77,7 +86,7 @@ async def test_a_new_task_takes_a_date_deadline_and_a_target_suggestion(
         FRIDAY,
         None,
         "America/Toronto",
-        "2026-10-02",
+        None,  # A deadline the owner set has no phrase.
     )
     assert (created.suggested_target_date, created.target_reason) == (
         date(2026, 10, 1),
@@ -100,7 +109,7 @@ async def test_a_deadline_with_a_time_is_an_instant_in_the_owner_s_zone(
         FRIDAY,
         datetime(2026, 10, 2, 21, 0, tzinfo=UTC),  # 17:00 EDT, whole minutes.
         "America/Toronto",
-        "2026-10-02 17:00",
+        None,
     )
     assert created.due_at_utc() == datetime(2026, 10, 2, 21, 0, tzinfo=UTC)
 
@@ -296,6 +305,7 @@ async def test_the_writing_export_says_who_set_each_deadline(tmp_path: Path) -> 
 
     (record,) = json.loads(exported.read_text(encoding="utf-8"))["records"]["actions"]
     assert (record["deadline_origin"], record["deadline_date"]) == ("owner", "2026-10-05")
+    assert record["deadline_text"] is None
     assert (record["stated_deadline_text"], record["stated_deadline_date"]) == (
         "by Friday",
         "2026-10-02",
@@ -308,8 +318,8 @@ def test_a_time_a_clock_change_skips_is_read_as_a_clock_shows_it() -> None:
 
     assert (found.date, found.at_utc, found.text) == (
         date(2026, 3, 8),
-        datetime(2026, 3, 8, 7, 30, tzinfo=UTC),
-        "2026-03-08 03:30",
+        datetime(2026, 3, 8, 7, 30, tzinfo=UTC),  # 03:30 EDT.
+        None,
     )
 
 
@@ -318,3 +328,76 @@ def test_a_repeated_time_is_its_first() -> None:
     found = owner_deadline(date(2026, 11, 1), time(1, 30), ZoneInfo("America/Toronto"))
 
     assert found.at_utc == datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("day", [date(1999, 12, 31), date(2100, 1, 1), date(9999, 12, 31)])
+def test_a_deadline_outside_2000_to_2099_is_refused(day: date) -> None:
+    with pytest.raises(ValidationError, match=DEADLINE_OUT_OF_RANGE):
+        DeadlineChange.to(day)
+
+    assert DeadlineChange.to(date(2099, 12, 31)).due_date == date(2099, 12, 31)
+
+
+def unnamed_toronto() -> ZoneInfo:
+    """Toronto's rules under no IANA name, as tzlocal returns a zone it found only as a file."""
+    source = importlib.resources.files("tzdata.zoneinfo") / "America" / "Toronto"
+    with source.open("rb") as handle:
+        return ZoneInfo.from_file(handle, key="local")
+
+
+def test_a_zone_without_an_iana_name_is_stored_as_utc() -> None:
+    zone = unnamed_toronto()
+
+    day = owner_deadline(FRIDAY, None, zone)
+    moment = owner_deadline(FRIDAY, time(21, 30), zone)
+
+    assert (day.date, day.timezone) == (FRIDAY, "UTC")
+    # 21:30 in Toronto is 01:30 UTC on Saturday: the instant is kept, dated in UTC.
+    assert (moment.at_utc, moment.date, moment.timezone) == (
+        datetime(2026, 10, 3, 1, 30, tzinfo=UTC),
+        date(2026, 10, 3),
+        "UTC",
+    )
+
+
+async def test_a_deadline_set_in_an_unnamed_zone_loads_and_is_suggested_locally(
+    session: AsyncSession,
+) -> None:
+    service = ActionService(session, clock=Clock(START), id_factory=Ids(), zone=unnamed_toronto())
+
+    created = await service.create(edit(), deadline=DeadlineChange.to(FRIDAY, time(21, 30)))
+
+    assert (created.deadline_timezone, created.deadline_at_utc) == (
+        "UTC",
+        datetime(2026, 10, 3, 1, 30, tzinfo=UTC),
+    )
+    # Due on Friday where the owner is, so Thursday is the working day before.
+    assert created.suggested_target_date == date(2026, 10, 1)
+    assert await ActionService(session).get(created.public_id) == created
+
+
+def test_drafting_sends_the_owner_s_deadline_as_a_date_or_a_local_time() -> None:
+    owner_day = make_action(
+        deadline_precision=DeadlinePrecision.DATE,
+        deadline_date=FRIDAY,
+        deadline_timezone="America/Toronto",
+        deadline_origin=Origin.OWNER,
+    )
+    owner_moment = make_action(
+        deadline_precision=DeadlinePrecision.DATETIME,
+        deadline_date=FRIDAY,
+        deadline_at_utc=datetime(2026, 10, 2, 21, 0, tzinfo=UTC),
+        deadline_timezone="America/Toronto",
+        deadline_origin=Origin.OWNER,
+    )
+    email = make_action(
+        deadline_text="by Friday",
+        deadline_precision=DeadlinePrecision.DATE,
+        deadline_date=FRIDAY,
+        deadline_timezone="America/Toronto",
+    )
+
+    assert _deadline_words(owner_day, TORONTO) == "2026-10-02"
+    assert _deadline_words(owner_moment, TORONTO) == "2026-10-02 17:00"
+    assert _deadline_words(email, TORONTO) == "by Friday"
+    assert _deadline_words(make_action(), TORONTO) is None

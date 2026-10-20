@@ -12,8 +12,9 @@ for the CHECK constraints, which keeps its rows, constraints and cascades; Alemb
 leaves SQLite foreign keys off, so the rebuild does not cascade. The values below are this
 revision's and stay fixed here even if the application's change later.
 
-Downgrading drops the columns and keeps every task. A deadline the owner set stays an ordinary
-dated deadline whose text is its date, which older versions read as they read an email's.
+A deadline the owner sets has no phrase (``deadline_text`` NULL). Downgrading gives each one its
+date, or its UTC time, as its text, since older versions require one, then drops the columns and
+keeps every task. Who set a deadline is lost on the way down: upgrading again marks it 'email'.
 """
 
 from collections.abc import Sequence
@@ -66,6 +67,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "UPDATE actions SET deadline_text = CASE deadline_precision"
+        " WHEN 'date' THEN deadline_date"
+        " ELSE substr(deadline_at_utc, 1, 16) || ' UTC' END"
+        " WHERE deadline_origin = 'owner'"
+    )
     with op.batch_alter_table("actions", recreate="always") as batch:
         for name in _CHECKS:
             batch.drop_constraint(op.f(name), type_="check")

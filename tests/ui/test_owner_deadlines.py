@@ -45,7 +45,6 @@ FROM_EMAIL = make_action(
 )
 STATED = StatedDeadline.model_validate(FRIDAY)
 OWNER_MONDAY = make_action(
-    deadline_text="2026-10-05",
     deadline_precision=DeadlinePrecision.DATE,
     deadline_date=date(2026, 10, 5),
     deadline_timezone="America/Toronto",
@@ -107,7 +106,7 @@ def test_an_unchanged_deadline_saves_no_change(editor: ActionEditor) -> None:
     assert [deadline for _, deadline in sent] == [None]
 
 
-def test_a_new_task_takes_a_deadline_and_a_target_one_working_day_before(
+def test_a_new_task_takes_a_deadline_and_suggests_a_target_without_ticking_one(
     editor: ActionEditor,
 ) -> None:
     sent = changes(editor)
@@ -122,12 +121,88 @@ def test_a_new_task_takes_a_deadline_and_a_target_one_working_day_before(
 
     assert editor.deadline_date.isEnabled() and editor.deadline_time.isEnabled()
     assert editor.suggested.text() == "2026-10-01, one working day before the deadline"
-    assert target(editor) == date(2026, 10, 1)  # It had none, and none was suggested.
+    assert target(editor) is None  # A target is the owner's to choose.
     assert editor.has_unsaved_input()
     save(editor)
     ((edit, deadline),) = sent
     assert deadline == DeadlineChange.to(date(2026, 10, 2))
-    assert edit.target_date == date(2026, 10, 1)
+    assert edit.target_date is None
+
+
+def test_a_new_repeating_task_keeps_the_rule_s_first_date(editor: ActionEditor) -> None:
+    created: list[object] = []
+    editor.create_requested.connect(lambda _edit, _steps, rule, _deadline: created.append(rule))
+    editor.new_task(TODAY, TORONTO)
+    editor.title.setText("Bins out")
+    editor.repeat.setCurrentIndex(2)  # Every week on… the task's own Monday.
+
+    editor.has_deadline.setChecked(True)
+    editor.deadline_date.setDate(QDate(2026, 10, 2))
+
+    assert target(editor) is None  # So the repeat still starts on the rule's Monday.
+    save(editor)
+    assert len(created) == 1
+
+
+def test_the_deadline_date_stays_between_2000_and_2099(editor: ActionEditor) -> None:
+    editor.new_task(TODAY, TORONTO)
+    editor.has_deadline.setChecked(True)
+
+    editor.deadline_date.setDate(QDate(9999, 12, 31))
+    assert editor.deadline_date.date() == QDate(2099, 12, 31)
+    editor.deadline_date.setDate(QDate(1999, 1, 1))
+    assert editor.deadline_date.date() == QDate(2000, 1, 1)
+
+
+@pytest.mark.parametrize(
+    ("shown", "key", "after"),
+    [
+        (time(16, 59), Qt.Key.Key_Up, "17:00"),
+        (time(16, 59), Qt.Key.Key_Down, "16:45"),
+        (time(17, 0), Qt.Key.Key_Up, "17:15"),
+        (time(0, 0), Qt.Key.Key_Down, "Any time"),
+        (None, Qt.Key.Key_Up, "00:00"),
+        (None, Qt.Key.Key_Down, "Any time"),
+        (time(23, 45), Qt.Key.Key_Up, "23:45"),
+        (time(9, 5), Qt.Key.Key_PageUp, "10:00"),
+        (time(9, 5), Qt.Key.Key_PageDown, "08:15"),  # 09:00 first, as event times step.
+    ],
+)
+def test_arrows_step_a_time_to_the_next_quarter_hour(
+    editor: ActionEditor, shown: time | None, key: Qt.Key, after: str
+) -> None:
+    editor.edit(FROM_EMAIL, TODAY, TORONTO)
+    editor.deadline_time.set_clock(shown)
+
+    QTest.keyClick(editor.deadline_time, key)
+
+    assert editor.deadline_time.currentText() == after
+
+
+def test_a_half_typed_time_stays_when_stepped(editor: ActionEditor) -> None:
+    editor.edit(FROM_EMAIL, TODAY, TORONTO)
+    editor.deadline_time.setEditText("17:")
+
+    QTest.keyClick(editor.deadline_time, Qt.Key.Key_Up)
+
+    assert editor.deadline_time.currentText() == "17:"
+
+
+def test_a_date_still_being_typed_is_taken_on_save(editor: ActionEditor) -> None:
+    sent = changes(editor)
+    editor.edit(FROM_EMAIL, TODAY, TORONTO)
+    box = editor.deadline_date
+    box.setSelectedSection(box.Section.DaySection)
+    QTest.keyClicks(box, "09")
+    # Typed, not yet taken: the field keeps its date, and nothing has followed it yet.
+    assert (box.text(), box.date()) == ("2026-10-09", QDate(2026, 10, 2))
+    assert editor.suggested.text() == "2026-10-01, one working day before the deadline"
+
+    save(editor)
+
+    ((edit, deadline),) = sent
+    assert deadline == DeadlineChange.to(date(2026, 10, 9))
+    assert edit.target_date == date(2026, 10, 8)  # It was the suggestion, so it follows.
 
 
 def test_a_time_is_chosen_from_the_list_or_typed(editor: ActionEditor) -> None:

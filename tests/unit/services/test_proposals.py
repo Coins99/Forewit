@@ -826,7 +826,7 @@ async def test_a_completing_proposal_moves_a_repeating_task_on(
 
 # Deadlines the owner set (B06)
 
-OWNER_FRIDAY: dict[str, Any] = {**FRIDAY, "deadline_text": "2026-10-02", "deadline_origin": "owner"}
+OWNER_FRIDAY: dict[str, Any] = {**FRIDAY, "deadline_text": None, "deadline_origin": "owner"}
 
 
 async def test_a_new_deadline_over_the_owner_s_says_so_and_undo_brings_theirs_back(
@@ -851,7 +851,7 @@ async def test_a_new_deadline_over_the_owner_s_says_so_and_undo_brings_theirs_ba
     assert (undone.deadline_origin, undone.deadline_date, undone.deadline_text) == (
         DeadlineOrigin.OWNER,
         date(2026, 10, 2),
-        "2026-10-02",
+        None,
     )
     (pending,) = await service.pending()
     assert pending.replaces_owner_deadline
@@ -893,6 +893,33 @@ async def test_an_email_naming_the_deadline_the_owner_replaced_proposes_nothing(
 
     assert created == 0
     assert await count(session) == 0
+
+
+async def test_once_an_email_s_deadline_is_back_the_one_replaced_earlier_counts_again(
+    session: AsyncSession, service: ProposalService
+) -> None:
+    owner = await account(session)
+    source = email("source", at=SOURCE_AT)
+    await cache(session, owner, source)
+    # The owner replaced the email's "next Monday", then applied an email's Friday.
+    await action(
+        session,
+        owner,
+        [source],
+        **FRIDAY,
+        stated_deadline_text="next Monday",
+        stated_deadline_precision="date",
+        stated_deadline_date=date(2026, 10, 5),
+        stated_deadline_timezone=ZONE,
+    )
+    reply = email("reply")
+    row_id = await cache(session, owner, reply)
+
+    created = await service.derive(
+        owner, [planned(reply, signal(FollowUpKind.NEW_DEADLINE), row_id)], ZONE
+    )
+
+    assert created == 1  # Monday is news again: an email's Friday has replaced it since.
 
 
 @pytest.mark.parametrize("dated", [True, False])

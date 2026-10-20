@@ -33,7 +33,8 @@ from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.messages import NormalizedMessage, ProviderKind, is_own_message
 from mailbrief.services.actions import ActionConflictError, touch, urgency
 from mailbrief.services.analysis import PlannedMessage
-from mailbrief.services.deadlines import ResolvedDeadline, suggest_target_for
+from mailbrief.services.deadlines import resolved, suggest_target_for
+from mailbrief.services.preferences import OwnerZone
 from mailbrief.services.recurrence import Repeats
 from mailbrief.services.threads import own_addresses
 from mailbrief.services.writes import commit_once
@@ -108,17 +109,22 @@ def _is_deadline(
 
 
 def _same_deadline(action: ActionTable, analysis: MessageAnalysis) -> bool:
-    """Whether the email's deadline is the action's already, or the email's deadline the
-    owner replaced or cleared (B06): proposing it would change nothing, or undo their choice.
+    """Whether the email's deadline is the action's already, or, while the owner's choice
+    stands (they set or cleared the deadline), the email's deadline they replaced (B06):
+    proposing it would change nothing, or undo their choice. Once an email's deadline is the
+    action's again, the one the owner replaced earlier no longer counts.
     """
-    return _is_deadline(
+    current = _is_deadline(
         analysis,
         action.deadline_precision,
         action.deadline_text,
         action.deadline_date,
         action.deadline_at_utc,
         action.deadline_timezone,
-    ) or _is_deadline(
+    )
+    if current or action.deadline_origin == DeadlineOrigin.EMAIL.value:
+        return current
+    return _is_deadline(
         analysis,
         action.stated_deadline_precision,
         action.stated_deadline_text,
@@ -181,13 +187,7 @@ def _new_row(
         created_at_utc=now,
     )
     if analysis.follow_up is FollowUpKind.NEW_DEADLINE:
-        deadline = ResolvedDeadline(
-            analysis.deadline_text,
-            analysis.deadline_precision,
-            analysis.deadline_date,
-            analysis.deadline_at_utc,
-            analysis.deadline_timezone,
-        )
+        deadline = resolved(analysis)
         target, reason = suggest_target_for(deadline, message.received_at_utc, timezone_name)
         row.deadline_text = deadline.text
         row.deadline_precision = deadline.precision.value
@@ -218,7 +218,9 @@ class ProposalService:
         self._clock = clock
         self._proposals = ProposalRepository(session)
         self._actions = ActionRepository(session)
-        self._repeats = Repeats(session, self._actions, zone=zone, id_factory=new_public_id)
+        self._repeats = Repeats(
+            session, self._actions, zone=OwnerZone(session, zone), id_factory=new_public_id
+        )
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         return await commit_once(self._session, self._clock, operation)

@@ -316,9 +316,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   it, and `deadline_origin` is set exactly when there is one. Only the owner's
   `DeadlineChange` (through `ActionService.create` or `save`) sets an owner deadline; AI runs
   never write a deadline, and only an applied follow-up proposal replaces one, as the email's,
-  with Undo. Replacing or clearing an email's deadline first copies it to
-  `stated_deadline_*`. A deadline change re-suggests the target but never moves the target
-  date, and moving a target date or an event never moves a deadline.
+  with Undo. An owner deadline is a date from 2000 to 2099 or an instant, with no phrase
+  (`deadline_text` NULL; it stays an email's words). Replacing or clearing an email's deadline
+  first copies it to `stated_deadline_*`. A deadline change re-suggests the target but never
+  moves or sets the target date, and moving a target date or an event never moves a deadline.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.
@@ -453,8 +454,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Send only the parts the owner ticks for that generation: the email being replied to
   (subject, sender name only, received time in the owner's zone, and its body, downloaded
   then, prepared like the brief's and never stored); the linked action (title, ownership,
-  target date, deadline phrase, steps in order up to 2,000 characters in all, at most 2,000
-  characters of notes); the draft's current title and body (at most 8,000 characters).
+  target date, deadline phrase, or the date and local time of a deadline the owner set,
+  steps in order up to 2,000 characters in all, at most 2,000 characters of notes); the draft's current title and body (at most 8,000 characters).
   Always: kind, tone, length, the owner's instructions (at most 1,000 characters) and
   today's date.
 - Never send the sender's address, To or Cc, other emails, attachments, other drafts or

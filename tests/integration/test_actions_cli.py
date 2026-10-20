@@ -82,7 +82,7 @@ def test_the_list_marks_a_deadline_the_owner_set(
                             title=f"Action {index}",
                             ownership="mine",
                             status="open",
-                            deadline_text="by Friday" if origin == "email" else "2026-10-02",
+                            deadline_text="by Friday" if origin == "email" else None,
                             deadline_precision="date",
                             deadline_date=date(2026, 10, 2),
                             deadline_timezone="UTC",
