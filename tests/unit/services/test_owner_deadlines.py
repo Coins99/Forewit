@@ -48,6 +48,7 @@ def edit(action: Action | None = None, **changes: object) -> ActionEdit:
     values: dict[str, object] = {
         "title": "Plan the week" if action is None else action.title,
         "ownership": ActionOwnership.MINE if action is None else action.ownership,
+        "person": None if action is None else action.person,
         "priority": None,
         "tags": (),
         "effort": None if action is None else action.effort,

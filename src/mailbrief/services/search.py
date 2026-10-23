@@ -1,9 +1,10 @@
 """Search the owner's local records for the command palette (Ctrl+K).
 
-Only this computer's SQLite is read: actions (title, notes and steps), drafts and notes
-(title and body), the owner's events (title and notes), cached Google event titles, and
-the cached metadata of the connected Gmail account (subject, sender and Gmail's preview
-snippet; bodies are never stored, so never searched). Nothing is sent anywhere or written.
+Only this computer's SQLite is read: actions (title, notes, steps and who they wait on or
+are for), drafts and notes (title and body), the owner's events (title and notes), cached
+Google event titles, and the cached metadata of the connected Gmail account (subject, sender
+and Gmail's preview snippet; bodies are never stored, so never searched). Nothing is sent
+anywhere or written.
 The query is the owner's text: logs carry only counts.
 
 Every word must appear somewhere in a record. Queries are parameterized LIKE patterns with
@@ -108,7 +109,12 @@ class SearchService:
         ]
         matches = and_(
             *(
-                or_(_contains(ActionTable.title, term), _contains(ActionTable.notes, term), step)
+                or_(
+                    _contains(ActionTable.title, term),
+                    _contains(ActionTable.notes, term),
+                    _contains(ActionTable.person, term),
+                    step,
+                )
                 for term, step in zip(terms, in_steps, strict=True)
             )
         )

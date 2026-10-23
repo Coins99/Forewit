@@ -320,7 +320,7 @@ class DesktopBackend(Protocol):
     async def list_areas(self) -> tuple[LifeArea, ...]: ...
     async def list_organization(
         self,
-    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...]]: ...
+    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...], tuple[str, ...]]: ...
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
     ) -> Project | LifeArea: ...
@@ -1239,7 +1239,6 @@ class MainWindow(QMainWindow):
         if self.workspace.current_page() == "actions":
             self.workspace.sidebar.set_current(self._sidebar_key())
             waiting = self.actions_panel.view() is ActionFilter.WAITING
-            self.actions_panel.new_task_button.setVisible(not waiting)
             self.workspace.header.title.setText("Waiting" if waiting else "Actions")
             self.workspace.header.date.setText(
                 "Keep track of commitments you’re waiting on from other people."
@@ -1461,11 +1460,11 @@ class MainWindow(QMainWindow):
         now = self.now()
         today = now.astimezone(self.zone).date()
         try:
-            projects, areas, tags = await self.backend.list_organization()
+            projects, areas, tags, people = await self.backend.list_organization()
             self._projects, self._areas = projects, areas
             self.action_editor.set_projects(self._projects)
             self.action_editor.set_tags(tags)
-            self.actions_panel.show_groups(self._projects, self._areas, tags)
+            self.actions_panel.show_groups(self._projects, self._areas, tags, people)
             group, group_id = self.actions_panel.grouping()
             for view in ActionFilter:
                 actions = (
@@ -1778,7 +1777,9 @@ class MainWindow(QMainWindow):
             self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
             return
         self.action_editor.set_embedded(self.actions_panel.detail_host, window=self)
-        self.action_editor.new_task(self._local_today(), self.zone)
+        # On the Waiting page a new task starts as someone else's to do (B08).
+        waiting = self.actions_panel.view() is ActionFilter.WAITING
+        self.action_editor.new_task(self._local_today(), self.zone, waiting=waiting)
         self.actions_panel.detail_host.addWidget(self.action_editor)
         self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
         self.action_editor.show()

@@ -38,16 +38,20 @@ def clock(moment: datetime, zone: ZoneInfo) -> str:
 
 
 def marker_text(marker: ActionMarker, zone: ZoneInfo) -> str:
-    """ "Deadline · Pay the invoice", "Deadline 17:00 · …" or "Target · …", and who does it
-    when someone else does."""
+    """ "Deadline · Pay the invoice", "Deadline 17:00 · …", "Target · …" or, for an action
+    the owner waits for, "Follow up · …" (B08); and who it is with: "waiting on Alex" (or
+    "waiting for others" without a name) or "for Sam"."""
     if marker.kind is MarkerKind.TARGET:
-        label = "Target"
+        label = "Follow up" if marker.waiting else "Target"
     elif marker.due_at_utc is None:
         label = "Deadline"
     else:
         label = f"Deadline {clock(marker.due_at_utc, zone)}"
-    waiting = " · waiting for others" if marker.waiting else ""
-    return f"{label} · {marker.action_title}{waiting}"
+    if marker.waiting:
+        who = " · waiting for others" if marker.person is None else f" · waiting on {marker.person}"
+    else:
+        who = "" if marker.person is None else f" · for {marker.person}"
+    return f"{label} · {marker.action_title}{who}"
 
 
 def entry_key(entry: Entry) -> tuple[str, ...]:

@@ -407,8 +407,16 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
   them under its old names), so only the text between them is rebuilt. In order, every
   mail-, AI- or owner-written line a `WrapLabel`:
   1. Title, 20px Semibold (`actionTitle`).
-  2. State, secondary: "Yours · open", "Waiting for someone · open" (either with " · carried over" while it
-     applies) or "Completed Tue Oct 6".
+  2. State, secondary: "Yours · open", "Waiting for someone · open", or with the person the
+     owner named (B08) "Yours, for Sam · open" and "Waiting on Alex · open" (each with
+     " · carried over" while it applies), or "Completed Tue Oct 6". Then the facts row
+     (`actionFacts`): Waiting on, Waiting since ("Wed Sep 30 · 3 days") and Follow-up for an
+     open waiting action, else Owner ("You, for Sam"), Project and Source email; and, for a
+     waiting action only when something calls for it, the follow-up prompt
+     (`waitingFollowUp`, heading `waitingFollowUpHeading`): "{sender} replied" for unseen
+     messages from others, else "Follow up with Alex" or "Time to follow up" once the
+     deadline has passed or the follow-up date has come. A waiting action's target reads
+     "Follow up Mon Oct 5" wherever another's reads "Target …".
   3. "Due {deadline_text}", with " · Set by you" for a deadline the owner set (B06) and
      " · Overdue" when overdue (then warning, else secondary)
      (`actionDeadline`); the target with its reason while it is still the suggested one

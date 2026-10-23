@@ -29,6 +29,7 @@ from mailbrief.domain.actions import (
     SuggestionState,
     SuggestionView,
     ThreadActivity,
+    person_key,
     tag_key,
 )
 from mailbrief.domain.analysis import (
@@ -279,7 +280,7 @@ def stated_deadline(row: ActionTable) -> StatedDeadline | None:
 def action_from_rows(
     row: ActionTable,
     steps: Sequence[ActionStepTable],
-    sources: Sequence[tuple[ActionSourceTable, bool | None]],
+    sources: Sequence[tuple[ActionSourceTable, bool | None, str | None]],
     thread: ThreadActivity | None = None,
     proposals: Sequence[ActionProposal] = (),
     activity: Sequence[ActionActivity] = (),
@@ -287,13 +288,16 @@ def action_from_rows(
     tags: Sequence[str] = (),
     repeat: ActionRepeat | None = None,
 ) -> Action:
-    """Rebuild an action; each source pairs its snapshot with the cached Inbox state, if any,
-    ``thread`` is its derived thread activity, and ``proposals`` its pending proposals."""
+    """Rebuild an action; each source has its snapshot, then the cached message's Inbox state
+    and sender name, if it is cached, ``thread`` is its derived thread activity, and
+    ``proposals`` its pending proposals."""
     return Action(
         public_id=row.public_id,
         project=project,
         title=row.title,
         ownership=ActionOwnership(row.ownership),
+        person=row.person,
+        waiting_since_utc=row.waiting_since_utc,
         status=ActionStatus(row.status),
         priority=None if row.priority is None else ActionPriority(row.priority),
         tags=tuple(sorted(tags, key=tag_key)),
@@ -328,12 +332,13 @@ def action_from_rows(
                 provider_message_id=source.provider_message_id,
                 subject=source.subject,
                 sender_address=source.sender_address,
+                sender_name=sender_name or None,
                 web_link=HttpUrl(source.web_link),
                 received_at_utc=source.received_at_utc,
                 available=source.message_id is not None,
                 in_inbox=in_inbox,
             )
-            for source, in_inbox in sources
+            for source, in_inbox, sender_name in sources
         ),
         thread_seen_until_utc=row.thread_seen_until_utc,
         repeat=repeat,
@@ -851,6 +856,23 @@ class ActionRepository:
         )
         return tuple(result.all())
 
+    async def people(self, view: ActionFilter | None = None) -> tuple[str, ...]:
+        """The people live actions wait on or are for, those of ``view`` when given, once each
+        in the spelling of the earliest action naming them, sorted by key (B08)."""
+        shown = [ActionTable.deleted_at_utc.is_(None)] if view is None else self._in_view(view)
+        earliest = (
+            select(func.min(ActionTable.id).label("first_id"))
+            .where(*shown, ActionTable.person_key.is_not(None))
+            .group_by(ActionTable.person_key)
+            .subquery()
+        )
+        result = await self._session.scalars(
+            select(ActionTable.person)
+            .join(earliest, ActionTable.id == earliest.c.first_id)
+            .order_by(ActionTable.person_key)
+        )
+        return tuple(person for person in result.all() if person is not None)
+
     @staticmethod
     def _in_view(view: ActionFilter) -> list[ColumnElement[bool]]:
         """The conditions for a live action to appear in ``view``."""
@@ -888,7 +910,9 @@ class ActionRepository:
                     )
                 )
             ]
-        raise ValueError("Choose a project, life area, tag or unassigned tasks.")
+        if kind == "person" and public_id is not None:
+            return [ActionTable.person_key == person_key(public_id)]
+        raise ValueError("Choose a project, life area, tag, person or unassigned tasks.")
 
     async def list_rows(
         self,
@@ -993,18 +1017,18 @@ class ActionRepository:
             )
             for step in step_result:
                 steps.setdefault(step.action_id, []).append(step)
-        sources: dict[int, list[tuple[ActionSourceTable, bool | None]]] = {}
+        sources: dict[int, list[tuple[ActionSourceTable, bool | None, str | None]]] = {}
         for chunk in sorted_batches(ids):
             source_result = await self._session.execute(
-                select(ActionSourceTable, MessageTable.is_in_inbox)
+                select(ActionSourceTable, MessageTable.is_in_inbox, MessageTable.sender_name)
                 .outerjoin(MessageTable, ActionSourceTable.message_id == MessageTable.id)
                 .where(ActionSourceTable.action_id.in_(chunk))
                 .order_by(ActionSourceTable.action_id, ActionSourceTable.id)
             )
-            for source, in_inbox in source_result.tuples():
-                sources.setdefault(source.action_id, []).append((source, in_inbox))
+            for source, in_inbox, sender_name in source_result.tuples():
+                sources.setdefault(source.action_id, []).append((source, in_inbox, sender_name))
         snapshots = {
-            action_id: [source for source, _ in pairs] for action_id, pairs in sources.items()
+            action_id: [source for source, _, _ in found] for action_id, found in sources.items()
         }
         accounts, cached = await self._thread_messages(snapshots)
         proposals = await ProposalRepository(self._session).pending_for_actions(ids)

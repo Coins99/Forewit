@@ -46,6 +46,7 @@ DAY_31 = RepeatRule(frequency=RepeatFrequency.MONTHLY_DAY, month_day=31)
 TASK = ActionEdit(
     title="Water plants",
     ownership=ActionOwnership.MINE,
+    person=None,
     effort=None,
     priority=None,
     tags=("Home",),

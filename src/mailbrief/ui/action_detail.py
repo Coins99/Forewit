@@ -30,8 +30,10 @@ from mailbrief.ui.action_text import (
     ActionDetails,
     action_details,
     completed_text,
+    follow_up_text,
     gmail_source,
     priority_text,
+    since_text,
     tags_text,
     target_text,
 )
@@ -52,14 +54,46 @@ OPEN_MARK: Final = "○ "
 
 
 def state_text(action: Action, details: ActionDetails) -> str:
-    """The state line: "Yours · open", "Waiting for someone · open", either with " · carried
-    over" while that applies, or "Completed Tue Oct 6"."""
+    """The state line: "Yours · open", "Waiting for someone · open", or with the person the
+    owner named, "Yours, for Sam · open" and "Waiting on Alex · open", each with " · carried
+    over" while that applies; or "Completed Tue Oct 6"."""
     completed = completed_text(details)
     if action.status is ActionStatus.COMPLETED and completed is not None:
         return completed
-    who = "Yours" if action.ownership is ActionOwnership.MINE else "Waiting for someone"
-    state = f"{who} · {action.status.value}"
+    state = f"{owner_text(action, mine='Yours')} · {action.status.value}"
     return f"{state} · carried over" if details.carried_over else state
+
+
+def owner_text(action: Action, *, mine: str) -> str:
+    """Whose the action is, with the person the owner named (B08): ``mine``, or "``mine``,
+    for Sam"; "Waiting for someone", or "Waiting on Alex"."""
+    person = action.person
+    if action.ownership is ActionOwnership.MINE:
+        return mine if person is None else f"{mine}, for {person}"
+    return "Waiting for someone" if person is None else f"Waiting on {person}"
+
+
+def follow_up_prompt(action: Action, details: ActionDetails) -> tuple[str, str] | None:
+    """What the callout of an action the owner waits for says, as a heading and a line, or
+    None while nothing calls for it (B08): a reply from others in its thread, then a deadline
+    that has passed or a follow-up date that has come."""
+    if not details.waiting:
+        return None
+    thread = action.thread
+    if details.new_messages and thread is not None and thread.latest_sender is not None:
+        return (
+            f"{thread.latest_sender} replied",
+            "If it's what you were waiting for, mark it received.",
+        )
+    target = details.target
+    if not details.overdue and (target is None or target > details.today):
+        return None
+    heading = "Time to follow up" if action.person is None else f"Follow up with {action.person}"
+    if details.overdue:
+        return heading, "The deadline has passed. Draft a short check-in."
+    if target == details.today:
+        return heading, "It's your follow-up date. Draft a short check-in."
+    return heading, f"Your follow-up date was {follow_up_text(details, reason=False)}."
 
 
 def proposals_text(count: int) -> str:
@@ -331,19 +365,13 @@ class ActionDetailPane(QScrollArea):
         source = action.sources[0] if action.sources else None
         values = (
             (
-                (
-                    "WAITING SINCE",
-                    day_text(action.created_at_utc.astimezone(zone).date(), today=today),
-                ),
-                ("FOLLOW-UP", target_text(details) or "No date set"),
-                ("SOURCE", (source.subject or NO_SUBJECT) if source else "Manual task"),
+                ("WAITING ON", action.person or "Not set"),
+                ("WAITING SINCE", since_text(details) or "Not set"),
+                ("FOLLOW-UP", follow_up_text(details) or "No date set"),
             )
             if details.waiting
             else (
-                (
-                    "OWNER",
-                    "You" if action.ownership is ActionOwnership.MINE else "Waiting for someone",
-                ),
+                ("OWNER", owner_text(action, mine="You")),
                 ("PROJECT", action.project.name if action.project else "Unassigned"),
                 ("SOURCE EMAIL", (source.subject or NO_SUBJECT) if source else "Manual task"),
             )
@@ -358,20 +386,21 @@ class ActionDetailPane(QScrollArea):
         facts_layout.addLayout(columns)
         facts_layout.addWidget(HairlineDivider())
         top.append(facts)
-        if details.waiting:
+        prompt = follow_up_prompt(action, details)
+        if prompt is not None:
+            heading, line = prompt
             callout = QWidget()
             callout.setObjectName("waitingFollowUp")
-            callout.setAccessibleName("Suggested follow-up")
+            callout.setAccessibleName("Follow-up")
             callout.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             copy = QVBoxLayout(callout)
             copy.setContentsMargins(14, 12, 14, 12)
             copy.setSpacing(5)
-            copy.addWidget(plain_label("Suggested follow-up", px=11, medium=True))
-            copy.addWidget(
-                wrap_label(
-                    "Draft a short check-in when you're ready to follow up.", tone="muted", px=9
-                )
-            )
+            # A person's name or a sender's: plain, and wrapped inside a long unbroken one.
+            title = wrap_label(heading, px=11, medium=True)
+            title.setObjectName("waitingFollowUpHeading")
+            copy.addWidget(title)
+            copy.addWidget(wrap_label(line, tone="muted", px=9))
             top.append(callout)
         summary = top
         top = self._plan(action, details)

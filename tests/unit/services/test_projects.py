@@ -25,6 +25,7 @@ from mailbrief.storage.tables import LifeAreaTable, ProjectTable
 TASK = ActionEdit(
     title="Finish proposal",
     ownership=ActionOwnership.MINE,
+    person=None,
     effort=None,
     priority=None,
     tags=(),

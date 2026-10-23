@@ -576,6 +576,9 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
         "ck_actions_deadline_origin_known",
         "ck_actions_deadline_origin_set",
         "ck_actions_stated_deadline_precision_known",
+        "ck_actions_person_length",
+        "ck_actions_person_key_set",
+        "ck_actions_waiting_since_set",
     }
     assert created_schema["action_tags"]["constraints"] == {
         "pk_action_tags",
@@ -1255,8 +1258,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261020_0023"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261020_0023",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261023_0024"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261023_0024",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1423,7 +1426,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261020_0023",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261023_0024",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")
@@ -1656,7 +1659,7 @@ def test_recurring_tasks_upgrade_keeps_every_row_and_downgrades_cleanly(tmp_path
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
             connection.execute("UPDATE actions SET status='archived'")
         connection.commit()
-    command.upgrade(config, "head")  # Alembic check requires the current head, now 0023.
+    command.upgrade(config, "head")  # Alembic check requires the current head, now 0024.
     command.check(config)
 
     command.downgrade(config, "20261014_0020")
@@ -1796,6 +1799,7 @@ def test_owner_deadlines_mark_every_existing_deadline_as_the_email_s(tmp_path: P
             " deadline_timezone='America/Toronto' WHERE id=3"
         )
         connection.commit()
+    command.upgrade(config, "head")  # Alembic check requires the current head, now 0024.
     command.check(config)
 
     command.downgrade(config, "20261016_0022")
@@ -1809,4 +1813,64 @@ def test_owner_deadlines_mark_every_existing_deadline_as_the_email_s(tmp_path: P
         ("2026-10-16 21:00 UTC", "datetime")
     ]
     assert len(_query(path, "SELECT id FROM actions")) == 3
+    assert _schema(path) == _schema(fresh)
+
+
+def test_waiting_people_backfill_waits_from_creation_and_downgrade_keeps_tasks(
+    tmp_path: Path,
+) -> None:
+    """0024 (B08) adds who a task waits on or is for, and since when a waiting one waits:
+    from its creation for existing ones, as earlier versions showed it."""
+    path = tmp_path / "waiting.sqlite3"
+    config = _alembic_config(path)
+    command.upgrade(config, "20261020_0023")
+    with closing(sqlite3.connect(path)) as connection:
+        for number, (ownership, created) in enumerate(
+            (("mine", "2026-10-15 09:00:00"), ("waiting_for", "2026-10-12 08:30:00"))
+        ):
+            connection.execute(
+                "INSERT INTO actions(public_id,title,ownership,status,created_at_utc,"
+                "updated_at_utc) VALUES(?,?,?,'open',?,?)",
+                (f"5b1d0d0e-3f4c-4a3e-8f5e-0c6b8f7a2d3{number}", f"Task {number}", ownership)
+                + (created, created),
+            )
+        connection.execute(
+            _SERIES_INSERT, ("6c2e1e1f-4a5d-4b4f-9a6f-1d7c9a8b3e31", "daily", 0, None)
+        )
+        connection.commit()
+    kept = ("actions", "action_series")
+    before = _rows(path, kept)
+    fresh = tmp_path / "fresh-0023.sqlite3"
+    command.upgrade(_alembic_config(fresh), "20261020_0023")
+
+    command.upgrade(config, "20261023_0024")
+
+    assert _earlier_columns(_rows(path, kept), before) == before
+    assert _query(
+        path, "SELECT ownership, person, person_key, waiting_since_utc FROM actions ORDER BY id"
+    ) == [("mine", None, None, None), ("waiting_for", None, None, "2026-10-12 08:30:00")]
+    indexes = _schema(path)["actions"]["indexes"]
+    assert isinstance(indexes, set) and ("ix_actions_person_key", ("person_key",)) in indexes
+    with closing(sqlite3.connect(path)) as connection:
+        for statement in (
+            "UPDATE actions SET person='Alex' WHERE id=2",  # No key.
+            "UPDATE actions SET person_key='alex' WHERE id=2",  # No name.
+            f"UPDATE actions SET person='{'a' * 121}', person_key='{'a' * 121}' WHERE id=2",
+            "UPDATE actions SET person='', person_key='' WHERE id=2",
+            "UPDATE actions SET waiting_since_utc=NULL WHERE id=2",
+            "UPDATE actions SET waiting_since_utc='2026-10-15 09:00:00' WHERE id=1",
+            "UPDATE actions SET ownership='waiting_for' WHERE id=1",
+            f"UPDATE action_series SET person='{'a' * 121}'",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+                connection.execute(statement)
+        connection.execute("UPDATE actions SET person='Alex', person_key='alex' WHERE id=2")
+        connection.execute("UPDATE action_series SET person='Sam'")
+        connection.commit()
+    command.upgrade(config, "head")  # Alembic check requires the current head.
+    command.check(config)
+
+    command.downgrade(config, "20261020_0023")
+
+    assert _rows(path, kept) == before
     assert _schema(path) == _schema(fresh)

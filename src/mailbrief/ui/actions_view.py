@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.actions import Action, ActionFilter, ActionStatus, tag_key
+from mailbrief.domain.actions import Action, ActionFilter, ActionStatus, person_key, tag_key
 from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.projects import LifeArea, Project
 from mailbrief.ui.action_detail import ActionDetailPane
@@ -51,10 +51,14 @@ from mailbrief.ui.action_text import (
     action_details,
     completed_text,
     gmail_source,
+    initials,
+    person_text,
     priority_text,
     repeat_short,
     tags_text,
     target_text,
+    waited_for,
+    waited_text,
 )
 from mailbrief.ui.brief_list import (
     CHIP_GAP,
@@ -146,7 +150,11 @@ def describe_details(action: Action, facts: ActionDetails) -> str:
     if (repeat := repeat_short(action)) is not None:
         details.append(repeat.lower())
     if facts.waiting:
-        details.append("waiting for someone")
+        who = "waiting for someone" if action.person is None else f"waiting on {action.person}"
+        waited = waited_for(facts)
+        details.append(who if waited is None else f"{who}, {waited}")
+    elif (with_person := person_text(action)) is not None:
+        details.append(with_person[0].lower() + with_person[1:])
     if facts.overdue:
         details.append("overdue")
     if facts.carried_over:
@@ -178,9 +186,18 @@ def action_row(action: Action, *, today: date, zone: ZoneInfo, now: datetime) ->
 
 def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
     """``action_row``, from details already worked out."""
+    # Who it is with (B08): a waiting row starts with the person and how long it has waited,
+    # "Alex · 3 days", or without a name "Waiting 3 days".
+    if not facts.waiting:
+        lead: tuple[str | None, ...] = (person_text(action),)
+    elif action.person is None:
+        lead = (waited_text(facts),)
+    else:
+        lead = (action.person, waited_for(facts))
     meta = [
         text
         for text in (
+            *lead,
             completed_text(facts),
             target_text(facts, reason=False),  # The detail pane gives the reason.
             None if facts.due is None else f"Due {facts.due}",
@@ -207,10 +224,16 @@ def row_from_details(action: Action, facts: ActionDetails) -> ActionRow:
         meta=" · ".join(meta) if meta else NO_DATES,
         chips=tuple(chips),
         muted=facts.completed is not None,
-        avatar=(action.sources[0].sender_address[:2].upper() if action.sources else "?")
-        if facts.waiting
-        else "",
+        avatar=_avatar(action) if facts.waiting else "",
     )
+
+
+def _avatar(action: Action) -> str:
+    """A waiting row's avatar: the initials of whom it waits on, else the first letters of
+    its email's sender, else "?"."""
+    if action.person is not None:
+        return initials(action.person)
+    return action.sources[0].sender_address[:2].upper() if action.sources else "?"
 
 
 def has_activity(action: Action) -> bool:
@@ -376,7 +399,7 @@ class ActionsPanel(QWidget):
         self.group.setObjectName("actionGroup")
         # Keep the project filter in the Tab order on Cocoa as well as Windows.
         self.group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.group.setAccessibleName("Filter tasks by project, life area or tag")
+        self.group.setAccessibleName("Filter tasks by project, life area, tag or person")
         # Seven characters: with the gap beside it, the page is no wider than before.
         self.group.setMinimumContentsLength(7)
         self.group.setSizeAdjustPolicy(
@@ -522,6 +545,7 @@ class ActionsPanel(QWidget):
         projects: tuple[Project, ...],
         areas: tuple[LifeArea, ...],
         tags: tuple[str, ...] = (),
+        people: tuple[str, ...] = (),
     ) -> None:
         selected = self.group.currentData()
         self.group.blockSignals(True)
@@ -535,6 +559,8 @@ class ActionsPanel(QWidget):
             self.group.addItem(f"Project: {project.name}{suffix}", "project:" + project.public_id)
         for tag in tags:
             self.group.addItem(f"Tag: {tag}", "tag:" + tag_key(tag))
+        for person in people:  # Who tasks wait on or are for (B08), matched as tags are.
+            self.group.addItem(f"Person: {person}", "person:" + person_key(person))
         self.group.setCurrentIndex(max(0, self.group.findData(selected)))
         self.group.blockSignals(False)
 

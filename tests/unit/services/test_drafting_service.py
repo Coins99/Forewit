@@ -158,6 +158,7 @@ async def seed_action_note(
         ActionEdit(
             title="Send the Q3 numbers",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),

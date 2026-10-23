@@ -28,6 +28,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     SuggestionState,
     ThreadLink,
+    person_key,
     tag_key,
 )
 from mailbrief.domain.analysis import (
@@ -165,10 +166,23 @@ def _check_step_list(steps: Sequence[StepEdit]) -> list[int]:
     return listed
 
 
-def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
+def _set_ownership(row: ActionTable, ownership: ActionOwnership, now: datetime) -> None:
+    """Give the action ``ownership`` (B08): one that becomes someone else's to do waits from
+    ``now``, one that stays theirs keeps its wait, and one that becomes the owner's waits no
+    longer."""
+    if ownership is not ActionOwnership.WAITING_FOR:
+        row.waiting_since_utc = None
+    elif row.ownership != ownership.value or row.waiting_since_utc is None:
+        row.waiting_since_utc = now
+    row.ownership = ownership.value
+
+
+def _apply_edit(row: ActionTable, edit: ActionEdit, now: datetime) -> None:
     row.project_public_id = edit.project_public_id
     row.title = edit.title
-    row.ownership = edit.ownership.value
+    _set_ownership(row, edit.ownership, now)
+    row.person = edit.person
+    row.person_key = None if edit.person is None else person_key(edit.person)
     row.priority = None if edit.priority is None else edit.priority.value
     row.effort = None if edit.effort is None else edit.effort.value
     row.estimate_minutes = edit.estimate_minutes
@@ -404,7 +418,7 @@ class ActionService:
                 updated_at_utc=now,
                 revision=1,
             )
-            _apply_edit(row, edit)
+            _apply_edit(row, edit, now)
             if deadline is not None:
                 await self._apply_deadline(row, deadline, now)
             await self._repository.add_action(row)
@@ -477,6 +491,10 @@ class ActionService:
                     public_id=self._id_factory(),
                     title=suggestion.title,
                     ownership=suggestion.ownership.value,
+                    # It waits from now; whom it waits on is the owner's to say.
+                    waiting_since_utc=(
+                        now if suggestion.ownership is ActionOwnership.WAITING_FOR else None
+                    ),
                     status=ActionStatus.OPEN.value,
                     effort=None if suggestion.effort is None else suggestion.effort.value,
                     **deadline_columns(suggestion),
@@ -710,7 +728,7 @@ class ActionService:
             listed = [] if steps is None else _check_step_list(steps)
             row = await self._live(public_id, expected_revision)
             await self._check_project(edit, row.project_public_id)
-            _apply_edit(row, edit)
+            _apply_edit(row, edit, now)
             if deadline is not None:
                 await self._apply_deadline(row, deadline, now)
             await self._apply_tags(row, edit, now)
@@ -942,6 +960,12 @@ class ActionService:
     async def list_tags(self) -> tuple[str, ...]:
         """Every tag on a live task, once each, sorted; the Actions filter offers them."""
         return await self._repository.tag_names()
+
+    async def list_people(self, view: ActionFilter | None = None) -> tuple[str, ...]:
+        """The people live actions wait on or are for, a view's when given, once each and
+        sorted (B08); the Actions filter offers them, and ``group="person"`` lists one's
+        actions."""
+        return await self._repository.people(view)
 
     async def count_actions(
         self, view: ActionFilter, *, group: str = "all", group_id: str | None = None

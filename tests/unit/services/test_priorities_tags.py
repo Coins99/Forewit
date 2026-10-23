@@ -29,6 +29,7 @@ TODAY = START.date()
 TASK = ActionEdit(
     title="Renew passport",
     ownership=ActionOwnership.MINE,
+    person=None,
     effort=None,
     priority=None,
     tags=(),

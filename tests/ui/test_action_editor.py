@@ -130,6 +130,7 @@ def test_saving_without_plan_changes_sends_no_steps(editor: ActionEditor) -> Non
     assert edit == ActionEdit(
         title="Send the final Q3 deck",
         ownership=ActionOwnership.WAITING_FOR,
+        person=None,
         effort=None,
         priority=None,
         tags=(),

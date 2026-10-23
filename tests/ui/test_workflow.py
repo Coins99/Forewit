@@ -346,8 +346,10 @@ class FakeBackend(FakeDrafts):
 
     async def list_organization(
         self,
-    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...]]:
-        return await self.list_projects(), await self.list_areas(), self.tags
+    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...], tuple[str, ...]]:
+        listed = [action for actions in self.actions.values() for action in actions]
+        people = tuple(sorted({action.person for action in listed if action.person}))
+        return await self.list_projects(), await self.list_areas(), self.tags, people
 
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit

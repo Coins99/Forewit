@@ -1,7 +1,7 @@
 """The Actions page: painted rows with plain item text, counts, the detail pane, buttons,
 requests and safe source links."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
@@ -156,7 +156,7 @@ def test_waiting_unresolved_and_unavailable_details(panel: ActionsPanel) -> None
     show(panel, ActionFilter.WAITING, waiting)
 
     assert row_text(panel, ActionFilter.WAITING) == (
-        "Action 2 — due “soon” · waiting for someone · source no longer in local mail"
+        "Action 2 — due “soon” · waiting for someone, since today · source no longer in local mail"
     )
 
 
@@ -409,12 +409,41 @@ def test_a_target_the_owner_moved_drops_the_suggested_reason() -> None:
     assert action_row(moved, today=TODAY, zone=UTC_ZONE, now=NOW).meta == "Target Fri Oct 9"
 
 
-def test_a_waiting_action_s_row_has_no_dates_to_show() -> None:
+def test_a_waiting_action_s_row_says_how_long_it_has_waited() -> None:
     waiting = action(2, ownership=ActionOwnership.WAITING_FOR)
 
     row = action_row(waiting, today=TODAY, zone=UTC_ZONE, now=NOW)
 
-    assert row == ActionRow(title="Action 2", meta=NO_DATES, chips=(), muted=False, avatar="?")
+    assert row == ActionRow(
+        title="Action 2", meta="Waiting since today", chips=(), muted=False, avatar="?"
+    )
+    later = action_row(waiting, today=TODAY + timedelta(days=3), zone=UTC_ZONE, now=NOW)
+    assert later.meta == "Waiting 3 days"
+
+
+def test_a_row_names_whom_it_waits_on_or_is_for() -> None:
+    """B08: a waiting row leads with the person and the wait; the owner's own, with whom
+    it is for."""
+    waiting = action(
+        2,
+        ownership=ActionOwnership.WAITING_FOR,
+        person="Alex Kim",
+        waiting_since_utc=NOW - timedelta(days=1),
+        target_date=date(2026, 10, 5),
+        sources=(source(),),
+    )
+
+    row = action_row(waiting, today=TODAY, zone=UTC_ZONE, now=NOW)
+
+    assert (row.meta, row.avatar) == ("Alex Kim · 1 day · Follow up Mon Oct 5", "AK")
+    assert describe(waiting, today=TODAY, zone=UTC_ZONE, now=NOW) == (
+        "Action 2 — Follow up Mon Oct 5 · waiting on Alex Kim, 1 day"
+    )
+    mine = action(1, person="Sam")
+    assert action_row(mine, today=TODAY, zone=UTC_ZONE, now=NOW).meta == "For Sam"
+    assert describe(mine, today=TODAY, zone=UTC_ZONE, now=NOW) == "Action 1 — for Sam"
+    one_name = action(3, ownership=ActionOwnership.WAITING_FOR, person="Priya")
+    assert action_row(one_name, today=TODAY, zone=UTC_ZONE, now=NOW).avatar == "PR"
 
 
 def test_a_completed_action_s_row_is_muted_with_its_day_in_the_owner_s_zone() -> None:
@@ -655,15 +684,13 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
     assert detail_texts(panel) == [
         "Waiting for someone · open",
         "Action 2",
+        "WAITING ON",
+        "Not set",
         "WAITING SINCE",
         "Sat Oct 3",
         "FOLLOW-UP",
         "No date set",
-        "SOURCE",
-        "Manual task",
-        "Suggested follow-up",
-        "Draft a short check-in when you're ready to follow up.",
-    ]
+    ]  # Nothing calls for a follow-up yet, so there is no prompt.
     assert shown_buttons(panel) == ["draftButton", "completeButton", "editButton", "deleteButton"]
 
 

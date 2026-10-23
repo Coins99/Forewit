@@ -476,6 +476,7 @@ async def test_a_manual_edit_survives_reanalysis_with_different_suggestions(
         ActionEdit(
             title="Send the final Q3 deck",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=ActionEffort.DAYS,
             priority=None,
             tags=(),
@@ -526,6 +527,7 @@ async def test_a_stale_revision_conflicts_and_changes_nothing(
         ActionEdit(
             title="Renamed",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -539,6 +541,7 @@ async def test_a_stale_revision_conflicts_and_changes_nothing(
     lost = ActionEdit(
         title="Lost",
         ownership=ActionOwnership.MINE,
+        person=None,
         effort=None,
         priority=None,
         tags=(),
@@ -589,6 +592,7 @@ async def test_a_second_save_from_the_same_revision_conflicts_and_keeps_the_firs
         return ActionEdit(
             title=title,
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -636,6 +640,7 @@ async def test_unaccept_is_refused_once_the_action_changed_or_has_two_sources(
         ActionEdit(
             title="Edited",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -720,6 +725,7 @@ def plan(action: Action) -> ActionEdit:
     return ActionEdit(
         title=action.title,
         ownership=action.ownership,
+        person=action.person,
         effort=action.effort,
         priority=None,
         tags=(),
@@ -886,6 +892,7 @@ async def test_lists_filter_by_view_and_order_by_target_then_due_then_creation(
         fields: dict[str, Any] = {
             "title": title,
             "ownership": ActionOwnership.MINE,
+            "person": None,
             "effort": None,
             "priority": None,
             "tags": (),
@@ -1390,6 +1397,7 @@ async def test_save_applies_an_edit_and_a_new_plan_as_one_revision(
     edit = ActionEdit(
         title="Send the final deck",
         ownership=ActionOwnership.WAITING_FOR,
+        person=None,
         effort=None,
         priority=None,
         tags=(),
@@ -1424,6 +1432,7 @@ async def test_save_changes_nothing_when_its_plan_is_rejected(
     edit = ActionEdit(
         title="Should not stick",
         ownership=ActionOwnership.MINE,
+        person=None,
         effort=None,
         priority=None,
         tags=(),
@@ -1453,6 +1462,7 @@ async def add_bare_actions(
                 public_id=f"00000000-0000-4000-8000-{index:012d}",
                 title=f"Action {index}",
                 ownership=ownership,
+                waiting_since_utc=START if ownership == "waiting_for" else None,
                 status=status,
                 deadline_precision="none",
                 notes="",

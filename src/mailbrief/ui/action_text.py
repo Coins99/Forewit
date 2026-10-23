@@ -19,6 +19,7 @@ from mailbrief.domain.recurrence import (
     RepeatFrequency,
     RepeatRule,
 )
+from mailbrief.ui.brief_list import with_address
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
     WEEKDAYS,
@@ -35,7 +36,8 @@ class ActionDetails:
     """An action's dates, progress, state and thread activity, as of ``now``.
 
     ``waiting``, ``overdue`` and ``carried_over`` hold only for an open action;
-    ``target_reason`` is set only while the target is still the suggested one.
+    ``target_reason`` is set only while the target is still the suggested one. A waiting
+    action's target date is its follow-up date (B08).
     """
 
     target: date | None
@@ -57,6 +59,8 @@ class ActionDetails:
     repeat: str | None  # "Repeats every Mon and Wed", or "Repeats stopped".
     previous: str | None  # The occurrence it follows: "Follows Wed Oct 14 · Skipped".
     today: date  # The owner's day, which decides whether a date names its year.
+    person: str | None = None  # Who it waits on, or is for (B08): the owner's text.
+    waiting_since: date | None = None  # The day it started waiting, in the owner's zone.
 
 
 def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> ActionDetails:
@@ -112,6 +116,12 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         repeat=repeat,
         previous=previous,
         today=today,
+        person=action.person,
+        waiting_since=(
+            None
+            if action.waiting_since_utc is None
+            else action.waiting_since_utc.astimezone(zone).date()
+        ),
     )
 
 
@@ -198,16 +208,82 @@ def estimate_text(minutes: int | None) -> str | None:
 
 
 def target_text(details: ActionDetails, *, reason: bool = True) -> str | None:
-    """The target as "Target Fri Oct 9"; with ``reason``, the reason too in the brief
-    detail's wording while it applies: "Target Fri Oct 9, one working day before the
-    deadline"."""
+    """The target as "Target Fri Oct 9", or "Follow up Fri Oct 9" while the owner waits for
+    someone (B08); with ``reason``, the reason too in the brief detail's wording while it
+    applies: "Target Fri Oct 9, one working day before the deadline"."""
+    day = follow_up_text(details, reason=reason)
+    if day is None:
+        return None
+    return ("Follow up " if details.waiting else "Target ") + day
+
+
+def follow_up_text(details: ActionDetails, *, reason: bool = True) -> str | None:
+    """The target's day alone, "Fri Oct 9", with its reason as target_text gives it."""
     target = details.target
     if target is None:
         return None
-    text = f"Target {day_text(target, today=details.today)}"
+    text = day_text(target, today=details.today)
     if not reason or details.target_reason is None:
         return text
     return f"{text}, {details.target_reason}"
+
+
+def _days(count: int) -> str:
+    return f"{count} day" if count == 1 else f"{count} days"
+
+
+def waited_for(details: ActionDetails) -> str | None:
+    """How long an open action has waited for someone (B08): "since today", "1 day" or "12
+    days"; None when it doesn't wait."""
+    since = details.waiting_since
+    if not details.waiting or since is None:
+        return None
+    days = (details.today - since).days
+    return "since today" if days <= 0 else _days(days)
+
+
+def waited_text(details: ActionDetails) -> str | None:
+    """waited_for as a sentence's start: "Waiting since today", "Waiting 12 days"."""
+    waited = waited_for(details)
+    return None if waited is None else "Waiting " + waited
+
+
+def since_text(details: ActionDetails) -> str | None:
+    """The day an action started waiting, and while it waits for how long: "Mon Oct 12 ·
+    11 days"; None for one that never waited."""
+    since = details.waiting_since
+    if since is None:
+        return None
+    text = day_text(since, today=details.today)
+    days = (details.today - since).days
+    return f"{text} · {_days(days)}" if details.waiting and days > 0 else text
+
+
+def person_text(action: Action) -> str | None:
+    """Who the action is with (B08): "Waiting on Alex", or "For Sam" for one of the owner's
+    own; None when the owner named no one."""
+    if action.person is None:
+        return None
+    return f"Waiting on {action.person}" if action.waiting else f"For {action.person}"
+
+
+def initials(name: str) -> str:
+    """A person's initials for a row's avatar: "Alex Kim" is "AK", "Alex" is "AL"."""
+    words = name.split()
+    if not words:
+        return "?"
+    return (words[0][0] + words[1][0] if len(words) > 1 else words[0][:2]).upper()
+
+
+def sender_person(action: Action) -> str | None:
+    """Who the action's first email is from, as a person (B08): the cached message's display
+    name when it can't pass for another address, else the address; None without a source."""
+    if not action.sources:
+        return None
+    source = action.sources[0]
+    if with_address(source.sender_name, source.sender_address) == source.sender_address:
+        return source.sender_address
+    return " ".join((source.sender_name or "").split())
 
 
 def completed_text(details: ActionDetails) -> str | None:

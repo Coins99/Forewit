@@ -1260,10 +1260,15 @@ async def actions(
             deadline += " (set by you)"
         done = sum(step.done for step in item.steps)
         target = item.target_date.isoformat() if item.target_date is not None else "none"
+        who = _ownership(item.ownership)
+        if item.person is not None:
+            who += f" {item.person}" if item.waiting else f", for {item.person}"
         line = (
-            f"{item.public_id} [{item.status.value}] {item.title} ({_ownership(item.ownership)}); "
+            f"{item.public_id} [{item.status.value}] {item.title} ({who}); "
             f"target {target}; deadline {deadline or 'none'}; steps {done}/{len(item.steps)}"
         )
+        if item.waiting_since_utc is not None:
+            line += f"; waiting since {item.waiting_since_utc.astimezone(zone).date()}"
         if item.status is ActionStatus.OPEN and item.carried_over(today, zone):
             line += "; carried over"
         if item.status is ActionStatus.OPEN and item.is_overdue(now):

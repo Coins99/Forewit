@@ -788,14 +788,17 @@ class DesktopRuntime:
 
     async def list_organization(
         self,
-    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...]]:
-        """Projects, areas and tags in use, from one session, for each Actions refresh."""
+    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...], tuple[str, ...]]:
+        """Projects, areas, and the tags and people in use, from one session, for each Actions
+        refresh."""
         async with self._storage().session() as session:
             projects = ProjectService(session)
+            actions = ActionService(session)
             return (
                 await projects.list_projects(),
                 await projects.list_areas(),
-                await ActionService(session).list_tags(),
+                await actions.list_tags(),
+                await actions.list_people(),
             )
 
     async def save_organization(
