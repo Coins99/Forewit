@@ -27,7 +27,7 @@ from mailbrief.services.drafting import _deadline_words
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
 from tests.factories import Clock, Ids, make_action
-from tests.unit.services.test_actions_service import START, TORONTO, seed
+from tests.unit.services.test_actions_service import START, TORONTO, seed, suggestion
 
 FRIDAY = date(2026, 10, 2)  # START is Monday 28 September, 09:00 in Toronto.
 MONDAY = date(2026, 10, 5)
@@ -224,6 +224,32 @@ async def test_clearing_an_email_s_deadline_keeps_it_to_go_back_to(
     none = await service.save(back.public_id, 3, edit(back), deadline=DeadlineChange.cleared())
     again = await service.save(none.public_id, 4, edit(none), deadline=DeadlineChange.cleared())
     assert again.stated_deadline == cleared.stated_deadline
+
+
+async def test_clearing_an_email_s_words_keeps_them_to_go_back_to(
+    session: AsyncSession, service: ActionService
+) -> None:
+    words = suggestion(
+        0,
+        "Call the client",
+        deadline_text="ASAP",
+        deadline_precision=DeadlinePrecision.UNRESOLVED,
+        evidence="Please call the client ASAP",
+    )
+    action = await service.accept((await seed(session, (words,))).suggestion_ids[0])
+
+    cleared = await service.save(
+        action.public_id, 1, edit(action), deadline=DeadlineChange.cleared()
+    )
+
+    assert deadline(cleared) == (None, DeadlinePrecision.NONE, None, None, None, None)
+    assert cleared.stated_deadline is not None
+    assert cleared.stated_deadline.deadline_text == "ASAP"
+    back = await service.save(
+        cleared.public_id, 2, edit(cleared), deadline=DeadlineChange.from_email()
+    )
+    assert deadline(back) == (Origin.EMAIL, DeadlinePrecision.UNRESOLVED, None, None, None, "ASAP")
+    assert (back.suggested_target_date, back.target_reason) == (None, None)
 
 
 async def test_clearing_the_owner_s_deadline_keeps_no_copy(service: ActionService) -> None:

@@ -45,6 +45,7 @@ from mailbrief.domain.actions import (
     ActionStatus,
     DeadlineChange,
     DeadlineOrigin,
+    StatedDeadline,
     StepEdit,
     normalize_tags,
 )
@@ -275,12 +276,27 @@ def _deadline_shown(
     return None
 
 
-def _deadline_note(action: Action | None, zone: ZoneInfo | None, today: date) -> str:
+def _said(deadline: Action | StatedDeadline, zone: ZoneInfo | None, today: date) -> str:
+    """What an email said its deadline was: its words, and the day or time they name."""
+    said = f"The email said “{deadline.deadline_text}”"
+    if deadline.deadline_precision is not DeadlinePrecision.UNRESOLVED:
+        own = ZoneInfo(deadline.deadline_timezone or "UTC")
+        if shown := deadline_text(deadline, zone or own, today=today):
+            said += f" ({shown})"
+    return said
+
+
+def _deadline_note(
+    action: Action | None, zone: ZoneInfo | None, today: date, *, clearing: bool = False
+) -> str:
     """What the editor says under the deadline fields: an email's deadline in the email's own
     words, naming its own time when the email stated it in another zone; or, once the owner
-    replaced or cleared it, what the email said. Nothing for a deadline the owner set alone."""
+    replaced or cleared it, what the email said. Nothing for a deadline the owner set alone.
+    ``clearing``: the owner chose Clear deadline for the email's words, which saving clears."""
     if action is None:
         return ""
+    if clearing:
+        return f"You cleared the deadline. {_said(action, zone, today)}."
     if action.deadline_origin is DeadlineOrigin.EMAIL and action.deadline_text:
         words = f"The email says “{action.deadline_text}”"
         at, own_zone = action.deadline_at_utc, action.deadline_timezone
@@ -294,11 +310,7 @@ def _deadline_note(action: Action | None, zone: ZoneInfo | None, today: date) ->
     stated = action.stated_deadline
     if stated is None:
         return ""
-    said = f"The email said “{stated.deadline_text}”"
-    if stated.deadline_precision is not DeadlinePrecision.UNRESOLVED:
-        own = ZoneInfo(stated.deadline_timezone or "UTC")
-        if shown := deadline_text(stated, zone or own, today=today):
-            said += f" ({shown})"
+    said = _said(stated, zone, today)
     if action.deadline_origin is DeadlineOrigin.OWNER:
         return f"You set this deadline. {said}."
     return f"You cleared the deadline. {said}."
@@ -348,6 +360,7 @@ class ActionEditor(QDialog):
         self._options = True  # The optional rows are shown (see set_embedded).
         self._filling = False  # The editor is filling the deadline fields itself.
         self._back_to_email = False  # Use the email's was chosen and nothing changed since.
+        self._clearing = False  # Clear deadline was chosen for the email's words alone.
         self._loaded_deadline: tuple[object, ...] | None = None
         self._shown_suggestion: date | None = None  # The target the Suggested row offers.
         layout = QVBoxLayout(self)
@@ -478,6 +491,10 @@ class ActionEditor(QDialog):
         self.from_email = outline_button("Use the email's", "taskDeadlineFromEmail")
         self.from_email.setAccessibleName("Use the email's deadline")
         self.from_email.setAutoDefault(False)
+        # Words alone ("ASAP") give the fields no day, so Due by has nothing to untick.
+        self.clear_deadline = outline_button("Clear deadline", "taskDeadlineClear")
+        self.clear_deadline.setAccessibleName("Clear the email's deadline")
+        self.clear_deadline.setAutoDefault(False)
         self.deadline_note = QWidget()
         self.deadline_note.setObjectName("taskDeadlineNoteRow")
         self.deadline_note.setAccessibleName("The email's deadline")
@@ -485,11 +502,13 @@ class ActionEditor(QDialog):
         note_row.setContentsMargins(0, 0, 0, 0)
         note_row.addWidget(self.deadline, 1, Qt.AlignmentFlag.AlignVCenter)
         note_row.addWidget(self.from_email, 0, Qt.AlignmentFlag.AlignVCenter)
+        note_row.addWidget(self.clear_deadline, 0, Qt.AlignmentFlag.AlignVCenter)
         form.addRow("", self.deadline_note)
         self.has_deadline.toggled.connect(self._deadline_edited)
         self.deadline_date.dateChanged.connect(self._deadline_edited)
         self.deadline_time.editTextChanged.connect(self._deadline_edited)
         self.from_email.clicked.connect(self._use_email_deadline)
+        self.clear_deadline.clicked.connect(self._clear_email_words)
         self.suggested = _plain("")
         form.addRow("Suggested", self.suggested)
         self.sources = _plain("")
@@ -642,6 +661,7 @@ class ActionEditor(QDialog):
             self.has_deadline.isChecked()
             and (self.deadline_date.text(), self.deadline_time.currentText()),
             self._back_to_email,
+            self._clearing,
         )
 
     def has_unsaved_input(self) -> bool:
@@ -737,11 +757,11 @@ class ActionEditor(QDialog):
     def _show_deadline(self, action: Action | None, day: date) -> None:
         """Show ``action``'s deadline (none for a new task) and what the email said; ``day``
         is the date the fields offer when there is no deadline to show."""
+        self._back_to_email = self._clearing = False
         self._fill_deadline(None if action is None else _deadline_shown(action, self._zone), day)
         self.deadline.setText(_deadline_note(action, self._zone, self._today))
-        self.from_email.setVisible(self._offers_email())
+        self._show_deadline_buttons()
         self._show_deadline_note()
-        self._back_to_email = False
         self._loaded_deadline = self._deadline_input()
 
     def _fill_deadline(self, shown: tuple[date, time | None] | None, day: date) -> None:
@@ -776,26 +796,61 @@ class ActionEditor(QDialog):
         return date(picked.year(), picked.month(), picked.day())
 
     def _deadline_edited(self) -> None:
-        """The owner changed the deadline: going back to the email's no longer applies, and
-        the suggested target follows the new day."""
+        """The owner changed the deadline: going back to the email's or clearing its words no
+        longer applies, and the suggested target follows the new day."""
         self._enable_deadline()
         if self._filling:
             return
         self._back_to_email = False
-        self.from_email.setVisible(self._offers_email())
+        if self._clearing:
+            self._clearing = False
+            self.deadline.setText(_deadline_note(self._action, self._zone, self._today))
+        self._show_deadline_buttons()
         self._follow(self._picked_deadline())
 
+    def _show_deadline_buttons(self) -> None:
+        self.from_email.setVisible(self._offers_email())
+        self.clear_deadline.setVisible(self._offers_clear())
+
     def _offers_email(self) -> bool:
+        """Use the email's: back to the email's deadline the owner replaced or cleared, or,
+        after Clear deadline, keep the email's words after all."""
         action = self._action
-        return (
-            action is not None
-            and action.stated_deadline is not None
+        if action is None:
+            return False
+        return self._clearing or (
+            action.stated_deadline is not None
             and action.deadline_origin is not DeadlineOrigin.EMAIL
         )
 
-    def _use_email_deadline(self) -> None:
-        """Show the email's deadline again; saving goes back to it (DeadlineChange.from_email)."""
+    def _offers_clear(self) -> bool:
+        """Clear deadline, for an email's deadline in words alone, while the fields are as
+        loaded: unticked, since the words name no day."""
         action = self._action
+        return (
+            action is not None
+            and action.deadline_origin is DeadlineOrigin.EMAIL
+            and action.deadline_precision is DeadlinePrecision.UNRESOLVED
+            and not self._clearing
+            and not self.has_deadline.isChecked()
+        )
+
+    def _clear_email_words(self) -> None:
+        """Clear the email's deadline in words alone: saving clears it, keeping the words to go
+        back to, as unticking clears a dated one (DeadlineChange.cleared)."""
+        self._clearing = True
+        self.deadline.setText(_deadline_note(self._action, self._zone, self._today, clearing=True))
+        self._show_deadline_buttons()
+
+    def _use_email_deadline(self) -> None:
+        """Show the email's deadline again; saving goes back to it (DeadlineChange.from_email).
+        After Clear deadline, it keeps the email's words, which are still the deadline."""
+        action = self._action
+        if action is not None and self._clearing:
+            self._clearing = False
+            self.deadline.setText(_deadline_note(action, self._zone, self._today))
+            self._show_deadline_buttons()
+            return
         if action is None or action.stated_deadline is None:
             return
         shown = _deadline_shown(action.stated_deadline, self._zone)
@@ -824,6 +879,8 @@ class ActionEditor(QDialog):
         raises ValueError, with the reason, for a time that isn't one."""
         if self._back_to_email:
             return DeadlineChange.from_email()
+        if self._clearing:
+            return DeadlineChange.cleared()
         due = self._picked_deadline()
         clock = None if due is None else self.deadline_time.clock()
         if self._deadline_input() == self._loaded_deadline:

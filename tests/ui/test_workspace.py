@@ -1066,6 +1066,17 @@ def test_owner_deadline_renders(
     show(qtbot, editor)
     assert editor.from_email.isVisible() and editor.deadline_time.currentText() == "17:00"
     images["dialog-task-deadline"] = editor.grab()
+    # An email's deadline in words alone: no day to untick, so Clear deadline beside the note.
+    words = make_action(
+        title="Call the client back",
+        deadline_text="ASAP",
+        deadline_precision=DeadlinePrecision.UNRESOLVED,
+        created_at_utc=ACTIONS_NOW,
+    )
+    editor.edit(words, TODAY, OWNER_ZONE)
+    qapp.processEvents()
+    assert editor.clear_deadline.isVisible() and not editor.from_email.isVisible()
+    images["dialog-task-deadline-words"] = editor.grab()
     folder = os.environ.get("MAILBRIEF_UI_SHOTS")
     if folder:
         Path(folder).mkdir(parents=True, exist_ok=True)

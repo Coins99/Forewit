@@ -52,6 +52,12 @@ deadline. The email said “by Friday” (Fri Oct 2)." or "You cleared the deadl
 deadline again. Changing your own deadline again keeps the email's as it was. Only the latest
 email deadline you replaced is kept.
 
+A deadline the email gave in words alone ("The email says “ASAP”, with no specific day.") has
+no day for the fields, so **Due by** stays unticked and there is nothing to untick. **Clear
+deadline** beside the note clears it instead: saving keeps the words to go back to, as for any
+email deadline you clear, and **Use the email's** takes the clear back before you save.
+Ticking **Due by** and choosing a day sets your own deadline over the words.
+
 ## Target dates
 
 Changing the deadline re-suggests a target, counted from today. In the editor, a target date
@@ -128,6 +134,9 @@ With Gmail connected:
    **Use the email's**, save, and confirm the email's deadline is back.
 8. When a reply proposes a new deadline for a task whose deadline you set, confirm "Replace
    your deadline with …"; apply it, then Undo, and confirm your deadline is back.
+9. Accept a suggestion whose deadline is words alone (“ASAP”). Confirm **Clear deadline**,
+   save, and confirm the task has no deadline; open the editor again, choose **Use the
+   email's**, save, and confirm “ASAP” is back.
 
 Validation on macOS, 2026-10-20: the full suite with the Qt tests passed, with the 90%
 per-service gate. Ruff formatting and lint and strict mypy for Windows and macOS passed. The

@@ -55,6 +55,8 @@ OWNER_MONDAY = make_action(
     target_date=date(2026, 10, 1),
 )
 CLEARED = make_action(stated_deadline=STATED, target_date=date(2026, 10, 1))
+# An email's deadline in words alone, with no day for the fields to show.
+WORDS = make_action(deadline_text="ASAP", deadline_precision=DeadlinePrecision.UNRESOLVED)
 
 
 @pytest.fixture
@@ -335,6 +337,55 @@ def test_an_email_s_words_alone_are_offered_back_without_a_day(editor: ActionEdi
     assert editor.suggested.text() == "no target was suggested"
     save(editor)
     assert [deadline for _, deadline in sent] == [DeadlineChange.from_email()]
+
+
+def test_an_email_s_words_alone_can_be_cleared(editor: ActionEditor) -> None:
+    sent = changes(editor)
+    editor.edit(WORDS, TODAY, TORONTO)
+    assert fields(editor)[0] is False  # No day to show, so Due by can't be unticked.
+    assert editor.deadline.text() == "The email says “ASAP”, with no specific day."
+    assert not editor.clear_deadline.isHidden() and editor.from_email.isHidden()
+
+    editor.clear_deadline.click()
+
+    assert editor.deadline.text() == "You cleared the deadline. The email said “ASAP”."
+    assert editor.clear_deadline.isHidden() and not editor.from_email.isHidden()
+    assert editor.has_unsaved_input()
+    save(editor)
+    assert [deadline for _, deadline in sent] == [DeadlineChange.cleared()]
+
+
+def test_use_the_email_s_takes_back_a_clear_before_saving(editor: ActionEditor) -> None:
+    sent = changes(editor)
+    editor.edit(WORDS, TODAY, TORONTO)
+    editor.clear_deadline.click()
+
+    editor.from_email.click()
+
+    assert editor.deadline.text() == "The email says “ASAP”, with no specific day."
+    assert not editor.clear_deadline.isHidden() and editor.from_email.isHidden()
+    assert not editor.has_unsaved_input()
+    save(editor)
+    assert [deadline for _, deadline in sent] == [None]
+
+
+def test_a_day_chosen_after_clearing_the_email_s_words_sets_it(editor: ActionEditor) -> None:
+    sent = changes(editor)
+    editor.edit(WORDS, TODAY, TORONTO)
+    editor.clear_deadline.click()
+
+    editor.has_deadline.setChecked(True)
+    editor.deadline_date.setDate(QDate(2026, 10, 2))
+
+    assert editor.deadline.text() == "The email says “ASAP”, with no specific day."
+    assert editor.clear_deadline.isHidden() and editor.from_email.isHidden()
+    save(editor)
+    assert [deadline for _, deadline in sent] == [DeadlineChange.to(date(2026, 10, 2))]
+
+    editor.edit(WORDS, TODAY, TORONTO)
+    editor.has_deadline.setChecked(True)
+    editor.has_deadline.setChecked(False)  # Back as loaded: Clear is offered again.
+    assert not editor.clear_deadline.isHidden()
 
 
 def test_a_deadline_the_owner_set_alone_has_no_note(editor: ActionEditor) -> None:
