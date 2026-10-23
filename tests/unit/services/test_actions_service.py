@@ -914,6 +914,7 @@ async def test_lists_filter_by_view_and_order_by_target_then_due_then_creation(
             deadline_precision="date",
             deadline_date=date(2026, 10, 3),
             deadline_timezone="America/Toronto",
+            deadline_origin="email",
         )
     )
     await session.commit()

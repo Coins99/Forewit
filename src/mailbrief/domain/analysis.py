@@ -101,12 +101,21 @@ def check_deadline_fields(
     date: date | None,
     at_utc: datetime | None,
     timezone: str | None,
+    *,
+    phrase: bool = True,
 ) -> None:
     """Raise ValueError unless the deadline fields agree with their precision and the zone
-    is loadable."""
+    is loadable. A stated deadline has its phrase; one without a ``phrase`` (a deadline the
+    owner set, B06) is a date or an instant with none."""
     if timezone is not None:
         _require_time_zone(timezone)
-    if (text is None) != (precision is DeadlinePrecision.NONE):
+    if not phrase:
+        if text is not None or precision not in (
+            DeadlinePrecision.DATE,
+            DeadlinePrecision.DATETIME,
+        ):
+            raise ValueError("a deadline without a phrase is a date or an instant")
+    elif (text is None) != (precision is DeadlinePrecision.NONE):
         raise ValueError("deadline_text must be present exactly when a deadline is stated")
     if precision in (DeadlinePrecision.NONE, DeadlinePrecision.UNRESOLVED):
         if date is not None or at_utc is not None or timezone is not None:
@@ -142,7 +151,8 @@ def deadline_due_at(
 class DeadlineFields(DomainModel):
     """A stated deadline: the email's phrase, how precisely it was resolved, and the date,
     instant and zone that precision carries. Every model with a deadline extends this; its
-    validator checks, for every subclass, that the fields agree and the zone loads."""
+    validator checks, for every subclass, that the fields agree and the zone loads. Only an
+    action's deadline that the owner set has no phrase (has_phrase())."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
@@ -159,6 +169,10 @@ class DeadlineFields(DomainModel):
     def normalize_deadline(cls, value: datetime | None) -> datetime | None:
         return None if value is None else normalize_utc(value)
 
+    def has_phrase(self) -> bool:
+        """Whether a deadline here is stated in words, as an email states one."""
+        return True
+
     @model_validator(mode="after")
     def validate_deadline(self) -> Self:
         """Raise ValueError unless the deadline fields agree with their precision."""
@@ -168,6 +182,7 @@ class DeadlineFields(DomainModel):
             self.deadline_date,
             self.deadline_at_utc,
             self.deadline_timezone,
+            phrase=self.has_phrase(),
         )
         return self
 

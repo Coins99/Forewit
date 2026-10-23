@@ -18,6 +18,7 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionFilter,
     ActionProposal,
+    DeadlineChange,
     StepEdit,
     ThreadLink,
 )
@@ -835,10 +836,14 @@ class DesktopRuntime:
             return await ActionService(session).count_actions(view, group=group, group_id=group_id)
 
     async def create_action(
-        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit],
+        repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
         async with self._storage().session() as session:
-            return await ActionService(session).create(edit, steps, repeat)
+            return await ActionService(session).create(edit, steps, repeat, deadline)
 
     async def undo_action_status(self, public_id: str, revision: int) -> Action:
         async with self._storage().session() as session:
@@ -851,9 +856,12 @@ class DesktopRuntime:
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
         async with self._storage().session() as session:
-            return await ActionService(session).save(public_id, revision, edit, steps, repeat)
+            return await ActionService(session).save(
+                public_id, revision, edit, steps, repeat, deadline
+            )
 
     async def complete_action(self, public_id: str, revision: int) -> Action:
         async with self._storage().session() as session:

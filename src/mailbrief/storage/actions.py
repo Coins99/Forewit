@@ -24,6 +24,8 @@ from mailbrief.domain.actions import (
     ActionSource,
     ActionStatus,
     ActionStep,
+    DeadlineOrigin,
+    StatedDeadline,
     SuggestionState,
     SuggestionView,
     ThreadActivity,
@@ -33,6 +35,7 @@ from mailbrief.domain.analysis import (
     ActionEffort,
     ActionOwnership,
     ActionSuggestion,
+    DeadlinePrecision,
     TargetReason,
 )
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
@@ -260,6 +263,19 @@ def series_rule(series: ActionSeriesTable) -> RepeatRule:
     )
 
 
+def stated_deadline(row: ActionTable) -> StatedDeadline | None:
+    """The email's deadline the owner last replaced or cleared, if any (B06)."""
+    if row.stated_deadline_precision == DeadlinePrecision.NONE.value:
+        return None
+    return StatedDeadline(
+        deadline_text=row.stated_deadline_text,
+        deadline_precision=DeadlinePrecision(row.stated_deadline_precision),
+        deadline_date=row.stated_deadline_date,
+        deadline_at_utc=row.stated_deadline_at_utc,
+        deadline_timezone=row.stated_deadline_timezone,
+    )
+
+
 def action_from_rows(
     row: ActionTable,
     steps: Sequence[ActionStepTable],
@@ -284,6 +300,10 @@ def action_from_rows(
         effort=None if row.effort is None else ActionEffort(row.effort),
         estimate_minutes=row.estimate_minutes,
         **deadline_values(row),
+        deadline_origin=None
+        if row.deadline_origin is None
+        else DeadlineOrigin(row.deadline_origin),
+        stated_deadline=stated_deadline(row),
         suggested_target_date=row.suggested_target_date,
         target_reason=None if row.target_reason is None else TargetReason(row.target_reason),
         target_date=row.target_date,
@@ -996,7 +1016,9 @@ class ActionRepository:
                 sources.get(row.id, ()),
                 _activity(row, snapshots.get(row.id, ()), accounts, cached),
                 [
-                    proposal_from_row(proposal, row.public_id, row.title, row.revision)
+                    proposal_from_row(
+                        proposal, row.public_id, row.title, row.revision, row.deadline_origin
+                    )
                     for proposal in proposals.get(row.id, ())
                 ],
                 activity.get(row.id, ()),

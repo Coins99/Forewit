@@ -142,6 +142,7 @@ async def seed_action_note(
             status=ActionStatus.OPEN.value,
             deadline_precision="unresolved",
             deadline_text="by Friday",
+            deadline_origin="email",
             notes="",
             created_at_utc=START,
             updated_at_utc=START,

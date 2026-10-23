@@ -282,7 +282,13 @@ async def test_the_editor_shows_deadlines_in_the_window_s_zone(
 
     window.actions_panel.edit_button.click()
 
-    assert window.action_editor.deadline.text().startswith("2026-10-02T17:00-04:00 (16:00")
+    editor = window.action_editor
+    assert editor.deadline_date.date() == QDate(2026, 10, 2)
+    assert editor.deadline_time.currentText() == "17:00"
+    assert editor.deadline.text() == (
+        "The email says “Friday 4 PM Central” (16:00 America/Chicago)."
+    )
+    editor.reject()
 
 
 async def test_the_editor_offers_the_owner_s_local_today_without_a_target(
@@ -330,6 +336,7 @@ async def test_a_save_after_the_window_closes_starts_nothing(window: MainWindow)
             target_date=None,
             notes="",
         ),
+        None,
         None,
         None,
     )
@@ -467,6 +474,7 @@ async def test_a_save_while_another_operation_runs_keeps_the_editor_open(
             target_date=None,
             notes="",
         ),
+        None,
         None,
         None,
     )

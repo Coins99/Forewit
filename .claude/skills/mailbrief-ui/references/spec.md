@@ -409,7 +409,8 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
   1. Title, 20px Semibold (`actionTitle`).
   2. State, secondary: "Yours · open", "Waiting for someone · open" (either with " · carried over" while it
      applies) or "Completed Tue Oct 6".
-  3. "Due {deadline_text}", warning with " · Overdue" when overdue, else secondary
+  3. "Due {deadline_text}", with " · Set by you" for a deadline the owner set (B06) and
+     " · Overdue" when overdue (then warning, else secondary)
      (`actionDeadline`); the target with its reason while it is still the suggested one
      ("Target Fri Oct 2, one working day before the deadline"), secondary
      (`actionTarget`).
@@ -463,7 +464,10 @@ The brief list's chips keep their shorter forms (see Brief list).
 - `deadline_text(item, zone, *, today)`: DATETIME `moment_text` in the owner's zone,
   DATE `day_text` of the day the email names, UNRESOLVED the email's phrase in quotes,
   NONE None. The brief detail's deadline, suggestion meta lines, proposal effects ("Set
-  the deadline to Mon Oct 5") and the Actions page all use it; a deadline in another year names it.
+  the deadline to Mon Oct 5", or "Replace your deadline with Mon Oct 5" over one the owner
+  set) and the Actions page all use it; a deadline in another year names it. The action
+  editor's note under its deadline fields uses it for what the email said ("The email said
+  “by Friday” (Fri Oct 2).").
 - Thread activity in the past week reads by weekday ("Tue 14:02", "Tue"); older, by
   `day_text` with the owner's day ("Sun Sep 20, 10:30", "Sun Dec 20, 2026, 15:30").
   Proposal rows show when the email arrived with `moment_text`.

@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import sqlite3
+from contextlib import closing
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -583,11 +585,18 @@ async def test_repeating_tasks_survive_backup_restore_and_export(tmp_path: Path)
     await database.dispose()
 
 
+def columns(path: Path, table: str) -> list[str]:
+    with closing(sqlite3.connect(path)) as connection:
+        return [str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")]
+
+
 async def test_downgrade_keeps_repeat_history_readable_by_older_versions(tmp_path: Path) -> None:
     path = tmp_path / "downgrade.sqlite3"
     config = migration_config(path)
-    # Simulate an owner database that has already used the immutable 0021 revision.
-    await asyncio.to_thread(command.upgrade, config, "20261015_0021")
+    # Simulate an owner database that has already used the immutable 0021 revision: made by
+    # this version, taken back to 0022, whose schema is 0021's, and stamped 0021, so the
+    # upgrade below runs 0022 and every revision after it.
+    await asyncio.to_thread(command.upgrade, config, "head")
     database = Database.from_path(path)
     clock = Clock(START)
     async with database.session() as session:
@@ -603,6 +612,11 @@ async def test_downgrade_keeps_repeat_history_readable_by_older_versions(tmp_pat
         assert any(row["kind"] == "tag_respelled" for row in before)
         assert any(row["previous_status"] == "skipped" for row in before)
     await database.dispose()
+    await asyncio.to_thread(command.downgrade, config, "20261016_0022")
+    await asyncio.to_thread(command.stamp, config, "20261015_0021")
+    fresh = tmp_path / "fresh-0021.sqlite3"
+    await asyncio.to_thread(command.upgrade, migration_config(fresh), "20261015_0021")
+    assert columns(path, "actions") == columns(fresh, "actions")
 
     await asyncio.to_thread(command.upgrade, config, "head")
     database = Database.from_path(path)

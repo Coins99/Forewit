@@ -422,6 +422,21 @@ def test_a_new_deadline_keeps_a_target_the_owner_set() -> None:
     assert line.endswith("now has deadline 2026-10-05; the target date you set is unchanged.")
 
 
+def test_a_new_deadline_over_the_owner_s_says_it_replaces_it() -> None:
+    proposal = _proposal(
+        kind=FollowUpKind.NEW_DEADLINE,
+        deadline_text="next Monday",
+        deadline_precision=DeadlinePrecision.DATE,
+        deadline_date=date(2026, 10, 5),
+        deadline_timezone="UTC",
+        replaces_owner_deadline=True,
+    )
+
+    kind = gmail._proposal_kind(proposal, ZoneInfo("UTC"))
+
+    assert kind == "new deadline 2026-10-05, replacing yours"
+
+
 def test_a_rank_reason_this_version_does_not_know_is_shown_as_stored() -> None:
     assert gmail._reason_words("tracked_thread_reply") == "reply in a thread you track"
     assert gmail._reason_words("from_the_future") == "from the future"

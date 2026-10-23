@@ -132,6 +132,7 @@ async def seeded(
             status="open",
             deadline_precision="date",
             deadline_date=FRIDAY,
+            deadline_origin="email",
             target_date=date(2026, 10, 15),
             notes="",
             created_at_utc=NOW,

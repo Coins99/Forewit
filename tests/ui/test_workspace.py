@@ -1022,6 +1022,69 @@ def test_repeating_task_renders(
             assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
 
 
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_owner_deadline_renders(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """A deadline the owner set over an email's (B06): the detail line, and the editor's Due
+    by fields with what the email said and Use the email's."""
+    from mailbrief.domain.actions import DeadlineOrigin, StatedDeadline
+    from mailbrief.domain.analysis import DeadlinePrecision, TargetReason
+    from mailbrief.ui.action_editor import ActionEditor
+    from tests.factories import make_action
+
+    apply_theme(qapp, mode)
+    workspace = build(qtbot)
+    panel = ActionsPanel()
+    moved = make_action(
+        title="Send the Q3 deck",
+        deadline_precision=DeadlinePrecision.DATETIME,
+        deadline_date=date(2026, 10, 16),
+        deadline_at_utc=datetime(2026, 10, 16, 21, 0, tzinfo=UTC),
+        deadline_timezone="America/Toronto",
+        deadline_origin=DeadlineOrigin.OWNER,
+        stated_deadline=StatedDeadline(
+            deadline_text="by Friday",
+            deadline_precision=DeadlinePrecision.DATE,
+            deadline_date=date(2026, 10, 9),
+            deadline_timezone="America/Toronto",
+        ),
+        suggested_target_date=date(2026, 10, 15),
+        target_reason=TargetReason.WORKING_DAY_BEFORE,
+        target_date=date(2026, 10, 15),
+        created_at_utc=ACTIONS_NOW,
+    )
+    panel.show_actions(ActionFilter.OPEN, (moved,), today=TODAY, zone=OWNER_ZONE, now=ACTIONS_NOW)
+    workspace.add_page("actions", panel)
+    workspace.show_page("actions")
+    workspace.sidebar.set_current("actions")
+    workspace.resize(*SIZES["desktop"])
+    show(qtbot, workspace)
+    images = {"page-owner-deadline": workspace.grab()}
+    editor = ActionEditor(workspace)
+    editor.edit(moved, TODAY, OWNER_ZONE)
+    show(qtbot, editor)
+    assert editor.from_email.isVisible() and editor.deadline_time.currentText() == "17:00"
+    images["dialog-task-deadline"] = editor.grab()
+    # An email's deadline in words alone: no day to untick, so Clear deadline beside the note.
+    words = make_action(
+        title="Call the client back",
+        deadline_text="ASAP",
+        deadline_precision=DeadlinePrecision.UNRESOLVED,
+        created_at_utc=ACTIONS_NOW,
+    )
+    editor.edit(words, TODAY, OWNER_ZONE)
+    qapp.processEvents()
+    assert editor.clear_deadline.isVisible() and not editor.from_email.isVisible()
+    images["dialog-task-deadline-words"] = editor.grab()
+    folder = os.environ.get("MAILBRIEF_UI_SHOTS")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        for name, image in images.items():
+            dpr = image.devicePixelRatio()
+            assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
+
+
 def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
     """The daily home, the mailbox, flagged and deferred work, drafts and history, then
     Calendar set apart below a divider; Ctrl+1 to Ctrl+7 follow the same order."""

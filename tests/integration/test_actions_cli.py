@@ -1,7 +1,8 @@
-"""mailbrief-gmail-diagnostic actions list says when the completed list is capped."""
+"""mailbrief-gmail-diagnostic actions list says when the completed list is capped, and
+who set each deadline."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -62,3 +63,45 @@ def test_the_completed_list_says_when_more_exist(
         assert lines[-1] == "Showing the newest 200 of 203 completed actions."
     else:
         assert len(lines) == 200
+
+
+def test_the_list_marks_a_deadline_the_owner_set(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "actions.sqlite3"
+    upgrade_database(path)
+
+    async def add() -> None:
+        database = Database.from_path(path)
+        try:
+            async with database.session() as session:
+                for index, origin in enumerate(("email", "owner")):
+                    session.add(
+                        ActionTable(
+                            public_id=f"00000000-0000-4000-8000-{index:012d}",
+                            title=f"Action {index}",
+                            ownership="mine",
+                            status="open",
+                            deadline_text="by Friday" if origin == "email" else None,
+                            deadline_precision="date",
+                            deadline_date=date(2026, 10, 2),
+                            deadline_timezone="UTC",
+                            deadline_origin=origin,
+                            notes="",
+                            created_at_utc=DONE + timedelta(minutes=index),
+                            updated_at_utc=DONE,
+                            revision=1,
+                        )
+                    )
+                await session.commit()
+        finally:
+            await database.dispose()
+
+    asyncio.run(add())
+
+    code = gmail.main(["actions", "list", "--timezone", "UTC", "--database", str(path)])
+
+    assert code == 0
+    email, owner = capsys.readouterr().out.splitlines()
+    assert "; deadline 2026-10-02; steps 0/0" in email
+    assert "; deadline 2026-10-02 (set by you); steps 0/0" in owner

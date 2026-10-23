@@ -48,6 +48,7 @@ NAMING_CONVENTION = {
 
 _PRECISION_CHECK = "deadline_precision IN ('none','unresolved','date','datetime')"
 _OWNERSHIP_CHECK = "ownership IN ('mine','waiting_for')"
+_DEADLINE_ORIGIN_CHECK = "deadline_origin IS NULL OR deadline_origin IN ('email','owner')"
 _DRAFT_KIND_CHECK = "kind IN ('reply','email','note','message')"
 _DRAFT_ORIGIN_CHECK = "origin IN ('created','edited','restored','generated')"
 _DRAFT_TONE_CHECK = "tone IN ('neutral','warm','formal','direct')"
@@ -534,6 +535,14 @@ class ActionTable(DeadlineColumns, Base):
             name="estimate_minutes_range",
         ),
         CheckConstraint(_PRIORITY_CHECK, name="priority_known"),
+        CheckConstraint(_DEADLINE_ORIGIN_CHECK, name="deadline_origin_known"),
+        CheckConstraint(
+            "(deadline_origin IS NULL) = (deadline_precision = 'none')", name="deadline_origin_set"
+        ),
+        CheckConstraint(
+            "stated_deadline_precision IN ('none','unresolved','date','datetime')",
+            name="stated_deadline_precision_known",
+        ),
         # One occurrence per series and date, so making the next one twice makes one.
         UniqueConstraint("series_id", "occurrence_date", name="uq_actions_series_occurrence"),
         Index("ix_actions_status", "status"),
@@ -574,6 +583,17 @@ class ActionTable(DeadlineColumns, Base):
     follows_action_id: Mapped[int | None] = mapped_column(
         ForeignKey("actions.id", ondelete="SET NULL")
     )
+    # Who set the deadline (B06): 'email' or 'owner', NULL exactly when there is none.
+    deadline_origin: Mapped[str | None] = mapped_column(String(8))
+    # The email's deadline the owner last replaced or cleared (B06), stored as the deadline
+    # columns store one; 'none' when there is none.
+    stated_deadline_text: Mapped[str | None] = mapped_column(Text)
+    stated_deadline_precision: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="none", server_default="none"
+    )
+    stated_deadline_date: Mapped[date | None] = mapped_column(Date)
+    stated_deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    stated_deadline_timezone: Mapped[str | None] = mapped_column(String(128))
 
 
 class ActionTagTable(Base):

@@ -22,6 +22,9 @@ from mailbrief.domain.actions import (
     ActionFilter,
     ActionPriority,
     ActionStatus,
+    DeadlineChange,
+    DeadlineChangeKind,
+    DeadlineOrigin,
     StepEdit,
     SuggestionState,
     ThreadLink,
@@ -36,9 +39,22 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
+from mailbrief.services.deadlines import (
+    ResolvedDeadline,
+    due_day,
+    owner_deadline,
+    resolved,
+    target_for_day,
+)
+from mailbrief.services.preferences import OwnerZone
 from mailbrief.services.recurrence import RepeatError, Repeats
 from mailbrief.services.writes import commit_once
-from mailbrief.storage.actions import ActionRepository, DecisionKey, suggestion_from_row
+from mailbrief.storage.actions import (
+    ActionRepository,
+    DecisionKey,
+    stated_deadline,
+    suggestion_from_row,
+)
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import (
     AccountTable,
@@ -54,6 +70,7 @@ _SUGGESTION_NOT_FOUND: Final = "That suggestion was not found."
 _STALE: Final = "The action changed since it was loaded; reload it and try again."
 _UNDO_ADD: Final = "Only an unchanged addition can be undone."
 _UNDO_STATUS: Final = "Only an unchanged completion, skip or reopening can be undone."
+_NO_STATED: Final = "This task has no deadline from an email to go back to."
 # The changes undo_status() reverses: each records the status before it.
 _UNDOABLE: Final = frozenset(
     kind.value
@@ -159,6 +176,39 @@ def _apply_edit(row: ActionTable, edit: ActionEdit) -> None:
     row.notes = edit.notes
 
 
+def _set_deadline(row: ActionTable, deadline: ResolvedDeadline, origin: DeadlineOrigin) -> None:
+    """Make ``deadline`` the action's current one, set by ``origin``."""
+    row.deadline_text, row.deadline_precision = deadline.text, deadline.precision.value
+    row.deadline_date, row.deadline_at_utc = deadline.date, deadline.at_utc
+    row.deadline_timezone = deadline.timezone
+    row.deadline_origin = origin.value
+
+
+def _clear_deadline(row: ActionTable) -> None:
+    row.deadline_text, row.deadline_precision = None, DeadlinePrecision.NONE.value
+    row.deadline_date = row.deadline_at_utc = row.deadline_timezone = None
+    row.deadline_origin = None
+
+
+def _keep_stated(row: ActionTable) -> None:
+    """Keep the email's deadline the owner is replacing or clearing, so they can go back."""
+    row.stated_deadline_text = row.deadline_text
+    row.stated_deadline_precision = row.deadline_precision
+    row.stated_deadline_date = row.deadline_date
+    row.stated_deadline_at_utc = row.deadline_at_utc
+    row.stated_deadline_timezone = row.deadline_timezone
+
+
+def _is_current(row: ActionTable, deadline: ResolvedDeadline) -> bool:
+    """Whether ``deadline`` falls when the action's current one does."""
+    return (
+        row.deadline_precision,
+        row.deadline_date,
+        row.deadline_at_utc,
+        row.deadline_timezone,
+    ) == (deadline.precision.value, deadline.date, deadline.at_utc, deadline.timezone)
+
+
 def _accepted_action_id(decision: SuggestionDecisionTable | None) -> int | None:
     if decision is None or decision.decision != SuggestionState.ACCEPTED.value:
         return None
@@ -170,9 +220,9 @@ class ActionService:
 
     Every mutating method reads the clock once, commits once and rolls back on failure.
     A method taking ``expected_revision`` raises ActionConflictError when the action's
-    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates a
-    repeating task's occurrences; by default the owner's saved zone is read when one is
-    needed (see Repeats).
+    revision differs, so a stale screen never overwrites a newer change. ``zone`` dates
+    repeating tasks' occurrences and the deadlines the owner sets; by default the owner's
+    saved zone is read when one is needed (OwnerZone).
     """
 
     def __init__(
@@ -187,13 +237,54 @@ class ActionService:
         self._clock = clock
         self._id_factory = id_factory
         self._repository = ActionRepository(session)
-        self._repeats = Repeats(session, self._repository, zone=zone, id_factory=id_factory)
+        self._zone = OwnerZone(session, zone)
+        self._repeats = Repeats(session, self._repository, zone=self._zone, id_factory=id_factory)
 
     async def _apply_repeat(self, row: ActionTable, repeat: RepeatEdit, now: datetime) -> None:
         try:
             await self._repeats.apply(row, repeat, now)
         except RepeatError as error:
             raise ActionRepeatError(str(error)) from None
+
+    async def _apply_deadline(
+        self, row: ActionTable, change: DeadlineChange, now: datetime
+    ) -> None:
+        """Apply the owner's change to the deadline (B06). Replacing or clearing an email's
+        deadline keeps it as the stated one, and the suggested target follows the new
+        deadline, counted from today; the target date stays the owner's. A deadline that
+        falls when the current one does changes nothing, so its origin stays."""
+        origin = row.deadline_origin
+        if change.kind is DeadlineChangeKind.CLEAR:
+            if row.deadline_precision == DeadlinePrecision.NONE.value:
+                return
+            if origin == DeadlineOrigin.EMAIL.value:
+                _keep_stated(row)
+            _clear_deadline(row)
+            row.suggested_target_date = row.target_reason = None
+            return
+        zone = await self._zone.get()
+        if change.kind is DeadlineChangeKind.STATED:
+            if origin == DeadlineOrigin.EMAIL.value:
+                return  # It is the email's already.
+            stated = stated_deadline(row)
+            if stated is None:
+                raise ActionConflictError(_NO_STATED)
+            deadline, new_origin = resolved(stated), DeadlineOrigin.EMAIL
+        else:
+            assert change.due_date is not None  # DeadlineChange checks it.
+            deadline = owner_deadline(change.due_date, change.due_time, zone)
+            if _is_current(row, deadline):
+                return
+            if origin == DeadlineOrigin.EMAIL.value:
+                _keep_stated(row)
+            new_origin = DeadlineOrigin.OWNER
+        _set_deadline(row, deadline, new_origin)
+        due = due_day(deadline, zone)
+        if due is None:  # Only the email's words: nothing to count back from.
+            row.suggested_target_date = row.target_reason = None
+            return
+        target, reason = target_for_day(due, now.astimezone(zone).date())
+        row.suggested_target_date, row.target_reason = target, reason.value
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         try:
@@ -291,9 +382,11 @@ class ActionService:
         edit: ActionEdit,
         steps: Sequence[StepEdit] = (),
         repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
         """Create a task with no account or email source, using the same plan and workflow.
-        With ``repeat`` it is the first occurrence of a new series (see Repeats.apply)."""
+        With ``repeat`` it is the first occurrence of a new series (see Repeats.apply), and
+        with ``deadline`` the owner sets its deadline (only a new one: it has no email's)."""
 
         async def run(now: datetime) -> Action:
             listed = _check_step_list(steps)
@@ -306,11 +399,14 @@ class ActionService:
                 ownership=edit.ownership.value,
                 status=ActionStatus.OPEN.value,
                 deadline_precision=DeadlinePrecision.NONE.value,
+                stated_deadline_precision=DeadlinePrecision.NONE.value,
                 created_at_utc=now,
                 updated_at_utc=now,
                 revision=1,
             )
             _apply_edit(row, edit)
+            if deadline is not None:
+                await self._apply_deadline(row, deadline, now)
             await self._repository.add_action(row)
             await self._apply_tags(row, edit, now)
             await self._apply_steps(row, steps, listed, now)
@@ -384,6 +480,11 @@ class ActionService:
                     status=ActionStatus.OPEN.value,
                     effort=None if suggestion.effort is None else suggestion.effort.value,
                     **deadline_columns(suggestion),
+                    deadline_origin=(
+                        None
+                        if suggestion.deadline_precision is DeadlinePrecision.NONE
+                        else DeadlineOrigin.EMAIL.value
+                    ),
                     suggested_target_date=suggestion.suggested_target_date,
                     target_reason=(
                         None if suggestion.target_reason is None else suggestion.target_reason.value
@@ -599,15 +700,19 @@ class ActionService:
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
-        """Apply an edit and, when given, a new plan and repeat settings together, as one
-        revision. Without ``repeat`` a repeating task's series is left as it was."""
+        """Apply an edit and, when given, a new plan, repeat settings and deadline together,
+        as one revision. Without ``repeat`` a repeating task's series is left as it was, and
+        without ``deadline`` the deadline is (see _apply_deadline)."""
 
         async def run(now: datetime) -> Action:
             listed = [] if steps is None else _check_step_list(steps)
             row = await self._live(public_id, expected_revision)
             await self._check_project(edit, row.project_public_id)
             _apply_edit(row, edit)
+            if deadline is not None:
+                await self._apply_deadline(row, deadline, now)
             await self._apply_tags(row, edit, now)
             if steps is not None:
                 await self._apply_steps(row, steps, listed, now)

@@ -19,6 +19,7 @@ from mailbrief.domain.actions import (
     ActionFilter,
     ActionProposal,
     ActionRepeat,
+    DeadlineChange,
     StepEdit,
     SuggestionState,
     ThreadLink,
@@ -148,6 +149,7 @@ class FakeBackend(FakeDrafts):
         self.loads = 0
         self.action_calls: list[tuple[object, ...]] = []
         self.repeats: list[RepeatRule | RepeatEdit | None] = []  # Each create's or save's.
+        self.deadlines: list[DeadlineChange | None] = []  # Each create's or save's.
         self.closed_repeat: ActionRepeat | None = None  # What a complete or skip returns.
         self.action_fail: Exception | None = None
         self.list_calls = 0
@@ -416,9 +418,14 @@ class FakeBackend(FakeDrafts):
         return len(await self.list_grouped_actions(view, group, group_id))
 
     async def create_action(
-        self, edit: ActionEdit, steps: Sequence[StepEdit], repeat: RepeatRule | None = None
+        self,
+        edit: ActionEdit,
+        steps: Sequence[StepEdit],
+        repeat: RepeatRule | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
         self.repeats.append(repeat)
+        self.deadlines.append(deadline)
         await self._act("create_action", edit, steps)
         return make_action(title=edit.title, notes=edit.notes, target_date=edit.target_date)
 
@@ -433,8 +440,10 @@ class FakeBackend(FakeDrafts):
         edit: ActionEdit,
         steps: Sequence[StepEdit] | None = None,
         repeat: RepeatEdit | None = None,
+        deadline: DeadlineChange | None = None,
     ) -> Action:
         self.repeats.append(repeat)
+        self.deadlines.append(deadline)
         await self._act("save_action", public_id, revision, edit, steps)
         return make_action(title=edit.title, revision=revision + 1)
 

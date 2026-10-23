@@ -12,7 +12,7 @@ from pydantic import HttpUrl
 from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import ActionProposal, ActionStatus, ProposalState
+from mailbrief.domain.actions import ActionProposal, ActionStatus, DeadlineOrigin, ProposalState
 from mailbrief.domain.analysis import FollowUpKind, TargetReason
 from mailbrief.storage.database import sorted_batches
 from mailbrief.storage.tables import (
@@ -23,12 +23,19 @@ from mailbrief.storage.tables import (
     deadline_values,
 )
 
+# A pending proposal with its action's public ID, title, revision and deadline origin.
+type PendingRow = tuple[ActionProposalTable, str, str, int, str | None]
+
 
 def proposal_from_row(
-    row: ActionProposalTable, public_id: str, title: str, revision: int
+    row: ActionProposalTable,
+    public_id: str,
+    title: str,
+    revision: int,
+    deadline_origin: str | None = None,
 ) -> ActionProposal:
     """Rebuild a stored proposal for the action with ``public_id``, ``title`` and, as loaded,
-    ``revision``."""
+    ``revision`` and ``deadline_origin``: a new deadline replaces one the owner set."""
     return ActionProposal(
         id=row.id,
         action_public_id=public_id,
@@ -46,6 +53,10 @@ def proposal_from_row(
         received_at_utc=row.received_at_utc,
         web_link=HttpUrl(row.web_link),
         created_at_utc=row.created_at_utc,
+        replaces_owner_deadline=(
+            row.kind == FollowUpKind.NEW_DEADLINE.value
+            and deadline_origin == DeadlineOrigin.OWNER.value
+        ),
     )
 
 
@@ -183,15 +194,16 @@ class ProposalRepository:
                 found.setdefault(row.action_id, []).append(row)
         return found
 
-    async def pending(self, limit: int) -> list[tuple[ActionProposalTable, str, str, int]]:
+    async def pending(self, limit: int) -> list[PendingRow]:
         """Pending proposals of live, open actions, newest first, with each action's public
-        ID, title and revision."""
+        ID, title, revision and deadline origin."""
         result = await self._session.execute(
             select(
                 ActionProposalTable,
                 ActionTable.public_id,
                 ActionTable.title,
                 ActionTable.revision,
+                ActionTable.deadline_origin,
             )
             .join(ActionTable, ActionProposalTable.action_id == ActionTable.id)
             .where(ActionProposalTable.state == ProposalState.PENDING.value, *_live_open())
@@ -202,10 +214,10 @@ class ProposalRepository:
 
     async def pending_for_messages(
         self, provider: str, account_email: str, provider_message_ids: Iterable[str]
-    ) -> list[tuple[ActionProposalTable, str, str, int]]:
+    ) -> list[PendingRow]:
         """Pending proposals of live, open actions made from these emails of the account,
-        with each action's public ID, title and revision, oldest first."""
-        found: list[tuple[ActionProposalTable, str, str, int]] = []
+        with each action's public ID, title, revision and deadline origin, oldest first."""
+        found: list[PendingRow] = []
         for chunk in sorted_batches(provider_message_ids):
             result = await self._session.execute(
                 select(
@@ -213,6 +225,7 @@ class ProposalRepository:
                     ActionTable.public_id,
                     ActionTable.title,
                     ActionTable.revision,
+                    ActionTable.deadline_origin,
                 )
                 .join(ActionTable, ActionProposalTable.action_id == ActionTable.id)
                 .join(

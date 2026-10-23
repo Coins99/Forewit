@@ -20,6 +20,7 @@ from mailbrief.domain.actions import (
     ActionActivityKind,
     ActionProposal,
     ActionStatus,
+    DeadlineOrigin,
     ProposalState,
 )
 from mailbrief.domain.analysis import (
@@ -32,7 +33,8 @@ from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.messages import NormalizedMessage, ProviderKind, is_own_message
 from mailbrief.services.actions import ActionConflictError, touch, urgency
 from mailbrief.services.analysis import PlannedMessage
-from mailbrief.services.deadlines import ResolvedDeadline, suggest_target_for
+from mailbrief.services.deadlines import resolved, suggest_target_for
+from mailbrief.services.preferences import OwnerZone
 from mailbrief.services.recurrence import Repeats
 from mailbrief.services.threads import own_addresses
 from mailbrief.services.writes import commit_once
@@ -63,6 +65,7 @@ _TEXT_FIELDS: Final = (
     "deadline_text",
     "deadline_precision",
     "deadline_timezone",
+    "deadline_origin",
     "target_reason",
     "status",
 )
@@ -84,20 +87,50 @@ def _due(action: ActionTable) -> datetime | None:
     )
 
 
-def _same_deadline(action: ActionTable, analysis: MessageAnalysis) -> bool:
-    """Whether applying the email's deadline would leave the action's as it is.
-
-    Dated deadlines compare by day or instant and zone; an unresolved one by its words.
-    """
-    precision = analysis.deadline_precision
-    if action.deadline_precision != precision.value:
+def _is_deadline(
+    analysis: MessageAnalysis,
+    precision: str,
+    text: str | None,
+    day: date | None,
+    at_utc: datetime | None,
+    zone: str | None,
+) -> bool:
+    """Whether the email's deadline is this one: dated deadlines compare by day or instant
+    and zone, an unresolved one by its words."""
+    if precision != analysis.deadline_precision.value:
         return False
-    if precision is DeadlinePrecision.UNRESOLVED:
-        return action.deadline_text == analysis.deadline_text
-    return (action.deadline_date, action.deadline_at_utc, action.deadline_timezone) == (
+    if analysis.deadline_precision is DeadlinePrecision.UNRESOLVED:
+        return text == analysis.deadline_text
+    return (day, at_utc, zone) == (
         analysis.deadline_date,
         analysis.deadline_at_utc,
         analysis.deadline_timezone,
+    )
+
+
+def _same_deadline(action: ActionTable, analysis: MessageAnalysis) -> bool:
+    """Whether the email's deadline is the action's already, or, while the owner's choice
+    stands (they set or cleared the deadline), the email's deadline they replaced (B06):
+    proposing it would change nothing, or undo their choice. Once an email's deadline is the
+    action's again, the one the owner replaced earlier no longer counts.
+    """
+    current = _is_deadline(
+        analysis,
+        action.deadline_precision,
+        action.deadline_text,
+        action.deadline_date,
+        action.deadline_at_utc,
+        action.deadline_timezone,
+    )
+    if current or action.deadline_origin == DeadlineOrigin.EMAIL.value:
+        return current
+    return _is_deadline(
+        analysis,
+        action.stated_deadline_precision,
+        action.stated_deadline_text,
+        action.stated_deadline_date,
+        action.stated_deadline_at_utc,
+        action.stated_deadline_timezone,
     )
 
 
@@ -111,6 +144,9 @@ def _previous(action: ActionTable) -> dict[str, str | None]:
 
 
 def _restore(action: ActionTable, saved: dict[str, str | None]) -> None:
+    # An apply saved before B06 kept no origin; every deadline was an email's then.
+    dated = saved["deadline_precision"] != DeadlinePrecision.NONE.value
+    saved = {"deadline_origin": DeadlineOrigin.EMAIL.value if dated else None} | saved
     for name in _TEXT_FIELDS:
         setattr(action, name, saved[name])
     for name in _DATE_FIELDS:
@@ -151,13 +187,7 @@ def _new_row(
         created_at_utc=now,
     )
     if analysis.follow_up is FollowUpKind.NEW_DEADLINE:
-        deadline = ResolvedDeadline(
-            analysis.deadline_text,
-            analysis.deadline_precision,
-            analysis.deadline_date,
-            analysis.deadline_at_utc,
-            analysis.deadline_timezone,
-        )
+        deadline = resolved(analysis)
         target, reason = suggest_target_for(deadline, message.received_at_utc, timezone_name)
         row.deadline_text = deadline.text
         row.deadline_precision = deadline.precision.value
@@ -188,7 +218,9 @@ class ProposalService:
         self._clock = clock
         self._proposals = ProposalRepository(session)
         self._actions = ActionRepository(session)
-        self._repeats = Repeats(session, self._actions, zone=zone, id_factory=new_public_id)
+        self._repeats = Repeats(
+            session, self._actions, zone=OwnerZone(session, zone), id_factory=new_public_id
+        )
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
         return await commit_once(self._session, self._clock, operation)
@@ -309,7 +341,9 @@ class ProposalService:
         """A proposal in any state."""
         row = await self._row(proposal_id)
         action = await self._action(row)
-        return proposal_from_row(row, action.public_id, action.title, action.revision)
+        return proposal_from_row(
+            row, action.public_id, action.title, action.revision, action.deadline_origin
+        )
 
     async def pending(self, limit: int = PROPOSAL_LIST_LIMIT) -> tuple[ActionProposal, ...]:
         """Pending proposals of live, open actions, newest first."""
@@ -317,8 +351,8 @@ class ProposalService:
             raise ValueError("limit must be at least 1")
         rows = await self._proposals.pending(limit)
         return tuple(
-            proposal_from_row(row, public_id, title, revision)
-            for row, public_id, title, revision in rows
+            proposal_from_row(row, public_id, title, revision, origin)
+            for row, public_id, title, revision, origin in rows
         )
 
     async def pending_for_messages(
@@ -330,17 +364,18 @@ class ProposalService:
             ProviderKind.GMAIL.value, account_email, message_keys
         )
         found: dict[str, list[ActionProposal]] = {}
-        for row, public_id, title, revision in rows:
+        for row, public_id, title, revision, origin in rows:
             found.setdefault(row.provider_message_id, []).append(
-                proposal_from_row(row, public_id, title, revision)
+                proposal_from_row(row, public_id, title, revision, origin)
             )
         return {key: tuple(proposals) for key, proposals in found.items()}
 
     async def apply(self, proposal_id: int, expected_revision: int) -> Action:
         """Apply a pending proposal to its live, open action, as one revision.
 
-        A new deadline sets the deadline and the suggested target, and moves the target
-        date only when it still equals the old suggested target; a cancellation or delivery
+        A new deadline sets the deadline, as the email's even over one the owner set (B06),
+        and the suggested target, and moves the target date only when it still equals the
+        old suggested target; a cancellation or delivery
         completes the action. The email becomes a source, from local mail or else from the
         snapshot. What changed is kept for undo_apply(). Raises ActionConflictError unless
         the proposal is pending and the action is open and at ``expected_revision``.
@@ -365,6 +400,7 @@ class ProposalService:
                 action.deadline_date = row.deadline_date
                 action.deadline_at_utc = row.deadline_at_utc
                 action.deadline_timezone = row.deadline_timezone
+                action.deadline_origin = DeadlineOrigin.EMAIL.value
                 action.suggested_target_date = row.suggested_target_date
                 action.target_reason = row.target_reason
             else:

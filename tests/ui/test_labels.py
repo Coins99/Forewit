@@ -142,7 +142,10 @@ def test_an_address_wraps_after_its_at_sign(qtbot: QtBot, qapp: QApplication, th
     assert "​" not in line.text() and "​" not in line.accessibleName()
 
 
-def test_a_path_wraps_after_its_slashes(qtbot: QtBot) -> None:
+def test_a_path_wraps_after_its_slashes(qtbot: QtBot, qapp: QApplication, themed: None) -> None:
+    # In the app's own font: a system's fallback font can make "mail.google.com/" alone wider
+    # than 120 px (192 px on a Windows machine), which leaves no break but inside the word.
+    apply_theme(qapp)
     label = wrap_label("https://mail.google.com/mail/u/0/#inbox/abc")
     qtbot.addWidget(label)
     lines = laid_out_lines(label, 120)
