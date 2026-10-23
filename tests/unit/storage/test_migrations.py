@@ -1789,14 +1789,24 @@ def test_owner_deadlines_mark_every_existing_deadline_as_the_email_s(tmp_path: P
             " stated_deadline_precision='date', stated_deadline_date='2026-10-02',"
             " stated_deadline_timezone='America/Toronto' WHERE id=1"
         )
+        # And gave the third, which had none, a time: 17:00 in Toronto.
+        connection.execute(
+            "UPDATE actions SET deadline_origin='owner', deadline_precision='datetime',"
+            " deadline_date='2026-10-16', deadline_at_utc='2026-10-16 21:00:00.000000',"
+            " deadline_timezone='America/Toronto' WHERE id=3"
+        )
         connection.commit()
     command.check(config)
 
     command.downgrade(config, "20261016_0022")
 
-    # Older versions read the owner's deadline as an ordinary dated one, its date as its text.
+    # Older versions read the owner's deadline as an ordinary dated one, its date as its text,
+    # or for a time, its UTC time.
     assert _query(
         path, "SELECT deadline_text, deadline_precision, deadline_date FROM actions WHERE id=1"
     ) == [("2026-10-05", "date", "2026-10-05")]
+    assert _query(path, "SELECT deadline_text, deadline_precision FROM actions WHERE id=3") == [
+        ("2026-10-16 21:00 UTC", "datetime")
+    ]
     assert len(_query(path, "SELECT id FROM actions")) == 3
     assert _schema(path) == _schema(fresh)

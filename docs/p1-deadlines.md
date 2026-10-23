@@ -140,5 +140,11 @@ With Gmail connected:
 
 Validation on macOS, 2026-10-20: the full suite with the Qt tests passed, with the 90%
 per-service gate. Ruff formatting and lint and strict mypy for Windows and macOS passed. The
-editor was reviewed in light and dark at 100%. Windows execution and owner desktop acceptance
-remain pending.
+editor was reviewed in light and dark at 100%.
+
+Validation on Windows 11, 2026-10-23 (offscreen Qt, Eastern time): the full suite passed with
+the 90% per-service gate, apart from the installed-command checks in
+`tests/unit/test_branding.py`, which need an environment synced since the Forewit rename.
+Ruff formatting and lint and strict mypy (default, Windows and macOS) passed. The editor's
+**Clear deadline** was reviewed in light and dark at 100% and 200%. Owner desktop acceptance
+remains pending.
