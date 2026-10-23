@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.ui.who_text import in_sentence, who_text
 
 Entry = CalendarEvent | GoogleEvent | ActionMarker
 Event = CalendarEvent | GoogleEvent
@@ -47,11 +48,8 @@ def marker_text(marker: ActionMarker, zone: ZoneInfo) -> str:
         label = "Deadline"
     else:
         label = f"Deadline {clock(marker.due_at_utc, zone)}"
-    if marker.waiting:
-        who = " · waiting for others" if marker.person is None else f" · waiting on {marker.person}"
-    else:
-        who = "" if marker.person is None else f" · for {marker.person}"
-    return f"{label} · {marker.action_title}{who}"
+    who = who_text(marker.waiting, marker.person, unnamed="Waiting for others")
+    return f"{label} · {marker.action_title}" + ("" if who is None else " · " + in_sentence(who))
 
 
 def entry_key(entry: Entry) -> tuple[str, ...]:

@@ -52,8 +52,9 @@ and without asking the AI to guess who anyone is.
 ## Consequences
 
 - The Waiting page names whom each item waits on and for how long, and prompts a follow-up
-  only when one is due: a reply from others in the thread, a follow-up date that has come or
-  a deadline that has passed.
+  only when one is due: a reply from others in the thread, or a follow-up date that has come
+  or a deadline that has passed with no message in the thread since that the owner sent or
+  marked seen.
 - Additive migration `20261023_0024`. Downgrading drops the columns and keeps every task;
   upgrading again counts each waiting task's wait from its creation.
 - A name is free text: two spellings that differ in more than case or width are two people.

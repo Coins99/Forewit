@@ -6,11 +6,13 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from mailbrief.domain.actions import (
+    PERSON_MAX_CHARS,
     TARGET_REASON_TEXT,
     Action,
     ActionPriority,
     ActionProposal,
     ActionStatus,
+    clean_person,
 )
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.recurrence import (
@@ -29,6 +31,7 @@ from mailbrief.ui.deadline_text import (
     weekday,
 )
 from mailbrief.ui.proposals_view import pending_proposals
+from mailbrief.ui.who_text import who_text
 
 
 @dataclass(frozen=True)
@@ -59,8 +62,16 @@ class ActionDetails:
     repeat: str | None  # "Repeats every Mon and Wed", or "Repeats stopped".
     previous: str | None  # The occurrence it follows: "Follows Wed Oct 14 · Skipped".
     today: date  # The owner's day, which decides whether a date names its year.
-    person: str | None = None  # Who it waits on, or is for (B08): the owner's text.
     waiting_since: date | None = None  # The day it started waiting, in the owner's zone.
+    followed_up_on: date | None = None  # followed_up_at's day, in the owner's zone (B08).
+
+
+def followed_up_at(action: Action) -> datetime | None:
+    """The latest message in the action's threads that the owner sent or marked seen (B08):
+    once one comes after a follow-up fell due, the owner has followed up or had an answer."""
+    thread = action.thread
+    sent = None if thread is None else thread.owner_replied_at_utc
+    return max((at for at in (action.thread_seen_until_utc, sent) if at is not None), default=None)
 
 
 def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> ActionDetails:
@@ -86,6 +97,7 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
             day = _when(thread.owner_replied_at_utc, today=today, zone=zone, clock=False)
             replied = f"you replied {day}"
     completed = action.completed_at_utc
+    followed = followed_up_at(action)
     repeat = previous = None
     if action.repeat is not None:
         repeat = (
@@ -116,12 +128,12 @@ def action_details(action: Action, *, today: date, zone: ZoneInfo, now: datetime
         repeat=repeat,
         previous=previous,
         today=today,
-        person=action.person,
         waiting_since=(
             None
             if action.waiting_since_utc is None
             else action.waiting_since_utc.astimezone(zone).date()
         ),
+        followed_up_on=None if followed is None else followed.astimezone(zone).date(),
     )
 
 
@@ -259,31 +271,23 @@ def since_text(details: ActionDetails) -> str | None:
     return f"{text} · {_days(days)}" if details.waiting and days > 0 else text
 
 
-def person_text(action: Action) -> str | None:
-    """Who the action is with (B08): "Waiting on Alex", or "For Sam" for one of the owner's
-    own; None when the owner named no one."""
-    if action.person is None:
-        return None
-    return f"Waiting on {action.person}" if action.waiting else f"For {action.person}"
-
-
-def initials(name: str) -> str:
-    """A person's initials for a row's avatar: "Alex Kim" is "AK", "Alex" is "AL"."""
-    words = name.split()
-    if not words:
-        return "?"
-    return (words[0][0] + words[1][0] if len(words) > 1 else words[0][:2]).upper()
+def person_text(action: Action, *, unnamed: str | None = None) -> str | None:
+    """Who ``action`` is with, in who_text's shared phrase (B08)."""
+    return who_text(action.waiting, action.person, unnamed=unnamed)
 
 
 def sender_person(action: Action) -> str | None:
     """Who the action's first email is from, as a person (B08): the cached message's display
-    name when it can't pass for another address, else the address; None without a source."""
+    name when it can't pass for another address, else the address. It is the email's text,
+    so it is cleaned as a typed name is (one line, no control or format characters, at most
+    PERSON_MAX_CHARS) before the editor shows it. None without a source."""
     if not action.sources:
         return None
     source = action.sources[0]
+    address = clean_person(source.sender_address[:PERSON_MAX_CHARS])
     if with_address(source.sender_name, source.sender_address) == source.sender_address:
-        return source.sender_address
-    return " ".join((source.sender_name or "").split())
+        return address
+    return clean_person((source.sender_name or "")[:PERSON_MAX_CHARS]) or address
 
 
 def completed_text(details: ActionDetails) -> str | None:

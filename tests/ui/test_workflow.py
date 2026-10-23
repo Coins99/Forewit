@@ -23,6 +23,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     SuggestionState,
     ThreadLink,
+    person_key,
     tag_key,
 )
 from mailbrief.domain.analysis import DeadlinePrecision
@@ -412,6 +413,11 @@ class FakeBackend(FakeDrafts):
                 and action.project.area_public_id == group_id
             )
             or (group == "tag" and any(tag_key(tag) == group_id for tag in action.tags))
+            or (
+                group == "person"
+                and action.person is not None
+                and person_key(action.person) == group_id
+            )
         )
 
     async def count_grouped_actions(

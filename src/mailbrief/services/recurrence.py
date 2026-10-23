@@ -17,7 +17,13 @@ from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import ActionActivityKind, ActionStatus, person_key, tag_key
+from mailbrief.domain.actions import (
+    ActionActivityKind,
+    ActionStatus,
+    person_key,
+    tag_key,
+    waiting_since_for,
+)
 from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision
 from mailbrief.domain.recurrence import (
     ENDS_FIRST,
@@ -33,7 +39,6 @@ from mailbrief.storage.actions import ActionRepository, series_rule
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.tables import ActionSeriesTable, ActionTable
 
-_WAITING_FOR: Final = ActionOwnership.WAITING_FOR.value
 _REOPEN: Final = "Reopen the task to change how it repeats."
 _STALE: Final = "The repeat changed since it was loaded; reload it and try again."
 # What the owner's own changes leave on a task; a task with no other activity is untouched.
@@ -192,7 +197,7 @@ class Repeats:
                 title=series.title,
                 ownership=series.ownership,
                 # Each occurrence waits from when it is made, like a task created then.
-                waiting_since_utc=now if series.ownership == _WAITING_FOR else None,
+                waiting_since_utc=waiting_since_for(ActionOwnership(series.ownership), now),
                 person=series.person,
                 person_key=None if series.person is None else person_key(series.person),
                 status=ActionStatus.OPEN.value,

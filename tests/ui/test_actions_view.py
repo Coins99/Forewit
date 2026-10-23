@@ -443,7 +443,8 @@ def test_a_row_names_whom_it_waits_on_or_is_for() -> None:
     assert action_row(mine, today=TODAY, zone=UTC_ZONE, now=NOW).meta == "For Sam"
     assert describe(mine, today=TODAY, zone=UTC_ZONE, now=NOW) == "Action 1 — for Sam"
     one_name = action(3, ownership=ActionOwnership.WAITING_FOR, person="Priya")
-    assert action_row(one_name, today=TODAY, zone=UTC_ZONE, now=NOW).avatar == "PR"
+    # The reader's rule for a sender's avatar too: one initial for a one-word name.
+    assert action_row(one_name, today=TODAY, zone=UTC_ZONE, now=NOW).avatar == "P"
 
 
 def test_a_completed_action_s_row_is_muted_with_its_day_in_the_owner_s_zone() -> None:

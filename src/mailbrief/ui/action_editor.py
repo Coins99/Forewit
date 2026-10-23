@@ -425,6 +425,7 @@ class ActionEditor(QDialog):
         person_row.addWidget(self.person, 1)
         person_row.addWidget(self.use_sender)
         self.person_label = QLabel()
+        self.person_label.setObjectName("taskPersonLabel")
         self.person_label.setBuddy(self.person)
         form.addRow(self.person_label, self.person_row)
         self.owner.currentIndexChanged.connect(self._owner_changed)
@@ -444,6 +445,7 @@ class ActionEditor(QDialog):
         target_row.addWidget(self.has_target)
         target_row.addWidget(self.target)
         self.target_label = QLabel("Target")  # "Follow up" while the task waits (B08).
+        self.target_label.setObjectName("taskTargetLabel")
         form.addRow(self.target_label, target_row)
         self.repeat = QComboBox()
         self.repeat.setObjectName("taskRepeat")
@@ -646,11 +648,13 @@ class ActionEditor(QDialog):
         someone has who it waits on and a follow-up date; the owner's own, who it is for."""
         waiting = _OWNERS[index][0] is ActionOwnership.WAITING_FOR
         self.person_label.setText("Waiting on" if waiting else "For")
+        self.person_label.setAccessibleName(self.person_label.text())
         self.person.setPlaceholderText(
             "Who you're waiting on" if waiting else "Who it's for, if anyone"
         )
         self.person.setAccessibleName("Who the task waits on" if waiting else "Who the task is for")
         self.target_label.setText("Follow up" if waiting else "Target")
+        self.target_label.setAccessibleName(self.target_label.text())
         self.has_target.setText("Follow-up &date" if waiting else "Target &date")
         self._show_person_row()
 

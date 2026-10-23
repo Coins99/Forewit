@@ -25,7 +25,8 @@ are two.
 
 A task accepted from a brief names no one: only you do. **Use sender** fills the field from
 the task's email: the sender's name while the email is still in local mail, unless the name
-looks like an email address, and otherwise the address. Save to keep it.
+looks like an email address, and otherwise the address, tidied as a name you type is. Save
+to keep it.
 
 ## Waiting since
 
@@ -46,20 +47,23 @@ changes about either date.
 ## The Waiting page
 
 - Each row starts with whom it waits on and for how long ("Alex Kim · 3 days"), or "Waiting
-  3 days" without a name; the avatar shows the person's initials ("AK"), else the email's
-  sender's. Search waiting items finds names too.
+  3 days" without a name; the avatar shows the person's initials ("AK"; "A" for "Alex", as
+  the reading pane shows a sender's), else the email's sender's. Search waiting items finds
+  names too.
 - The detail pane's state line says "Waiting on Alex Kim · open", and its facts are
   **Waiting on**, **Waiting since** ("Wed Sep 30 · 3 days") and **Follow-up**.
 - A prompt appears only when something calls for it: "{sender} replied" when the thread has
   messages from others since you marked it seen ("If it's what you were waiting for, mark it
   received."), else "Follow up with Alex" (or "Time to follow up") when the deadline has
-  passed or the follow-up date has come. **Draft follow-up** and **Mark received** are where
-  they were.
+  passed or the follow-up date has come, unless you've already followed up: a message in
+  the thread you sent, or marked seen, on or after that day quiets it. **Draft follow-up** and
+  **Mark received** are where they were.
 - **New task** shows on the Waiting page too, and starts the task as **Waiting for someone**.
 
 For your own tasks the state line reads "Yours, for Sam · open", the **Owner** fact "You, for
 Sam", rows "For Sam", Your day "Today · for Sam" and the Calendar "… · for Sam". The Actions
-filter offers each person ("Person: Sam") beside projects, areas and tags.
+filter offers each person ("Person: Sam") beside projects, areas and tags. It narrows the
+Actions page only: Waiting, which has its own search, always lists everything you wait for.
 
 ## Repeating tasks
 
@@ -102,7 +106,7 @@ With Gmail disconnected:
 
 1. On Waiting, choose **New task**. Confirm **Whose** is **Waiting for someone** and the rows
    read **Waiting on** and **Follow up**. Name Alex, set the follow-up date to today and save.
-2. Confirm the row says "Alex · since today", the avatar "AL", the detail "Waiting on Alex ·
+2. Confirm the row says "Alex · since today", the avatar "A", the detail "Waiting on Alex ·
    open" with the prompt "Follow up with Alex", and Your day "Follow up today · waiting on
    Alex".
 3. Edit a task of yours, name Sam under **For** and save. Confirm "Yours, for Sam · open",

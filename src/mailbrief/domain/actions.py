@@ -110,6 +110,13 @@ def clean_person(text: str | None) -> str | None:
     return person or None
 
 
+def waiting_since_for(ownership: ActionOwnership, now: datetime) -> datetime | None:
+    """When an action that takes ``ownership`` at ``now`` starts waiting (B08): now when
+    someone else does it, never for one of the owner's own. Every path that makes or re-owns
+    an action uses it, as the table's CHECK requires."""
+    return now if ownership is ActionOwnership.WAITING_FOR else None
+
+
 def normalize_tags(values: Iterable[str]) -> tuple[str, ...]:
     """The owner's tags cleaned, without blanks or repeats (the first spelling is kept),
     sorted by their key. Raises ValueError, naming no tag, for a tag that is too long or has a

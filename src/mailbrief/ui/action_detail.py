@@ -25,13 +25,14 @@ from PySide6.QtWidgets import (
 )
 
 from mailbrief.domain.actions import Action, ActionFilter, ActionSource, ActionStatus
-from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.ui.action_text import (
     ActionDetails,
     action_details,
     completed_text,
     follow_up_text,
+    followed_up_at,
     gmail_source,
+    person_text,
     priority_text,
     since_text,
     tags_text,
@@ -43,6 +44,7 @@ from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.hairline import HairlineDivider
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.theme import SMALL_PX, TEXT_PX
+from mailbrief.ui.who_text import UNNAMED_WAITING, in_sentence
 
 EMPTY_TEXT: Final = {
     ActionFilter.OPEN: "No open actions. Create a task or accept a suggestion in a brief.",
@@ -67,16 +69,17 @@ def state_text(action: Action, details: ActionDetails) -> str:
 def owner_text(action: Action, *, mine: str) -> str:
     """Whose the action is, with the person the owner named (B08): ``mine``, or "``mine``,
     for Sam"; "Waiting for someone", or "Waiting on Alex"."""
-    person = action.person
-    if action.ownership is ActionOwnership.MINE:
-        return mine if person is None else f"{mine}, for {person}"
-    return "Waiting for someone" if person is None else f"Waiting on {person}"
+    who = person_text(action, unnamed=UNNAMED_WAITING)
+    if action.waiting and who is not None:
+        return who
+    return mine if who is None else f"{mine}, {in_sentence(who)}"
 
 
 def follow_up_prompt(action: Action, details: ActionDetails) -> tuple[str, str] | None:
     """What the callout of an action the owner waits for says, as a heading and a line, or
     None while nothing calls for it (B08): a reply from others in its thread, then a deadline
-    that has passed or a follow-up date that has come."""
+    that has passed or a follow-up date that has come, unless the owner has sent or marked
+    seen a message in its threads since then (followed_up_at)."""
     if not details.waiting:
         return None
     thread = action.thread
@@ -86,10 +89,17 @@ def follow_up_prompt(action: Action, details: ActionDetails) -> tuple[str, str] 
             "If it's what you were waiting for, mark it received.",
         )
     target = details.target
-    if not details.overdue and (target is None or target > details.today):
+    followed, due_at = followed_up_at(action), action.due_at_utc()
+    late = details.overdue and (followed is None or due_at is None or followed < due_at)
+    planned = (
+        target is not None
+        and target <= details.today
+        and (details.followed_up_on is None or details.followed_up_on < target)
+    )
+    if not (late or planned):
         return None
     heading = "Time to follow up" if action.person is None else f"Follow up with {action.person}"
-    if details.overdue:
+    if late:
         return heading, "The deadline has passed. Draft a short check-in."
     if target == details.today:
         return heading, "It's your follow-up date. Draft a short check-in."
@@ -399,8 +409,12 @@ class ActionDetailPane(QScrollArea):
             # A person's name or a sender's: plain, and wrapped inside a long unbroken one.
             title = wrap_label(heading, px=11, medium=True)
             title.setObjectName("waitingFollowUpHeading")
+            title.setAccessibleName(heading)
             copy.addWidget(title)
-            copy.addWidget(wrap_label(line, tone="muted", px=9))
+            note = wrap_label(line, tone="muted", px=9)
+            note.setObjectName("waitingFollowUpLine")
+            note.setAccessibleName(line)
+            copy.addWidget(note)
             top.append(callout)
         summary = top
         top = self._plan(action, details)

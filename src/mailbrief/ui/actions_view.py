@@ -51,7 +51,6 @@ from mailbrief.ui.action_text import (
     action_details,
     completed_text,
     gmail_source,
-    initials,
     person_text,
     priority_text,
     repeat_short,
@@ -68,6 +67,7 @@ from mailbrief.ui.brief_list import (
     Chip,
     ChipTone,
     elided,
+    initials,
     page_detail,
     paint_chips,
     paint_lines,
@@ -80,6 +80,7 @@ from mailbrief.ui.labels import outline_button, plain_label
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.proposals_view import pending_proposals
 from mailbrief.ui.theme import META_PX, TITLE_PX, current_tokens, ui_font, ui_metrics
+from mailbrief.ui.who_text import UNNAMED_WAITING, in_sentence
 
 __all__ = [
     "COMPLETE",
@@ -149,12 +150,10 @@ def describe_details(action: Action, facts: ActionDetails) -> str:
         details.append("tagged " + ", ".join(action.tags))
     if (repeat := repeat_short(action)) is not None:
         details.append(repeat.lower())
-    if facts.waiting:
-        who = "waiting for someone" if action.person is None else f"waiting on {action.person}"
+    who = person_text(action, unnamed=UNNAMED_WAITING if facts.waiting else None)
+    if who is not None:
         waited = waited_for(facts)
-        details.append(who if waited is None else f"{who}, {waited}")
-    elif (with_person := person_text(action)) is not None:
-        details.append(with_person[0].lower() + with_person[1:])
+        details.append(in_sentence(who) + ("" if waited is None else f", {waited}"))
     if facts.overdue:
         details.append("overdue")
     if facts.carried_over:

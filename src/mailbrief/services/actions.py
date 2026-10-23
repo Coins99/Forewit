@@ -30,6 +30,7 @@ from mailbrief.domain.actions import (
     ThreadLink,
     person_key,
     tag_key,
+    waiting_since_for,
 )
 from mailbrief.domain.analysis import (
     ActionOwnership,
@@ -170,10 +171,8 @@ def _set_ownership(row: ActionTable, ownership: ActionOwnership, now: datetime) 
     """Give the action ``ownership`` (B08): one that becomes someone else's to do waits from
     ``now``, one that stays theirs keeps its wait, and one that becomes the owner's waits no
     longer."""
-    if ownership is not ActionOwnership.WAITING_FOR:
-        row.waiting_since_utc = None
-    elif row.ownership != ownership.value or row.waiting_since_utc is None:
-        row.waiting_since_utc = now
+    if row.ownership != ownership.value or row.waiting_since_utc is None:
+        row.waiting_since_utc = waiting_since_for(ownership, now)
     row.ownership = ownership.value
 
 
@@ -492,9 +491,7 @@ class ActionService:
                     title=suggestion.title,
                     ownership=suggestion.ownership.value,
                     # It waits from now; whom it waits on is the owner's to say.
-                    waiting_since_utc=(
-                        now if suggestion.ownership is ActionOwnership.WAITING_FOR else None
-                    ),
+                    waiting_since_utc=waiting_since_for(suggestion.ownership, now),
                     status=ActionStatus.OPEN.value,
                     effort=None if suggestion.effort is None else suggestion.effort.value,
                     **deadline_columns(suggestion),

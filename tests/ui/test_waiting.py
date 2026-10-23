@@ -17,9 +17,12 @@ from mailbrief.ui.action_editor import ActionEditor
 from mailbrief.ui.action_text import action_details, sender_person
 from mailbrief.ui.actions_view import ActionsPanel
 from mailbrief.ui.calendar_layout import marker_text
+from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.today_view import attention_row
 from tests.factories import make_action
 from tests.ui.test_actions_view import NOW, TODAY, UTC_ZONE, detail_texts, show
+from tests.ui.test_workflow import FakeBackend
+from tests.ui.window_wait import show as show_window
 
 GMAIL = "https://mail.google.com/mail/u/?authuser=me%40x.com#all/t1"
 
@@ -80,12 +83,17 @@ def test_the_person_row_follows_whose_task_it_is(editor: ActionEditor) -> None:
     assert editor.person.placeholderText() == "Who it's for, if anyone"
     assert (editor.target_label.text(), editor.has_target.text()) == ("Target", "Target &date")
     assert editor.person.maxLength() == 120
+    names = (editor.person_label.objectName(), editor.target_label.objectName())
+    assert names == ("taskPersonLabel", "taskTargetLabel")
+    assert editor.person_label.accessibleName() == "For"
 
     editor.owner.setCurrentIndex(1)
 
     assert editor.person_label.text() == "Waiting on"
     assert editor.person.placeholderText() == "Who you're waiting on"
     assert editor.person.accessibleName() == "Who the task waits on"
+    assert editor.person_label.accessibleName() == "Waiting on"
+    assert editor.target_label.accessibleName() == "Follow up"
     assert (editor.target_label.text(), editor.has_target.text()) == (
         "Follow up",
         "Follow-up &date",
@@ -121,6 +129,11 @@ def test_clearing_the_person_names_no_one(editor: ActionEditor) -> None:
         (email(), "alex@example.com"),  # Gone from local mail: the snapshot's address.
         (email(name="boss@corp.example"), "alex@example.com"),  # A name posing as an address.
         (email(name="  "), "alex@example.com"),
+        # The email's text is cleaned as a typed name is: no bidi override, one line,
+        # at most 120 characters.
+        (email(name="Alex\u202eKim"), "AlexKim"),
+        (email(name="Alex\nKim"), "Alex Kim"),
+        (email(name="A" * 200), "A" * 120),
     ],
 )
 def test_use_sender_names_the_email_s_sender(
@@ -244,6 +257,32 @@ def test_the_prompt_comes_only_when_something_calls_for_it() -> None:
     )
 
 
+def test_a_follow_up_the_owner_made_quiets_the_prompt() -> None:
+    """A message the owner sent, or marked seen, on or after the day a follow-up fell due
+    means it has been followed up; one before that doesn't."""
+    due = waiting(person="Alex", target_date=TODAY - timedelta(days=2))  # Thu Oct 1.
+
+    def replied(at: datetime) -> Action:
+        return due.model_copy(update={"thread": ThreadActivity(owner_replied_at_utc=at)})
+
+    assert prompt(replied(NOW - timedelta(days=1))) is None  # Fri Oct 2, after Oct 1.
+    assert prompt(replied(datetime(2026, 10, 1, 8, tzinfo=UTC))) is None  # On the day.
+    assert prompt(replied(datetime(2026, 9, 30, 8, tzinfo=UTC))) == (
+        "Follow up with Alex",
+        "Your follow-up date was Thu Oct 1.",
+    )
+    seen = due.model_copy(update={"thread_seen_until_utc": NOW - timedelta(hours=2)})
+    assert prompt(seen) is None  # Marking a later message seen counts too.
+    late = waiting(
+        deadline_text="by Thursday",
+        deadline_precision=DeadlinePrecision.DATE,
+        deadline_date=date(2026, 10, 1),
+        deadline_timezone="UTC",
+    )
+    assert prompt(late) is not None
+    assert prompt(late.model_copy(update={"thread_seen_until_utc": NOW})) is None
+
+
 def test_the_owner_line_says_whose_it_is() -> None:
     assert owner_text(make_action(), mine="Yours") == "Yours"
     assert owner_text(make_action(person="Sam"), mine="You") == "You, for Sam"
@@ -326,3 +365,69 @@ def test_new_task_inline_on_waiting_shows_whom_at_once(editor: ActionEditor, qtb
     assert not form.isRowVisible(editor.person_row)  # A task of yours: with More options.
     editor.more_options.setChecked(True)
     assert form.isRowVisible(editor.person_row) and editor.person_label.text() == "For"
+
+
+def ids(number: int) -> str:
+    return f"0c5e2c1d-6b8e-4f55-9d0e-{number:012d}"
+
+
+async def test_new_task_on_the_waiting_page_stays_there_and_waits(qtbot: QtBot) -> None:
+    """New task, Ctrl+N or the palette's New task on Waiting starts a waiting task there; on
+    Actions, one of the owner's own."""
+    window = MainWindow(FakeBackend())
+    qtbot.addWidget(window)
+    await window.initialize()
+    show_window(qtbot, window)
+    try:
+        window._show_page("waiting")
+        window._request_new_task()
+        assert (window._sidebar_key(), window.workspace.header.title.text()) == (
+            "waiting",
+            "Waiting",
+        )
+        editor = window.action_editor
+        assert (editor.owner.currentText(), editor.person_label.text()) == (
+            "Waiting for someone",
+            "Waiting on",
+        )
+        editor.force_close()  # New task waits while the inline editor is open.
+        window._show_page("actions")
+        window._request_new_task()
+        assert window._sidebar_key() == "actions"
+        assert editor.owner.currentText() == "Mine"
+    finally:
+        window.action_editor.force_close()
+        window.close()
+        await window.shutdown()
+
+
+async def test_a_filter_on_actions_never_narrows_waiting(qtbot: QtBot) -> None:
+    """Waiting shows no filter, so a person (or any) filter chosen on Actions leaves it whole."""
+    backend = FakeBackend()
+    backend.actions = {
+        ActionFilter.OPEN: (
+            make_action(public_id=ids(1), title="Send Sam the slides", person="Sam"),
+            make_action(public_id=ids(2), title="Book flights"),
+        ),
+        ActionFilter.WAITING: (
+            waiting(public_id=ids(3), person="Alex"),
+            waiting(public_id=ids(4), title="Keys from Sam", person="Sam"),
+        ),
+    }
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window.initialize()
+    show_window(qtbot, window)
+    try:
+        group = window.actions_panel.group
+        group.setCurrentIndex(group.findData("person:sam"))
+        assert window.task is not None
+        await window.task
+
+        lists = window.actions_panel.lists
+        assert lists[ActionFilter.OPEN].count() == 1
+        assert lists[ActionFilter.WAITING].count() == 2
+        assert window.workspace.sidebar.count_text("waiting") == "2"
+    finally:
+        window.close()
+        await window.shutdown()

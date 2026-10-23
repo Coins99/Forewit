@@ -56,6 +56,7 @@ from mailbrief.ui.theme import (
     ui_font,
     ui_metrics,
 )
+from mailbrief.ui.who_text import in_sentence, who_text
 
 # A card shows this many rows before its list scrolls.
 VISIBLE_ROWS: Final = 3
@@ -118,10 +119,8 @@ def attention_row(item: AttentionItem, zone: ZoneInfo, today: date) -> DayRow:
         assert action.target_date is not None
         day = day_text(action.target_date, today=today)
         note = f"Follow-up date {day}" if waiting else f"Planned {day}"
-    if waiting:
-        note += " · waiting" if action.person is None else f" · waiting on {action.person}"
-    elif action.person is not None:
-        note += f" · for {action.person}"
+    if (who := who_text(waiting, action.person, unnamed="Waiting")) is not None:
+        note += " · " + in_sentence(who)
     urgent = item.reason in (AttentionReason.OVERDUE, AttentionReason.DUE_TODAY)
     return DayRow(action.title, note, warning=urgent)
 

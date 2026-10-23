@@ -415,7 +415,8 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
      waiting action only when something calls for it, the follow-up prompt
      (`waitingFollowUp`, heading `waitingFollowUpHeading`): "{sender} replied" for unseen
      messages from others, else "Follow up with Alex" or "Time to follow up" once the
-     deadline has passed or the follow-up date has come. A waiting action's target reads
+     deadline has passed or the follow-up date has come, unless a thread message the owner
+     sent or marked seen came since (`followed_up_at`). A waiting action's target reads
      "Follow up Mon Oct 5" wherever another's reads "Target …".
   3. "Due {deadline_text}", with " · Set by you" for a deadline the owner set (B06) and
      " · Overdue" when overdue (then warning, else secondary)

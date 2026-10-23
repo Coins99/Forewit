@@ -1467,17 +1467,19 @@ class MainWindow(QMainWindow):
             self.actions_panel.show_groups(self._projects, self._areas, tags, people)
             group, group_id = self.actions_panel.grouping()
             for view in ActionFilter:
+                # Waiting shows no filter, so the Actions page's never narrows it (B08).
+                filtered = group != "all" and view is not ActionFilter.WAITING
                 actions = (
-                    await self.backend.list_actions(view)
-                    if group == "all"
-                    else await self.backend.list_grouped_actions(view, group, group_id)
+                    await self.backend.list_grouped_actions(view, group, group_id)
+                    if filtered
+                    else await self.backend.list_actions(view)
                 )
                 # Only the completed list is capped; say so when more exist.
                 total = (
                     (
-                        await self.backend.count_actions(view)
-                        if group == "all"
-                        else await self.backend.count_grouped_actions(view, group, group_id)
+                        await self.backend.count_grouped_actions(view, group, group_id)
+                        if filtered
+                        else await self.backend.count_actions(view)
                     )
                     if view is ActionFilter.COMPLETED and len(actions) >= COMPLETED_LIST_LIMIT
                     else None
@@ -1487,16 +1489,10 @@ class MainWindow(QMainWindow):
                 )
                 if view is ActionFilter.OPEN:
                     self._set_counts(
-                        actions=len(actions)
-                        if group == "all"
-                        else await self.backend.count_actions(view)
+                        actions=await self.backend.count_actions(view) if filtered else len(actions)
                     )
                 elif view is ActionFilter.WAITING:
-                    self._set_counts(
-                        waiting=len(actions)
-                        if group == "all"
-                        else await self.backend.count_actions(view)
-                    )
+                    self._set_counts(waiting=len(actions))
         except Exception as exc:
             self._note_not_refreshed(exc)
         await self._refresh_day()
@@ -1772,13 +1768,14 @@ class MainWindow(QMainWindow):
     def _request_new_task(self) -> None:
         if self._closing or (self.task is not None and not self.task.done()) or self._dialog_open():
             return
-        self._show_page("actions")
+        # On the Waiting page a new task starts there, as someone else's to do (B08); read it
+        # before showing the page, which shows Open for "actions".
+        waiting = self._sidebar_key() == "waiting"
+        self._show_page("waiting" if waiting else "actions")
         if self.action_editor.embedded and self.action_editor.has_unsaved_input():
             self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
             return
         self.action_editor.set_embedded(self.actions_panel.detail_host, window=self)
-        # On the Waiting page a new task starts as someone else's to do (B08).
-        waiting = self.actions_panel.view() is ActionFilter.WAITING
         self.action_editor.new_task(self._local_today(), self.zone, waiting=waiting)
         self.actions_panel.detail_host.addWidget(self.action_editor)
         self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
