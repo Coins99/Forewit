@@ -1100,6 +1100,16 @@ class ThreePaneWorkspace(QWidget):
             for widget in widgets:
                 widget.setVisible(page == key)
 
+    def show_actions_heading(self, *, waiting: bool) -> None:
+        """Head the Actions page for the view it shows: Waiting has its own sidebar row, so
+        its own title and line."""
+        self.header.title.setText("Waiting" if waiting else "Actions")
+        self.header.date.setText(
+            "Keep track of commitments you’re waiting on from other people."
+            if waiting
+            else "Turn important email into clear, trackable next steps."
+        )
+
     def current_page(self) -> str:
         current = self.pages.currentWidget()
         return next(key for key, widget in self._pages.items() if widget is current)

@@ -12,6 +12,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
+    QPushButton,
     QStyle,
     QStyleOptionViewItem,
     QTabBar,
@@ -49,7 +50,7 @@ from mailbrief.ui.actions_view import (
     describe,
 )
 from mailbrief.ui.brief_list import ROW_ROLE, Chip, ChipTone, row_height
-from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_glass, current_tokens, icon
 from tests.factories import make_action, make_proposal
 from tests.ui.window_wait import show as show_window
 
@@ -693,6 +694,35 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
         "No date set",
     ]  # Nothing calls for a follow-up yet, so there is no prompt.
     assert shown_buttons(panel) == ["draftButton", "completeButton", "editButton", "deleteButton"]
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_waiting_swaps_the_primary_action_and_its_icons(
+    panel: ActionsPanel, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    apply_theme(qapp, mode)
+    show(panel, ActionFilter.OPEN, action(1))
+    show(panel, ActionFilter.WAITING, action(2, ownership=ActionOwnership.WAITING_FOR))
+
+    def shown(button: QPushButton) -> QImage:
+        return button.icon().pixmap(14).toImage()
+
+    def tinted(name: str, color: str) -> QImage:
+        return icon(name, color, 14).pixmap(14).toImage()
+
+    on_fill, on_pill = current_glass().primary_text, current_tokens().text
+    panel.show_view(ActionFilter.WAITING)
+    # Mark received is an outline pill there: a tick kept white from Complete's blue fill
+    # would vanish on it in light mode.
+    assert panel.complete_button.property("variant") == "outline"
+    assert shown(panel.complete_button) == tinted("check", on_pill)
+    assert panel.draft_button.property("variant") == "primary"
+    assert shown(panel.draft_button) == tinted("pencil", on_fill)
+
+    panel.show_view(ActionFilter.OPEN)
+    assert panel.complete_button.property("variant") == "primary"
+    assert shown(panel.complete_button) == tinted("check", on_fill)
+    assert shown(panel.draft_button) == tinted("pencil", on_pill)
 
 
 def test_a_completed_action_s_detail(panel: ActionsPanel) -> None:

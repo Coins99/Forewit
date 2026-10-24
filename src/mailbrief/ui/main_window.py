@@ -1239,12 +1239,7 @@ class MainWindow(QMainWindow):
         if self.workspace.current_page() == "actions":
             self.workspace.sidebar.set_current(self._sidebar_key())
             waiting = self.actions_panel.view() is ActionFilter.WAITING
-            self.workspace.header.title.setText("Waiting" if waiting else "Actions")
-            self.workspace.header.date.setText(
-                "Keep track of commitments you’re waiting on from other people."
-                if waiting
-                else "Turn important email into clear, trackable next steps."
-            )
+            self.workspace.show_actions_heading(waiting=waiting)
 
     def _request_page(self, key: str) -> None:
         if key == "inbox":

@@ -76,7 +76,7 @@ from mailbrief.ui.brief_list import (
     row_height,
 )
 from mailbrief.ui.hairline import HairlineSplitter, hairline_pen, paint_focus_ring
-from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.labels import outline_button, plain_label, set_variant
 from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.proposals_view import pending_proposals
 from mailbrief.ui.theme import META_PX, TITLE_PX, current_tokens, ui_font, ui_metrics
@@ -693,11 +693,7 @@ class ActionsPanel(QWidget):
         )
         self.draft_button.setText("Draft follow-up" if waiting else "Dra&ft reply")
         for button, primary in ((self.complete_button, not waiting), (self.draft_button, waiting)):
-            variant = "primary" if primary else "outline"
-            if button.property("variant") != variant:
-                button.setProperty("variant", variant)
-                button.style().unpolish(button)
-                button.style().polish(button)
+            set_variant(button, "primary" if primary else "outline")
         enabled = action is not None and not self._busy
         for button in (self.edit_button, self.complete_button, self.delete_button):
             button.setEnabled(enabled)

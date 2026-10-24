@@ -325,7 +325,10 @@ class ThemeStyle(QProxyStyle):
                 paint_button_focus(painter, option, widget)
                 return
         if element in _CHEVRONS:
-            paint_chevron(painter, rect, _arrow_color(option), up=element in _UP)
+            # A menu button's arrow on the primary pill is white, as its label is.
+            on_fill = _is_pill(widget) and _is_primary(widget)
+            color = current_glass().primary_text if on_fill else _arrow_color(option)
+            paint_chevron(painter, rect, color, up=element in _UP)
             return
         state = option.state
         on = bool(state & QStyle.StateFlag.State_On)

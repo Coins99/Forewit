@@ -249,6 +249,37 @@ def test_every_push_button_is_a_glass_pill(
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_primary_menu_button_s_arrow_is_white_as_its_label(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    """Draft follow-up, the Waiting page's primary action, opens a menu: its arrow on the
+    blue fill is the label's white, never the secondary grey of a field's chevron, which
+    barely shows on blue in light mode."""
+    apply_theme(qapp, mode)
+    button = QPushButton("Draft follow-up")
+    qtbot.addWidget(button)
+    button.setMenu(QMenu(button))
+    button.setProperty("variant", "primary")
+    button.ensurePolished()
+    button.resize(button.sizeHint())
+    button.show()
+    image = grab(button)
+    ratio = image.devicePixelRatio()
+    # The arrow's band: the right end, inside the pill's rim, around the middle.
+    band = image.copy(
+        round((button.width() - 26) * ratio),
+        round((button.height() / 2 - 4) * ratio),
+        round(18 * ratio),
+        round(8 * ratio),
+    )
+    fill = QColor(current_glass().primary.color)
+    white = QColor(current_glass().primary_text)
+    arrow = [QColor(c) for c in colours(band)]
+    assert max(c.lightness() for c in arrow) > (fill.lightness() + white.lightness()) / 2
+    assert all(c.lightness() >= fill.lightness() - 12 for c in arrow)
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
 def test_every_dialog_has_the_home_screen_s_sheet(
     qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
 ) -> None:
