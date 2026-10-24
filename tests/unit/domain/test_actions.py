@@ -23,7 +23,9 @@ from mailbrief.domain.actions import (
     SuggestionState,
     SuggestionView,
     ThreadActivity,
+    clean_person,
     normalize_tags,
+    person_key,
     tag_key,
 )
 from mailbrief.domain.analysis import (
@@ -342,6 +344,7 @@ def test_an_edit_carries_every_editable_field() -> None:
     edit = ActionEdit(
         title="Approve it",
         ownership=ActionOwnership.WAITING_FOR,
+        person=None,
         effort=None,
         priority=None,
         tags=(),
@@ -378,6 +381,7 @@ def test_priority_and_tags_are_required_in_an_edit() -> None:
     edit = ActionEdit(
         title="Book flights",
         ownership=ActionOwnership.MINE,
+        person=None,
         effort=None,
         priority=ActionPriority.HIGH,
         tags=("Travel", "#admin", "travel"),
@@ -483,6 +487,7 @@ def test_reprs_and_errors_leave_out_action_text() -> None:
     edit = ActionEdit(
         title=MARKER,
         ownership=ActionOwnership.MINE,
+        person=None,
         effort=None,
         priority=None,
         tags=(),
@@ -592,3 +597,50 @@ def test_an_action_lists_its_pending_proposals() -> None:
 
     assert [proposal.id for proposal in action.proposals] == [3]
     assert make_action().proposals == ()
+
+
+def test_a_person_is_cleaned_to_one_line_and_bounded() -> None:
+    """B08: who a task waits on or is for, as the owner typed it, tidied."""
+    assert clean_person("  Alex \t Kim\u200b\n") == "Alex Kim"
+    assert clean_person("Dr. Lee, Accounts") == "Dr. Lee, Accounts"  # Commas are fine.
+    assert clean_person("#Sam") == "#Sam"  # Unlike a tag, a leading # stays.
+    assert clean_person(" \u200b ") is None and clean_person(None) is None
+    assert clean_person("a" * 120) == "a" * 120
+    with pytest.raises(ValueError, match="at most 120"):
+        clean_person("a" * 121)
+    assert person_key("ALEX") == person_key("alex") == person_key("\uff21\uff4c\uff45\uff58")
+
+
+def test_an_edit_needs_a_person_and_cleans_it() -> None:
+    """Required like the rest: an edit that left it out would erase the owner's choice."""
+    fields = {
+        "title": "Get the lease",
+        "ownership": ActionOwnership.WAITING_FOR,
+        "person": "  Alex  ",
+        "effort": None,
+        "priority": None,
+        "tags": (),
+        "estimate_minutes": None,
+        "target_date": None,
+        "notes": "",
+    }
+    assert ActionEdit.model_validate(fields).person == "Alex"
+    assert ActionEdit.model_validate({**fields, "person": "   "}).person is None
+    with pytest.raises(ValidationError):
+        ActionEdit.model_validate({k: v for k, v in fields.items() if k != "person"})
+    with pytest.raises(ValidationError) as caught:
+        ActionEdit.model_validate({**fields, "person": "Secret " + "x" * 120})
+    assert "Secret" not in str(caught.value)  # The owner's text stays out of errors.
+
+
+def test_an_action_waits_exactly_while_someone_else_does_it() -> None:
+    waiting = make_action(ownership=ActionOwnership.WAITING_FOR, person="Alex")
+    assert waiting.waiting and waiting.waiting_since_utc == waiting.created_at_utc
+    assert not make_action().waiting
+    with pytest.raises(ValidationError):
+        make_action(ownership=ActionOwnership.WAITING_FOR, waiting_since_utc=None)
+    with pytest.raises(ValidationError):
+        make_action(waiting_since_utc=datetime(2026, 10, 1, tzinfo=UTC))
+    with pytest.raises(ValidationError):
+        make_action(person="")
+    assert "Alex" not in repr(waiting)

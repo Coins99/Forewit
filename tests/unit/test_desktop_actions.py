@@ -106,6 +106,7 @@ async def test_the_runtime_accepts_edits_completes_and_restores_actions(tmp_path
             ActionEdit(
                 title="Approve the final budget",
                 ownership=ActionOwnership.MINE,
+                person=None,
                 effort=None,
                 priority=None,
                 tags=(),
@@ -149,6 +150,7 @@ async def test_saving_an_edit_without_a_plan_leaves_the_steps_unchanged(tmp_path
         edit = ActionEdit(
             title="Approve the final budget",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),

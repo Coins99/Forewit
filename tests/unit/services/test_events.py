@@ -208,6 +208,8 @@ def action_row(number: int, **fields: Any) -> ActionTable:
     values |= fields
     if values["deadline_precision"] != "none":
         values.setdefault("deadline_origin", "email")
+    if values["ownership"] == "waiting_for":
+        values.setdefault("waiting_since_utc", values["created_at_utc"])
     return ActionTable(**values)
 
 

@@ -245,6 +245,7 @@ def track_earlier(path: Path, title: str) -> str:
                         public_id=str(uuid.uuid4()),
                         title=title,
                         ownership="waiting_for",
+                        waiting_since_utc=MIDDAY - timedelta(days=1),
                         status="open",
                         deadline_precision="none",
                         created_at_utc=MIDDAY - timedelta(days=1),

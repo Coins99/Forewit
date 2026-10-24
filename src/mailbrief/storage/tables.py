@@ -21,7 +21,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from mailbrief.domain.actions import ESTIMATE_MAX_MINUTES, TAG_MAX_CHARS, ActionPriority
+from mailbrief.domain.actions import (
+    ESTIMATE_MAX_MINUTES,
+    PERSON_MAX_CHARS,
+    TAG_MAX_CHARS,
+    ActionPriority,
+)
 from mailbrief.domain.analysis import MAX_ANALYSIS_BATCH, DeadlineFields, DeadlinePrecision
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX
 from mailbrief.domain.common import utc_now
@@ -68,6 +73,7 @@ _REFRESH_INTERVAL_CHECK = (
     "refresh_interval_minutes IS NULL OR refresh_interval_minutes IN "
     f"({', '.join(str(minutes) for minutes in REFRESH_INTERVALS)})"
 )
+_PERSON_LENGTH_CHECK = f"person IS NULL OR length(person) BETWEEN 1 AND {PERSON_MAX_CHARS}"
 
 
 class Base(DeclarativeBase):
@@ -488,6 +494,7 @@ class ActionSeriesTable(Base):
             name="estimate_minutes_range",
         ),
         CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(_PERSON_LENGTH_CHECK, name="person_length"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -502,6 +509,7 @@ class ActionSeriesTable(Base):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     ownership: Mapped[str] = mapped_column(String(16), nullable=False)
+    person: Mapped[str | None] = mapped_column(Text)  # Who later repeats wait on or are for.
     priority: Mapped[str | None] = mapped_column(String(16))
     effort: Mapped[str | None] = mapped_column(String(16))
     estimate_minutes: Mapped[int | None] = mapped_column(Integer)
@@ -543,10 +551,17 @@ class ActionTable(DeadlineColumns, Base):
             "stated_deadline_precision IN ('none','unresolved','date','datetime')",
             name="stated_deadline_precision_known",
         ),
+        CheckConstraint(_PERSON_LENGTH_CHECK, name="person_length"),
+        CheckConstraint("(person IS NULL) = (person_key IS NULL)", name="person_key_set"),
+        CheckConstraint(
+            "(ownership = 'waiting_for') = (waiting_since_utc IS NOT NULL)",
+            name="waiting_since_set",
+        ),
         # One occurrence per series and date, so making the next one twice makes one.
         UniqueConstraint("series_id", "occurrence_date", name="uq_actions_series_occurrence"),
         Index("ix_actions_status", "status"),
         Index("ix_actions_follows_action_id", "follows_action_id"),
+        Index("ix_actions_person_key", "person_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -594,6 +609,12 @@ class ActionTable(DeadlineColumns, Base):
     stated_deadline_date: Mapped[date | None] = mapped_column(Date)
     stated_deadline_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     stated_deadline_timezone: Mapped[str | None] = mapped_column(String(128))
+    # Who the task waits on, or is for (B08): the owner's text, with the key it is matched
+    # by (person_key), and when it last became someone else's to do, set exactly while it
+    # waits for someone.
+    person: Mapped[str | None] = mapped_column(Text)
+    person_key: Mapped[str | None] = mapped_column(Text)
+    waiting_since_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class ActionTagTable(Base):

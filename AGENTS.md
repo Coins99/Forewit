@@ -102,6 +102,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `actions.deadline_origin` says whether an email or the owner set it, and
   `stated_deadline_*` keeps the email's deadline the owner replaced, for Use the email's.
   Migration 0023 follows 0022. See `docs/p1-deadlines.md` and ADR 0021.
+- P1 waiting and commitments (B08) implemented, awaiting owner desktop acceptance: a task
+  names who it waits on (**Waiting on**) or, for the owner's own, who it is for (**For**),
+  the owner's text in `actions.person` with its `person_key`; a waiting task keeps
+  `waiting_since_utc` and its target date is its follow-up date. The Waiting page shows the
+  person and the wait and prompts a follow-up only when one is due; New task works there, and
+  the Actions filter offers each person. Migration 0024 follows 0023. See
+  `docs/p1-waiting.md` and ADR 0022.
 - Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
@@ -320,6 +327,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (`deadline_text` NULL; it stays an email's words). Replacing or clearing an email's deadline
   first copies it to `stated_deadline_*`. A deadline change re-suggests the target but never
   moves or sets the target date, and moving a target date or an event never moves a deadline.
+- Waiting and commitments (B08, ADR 0022): a task's person is the owner's text, cleaned by
+  `clean_person` (one line, at most 120 characters) and matched by `person_key`; only an
+  owner's `ActionEdit` sets it, and accepting a suggestion, AI runs, proposals and adding an
+  email never set or change it. `waiting_since_utc` is set exactly while ownership is
+  `waiting_for`: becoming waiting sets it to now, staying waiting keeps it, becoming the
+  owner's clears it, and a repeat's next occurrence waits from when it is made. AI drafting
+  never sends the person.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.

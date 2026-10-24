@@ -149,16 +149,14 @@ class CachedMailDialog(QDialog):
         navigation = QHBoxLayout()
         self.previous = outline_button("&Previous", "cachedPrevious", mnemonic=True)
         self.next = outline_button("&Next", "cachedNext", mnemonic=True)
+        # An outline pill: Done is the dialog's one primary action.
         self.source = outline_button(
-            "Open in &Gmail", "cachedSource", mnemonic=True, primary=True, icon_name="external-link"
+            "Open source in &Gmail", "cachedSource", mnemonic=True, icon_name="external-link"
         )
         close = outline_button("&Done", "cachedClose", mnemonic=True, primary=True)
         for button in (self.previous, self.next):
             navigation.addWidget(button)
         left.addLayout(navigation)
-        self.source.setProperty("variant", "primary")
-        self.source.setText("Open source in &Gmail")
-        self.source.setProperty("variant", "outline")
         list_pane.setMinimumWidth(260)
         detail_pane.setMinimumWidth(300)
         self.splitter.addWidget(list_pane)

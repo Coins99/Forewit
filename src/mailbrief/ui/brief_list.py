@@ -115,6 +115,11 @@ def sender_text(contact: EmailContact) -> str:
     return contact.name or contact.address
 
 
+def initials(name: str) -> str:
+    """Up to two initials for an avatar: "Alex Kim" is "AK", "Alex" is "A"."""
+    return "".join(part[0] for part in name.split()[:2]).upper()
+
+
 def sender_with_address(contact: EmailContact) -> str:
     """The sender as "Name <address>", so a display name can't pass for someone else (see
     ``with_address``)."""

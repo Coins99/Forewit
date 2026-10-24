@@ -145,7 +145,8 @@ def test_each_reason_reads_as_a_title_and_a_short_note() -> None:
         DayRow("Pay the invoice", "Overdue · Mon Oct 12", warning=True),
         DayRow("Send the slides", "Due 17:00", warning=True),
         DayRow("Book the room", "Today"),
-        DayRow("Hear back from Sam", "Planned Fri Oct 9 · waiting"),
+        # A waiting task's target is its follow-up date (B08).
+        DayRow("Hear back from Sam", "Follow-up date Fri Oct 9 · waiting"),
     ]
     assert reply_row(REPLIED) == DayRow("Finance review prep", "2 new · Priya Shah", accent=True)
     assert reply_row(REPLIED).text() == "Finance review prep, 2 new · Priya Shah"

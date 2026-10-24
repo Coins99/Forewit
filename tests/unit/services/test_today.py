@@ -142,6 +142,7 @@ async def test_the_service_reads_open_and_waiting_actions_and_todays_calendar(
         ActionEdit(
             title="Book the room",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -155,6 +156,7 @@ async def test_the_service_reads_open_and_waiting_actions_and_todays_calendar(
         ActionEdit(
             title="Hear back from Sam",
             ownership=ActionOwnership.WAITING_FOR,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -168,6 +170,7 @@ async def test_the_service_reads_open_and_waiting_actions_and_todays_calendar(
         ActionEdit(
             title="Someday",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),

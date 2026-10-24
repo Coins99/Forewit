@@ -28,6 +28,7 @@ from tests.unit.services.test_actions_service import START, seed
 EDIT = ActionEdit(
     title="Plan the week",
     ownership=ActionOwnership.MINE,
+    person=None,
     effort=None,
     priority=None,
     tags=(),

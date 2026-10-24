@@ -56,6 +56,7 @@ from mailbrief.ui.theme import (
     ui_font,
     ui_metrics,
 )
+from mailbrief.ui.who_text import in_sentence, who_text
 
 # A card shows this many rows before its list scrolls.
 VISIBLE_ROWS: Final = 3
@@ -101,8 +102,11 @@ class DayRow:
 
 def attention_row(item: AttentionItem, zone: ZoneInfo, today: date) -> DayRow:
     """The action's title, and "Overdue · Mon Oct 12", "Due 17:00", "Due today", "Today"
-    or "Planned Fri Oct 9", with "waiting" when someone else does it."""
+    or "Planned Fri Oct 9"; for one the owner waits for, whose target is its follow-up
+    date (B08), "Follow up today" or "Follow-up date Fri Oct 9", with "waiting" or "waiting
+    on Alex"; and "for Sam" with a person the owner's own task is for."""
     action = item.action
+    waiting = action.ownership is ActionOwnership.WAITING_FOR
     if item.reason is AttentionReason.OVERDUE:
         due = deadline_text(action, zone, today=today)
         note = f"Overdue · {due}" if due else "Overdue"
@@ -110,12 +114,13 @@ def attention_row(item: AttentionItem, zone: ZoneInfo, today: date) -> DayRow:
         local = action.deadline_at_utc.astimezone(zone) if action.deadline_at_utc else None
         note = f"Due {local:%H:%M}" if local is not None else "Due today"
     elif item.reason is AttentionReason.PLANNED_TODAY:
-        note = "Today"
+        note = "Follow up today" if waiting else "Today"
     else:
         assert action.target_date is not None
-        note = f"Planned {day_text(action.target_date, today=today)}"
-    if action.ownership is ActionOwnership.WAITING_FOR:
-        note += " · waiting"
+        day = day_text(action.target_date, today=today)
+        note = f"Follow-up date {day}" if waiting else f"Planned {day}"
+    if (who := who_text(waiting, action.person, unnamed="Waiting")) is not None:
+        note += " · " + in_sentence(who)
     urgent = item.reason in (AttentionReason.OVERDUE, AttentionReason.DUE_TODAY)
     return DayRow(action.title, note, warning=urgent)
 

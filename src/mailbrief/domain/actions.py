@@ -35,7 +35,9 @@ ESTIMATE_MAX_MINUTES: Final = 6_000
 PUBLIC_ID_CHARS: Final = 36  # A UUID in its canonical text form.
 TAG_MAX_CHARS: Final = 40
 MAX_ACTION_TAGS: Final = 10
-_TAG_SPACES: Final = re.compile(r"\s+")
+# Who a task waits on, or is for (B08): a name as the owner types it.
+PERSON_MAX_CHARS: Final = 120
+_SPACES: Final = re.compile(r"\s+")
 
 # The days a deadline the owner sets may fall on (B06): wide enough for any plan, and far
 # from the calendar's ends, where a deadline's due time can't be worked out.
@@ -81,12 +83,38 @@ def tag_key(name: str) -> str:
     return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", name).casefold())
 
 
-def clean_tag(text: str) -> str:
-    """A tag as stored: single spaces, no control or format characters, no leading ``#``."""
+def _one_line(text: str) -> str:
+    """``text`` without control or format characters, its spaces single and trimmed."""
     kept = "".join(
         char for char in text if char.isspace() or not unicodedata.category(char).startswith("C")
     )
-    return _TAG_SPACES.sub(" ", kept).strip().lstrip("#").strip()
+    return _SPACES.sub(" ", kept).strip()
+
+
+def clean_tag(text: str) -> str:
+    """A tag as stored: single spaces, no control or format characters, no leading ``#``."""
+    return _one_line(text).lstrip("#").strip()
+
+
+def person_key(name: str) -> str:
+    """What makes two names the same person, as for tags: case and width don't."""
+    return tag_key(name)
+
+
+def clean_person(text: str | None) -> str | None:
+    """A person as stored (B08): single spaces, no control or format characters, None when
+    nothing is left. Raises ValueError, naming no one, for a name that is too long."""
+    person = _one_line(text or "")
+    if len(person) > PERSON_MAX_CHARS:
+        raise ValueError(f"A name can be at most {PERSON_MAX_CHARS} characters.")
+    return person or None
+
+
+def waiting_since_for(ownership: ActionOwnership, now: datetime) -> datetime | None:
+    """When an action that takes ``ownership`` at ``now`` starts waiting (B08): now when
+    someone else does it, never for one of the owner's own. Every path that makes or re-owns
+    an action uses it, as the table's CHECK requires."""
+    return now if ownership is ActionOwnership.WAITING_FOR else None
 
 
 def normalize_tags(values: Iterable[str]) -> tuple[str, ...]:
@@ -291,13 +319,18 @@ class ActionStep(DomainModel):
 
 
 class ActionSource(DomainModel):
-    """A message an action came from; ``available`` says whether it is still cached."""
+    """A message an action came from; ``available`` says whether it is still cached.
+
+    ``sender_name`` is the display name the cached message gives, None once it isn't cached:
+    the snapshot keeps only the address.
+    """
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
     provider_message_id: str = Field(min_length=1, max_length=512)
     subject: str = Field(default="", max_length=998, repr=False)
     sender_address: str = Field(min_length=3, max_length=320)
+    sender_name: str | None = Field(default=None, max_length=255, repr=False)
     web_link: HttpUrl
     received_at_utc: datetime
     available: bool
@@ -398,6 +431,10 @@ class Action(DeadlineFields):
     None exactly when there is none. A deadline the owner set is a date or an instant with no
     phrase. ``stated_deadline`` is the email's deadline the owner last replaced or cleared,
     if any (B06).
+
+    ``person`` is who the action waits on or, for one of the owner's own, who it is for (B08),
+    and ``waiting_since_utc`` when it last became someone else's to do: set exactly while it
+    waits for someone.
     """
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -406,6 +443,10 @@ class Action(DeadlineFields):
     project: Project | None = None
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
+    person: str | None = Field(
+        default=None, min_length=1, max_length=PERSON_MAX_CHARS, repr=False
+    )  # The owner's, never the AI's.
+    waiting_since_utc: datetime | None = None
     status: ActionStatus
     priority: ActionPriority | None = None  # The owner's, never the AI's.
     tags: tuple[str, ...] = Field(default=(), repr=False)  # Sorted by tag_key.
@@ -438,6 +479,7 @@ class Action(DeadlineFields):
         "updated_at_utc",
         "completed_at_utc",
         "thread_seen_until_utc",
+        "waiting_since_utc",
     )
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
@@ -449,7 +491,14 @@ class Action(DeadlineFields):
             raise ValueError("completed_at_utc must be set exactly when the action is completed")
         if (self.deadline_origin is None) != (self.deadline_precision is DeadlinePrecision.NONE):
             raise ValueError("deadline_origin must be set exactly when there is a deadline")
+        if (self.waiting_since_utc is not None) != self.waiting:
+            raise ValueError("waiting_since_utc must be set exactly when the action waits")
         return self
+
+    @property
+    def waiting(self) -> bool:
+        """Whether someone else does the action: the owner waits for them."""
+        return self.ownership is ActionOwnership.WAITING_FOR
 
     @property
     def owner_deadline(self) -> bool:
@@ -503,12 +552,18 @@ class ActionEdit(DomainModel):
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership
     # Required like the rest: an edit that left one out would erase the owner's choice.
+    person: str | None = Field(repr=False)  # Cleaned by clean_person; blank is None.
     priority: ActionPriority | None
     tags: tuple[str, ...] = Field(repr=False)
     effort: ActionEffort | None
     estimate_minutes: int | None = Field(ge=1, le=ESTIMATE_MAX_MINUTES)
     target_date: date | None
     notes: str = Field(max_length=ACTION_NOTES_MAX_CHARS, repr=False)
+
+    @field_validator("person")
+    @classmethod
+    def check_person(cls, value: str | None) -> str | None:
+        return clean_person(value)
 
     @field_validator("tags")
     @classmethod

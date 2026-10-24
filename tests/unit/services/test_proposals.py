@@ -129,6 +129,7 @@ async def action(
             public_id=str(uuid.uuid4()),
             title="Send the deck",
             ownership="waiting_for",
+            waiting_since_utc=SOURCE_AT + timedelta(minutes=minutes),
             status=status,
             notes="Ask Sam first.",
             created_at_utc=SOURCE_AT + timedelta(minutes=minutes),
@@ -695,6 +696,7 @@ async def test_undo_is_refused_once_the_action_changed(
         ActionEdit(
             title="Send the deck",
             ownership=ActionOwnership.WAITING_FOR,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -801,6 +803,7 @@ async def test_a_completing_proposal_moves_a_repeating_task_on(
     edit = ActionEdit(
         title=before.title,
         ownership=before.ownership,
+        person=before.person,
         priority=None,
         tags=(),
         effort=before.effort,

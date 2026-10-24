@@ -167,6 +167,7 @@ def build_actions(qtbot: QtBot, key: str) -> ThreePaneWorkspace:
     sidebar, view = ACTION_PAGES[key]
     workspace.show_page("actions")
     panel.show_view(view)
+    workspace.show_actions_heading(waiting=view is ActionFilter.WAITING)
     workspace.sidebar.set_current(sidebar)
     return workspace
 
@@ -189,6 +190,17 @@ def test_actions_page_renders(
         Path(folder).mkdir(parents=True, exist_ok=True)
         dpr = image.devicePixelRatio()
         assert image.save(str(Path(folder) / f"{key}-{mode.value}-{dpr:g}x.png"))
+
+
+def test_the_waiting_page_is_headed_as_the_window_heads_it(qtbot: QtBot) -> None:
+    waiting = build_actions(qtbot, "page-waiting")
+    assert waiting.header.title.text() == "Waiting"
+    assert waiting.header.date.text() == (
+        "Keep track of commitments you’re waiting on from other people."
+    )
+    waiting.show_actions_heading(waiting=False)
+    assert waiting.header.title.text() == "Actions"
+    assert waiting.header.date.text() == "Turn important email into clear, trackable next steps."
 
 
 @pytest.mark.parametrize("key", list(ACTION_PAGES))

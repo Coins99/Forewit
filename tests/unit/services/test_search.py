@@ -61,6 +61,7 @@ async def add_task(
         ActionEdit(
             title=title,
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),
@@ -113,6 +114,7 @@ async def test_a_skipped_occurrence_is_never_found(session: AsyncSession) -> Non
         ActionEdit(
             title="Water the plants",
             ownership=ActionOwnership.MINE,
+            person=None,
             effort=None,
             priority=None,
             tags=(),

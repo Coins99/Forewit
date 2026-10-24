@@ -903,9 +903,14 @@ def test_the_waiting_view_lists_an_accepted_waiting_for_action(
     assert accepted is not None
 
     assert run_actions(path, "list", "--view", "waiting", "--timezone", "UTC") == 0
-    assert capsys.readouterr().out == (
-        f"{accepted[1]} [open] Wait for the signed copy (waiting for); "
-        "target none; deadline none; steps 0/0\n"
+    # It waits from when it was accepted, today on the real clock.
+    assert re.fullmatch(
+        re.escape(
+            f"{accepted[1]} [open] Wait for the signed copy (waiting for); "
+            "target none; deadline none; steps 0/0; waiting since "
+        )
+        + r"\d{4}-\d{2}-\d{2}\n",
+        capsys.readouterr().out,
     )
     assert run_actions(path, "list", "--timezone", "UTC") == 0
     assert capsys.readouterr().out == "No actions.\n"  # The open view holds the owner's own.

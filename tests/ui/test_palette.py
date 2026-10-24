@@ -494,6 +494,7 @@ async def test_runtime_search_and_inbox_position_read_only_local_data(tmp_path: 
             ActionEdit(
                 title="Approve the budget",
                 ownership=ActionOwnership.MINE,
+                person=None,
                 effort=None,
                 priority=None,
                 tags=(),

@@ -38,6 +38,7 @@ from mailbrief.domain.actions import (
     DEADLINE_LAST_DAY,
     ESTIMATE_MAX_MINUTES,
     MAX_ACTION_STEPS,
+    PERSON_MAX_CHARS,
     TARGET_REASON_TEXT,
     Action,
     ActionEdit,
@@ -66,6 +67,7 @@ from mailbrief.domain.recurrence import (
     first_occurrence,
 )
 from mailbrief.services.deadlines import target_for_day
+from mailbrief.ui.action_text import sender_person
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
     WEEKDAYS,
@@ -407,6 +409,27 @@ class ActionEditor(QDialog):
         for _value, name in _OWNERS:
             self.owner.addItem(name)
         form.addRow("&Whose", self.owner)
+        # Who it waits on or, for the owner's own, who it is for (B08). The label follows
+        # Whose; every letter of either is another row's mnemonic already, so it has none.
+        self.person = QLineEdit()
+        self.person.setObjectName("taskPerson")
+        self.person.setMaxLength(PERSON_MAX_CHARS)
+        self.use_sender = outline_button("Use sender", "taskUseSender")
+        self.use_sender.setAccessibleName("Use the email's sender")
+        self.use_sender.setAutoDefault(False)
+        self.person_row = QWidget()
+        self.person_row.setObjectName("taskPersonRow")
+        self.person_row.setAccessibleName("Who the task is with")
+        person_row = QHBoxLayout(self.person_row)
+        person_row.setContentsMargins(0, 0, 0, 0)
+        person_row.addWidget(self.person, 1)
+        person_row.addWidget(self.use_sender)
+        self.person_label = QLabel()
+        self.person_label.setObjectName("taskPersonLabel")
+        self.person_label.setBuddy(self.person)
+        form.addRow(self.person_label, self.person_row)
+        self.owner.currentIndexChanged.connect(self._owner_changed)
+        self.use_sender.clicked.connect(self._use_sender)
         self.effort = QComboBox()
         for _effort, name in _EFFORTS:
             self.effort.addItem(name)
@@ -421,7 +444,9 @@ class ActionEditor(QDialog):
         target_row = QHBoxLayout()
         target_row.addWidget(self.has_target)
         target_row.addWidget(self.target)
-        form.addRow("Target", target_row)
+        self.target_label = QLabel("Target")  # "Follow up" while the task waits (B08).
+        self.target_label.setObjectName("taskTargetLabel")
+        form.addRow(self.target_label, target_row)
         self.repeat = QComboBox()
         self.repeat.setObjectName("taskRepeat")
         self.repeat.setAccessibleName("How the task repeats")
@@ -563,6 +588,7 @@ class ActionEditor(QDialog):
         self.steps.currentRowChanged.connect(lambda _row: self._update_step_buttons())
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
+        self._owner_changed(self.owner.currentIndex())
         self._loaded_input = self._input()
         self.title.textChanged.connect(self._update_buttons)
 
@@ -617,6 +643,28 @@ class ActionEditor(QDialog):
         if (save := self.buttons.button(QDialogButtonBox.StandardButton.Save)) is not None:
             save.setText("Create action" if self.embedded else "Save")
 
+    def _owner_changed(self, index: int) -> None:
+        """Name the person and the target for whose task it is (B08): a task waiting for
+        someone has who it waits on and a follow-up date; the owner's own, who it is for."""
+        waiting = _OWNERS[index][0] is ActionOwnership.WAITING_FOR
+        self.person_label.setText("Waiting on" if waiting else "For")
+        self.person_label.setAccessibleName(self.person_label.text())
+        self.person.setPlaceholderText(
+            "Who you're waiting on" if waiting else "Who it's for, if anyone"
+        )
+        self.person.setAccessibleName("Who the task waits on" if waiting else "Who the task is for")
+        self.target_label.setText("Follow up" if waiting else "Target")
+        self.target_label.setAccessibleName(self.target_label.text())
+        self.has_target.setText("Follow-up &date" if waiting else "Target &date")
+        self._show_person_row()
+
+    def _use_sender(self) -> None:
+        """Name the email's sender as the person, which the owner can still change."""
+        found = None if self._action is None else sender_person(self._action)
+        if found is not None:
+            self.person.setText(found)
+            self.person.setFocus()
+
     def _show_options(self, show: bool) -> None:
         self._options = show
         for widget in (
@@ -631,9 +679,16 @@ class ActionEditor(QDialog):
             self.sources,
         ):
             self._form.setRowVisible(widget, show)
+        self._show_person_row()
         self._show_deadline_note()
         for control in (self.plan_heading, self.steps, self.step_controls):
             control.setVisible(show)
+
+    def _show_person_row(self) -> None:
+        """The person row shows with the other options, and on its own for a new task that
+        waits for someone, so New task on the Waiting page can name whom at once (B08)."""
+        waiting = _OWNERS[self.owner.currentIndex()][0] is ActionOwnership.WAITING_FOR
+        self._form.setRowVisible(self.person_row, self._options or (self._creating and waiting))
 
     def _show_deadline_note(self) -> None:
         """The note's row shows with the other options, and only when it says something."""
@@ -647,6 +702,7 @@ class ActionEditor(QDialog):
             self.priority.currentIndex(),
             self.tags.text().strip(),
             self.owner.currentIndex(),
+            self.person.text().strip(),
             self.project.currentData(),
             self.effort.currentIndex(),
             self.estimate.text(),
@@ -685,6 +741,9 @@ class ActionEditor(QDialog):
         self.priority.setCurrentIndex([value for value, _ in _PRIORITIES].index(action.priority))
         self.tags.setText(", ".join(action.tags))
         self.owner.setCurrentIndex([value for value, _ in _OWNERS].index(action.ownership))
+        self._owner_changed(self.owner.currentIndex())
+        self.person.setText(action.person or "")
+        self.use_sender.setVisible(bool(action.sources))
         self.effort.setCurrentIndex([value for value, _ in _EFFORTS].index(action.effort))
         self.estimate.setValue(action.estimate_minutes or 0)
         self.has_target.setChecked(action.target_date is not None)
@@ -721,8 +780,9 @@ class ActionEditor(QDialog):
         self._update_step_buttons()
         self._loaded_input = self._input()
 
-    def new_task(self, today: date, zone: ZoneInfo | None = None) -> None:
-        """Open an empty editor; cancelling creates no record. ``zone`` is the owner's."""
+    def new_task(self, today: date, zone: ZoneInfo | None = None, *, waiting: bool = False) -> None:
+        """Open an empty editor; cancelling creates no record. ``zone`` is the owner's, and
+        ``waiting`` starts the task as someone else's to do, as on the Waiting page."""
         self._creating = True
         self._action = None
         self._set_saving(False)
@@ -731,7 +791,10 @@ class ActionEditor(QDialog):
         self._fill_projects(None)
         self.priority.setCurrentIndex(0)
         self.tags.clear()
-        self.owner.setCurrentIndex(0)
+        self.owner.setCurrentIndex(1 if waiting else 0)
+        self._owner_changed(self.owner.currentIndex())
+        self.person.clear()
+        self.use_sender.hide()  # A new task has no email.
         self.effort.setCurrentIndex(0)
         self.estimate.setValue(0)
         self.has_target.setChecked(False)
@@ -1126,6 +1189,7 @@ class ActionEditor(QDialog):
             project_public_id=project_id if isinstance(project_id, str) else None,
             title=title,
             ownership=_OWNERS[self.owner.currentIndex()][0],
+            person=self.person.text(),  # Cleaned by the edit: a blank one names no one.
             priority=_PRIORITIES[self.priority.currentIndex()][0],
             tags=tags,
             effort=_EFFORTS[self.effort.currentIndex()][0],

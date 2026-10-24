@@ -214,7 +214,8 @@ async def test_revisiting_waiting_keeps_its_header_and_controls(qtbot: QtBot) ->
             window._show_page(page)
         assert window.workspace.header.title.text() == "Waiting"
         assert window.workspace.sidebar.current_key() == "waiting"
-        assert not window.actions_panel.new_task_button.isVisible()
+        # B08: a task can start on Waiting, as one someone else does.
+        assert window.actions_panel.new_task_button.isVisible()
         assert window.actions_panel.search.isVisible()
         assert not window.actions_panel.group.isVisible()
     finally:

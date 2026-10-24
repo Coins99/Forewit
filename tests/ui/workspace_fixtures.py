@@ -283,6 +283,7 @@ def mockup_actions() -> dict[ActionFilter, tuple[Action, ...]]:
         public_id="3b5d7f9a-2c4e-4a6b-8d0f-1e2a3b4c5d6e",
         title="Signed contract back from Acme legal",
         ownership=ActionOwnership.WAITING_FOR,
+        person="Dana Ruiz",
         target_date=date(2026, 10, 9),
         created_at_utc=created,
         updated_at_utc=created,

@@ -74,6 +74,7 @@ def markers_for(
                     action_public_id=action.public_id,
                     action_title=action.title,
                     waiting=waiting,
+                    person=action.person,
                 )
             )
         precision = DeadlinePrecision(action.deadline_precision)
@@ -94,6 +95,7 @@ def markers_for(
                     action_public_id=action.public_id,
                     action_title=action.title,
                     waiting=waiting,
+                    person=action.person,
                 )
             )
     return tuple(sorted(found, key=ActionMarker.sort_key))

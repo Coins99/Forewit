@@ -23,6 +23,7 @@ from mailbrief.domain.actions import (
     StepEdit,
     SuggestionState,
     ThreadLink,
+    person_key,
     tag_key,
 )
 from mailbrief.domain.analysis import DeadlinePrecision
@@ -346,8 +347,10 @@ class FakeBackend(FakeDrafts):
 
     async def list_organization(
         self,
-    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...]]:
-        return await self.list_projects(), await self.list_areas(), self.tags
+    ) -> tuple[tuple[Project, ...], tuple[LifeArea, ...], tuple[str, ...], tuple[str, ...]]:
+        listed = [action for actions in self.actions.values() for action in actions]
+        people = tuple(sorted({action.person for action in listed if action.person}))
+        return await self.list_projects(), await self.list_areas(), self.tags, people
 
     async def save_organization(
         self, kind: str, public_id: str | None, revision: int | None, edit: AreaEdit
@@ -410,6 +413,11 @@ class FakeBackend(FakeDrafts):
                 and action.project.area_public_id == group_id
             )
             or (group == "tag" and any(tag_key(tag) == group_id for tag in action.tags))
+            or (
+                group == "person"
+                and action.person is not None
+                and person_key(action.person) == group_id
+            )
         )
 
     async def count_grouped_actions(

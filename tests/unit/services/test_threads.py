@@ -61,6 +61,7 @@ async def action(
         public_id=str(uuid.uuid4()),
         title="Send the deck",
         ownership=ownership,
+        waiting_since_utc=created if ownership == "waiting_for" else None,
         status=status,
         deadline_precision="none",
         target_date=target,

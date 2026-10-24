@@ -329,6 +329,7 @@ async def test_a_save_after_the_window_closes_starts_nothing(window: MainWindow)
         ActionEdit(
             title="Too late",
             ownership=OPEN.ownership,
+            person=OPEN.person,
             effort=None,
             priority=None,
             tags=(),
@@ -467,6 +468,7 @@ async def test_a_save_while_another_operation_runs_keeps_the_editor_open(
         ActionEdit(
             title="Too soon",
             ownership=OPEN.ownership,
+            person=OPEN.person,
             effort=None,
             priority=None,
             tags=(),

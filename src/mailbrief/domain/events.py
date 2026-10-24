@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from mailbrief.domain.actions import ACTION_TITLE_MAX_CHARS, PUBLIC_ID_CHARS
+from mailbrief.domain.actions import ACTION_TITLE_MAX_CHARS, PERSON_MAX_CHARS, PUBLIC_ID_CHARS
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 
@@ -195,6 +195,8 @@ class ActionMarker(DomainModel):
     action_public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
     action_title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     waiting: bool = False  # Someone else is doing it.
+    # Who it waits on or is for (B08): the owner's text, shown with the marker only.
+    person: str | None = Field(default=None, min_length=1, max_length=PERSON_MAX_CHARS, repr=False)
 
     @field_validator("due_at_utc")
     @classmethod

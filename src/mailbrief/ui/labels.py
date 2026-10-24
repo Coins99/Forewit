@@ -143,23 +143,39 @@ def outline_button(
     if px is not None:
         button.setFont(ui_font(px, medium=glass))
     if icon_name is not None:
-        glyph = icon_name  # Narrowed for the function.
-
-        def tint(target: QPushButton) -> None:
-            color = current_glass().primary_text if primary else current_tokens().text
-            target.setIcon(icon(glyph, color, OUTLINE_ICON_PX))
-
-        follow_theme(button, tint)
+        button.setProperty("iconName", icon_name)
+        follow_theme(button, _tint_icon)
         button.setIconSize(QSize(OUTLINE_ICON_PX, OUTLINE_ICON_PX))
     return button
 
 
-def primary_action(button: QPushButton) -> None:
-    """Apply the primary variant to controls supplied by native Qt button boxes."""
-    button.setProperty("variant", "primary")
+def _tint_icon(button: QPushButton) -> None:
+    """Colour ``button``'s icon for the fill it has now: the primary text colour on the one
+    primary action, the text colour on every other pill."""
+    if isinstance(button, GlassButton):
+        on_fill = button.primary
+    else:
+        on_fill = button.property("variant") == "primary"
+    color = current_glass().primary_text if on_fill else current_tokens().text
+    button.setIcon(icon(str(button.property("iconName")), color, OUTLINE_ICON_PX))
+
+
+def set_variant(button: QPushButton, variant: str) -> None:
+    """Draw ``button`` as ``variant`` from now on, its icon tinted for the new fill: a white
+    icon kept from the primary fill would vanish on a light outline pill."""
+    if button.property("variant") == variant:
+        return
+    button.setProperty("variant", variant)
     button.style().unpolish(button)
     button.style().polish(button)
+    if button.property("iconName") is not None:
+        _tint_icon(button)
     button.update()
+
+
+def primary_action(button: QPushButton) -> None:
+    """Apply the primary variant to controls supplied by native Qt button boxes."""
+    set_variant(button, "primary")
 
 
 class ElidedLabel(QLabel):

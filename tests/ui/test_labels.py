@@ -4,8 +4,8 @@ import math
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetricsF, QTextLayout
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QFontMetricsF, QImage, QTextLayout
+from PySide6.QtWidgets import QApplication, QPushButton
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui import labels
@@ -16,10 +16,20 @@ from mailbrief.ui.labels import (
     cut_text,
     outline_button,
     plain_label,
+    set_variant,
     short_button_label,
     wrap_label,
 )
-from mailbrief.ui.theme import CAPTION_PX, SIDEBAR_WIDTH, apply_theme, ui_font
+from mailbrief.ui.theme import (
+    CAPTION_PX,
+    SIDEBAR_WIDTH,
+    ThemeMode,
+    apply_theme,
+    current_glass,
+    current_tokens,
+    icon,
+    ui_font,
+)
 from mailbrief.ui.workspace import SidebarNav
 
 HOSTILE = '<b>Win</b> & <a href="x">link</a>'
@@ -249,6 +259,65 @@ def test_outline_button_takes_a_size_and_an_icon(qtbot: QtBot) -> None:
     assert (iconic.iconSize().width(), iconic.iconSize().height()) == (14, 14)
     named = outline_button("&Connect Gmail", "x", mnemonic=True, accessible_name="Connect Gmail")
     assert named.accessibleName() == "Connect Gmail"
+
+
+def tinted(name: str, color: str) -> QImage:
+    return icon(name, color, 14).pixmap(14).toImage()
+
+
+def shown_icon(button: QPushButton) -> QImage:
+    return button.icon().pixmap(14).toImage()
+
+
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_button_s_icon_follows_its_variant(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    apply_theme(qapp, mode)
+    button = outline_button("Complete", "x", primary=True, icon_name="check")
+    qtbot.addWidget(button)
+    on_fill, on_pill = current_glass().primary_text, current_tokens().text
+    assert shown_icon(button) == tinted("check", on_fill)
+
+    # The primary fill's white tick would vanish on a light outline pill.
+    set_variant(button, "outline")
+    assert button.property("variant") == "outline"
+    assert shown_icon(button) == tinted("check", on_pill)
+    set_variant(button, "primary")
+    assert shown_icon(button) == tinted("check", on_fill)
+
+
+def test_a_switched_icon_keeps_its_variant_s_tint_through_a_theme_change(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    button = outline_button("Complete", "x", primary=True, icon_name="check")
+    qtbot.addWidget(button)
+    set_variant(button, "outline")
+
+    apply_theme(qapp, ThemeMode.DARK)
+
+    assert shown_icon(button) == tinted("check", current_tokens().text)
+
+
+def test_a_glass_button_s_icon_follows_its_own_fill(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    primary = outline_button("Sync", "x", glass=True, primary=True, icon_name="refresh")
+    plain = outline_button("Sync", "y", glass=True, icon_name="refresh")
+    qtbot.addWidget(primary)
+    qtbot.addWidget(plain)
+    assert shown_icon(primary) == tinted("refresh", current_glass().primary_text)
+    assert shown_icon(plain) == tinted("refresh", current_tokens().text)
+
+
+def test_set_variant_leaves_a_button_without_an_icon_without_one(qtbot: QtBot) -> None:
+    button = outline_button("Save", "x")
+    qtbot.addWidget(button)
+    set_variant(button, "primary")
+    assert button.property("variant") == "primary"
+    assert button.icon().isNull()
 
 
 def test_a_shortened_outline_button_can_t_carry_a_mnemonic() -> None:

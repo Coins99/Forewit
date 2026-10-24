@@ -103,6 +103,8 @@ def make_action(**overrides: object) -> Action:
     values.update(overrides)
     if values.get("deadline_precision", DeadlinePrecision.NONE) != DeadlinePrecision.NONE:
         values.setdefault("deadline_origin", DeadlineOrigin.EMAIL)  # Like an accepted email's.
+    if values["ownership"] == ActionOwnership.WAITING_FOR:
+        values.setdefault("waiting_since_utc", values["created_at_utc"])  # Waiting from the start.
     return Action.model_validate(values)
 
 
