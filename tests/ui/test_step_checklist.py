@@ -27,6 +27,7 @@ from mailbrief.ui.action_text import steps_status
 from mailbrief.ui.actions_view import ActionsPanel
 from mailbrief.ui.labels import WrapLabel
 from mailbrief.ui.main_window import MainWindow
+from mailbrief.ui.theme import apply_theme
 from tests.factories import make_action
 from tests.ui.test_actions_view import NOW, action, detail_texts, show, steps
 from tests.ui.test_actions_workflow import finish
@@ -323,8 +324,11 @@ def test_a_box_keeps_the_focus_when_its_plan_is_shown_again(
 
 
 def test_tab_runs_from_the_footer_through_the_steps_to_the_field(
-    qtbot: QtBot, panel: ActionsPanel
+    qtbot: QtBot, qapp: QApplication, themed: None, panel: ActionsPanel
 ) -> None:
+    # The app's own style, as Forewit always runs: under macOS's native style buttons and
+    # check boxes are Tab stops only with Full Keyboard Access on.
+    apply_theme(qapp)
     thread = ThreadActivity(
         new_messages=1,
         latest_at_utc=datetime(2026, 10, 3, 8, 30, tzinfo=UTC),
