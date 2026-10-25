@@ -213,6 +213,15 @@ def tags_text(tags: tuple[str, ...]) -> str | None:
     return ("Tags: " + ", ".join(tags)) if tags else None
 
 
+def steps_status(action: Action) -> str:
+    """The status line once a step is ticked or unticked in place (B04): "2 of 5 steps done:
+    {title}.", or "Every step done: {title}." when none is left."""
+    done, total = sum(step.done for step in action.steps), len(action.steps)
+    if done == total:
+        return f"Every step done: {action.title}."
+    return f"{done} of {total} step{'' if total == 1 else 's'} done: {action.title}."
+
+
 def estimate_text(minutes: int | None) -> str | None:
     """The owner's estimate as "Estimate 45 mins" or "Estimate 1 hr 30 mins", in the event
     editor's words for a length."""

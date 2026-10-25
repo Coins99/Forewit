@@ -14,6 +14,9 @@ reopening, drafts and deletion workflow as email-derived actions. They need no G
 connection or source snapshot. Adding an email later retains its provenance; undoing
 that first addition restores the manual task to zero sources.
 
+An open task's steps can also be ticked and added from the detail pane, each saved at once
+as one revision ([checklists in place](p1-checklists.md), B04).
+
 ## Durable activity
 
 Additive migration `20261013_0015` follows the Google calendar cache migration

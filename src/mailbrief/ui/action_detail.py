@@ -1,10 +1,11 @@
 """The selected action: its title, state, dates, plan, notes, thread activity, proposals and
 sources, with the buttons that act on it.
 
-The buttons are made once and stay, so the window's Tab order and the Actions panel's names
-for them never go stale; only the text between them is rebuilt for each action. Text the
-mail, the AI or the owner wrote appears only in plain-text wrapping labels, never in a
-tooltip, and the pane never opens a URL itself.
+The buttons and the field that adds a step are made once and stay, so the window's Tab
+order and the Actions panel's names for them never go stale; only the text between them,
+with an open task's step check boxes, is rebuilt for each action. Text the mail, the AI or
+the owner wrote appears only in plain-text wrapping labels, never in a tooltip, and the
+pane never opens a URL itself.
 """
 
 from collections.abc import Sequence
@@ -12,19 +13,31 @@ from datetime import date, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from mailbrief.domain.actions import Action, ActionFilter, ActionSource, ActionStatus
+from mailbrief.domain.actions import (
+    MAX_ACTION_STEPS,
+    Action,
+    ActionActivity,
+    ActionActivityKind,
+    ActionFilter,
+    ActionSource,
+    ActionStatus,
+    ActionStep,
+)
 from mailbrief.ui.action_text import (
     ActionDetails,
     action_details,
@@ -53,6 +66,8 @@ EMPTY_TEXT: Final = {
 }
 DONE_MARK: Final = "✓ "
 OPEN_MARK: Final = "○ "
+NEW_STEP_TEXT: Final = "Add a step"
+STEP_PX: Final = 11
 
 
 def state_text(action: Action, details: ActionDetails) -> str:
@@ -157,7 +172,7 @@ def _button_row(name: str, *buttons: QPushButton) -> QWidget:
     return row
 
 
-def _heading(text: str) -> QWidget:
+def _heading(text: str) -> QLabel:
     """A section's caption: app text, muted."""
     label = plain_label(text, tone="muted", px=9)
     label.setObjectName("actionSectionHeading")
@@ -167,9 +182,70 @@ def _heading(text: str) -> QWidget:
 _SECTION_GAP: Final = 6
 
 
+class StepRow(QWidget):
+    """One step of an open task's plan (B04): a check box beside the step's text, muted once
+    it is done. The box has no text of its own, so the step's words stay plain and wrap, and
+    an "&" in them never becomes a mnemonic; the step is its accessible name. A click on the
+    text ticks the box too, as a check box's own label would."""
+
+    def __init__(self, step: ActionStep) -> None:
+        super().__init__()
+        self.setObjectName("actionStep")
+        self.step_id = step.step_id
+        self.box = QCheckBox()
+        self.box.setObjectName("actionStepBox")
+        self.label = wrap_label(px=STEP_PX)
+        self.label.setObjectName("actionStepText")
+        self.show_step(step)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.label, 1)
+        # The text's first line sits level with the box; later lines run on below it.
+        rise = self.box.sizeHint().height() - self.label.minimumSizeHint().height()
+        if rise > 0:
+            self.label.setContentsMargins(0, rise // 2, 0, 0)
+
+    def show_step(self, step: ActionStep) -> None:
+        """Show ``step`` (this row's, as saved now): its words, and whether it is done."""
+        self.setAccessibleName(step.text)
+        self.box.setAccessibleName(step.text)
+        self.box.setChecked(step.done)
+        self.label.setText(step.text)
+        tone = "muted" if step.done else None
+        if self.label.property("tone") != tone:
+            self.label.setProperty("tone", tone)
+            self.label.style().unpolish(self.label)
+            self.label.style().polish(self.label)
+
+    def _on_text(self, event: QMouseEvent) -> bool:
+        return event.button() == Qt.MouseButton.LeftButton and self.label.geometry().contains(
+            event.position().toPoint()
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._on_text(event):
+            event.accept()  # So the release comes here too.
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._on_text(event) and self.box.isEnabled():
+            self.box.click()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
 class ActionDetailPane(QScrollArea):
-    """Shows one action, or the view's empty state; it emits nothing itself; the Actions
-    panel connects its buttons."""
+    """Shows one action, or the view's empty state. The Actions panel connects its buttons;
+    the plan of an open task emits ``step_toggled(step_id, done)`` when the owner ticks or
+    unticks a step and ``step_added(text)`` when they add one (B04). The window decides
+    whether they can be saved now, and puts back a tick it can't save (put_back_step)."""
+
+    step_toggled = Signal(object, bool)
+    step_added = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -219,6 +295,26 @@ class ActionDetailPane(QScrollArea):
         self.empty = wrap_label("", tone="muted", px=TEXT_PX)
         self.empty.setObjectName("actionEmpty")
         self._top = _Section("actionSummary")
+        self._plan_steps = _Section("actionPlan")
+        self._plan_steps.setAccessibleName("Plan steps")
+        self._plan_heading: QLabel | None = None
+        # No length limit here: a step too long is refused with the reason, as in the editor,
+        # rather than cut short.
+        self.new_step = QLineEdit()
+        self.new_step.setObjectName("newStepField")
+        self.new_step.setAccessibleName(NEW_STEP_TEXT)
+        self.new_step.setPlaceholderText(NEW_STEP_TEXT)
+        self.new_step.setToolTip("Type a step and press Return to add it to the plan.")
+        self.new_step.returnPressed.connect(self._add_step)
+        self._plan_box = QWidget()
+        self._plan_box.setObjectName("actionPlanBox")
+        self._plan_box.setAccessibleName("Plan")
+        plan_layout = QVBoxLayout(self._plan_box)
+        plan_layout.setContentsMargins(0, 0, 0, 0)
+        plan_layout.setSpacing(8)
+        plan_layout.addWidget(self._plan_steps)
+        plan_layout.addWidget(self.new_step)
+        self._step_rows: list[StepRow] = []
         self._activity_summary = _Section("actionActivitySummary")
         self._seen_row = _button_row("seenRow", self.seen_button)
         self._proposals = _Section("actionProposals")
@@ -231,12 +327,16 @@ class ActionDetailPane(QScrollArea):
         self._footer_layout = QGridLayout(self._footer)
         self._footer_layout.setContentsMargins(0, 0, 0, 0)
         self._footer_layout.setSpacing(8)
+        # Skip lives in the footer from the start, hidden, so showing it never shows it as a
+        # window of its own and it shares the window's Tab order.
+        self.skip_button.setParent(self._footer)
         self._arrange_footer(4)
         # Created in display order, which is also the Tab order of the buttons.
         for widget in (
             self.empty,
             self._top,
             self._footer,
+            self._plan_box,
             self._activity_summary,
             self._seen_row,
             self._proposals,
@@ -265,6 +365,53 @@ class ActionDetailPane(QScrollArea):
             self._footer_layout.setColumnStretch(column, 1 if column == columns else 0)
         for first, second in zip(buttons, buttons[1:], strict=False):
             QWidget.setTabOrder(first, second)
+
+    def _link_below_footer(self) -> None:
+        """Tab goes from the footer's last button (Delete) to the plan's boxes and the field
+        that adds a step, then Mark seen, Proposals and Open source. The whole run is linked
+        each time the boxes are made: Qt skips a link that already holds, so a partial one
+        could leave other widgets between them."""
+        chain = [self.delete_button, *self._below_footer()]
+        for first, second in zip(chain, chain[1:], strict=False):
+            QWidget.setTabOrder(first, second)
+
+    def _below_footer(self) -> list[QWidget]:
+        """The controls after the footer, in display order: the plan's boxes and field, then
+        Mark seen, Proposals and Open source."""
+        return [
+            *(row.box for row in self._step_rows),
+            self.new_step,
+            self.seen_button,
+            self.proposals_button,
+            self.source_button,
+        ]
+
+    def focus_order(self) -> list[QWidget]:
+        """The pane's controls in display order, which is their Tab order: the footer's
+        buttons as laid out, then the controls below it."""
+        return [*self._footer_buttons(), *self._below_footer()]
+
+    def step_rows(self) -> list[StepRow]:
+        """The open task's steps shown, in order; none for a closed task."""
+        return list(self._step_rows)
+
+    def put_back_step(self, step_id: int, done: bool) -> None:
+        """Show the step as it was before a tick to ``done`` that nothing saved. The box is set
+        back, never remade, so this is safe from within its own click."""
+        for row in self._step_rows:
+            if row.step_id == step_id:
+                row.box.setChecked(not done)
+
+    def _add_step(self) -> None:
+        text = self.new_step.text().strip()
+        if text:
+            self.step_added.emit(text)
+
+    def clear_added_step(self, public_id: str, text: str) -> None:
+        """Empty the field once its step is added to the action ``public_id``, unless another
+        action shows now or the field holds something else."""
+        if self._shown == public_id and self.new_step.text().strip() == text:
+            self.new_step.clear()
 
     def all_footer_buttons(self) -> list[QPushButton]:
         """The footer's buttons, Skip included whether it is shown or not."""
@@ -300,6 +447,7 @@ class ActionDetailPane(QScrollArea):
             self._arrange_footer(len(buttons) if needed <= room else 2)
         else:
             self._arrange_footer(4 if width >= 480 else 2)
+        self._link_below_footer()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -326,15 +474,26 @@ class ActionDetailPane(QScrollArea):
         self.title = None
         self.empty.setText(EMPTY_TEXT[view])
         self.empty.show()
+        self._release_focus()
+        self._step_rows = []
+        self._plan_heading = None
+        self.new_step.clear()
         for section in (
             self._top,
+            self._plan_steps,
             self._activity_summary,
             self._proposals,
             self._sources,
             self._later_sources,
         ):
             section.set_widgets(())
-        for row in (self._seen_row, self._proposals_row, self._source_row, self._footer):
+        for row in (
+            self._plan_box,
+            self._seen_row,
+            self._proposals_row,
+            self._source_row,
+            self._footer,
+        ):
             row.hide()
 
     def show_action(self, action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> None:
@@ -417,17 +576,24 @@ class ActionDetailPane(QScrollArea):
             copy.addWidget(note)
             top.append(callout)
         summary = top
-        top = self._plan(action, details)
+        top = []
         activity = [text for text in (details.activity, details.replied) if text is not None]
         if activity:
             top += [_SECTION_GAP, _heading("Thread")]
             top += [wrap_label(_sentence(text), px=TEXT_PX) for text in activity]
         if action.activity:
             top += [_SECTION_GAP, _heading("Activity")]
+            # Edits in a row, as ticking steps makes, read as one line with their count.
+            entries: list[tuple[ActionActivity, int]] = []
             for event in reversed(action.activity[-20:]):
+                if entries and _plain_edit(event) and _plain_edit(entries[-1][0]):
+                    entries[-1] = (entries[-1][0], entries[-1][1] + 1)
+                else:
+                    entries.append((event, 1))
+            for event, edits in entries:
                 at = moment_text(event.occurred_at_utc, zone, today=today)
                 name = event.kind.value.replace("_", " ").capitalize()
-                detail = ""
+                detail = f" {edits} times" if edits > 1 else ""
                 if event.undo_of_revision is not None:
                     reversed_event = next(
                         (
@@ -454,6 +620,9 @@ class ActionDetailPane(QScrollArea):
                 label.setObjectName("actionActivityEntry")
                 top.append(label)
         self._top.set_widgets(summary)
+        if action.public_id != self._shown:
+            self.new_step.clear()  # A step typed for another action isn't this one's.
+        self._show_plan(action, details)
         self._activity_summary.set_widgets(top)
         self._seen_row.setVisible(bool(activity))
         count = len(details.proposals)
@@ -499,19 +668,63 @@ class ActionDetailPane(QScrollArea):
                 widgets.append(label)
         return widgets
 
-    def _plan(self, action: Action, details: ActionDetails) -> list[QWidget | int]:
-        if not details.steps:
-            return []
-        widgets: list[QWidget | int] = [
-            _SECTION_GAP,
-            _heading(f"Plan · {details.steps_done} of {details.steps} done"),
-        ]
-        for step in sorted(action.steps, key=lambda step: step.position):
-            if step.done:
-                widgets.append(wrap_label(DONE_MARK + step.text, tone="muted", px=11))
-            else:
-                widgets.append(wrap_label(OPEN_MARK + step.text, px=11))
-        return widgets
+    def _release_focus(self) -> int | None:
+        """The step whose box has the focus, or None. The pane holds the focus meanwhile, so
+        replacing the boxes doesn't pass it along the Tab chain."""
+        for row in self._step_rows:
+            if row.box.hasFocus():
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
+                return row.step_id
+        return None
+
+    def _show_plan(self, action: Action, details: ActionDetails) -> None:
+        """The plan (B04): an open task's steps as check boxes, with the field that adds one
+        while it has room; a closed task's as text, "✓" when done and "○" when not; nothing
+        for a closed task without steps. The same steps shown again, as after a tick, are
+        updated in place, so the focus and the Tab order stay where they are."""
+        is_open = action.status is ActionStatus.OPEN
+        steps = sorted(action.steps, key=lambda step: step.position)
+        heading = f"Plan · {details.steps_done} of {details.steps} done" if steps else "Plan"
+        same = [row.step_id for row in self._step_rows] == [step.step_id for step in steps]
+        if is_open and steps and same and self._plan_heading is not None:
+            self._plan_heading.setText(heading)
+            for row, step in zip(self._step_rows, steps, strict=True):
+                row.show_step(step)
+        else:
+            self._rebuild_plan(steps, heading if steps or is_open else None, is_open=is_open)
+        self.new_step.setVisible(is_open and len(steps) < MAX_ACTION_STEPS)
+        self._plan_box.setVisible(self._plan_heading is not None)
+
+    def _rebuild_plan(self, steps: list[ActionStep], heading: str | None, *, is_open: bool) -> None:
+        """Make the plan's widgets anew: under ``heading``, an open task's rows or a closed
+        task's lines. A box that had the focus gives it to its step's new box."""
+        focused = self._release_focus()
+        widgets: list[QWidget | int] = []
+        self._plan_heading = None if heading is None else _heading(heading)
+        if self._plan_heading is not None:
+            widgets = [_SECTION_GAP, self._plan_heading]
+        if is_open:
+            self._step_rows = [StepRow(step) for step in steps]
+            for row in self._step_rows:
+                row.box.clicked.connect(
+                    lambda done, step_id=row.step_id: self.step_toggled.emit(step_id, done)
+                )
+            widgets += self._step_rows
+        else:
+            self._step_rows = []
+            widgets += [
+                wrap_label(
+                    (DONE_MARK if step.done else OPEN_MARK) + step.text,
+                    tone="muted" if step.done else None,
+                    px=STEP_PX,
+                )
+                for step in steps
+            ]
+        self._plan_steps.set_widgets(widgets)
+        self._link_below_footer()
+        for row in self._step_rows:
+            if row.step_id == focused:
+                row.box.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _show_sources(self, action: Action, *, today: date, zone: ZoneInfo) -> None:
         """Each source; Open source follows the first that opens Gmail."""
@@ -542,6 +755,15 @@ class ActionDetailPane(QScrollArea):
         )
         meta.setObjectName("sourceMeta")
         return [subject, meta]
+
+
+def _plain_edit(event: ActionActivity) -> bool:
+    """Whether ``event`` is an ordinary edit, which may share a line with the edits beside it."""
+    return (
+        event.kind is ActionActivityKind.EDITED
+        and event.undo_of_revision is None
+        and not event.legacy
+    )
 
 
 def _sentence(text: str) -> str:

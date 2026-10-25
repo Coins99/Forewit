@@ -176,6 +176,39 @@ async def test_saving_an_edit_without_a_plan_leaves_the_steps_unchanged(tmp_path
         await runtime.close()
 
 
+async def test_the_runtime_ticks_and_adds_steps_in_place(tmp_path: Path) -> None:
+    runtime = DesktopRuntime(tmp_path / "mailbrief.sqlite3")
+    try:
+        assert await runtime.load_saved() is None  # Migrates the new database.
+        edit = ActionEdit(
+            title="Plan the party",
+            ownership=ActionOwnership.MINE,
+            person=None,
+            effort=None,
+            priority=None,
+            tags=(),
+            estimate_minutes=None,
+            target_date=None,
+            notes="",
+        )
+        created = await runtime.create_action(
+            edit, [StepEdit(step_id=None, text="Book the venue", done=False)]
+        )
+
+        ticked = await runtime.set_step_done(created.public_id, 1, created.steps[0].step_id, True)
+        added = await runtime.add_step(created.public_id, 2, "Send invites")
+
+        assert ticked.revision == 2
+        assert [(step.text, step.done) for step in added.steps] == [
+            ("Book the venue", True),
+            ("Send invites", False),
+        ]
+        with pytest.raises(ActionConflictError):
+            await runtime.add_step(created.public_id, 2, "Too late")  # A stale revision.
+    finally:
+        await runtime.close()
+
+
 async def test_the_runtime_links_briefs_adds_to_actions_and_marks_threads_seen(
     tmp_path: Path,
 ) -> None:

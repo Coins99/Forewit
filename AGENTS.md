@@ -109,6 +109,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   person and the wait and prompts a follow-up only when one is due; New task works there, and
   the Actions filter offers each person. Migration 0024 follows 0023. See
   `docs/p1-waiting.md` and ADR 0022.
+- P1 checklists in place (B04) implemented, awaiting owner desktop acceptance: an open task's
+  steps are check boxes in the Actions detail pane, with an **Add a step** field
+  (`ActionService.set_step_done` and `add_step`, one revision each, recorded as `edited`). No
+  migration. See `docs/p1-checklists.md`.
 - Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
@@ -334,6 +338,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `waiting_for`: becoming waiting sets it to now, staying waiting keeps it, becoming the
   owner's clears it, and a repeat's next occurrence waits from when it is made. AI drafting
   never sends the person.
+- Checklists in place (B04): ticking, unticking or adding a step outside the editor changes
+  only a live, open task, needs the revision the caller saw, and is one revision recorded as
+  `edited` (never a new activity kind without a migration: older builds must read the
+  history). A tick that changes nothing makes no revision. An added step is this occurrence's
+  alone; a series' template changes only with its rule. Ticking the last step never
+  completes a task.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.

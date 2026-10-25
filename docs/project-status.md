@@ -24,7 +24,9 @@ later use after Microsoft Entra access is resolved.
   task's deadline, keeping an email's to go back to ([deadlines](p1-deadlines.md)). Waiting
   and commitments (B08) are implemented, awaiting owner desktop acceptance: name who a task
   waits on or is for, see how long you've waited, and get a follow-up prompt only when one is
-  due ([waiting and commitments](p1-waiting.md)).
+  due ([waiting and commitments](p1-waiting.md)). Checklists in place (B04) are implemented,
+  awaiting owner desktop acceptance: tick and add an open task's steps in its detail pane,
+  one revision each ([checklists in place](p1-checklists.md)).
 
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.

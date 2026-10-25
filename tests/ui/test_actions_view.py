@@ -630,8 +630,8 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
         "SOURCE EMAIL",
         "Q3 deck",
         "Plan · 1 of 2 done",
-        "✓ Step 1",
-        "○ Step 2",
+        "Step 1",  # Beside their check boxes (B04).
+        "Step 2",
         "Thread",
         "2 new in thread, latest Sat 08:30 from Sam",
         "You replied Fri",
@@ -648,8 +648,9 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
     assert deadline is not None and deadline.property("tone") == "warning"
     content = panel.detail.widget()
     assert content is not None
-    done_step = next(label for label in content.findChildren(QLabel) if label.text() == "✓ Step 1")
+    done_step = next(label for label in content.findChildren(QLabel) if label.text() == "Step 1")
     assert done_step.property("tone") == "muted"
+    assert [row.box.isChecked() for row in panel.detail.step_rows()] == [True, False]
     assert shown_buttons(panel) == [
         "completeButton",
         "draftButton",
@@ -692,6 +693,7 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
         "Sat Oct 3",
         "FOLLOW-UP",
         "No date set",
+        "Plan",  # Its heading over the field that adds a step (B04).
     ]  # Nothing calls for a follow-up yet, so there is no prompt.
     assert shown_buttons(panel) == ["draftButton", "completeButton", "editButton", "deleteButton"]
 
@@ -775,11 +777,13 @@ def test_hostile_text_stays_literal_and_out_of_tooltips(panel: ActionsPanel) -> 
     for expected in (
         HOSTILE[:200],
         HOSTILE,
-        f"○ {HOSTILE}",
         f"1 new in thread, latest Sat 09:00 from {HOSTILE}",
         "<b>x</b>@evil.example · Received Mon Sep 28",
     ):
         assert expected in texts
+    (step,) = panel.detail.step_rows()  # Its words beside its box, the box without text.
+    assert step.label in labels and step.label.text() == HOSTILE
+    assert (step.box.text(), step.box.toolTip()) == ("", "")
     for label in labels:
         assert label.textFormat() is Qt.TextFormat.PlainText
         assert not label.openExternalLinks()

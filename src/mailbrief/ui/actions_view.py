@@ -352,7 +352,9 @@ class ActionsPanel(QWidget):
 
     ``action_requested(kind, action)`` carries EDIT, COMPLETE, REOPEN, DELETE, SEEN, SKIP or
     PROPOSALS and the selected Action, and ``draft_requested(kind, action)`` a DraftKind and
-    the Action. Opening a source needs no backend, so the panel does it directly.
+    the Action. ``step_toggled(action, step_id, done)`` and ``step_added(action, text)`` ask
+    to tick or untick a step of the selected action, or add one (B04). Opening a source
+    needs no backend, so the panel does it directly.
     """
 
     organize_requested = Signal()
@@ -360,6 +362,8 @@ class ActionsPanel(QWidget):
     new_task_requested = Signal()
     action_requested = Signal(str, object)
     draft_requested = Signal(object, object)
+    step_toggled = Signal(object, object, bool)
+    step_added = Signal(object, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -513,7 +517,9 @@ class ActionsPanel(QWidget):
         self.seen_button.clicked.connect(self._mark_seen)
         self.proposals_button.clicked.connect(self._show_proposals)
         self.source_button.clicked.connect(self._open_source)
-        # Tab: the views, the list shown, then the detail's buttons in display order.
+        detail.step_toggled.connect(self._toggle_step)
+        detail.step_added.connect(self._add_step)
+        # Tab: the views, the list shown, then the detail's controls in display order.
         chain: list[QWidget] = [
             self.new_task_button,
             self.group,
@@ -521,7 +527,7 @@ class ActionsPanel(QWidget):
             self.search,
             self.tabs,
             *self.lists.values(),
-            *detail.all_buttons(),
+            *detail.focus_order(),
         ]
         for first, second in itertools.pairwise(chain):
             QWidget.setTabOrder(first, second)
@@ -712,6 +718,17 @@ class ActionsPanel(QWidget):
         action = self.selected()
         if action is not None and not self._busy:
             self.action_requested.emit(kind, action)
+
+    # Forwarded even while busy: the window says so, and puts back a tick it can't save.
+    def _toggle_step(self, step_id: int, done: bool) -> None:
+        action = self.selected()
+        if action is not None:
+            self.step_toggled.emit(action, step_id, done)
+
+    def _add_step(self, text: str) -> None:
+        action = self.selected()
+        if action is not None:
+            self.step_added.emit(action, text)
 
     def _request_draft(self, kind: DraftKind) -> None:
         action = self.selected()

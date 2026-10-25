@@ -148,6 +148,7 @@ from mailbrief.services.ranking import (
     reason_text,
 )
 from mailbrief.ui.action_editor import ActionEditor
+from mailbrief.ui.action_text import steps_status
 from mailbrief.ui.actions_view import (
     COMPLETE,
     DELETE,
@@ -349,6 +350,10 @@ class DesktopBackend(Protocol):
         repeat: RepeatEdit | None = None,
         deadline: DeadlineChange | None = None,
     ) -> Action: ...
+    async def set_step_done(
+        self, public_id: str, revision: int, step_id: int, done: bool
+    ) -> Action: ...
+    async def add_step(self, public_id: str, revision: int, text: str) -> Action: ...
     async def complete_action(self, public_id: str, revision: int) -> Action: ...
     async def skip_action(self, public_id: str, revision: int) -> Action: ...
     async def reopen_action(self, public_id: str, revision: int) -> Action: ...
@@ -1004,6 +1009,8 @@ class MainWindow(QMainWindow):
         self.new_task_shortcut.activated.connect(self._request_new_task)
         self.actions_panel.action_requested.connect(self._request_action)
         self.actions_panel.draft_requested.connect(self._request_action_draft)
+        self.actions_panel.step_toggled.connect(self._request_step_done)
+        self.actions_panel.step_added.connect(self._request_add_step)
         self.actions_panel.tabs.currentChanged.connect(self._actions_tab_changed)
         # Edge to edge, like Today: the list and the detail meet at a hairline.
         workspace.add_page(
@@ -1906,6 +1913,57 @@ class MainWindow(QMainWindow):
         self._offer_undo()  # Like an edit, it has no undo; an older offer could be stale.
         self.status.setText(f"Marked seen: {marked.title}.")
         await self._refresh_views()
+
+    def _request_step_done(self, action: Action, step_id: int, done: bool) -> None:
+        """A tick that can't start now, while another operation runs, is put back and says
+        why (B04). The box is set back, not remade: this runs within its own click."""
+        if not self.start(lambda: self._set_step_done(action, step_id, done), cancellable=False):
+            if not self._closing:
+                self.status.setText(_BUSY)
+            self.actions_panel.detail.put_back_step(step_id, done)
+
+    async def _set_step_done(self, action: Action, step_id: int, done: bool) -> None:
+        """Tick or untick one step in place (B04). Like an edit it has no Undo: ticking the
+        step again undoes it."""
+        try:
+            saved = await self._unless_stale(
+                self.backend.set_step_done(action.public_id, action.revision, step_id, done),
+                explain=True,
+            )
+        except Exception:
+            self.actions_panel.detail.put_back_step(step_id, done)  # Shown as stored again.
+            raise  # _run logs it and reports the failure.
+        if saved is _GONE:
+            return
+        self._offer_undo()  # An older offer would refer to a past revision.
+        self.status.setText(steps_status(saved))
+        await self._refresh_plan()
+
+    def _request_add_step(self, action: Action, text: str) -> None:
+        started = self.start(lambda: self._add_step(action, text), cancellable=False)
+        if not started and not self._closing:
+            self.status.setText(_BUSY)  # The step stays in its field to add again.
+
+    async def _add_step(self, action: Action, text: str) -> None:
+        """Add a step in place (B04); the field keeps the text until it is saved, and a step
+        that can't be added says why."""
+        added = await self._unless_stale(
+            self.backend.add_step(action.public_id, action.revision, text), explain=True
+        )
+        if added is _GONE:
+            return
+        self.actions_panel.detail.clear_added_step(added.public_id, text)
+        self._offer_undo()  # Like an edit, it has no undo; an older offer could be stale.
+        self.status.setText(f"Step added: {added.title}.")
+        await self._refresh_plan()
+
+    async def _refresh_plan(self) -> None:
+        """After a step changes (B04), what shows the action or its revision reads it again:
+        the brief's links and proposals, the action lists with Your day, and an open
+        Proposals dialog. Drafts and the calendar, which no step changes, stay as they are."""
+        await self._reload_brief()
+        await self._refresh_actions()
+        self._refresh_proposals_dialog()
 
     async def _save_action(
         self,
