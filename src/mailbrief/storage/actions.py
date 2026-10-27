@@ -64,7 +64,9 @@ from mailbrief.storage.tables import (
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_ACTIVITY_LIMIT = 20
+# Activity rows read per action for the detail pane, which shows its 20 latest lines. Edits
+# in a row share a line (B04), so a run of ticks leaves room for what came before it.
+DISPLAY_ACTIVITY_LIMIT = 200
 
 
 @dataclass(frozen=True, slots=True)

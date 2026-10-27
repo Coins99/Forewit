@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMenu,
     QPlainTextEdit,
@@ -52,7 +51,7 @@ from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.labels import outline_button, plain_label
-from mailbrief.ui.lists import clear_list
+from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
 DEBOUNCE_MS = 1_500
@@ -264,7 +263,7 @@ class DraftEditor(QDialog):
         versions = QVBoxLayout(self.versions_panel)
         versions.setContentsMargins(0, 0, 0, 0)
         versions.addWidget(_plain("Saved versions, newest first:"))
-        self.versions_list = QListWidget()
+        self.versions_list = SafeList()
         self.versions_list.setAccessibleName("Saved versions")
         versions.addWidget(self.versions_list)
         self.version_preview = QPlainTextEdit()

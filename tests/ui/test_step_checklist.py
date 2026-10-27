@@ -290,6 +290,39 @@ def test_edits_in_a_row_read_as_one_activity_line(panel: ActionsPanel) -> None:
     ]
 
 
+def test_activity_shows_its_20_latest_lines_however_long_a_run_of_edits(
+    panel: ActionsPanel,
+) -> None:
+    def event(revision: int, kind: ActionActivityKind) -> ActionActivity:
+        return ActionActivity(
+            revision=revision, kind=kind, occurred_at_utc=datetime(2026, 10, 3, 8, tzinfo=UTC)
+        )
+
+    def entries() -> list[str]:
+        return [
+            label.text() for label in content(panel).findChildren(QLabel, "actionActivityEntry")
+        ]
+
+    # Created, then 25 ticks: they share one line, and Created still shows below it.
+    ticked = (
+        event(1, ActionActivityKind.CREATED),
+        *(event(revision, ActionActivityKind.EDITED) for revision in range(2, 27)),
+    )
+    show(panel, ActionFilter.OPEN, action(1, activity=ticked, revision=26))
+    assert entries() == ["Edited 25 times · Sat Oct 3, 08:00", "Created · Sat Oct 3, 08:00"]
+
+    # Completions and reopenings make a line each: only the 20 latest show.
+    closings = tuple(
+        event(
+            revision, ActionActivityKind.COMPLETED if revision % 2 else ActionActivityKind.REOPENED
+        )
+        for revision in range(1, 31)
+    )
+    show(panel, ActionFilter.OPEN, action(2, activity=closings, revision=30))
+    assert len(entries()) == 20
+    assert entries()[0].startswith("Reopened")  # Revision 30, the latest.
+
+
 def test_a_box_keeps_the_focus_when_its_plan_is_shown_again(
     qtbot: QtBot, panel: ActionsPanel
 ) -> None:
@@ -321,6 +354,23 @@ def test_a_box_keeps_the_focus_when_its_plan_is_shown_again(
     assert remade.box.isChecked() and remade.box.hasFocus()
     QApplication.processEvents()  # The layout shows the new boxes at the next turn.
     assert remade.box.isVisible() and remade.box.hasFocus()
+
+
+def test_the_step_that_fills_the_plan_keeps_the_focus_in_it(
+    qtbot: QtBot, panel: ActionsPanel
+) -> None:
+    shown = action(1, steps=steps(*[False] * (MAX_ACTION_STEPS - 1)))
+    show(panel, ActionFilter.OPEN, shown)
+    activate(qtbot, panel)
+    panel.detail.new_step.setFocus()
+    assert panel.detail.new_step.hasFocus()
+
+    full = shown.model_copy(update={"revision": 2, "steps": steps(*[False] * MAX_ACTION_STEPS)})
+    show(panel, ActionFilter.OPEN, full)
+
+    # The field goes at 30 steps; the focus goes to the step just added, not along the chain.
+    assert panel.detail.new_step.isHidden()
+    assert QApplication.focusWidget() is rows(panel)[-1].box
 
 
 def test_tab_runs_from_the_footer_through_the_steps_to_the_field(

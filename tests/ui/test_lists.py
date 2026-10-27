@@ -16,7 +16,7 @@ from mailbrief.domain.digests import DigestStatus, SavedBriefSummary
 from mailbrief.ui.actions_view import EDIT, ActionsPanel
 from mailbrief.ui.drafts_view import OPEN, DraftsPanel
 from mailbrief.ui.history_view import BriefHistoryPanel
-from mailbrief.ui.lists import ActivatingList, clear_list
+from mailbrief.ui.lists import ActivatingList, SafeList, clear_list
 from tests.factories import make_action
 from tests.ui.test_actions_view import NOW, TODAY, UTC_ZONE
 from tests.ui.test_drafts_view import TORONTO, summary
@@ -162,7 +162,7 @@ def test_clear_list_changes_the_current_row_once_as_clear_does(qtbot: QtBot) -> 
     listing = QListWidget()
     qtbot.addWidget(listing)
     listing.addItems([f"Row {number}" for number in range(5)])
-    listing.setCurrentRow(0)
+    listing.setCurrentRow(4)  # The last: taking rows from the end would move it each time.
     rows: list[int] = []
     listing.currentRowChanged.connect(rows.append)
 
@@ -179,3 +179,26 @@ def test_clear_list_empties_an_empty_list(qtbot: QtBot) -> None:
     qtbot.addWidget(listing)
     clear_list(listing)
     assert listing.count() == 0
+
+
+@pytest.mark.parametrize("make", [SafeList, ActivatingList])
+def test_a_list_s_own_clear_is_clear_list(qtbot: QtBot, make: type[SafeList]) -> None:
+    listing = make()
+    qtbot.addWidget(listing)
+    collected: list[bool] = []
+    row = Row()
+    weakref.finalize(row, lambda: collected.append(gc.isenabled()))
+    item = QListWidgetItem("Row 0")
+    item.setData(Qt.ItemDataRole.UserRole, row)
+    listing.addItem(item)
+    listing.addItems(["Row 1", "Row 2"])
+    listing.setCurrentRow(2)
+    del row, item
+    rows: list[int] = []
+    listing.currentRowChanged.connect(rows.append)
+
+    listing.clear()
+
+    assert listing.count() == 0
+    assert rows == [-1]
+    assert collected == [False]  # Released with collection paused, as clear_list does.

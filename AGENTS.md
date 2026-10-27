@@ -221,8 +221,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
-  Return or Enter activates a row once on every platform, and `clear_list`, which empties a
-  `QListWidget`; `HeaderRowsModel`
+  Return or Enter activates a row once on every platform, `clear_list`, which empties a
+  `QListWidget`, and `SafeList`, the list widget whose `clear()` is `clear_list`;
+  `HeaderRowsModel`
   (`brief_list.py`) is the model of a painted list with section headers, which the keyboard
   skips; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
@@ -537,11 +538,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   statement/branch gate.
 - Tests run SQLite without disk flushes, CI runs tests in parallel (`pytest -n auto`), and CI
   runs macOS in Toronto and Windows in Tokyo time.
-- `tests/unit/test_source_rules.py` enforces two source rules, naming the file and line of
+- `tests/unit/test_source_rules.py` enforces three source rules, naming the file and line of
   each slip: no strftime directive that follows the system language (`%a`, `%A`, `%b`, `%B`,
   `%p`, `%c`, `%x`) anywhere in `src/mailbrief`, since weekday and month names come from
-  `ui/deadline_text.py`; and no hex colour literal in `src/mailbrief/ui` outside
-  `ui/theme/tokens.py`.
+  `ui/deadline_text.py`; no hex colour literal in `src/mailbrief/ui` outside
+  `ui/theme/tokens.py`; and no `QListWidget` made or subclassed in `src/mailbrief/ui`
+  outside `ui/lists.py`.
 
 ## UI work
 
@@ -560,10 +562,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
   repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
   Python code for each, and a garbage collection there could free one it still visits.
-- Empty a `QListWidget` with `lists.clear_list()`, never its `clear()`: `clear()` deletes the
-  items inside Qt's model reset, and a garbage collection of their Python wrappers or data
-  there can crash on Cocoa (CI's macOS UI step). `clear_list` takes each item out with
-  collection paused, and changes the current row once, as `clear()` does.
+- Make list widgets from `lists.SafeList` (an `ActivatingList` is one), never `QListWidget`
+  itself: Qt's `clear()` deletes the items inside its model reset, and a garbage collection
+  of their Python wrappers or data there can crash on Cocoa (CI's macOS UI step).
+  `SafeList.clear()` is `lists.clear_list()`, which takes each item out with collection
+  paused and changes the current row once, as Qt's `clear()` does.
 
 ## Dormant Microsoft notes
 

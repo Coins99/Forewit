@@ -99,6 +99,22 @@ async def test_ticking_a_step_is_one_revision_recorded_as_an_edit(
     assert await service.get(created.public_id) == ticked
 
 
+async def test_a_run_of_ticks_leaves_what_came_before_it_in_the_history_read(
+    service: ActionService,
+) -> None:
+    created = await service.create(TASK, new_steps("Book the venue"))
+    action = created
+    for number in range(25):
+        action = await service.set_step_done(
+            action.public_id, action.revision, created.steps[0].step_id, number % 2 == 0
+        )
+
+    shown = await service.get(created.public_id)
+
+    assert shown is not None
+    assert kinds(shown) == [Kind.CREATED, *[Kind.EDITED] * 25]  # Its creation stays.
+
+
 async def test_a_done_step_keeps_its_time_until_it_is_unticked(
     service: ActionService, clock: Clock
 ) -> None:

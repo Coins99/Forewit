@@ -68,6 +68,7 @@ DONE_MARK: Final = "✓ "
 OPEN_MARK: Final = "○ "
 NEW_STEP_TEXT: Final = "Add a step"
 STEP_PX: Final = 11
+ACTIVITY_LINES: Final = 20  # The latest lines of Activity shown; edits in a row share one.
 
 
 def state_text(action: Action, details: ActionDetails) -> str:
@@ -585,11 +586,13 @@ class ActionDetailPane(QScrollArea):
             top += [_SECTION_GAP, _heading("Activity")]
             # Edits in a row, as ticking steps makes, read as one line with their count.
             entries: list[tuple[ActionActivity, int]] = []
-            for event in reversed(action.activity[-20:]):
+            for event in reversed(action.activity):
                 if entries and _plain_edit(event) and _plain_edit(entries[-1][0]):
                     entries[-1] = (entries[-1][0], entries[-1][1] + 1)
-                else:
+                elif len(entries) < ACTIVITY_LINES:
                     entries.append((event, 1))
+                else:
+                    break
             for event, edits in entries:
                 at = moment_text(event.occurred_at_utc, zone, today=today)
                 name = event.kind.value.replace("_", " ").capitalize()
@@ -692,7 +695,13 @@ class ActionDetailPane(QScrollArea):
                 row.show_step(step)
         else:
             self._rebuild_plan(steps, heading if steps or is_open else None, is_open=is_open)
-        self.new_step.setVisible(is_open and len(steps) < MAX_ACTION_STEPS)
+        room = is_open and len(steps) < MAX_ACTION_STEPS
+        if not room and self.new_step.hasFocus():
+            # Hidden, the field would pass the focus along the window's Tab chain: it stays
+            # in the plan, on the step just added (the last), or on the pane.
+            last = self._step_rows[-1].box if self._step_rows else self
+            last.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.new_step.setVisible(room)
         self._plan_box.setVisible(self._plan_heading is not None)
 
     def _rebuild_plan(self, steps: list[ActionStep], heading: str | None, *, is_open: bool) -> None:

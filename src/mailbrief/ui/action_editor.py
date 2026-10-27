@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
@@ -79,7 +78,7 @@ from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.event_editor import DateBox, TimeBox, parse_clock
 from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import outline_button, plain_label, primary_action, wrap_label
-from mailbrief.ui.lists import clear_list
+from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
@@ -546,7 +545,7 @@ class ActionEditor(QDialog):
         fields.addLayout(form)
         self.plan_heading = _plain("Plan (check a step when it's done; double-click to rename):")
         fields.addWidget(self.plan_heading)
-        self.steps = QListWidget()
+        self.steps = SafeList()
         self.steps.setMinimumHeight(100)
         self.steps.setAccessibleName("Plan steps")
         fields.addWidget(self.steps)

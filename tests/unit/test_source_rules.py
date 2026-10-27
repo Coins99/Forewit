@@ -10,6 +10,7 @@ ROOT: Final = Path(__file__).resolve().parents[2]
 SOURCE: Final = ROOT / "src" / "mailbrief"
 UI: Final = SOURCE / "ui"
 TOKENS: Final = UI / "theme" / "tokens.py"
+LISTS: Final = UI / "lists.py"
 
 # strftime directives that print words or formats of the system language: weekday and month
 # names (%a %A %b %B), AM or PM (%p), and the system's date and date-time formats (%c %x).
@@ -19,6 +20,8 @@ TOKENS: Final = UI / "theme" / "tokens.py"
 SYSTEM_LANGUAGE_DATE: Final = re.compile(r"(?<!%)%[aAbBpcx](?![0-9A-Za-z])")
 # A colour written as six or eight hex digits after "#".
 HEX_COLOUR: Final = re.compile(r"#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})(?![0-9A-Za-z])")
+# Qt's own list widget made or subclassed: its clear() can crash on Cocoa (see ui/lists.py).
+PLAIN_LIST: Final = re.compile(r"\bQListWidget\(|\(QListWidget\)")
 
 
 def offending_lines(files: Iterable[Path], pattern: re.Pattern[str]) -> list[str]:
@@ -43,6 +46,13 @@ def test_ui_colours_come_only_from_the_tokens() -> None:
     assert offending_lines(files, HEX_COLOUR) == []
 
 
+def test_ui_lists_clear_safely() -> None:
+    """Every list widget under ``ui`` is a ``SafeList`` from ``ui/lists.py`` (an
+    ``ActivatingList`` is one), whose ``clear()`` is ``clear_list()``."""
+    files = (path for path in UI.rglob("*.py") if path != LISTS)
+    assert offending_lines(files, PLAIN_LIST) == []
+
+
 def test_the_rules_find_what_they_are_for() -> None:
     """The patterns catch the slips they exist for, and pass what only looks like them."""
     for line in ('f"{day:%b} {day.day}"', 'when.strftime("%a %d %B")', '"%I:%M %p"', '"%x"'):
@@ -53,3 +63,7 @@ def test_the_rules_find_what_they_are_for() -> None:
         assert HEX_COLOUR.search(line), line
     for line in ("QListView#briefList", "# PR #38 and #2041", '"#1a1a1"', "#accent_fg"):
         assert not HEX_COLOUR.search(line), line
+    for line in ("self.missed = QListWidget()", "QListWidget(parent)", "class Rows(QListWidget):"):
+        assert PLAIN_LIST.search(line), line
+    for line in ("QListWidgetItem(title)", "listing: QListWidget", "isinstance(x, QListWidget)"):
+        assert not PLAIN_LIST.search(line), line

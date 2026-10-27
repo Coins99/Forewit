@@ -7,7 +7,15 @@ from PySide6.QtWidgets import QListWidget
 from mailbrief.ui.theme import paused_collection
 
 
-class ActivatingList(QListWidget):
+class SafeList(QListWidget):
+    """A list widget whose ``clear()`` is ``clear_list()``. Every list widget under ``ui`` is
+    one (``tests/unit/test_source_rules.py`` checks), so clearing a list is safe by default."""
+
+    def clear(self) -> None:
+        clear_list(self)
+
+
+class ActivatingList(SafeList):
     """Return and Enter activate the current row exactly once, on every platform.
 
     Qt's item views differ by platform: on macOS they only try to edit an item on Return,

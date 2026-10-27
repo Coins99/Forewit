@@ -84,8 +84,9 @@ shadows), in the system's light or dark mode. Its approved renders are
   `HairlineFrame`, `HairlineDivider`, `HairlineSplitter`), never with QSS borders, so they
   stay one device pixel at every scale.
 - Keep MainWindow's attribute names; tests and other modules use them.
-- Empty a `QListWidget` with `clear_list()` (ui/lists.py), never `QListWidget.clear()`,
-  which can crash on Cocoa when a garbage collection runs inside Qt's deletion.
+- Make list widgets from `SafeList` (ui/lists.py; an `ActivatingList` is one), never
+  `QListWidget` itself, whose `clear()` can crash on Cocoa when a garbage collection runs
+  inside Qt's deletion; `SafeList.clear()` is `clear_list()`.
 - Nothing inside a window may keep a reference back to the window: no attribute holding
   it, and no function or bound method over it kept in an attribute (a clock, a
   callback, a theme follower's `apply`). That makes a cycle, and a dropped window in a
@@ -127,9 +128,9 @@ shadows), in the system's light or dark mode. Its approved renders are
   with `QGuiApplication.primaryScreen()` or `screenAt()`, never `widget.screen()`, which
   re-parents the shared QScreen wrapper under the widget.
 - `tests/unit/test_source_rules.py` runs with every test run: it fails, naming the file and
-  line, on a hex colour under `ui` outside `ui/theme/tokens.py`, and on a strftime directive
-  that follows the system language (`%a`, `%A`, `%b`, `%B`, `%p`, `%c`, `%x`) anywhere in
-  `src/mailbrief`.
+  line, on a hex colour under `ui` outside `ui/theme/tokens.py`, on a `QListWidget` made or
+  subclassed under `ui` outside `ui/lists.py`, and on a strftime directive that follows the
+  system language (`%a`, `%A`, `%b`, `%B`, `%p`, `%c`, `%x`) anywhere in `src/mailbrief`.
 
 ## Screenshot review loop
 1. Render the gallery at 1x and 2x (PowerShell: set `$env:MAILBRIEF_UI_SHOTS` instead; on

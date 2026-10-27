@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
@@ -206,7 +205,7 @@ from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
-from mailbrief.ui.lists import clear_list
+from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
@@ -925,7 +924,7 @@ class MainWindow(QMainWindow):
         self.review_hint = wrap_label(_review_hint(MAX_SHORTLIST_SIZE), tone="secondary")
         self.review_hint.setObjectName("reviewHint")
         review_layout.addWidget(self.review_hint)
-        self.shortlist = QListWidget()
+        self.shortlist = SafeList()
         self.shortlist.setObjectName("shortlist")
         self.shortlist.setAccessibleName("Messages selected for analysis")
         self.shortlist.setItemDelegate(ShortlistDelegate(self.shortlist))
