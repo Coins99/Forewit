@@ -324,11 +324,14 @@ def test_a_box_keeps_the_focus_when_its_plan_is_shown_again(
 
 
 def test_tab_runs_from_the_footer_through_the_steps_to_the_field(
-    qtbot: QtBot, qapp: QApplication, themed: None, panel: ActionsPanel
+    qtbot: QtBot, qapp: QApplication, themed: None
 ) -> None:
-    # The app's own style, as Forewit always runs: under macOS's native style buttons and
-    # check boxes are Tab stops only with Full Keyboard Access on.
+    # The app's own style, applied before any widget is made, as app.main does: a button
+    # made under macOS's native style keeps only TabFocus, and Tab skips it unless Full
+    # Keyboard Access is on, so the panel is made here rather than by the fixture.
     apply_theme(qapp)
+    panel = ActionsPanel()
+    qtbot.addWidget(panel)
     thread = ThreadActivity(
         new_messages=1,
         latest_at_utc=datetime(2026, 10, 3, 8, 30, tzinfo=UTC),
