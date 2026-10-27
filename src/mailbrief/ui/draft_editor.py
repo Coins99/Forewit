@@ -52,6 +52,7 @@ from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.lists import clear_list
 from mailbrief.ui.theme import ui_font
 
 DEBOUNCE_MS = 1_500
@@ -678,7 +679,7 @@ class DraftEditor(QDialog):
         self._versions = versions
         self.confirm_panel.hide()
         self.versions_list.blockSignals(True)
-        self.versions_list.clear()
+        clear_list(self.versions_list)
         for info in versions:
             when = moment_text(info.created_at_utc, self._zone, today=today)
             preview = info.preview or "(empty)"

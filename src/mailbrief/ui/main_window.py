@@ -206,6 +206,7 @@ from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
+from mailbrief.ui.lists import clear_list
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
@@ -3197,7 +3198,7 @@ class MainWindow(QMainWindow):
                 self.settings_dialog.status.setText(self.status.text())
             self.review_panel.hide()
             self.consent_panel.hide()
-            self.shortlist.clear()
+            clear_list(self.shortlist)
             self.disclosure.setText("")
             self._review = None
             self._consent = None
@@ -4036,7 +4037,7 @@ class MainWindow(QMainWindow):
         self._show_page("today")  # The run page, while the review waits.
         self._review_limit, self._review_blocked = limit, blocked_ids
         self.review_hint.setText(_review_hint(limit))
-        self.shortlist.clear()
+        clear_list(self.shortlist)
         for ranked in candidates:
             message = ranked.message
             label = f"{message.sender.address} — {message.subject}"

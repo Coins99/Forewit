@@ -25,7 +25,7 @@ from mailbrief.domain.search import (
 )
 from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.labels import wrap_label
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import SMALL_PX, current_tokens, ui_font
 from mailbrief.ui.workspace import PAGES
 
@@ -191,7 +191,7 @@ class CommandPalette(QDialog):
         super().hideEvent(event)
 
     def _show(self, commands: tuple[Command, ...], results: SearchResults | None) -> None:
-        self.results.clear()
+        clear_list(self.results)
         if commands:
             self._section("Commands")
             for command in commands:

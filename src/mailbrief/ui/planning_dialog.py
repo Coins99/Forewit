@@ -43,7 +43,7 @@ from mailbrief.domain.events import ChangeKind, EventChange, EventEdit
 from mailbrief.ui.deadline_text import day_text
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import ui_font
 
 NO_INSTRUCTION: Final = "Say what to change first."
@@ -275,7 +275,7 @@ class PlanningDialog(QDialog):
         self.google_titles.setEnabled(False)
         self.consent.setChecked(False)
         self._proposals = ()
-        self.list.clear()
+        clear_list(self.list)
         self._show(0)
         self._say("")
         self.instruction.setFocus()
@@ -358,7 +358,7 @@ class PlanningDialog(QDialog):
         self._zone, self._today, self._overlaps = zone, today, overlaps
         self._ticks = [ticked_at_first(proposal.change) for proposal in plan.proposals]
         self.list.blockSignals(True)
-        self.list.clear()
+        clear_list(self.list)
         for proposal, ticked in zip(plan.proposals, self._ticks, strict=True):
             item = QListWidgetItem(proposal_text(proposal, zone, today))
             item.setFlags(

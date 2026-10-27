@@ -77,7 +77,7 @@ from mailbrief.ui.brief_list import (
 )
 from mailbrief.ui.hairline import HairlineSplitter, hairline_pen, paint_focus_ring
 from mailbrief.ui.labels import outline_button, plain_label, set_variant
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.proposals_view import pending_proposals
 from mailbrief.ui.theme import META_PX, TITLE_PX, current_tokens, ui_font, ui_metrics
 from mailbrief.ui.who_text import UNNAMED_WAITING, in_sentence
@@ -621,7 +621,7 @@ class ActionsPanel(QWidget):
         self._moment = (today, zone, now)
         self._filling = True
         try:
-            listing.clear()
+            clear_list(listing)
             for action in actions:
                 facts = action_details(action, today=today, zone=zone, now=now)
                 item = QListWidgetItem(describe_details(action, facts))

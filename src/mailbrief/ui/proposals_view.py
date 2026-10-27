@@ -28,7 +28,7 @@ from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import plain_label, short_button_label, wrap_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 
 _COMPLETES = {
     FollowUpKind.CANCELLED: "Complete it (cancelled)",
@@ -164,7 +164,7 @@ class ProposalsDialog(QDialog):
         self._zone, self._today = zone, today
         self.heading.setText("Proposals" if action is None else f"Proposals for “{action.title}”")
         self.listing.blockSignals(True)
-        self.listing.clear()
+        clear_list(self.listing)
         for proposal in self._proposals:
             received = moment_text(proposal.received_at_utc, zone, today=today)
             item = QListWidgetItem(proposal_text(proposal, zone, today=today))

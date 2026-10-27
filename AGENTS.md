@@ -221,7 +221,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
-  Return or Enter activates a row once on every platform; `HeaderRowsModel`
+  Return or Enter activates a row once on every platform, and `clear_list`, which empties a
+  `QListWidget`; `HeaderRowsModel`
   (`brief_list.py`) is the model of a painted list with section headers, which the keyboard
   skips; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
@@ -559,6 +560,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
   repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
   Python code for each, and a garbage collection there could free one it still visits.
+- Empty a `QListWidget` with `lists.clear_list()`, never its `clear()`: `clear()` deletes the
+  items inside Qt's model reset, and a garbage collection of their Python wrappers or data
+  there can crash on Cocoa (CI's macOS UI step). `clear_list` takes each item out with
+  collection paused, and changes the current row once, as `clear()` does.
 
 ## Dormant Microsoft notes
 

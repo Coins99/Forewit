@@ -47,12 +47,11 @@ from mailbrief.ui.calendar_view import day_rows, entry_key, event_when
 from mailbrief.ui.deadline_text import day_text, deadline_text
 from mailbrief.ui.hairline import HairlineFrame, paint_focus_ring
 from mailbrief.ui.labels import plain_label, wrap_label
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import (
     SMALL_PX,
     TEXT_PX,
     current_tokens,
-    paused_collection,
     ui_font,
     ui_metrics,
 )
@@ -241,13 +240,7 @@ class _Card(HairlineFrame):
 
     def show_rows(self, rows: list[tuple[DayRow, object]]) -> None:
         """Each row and what it opens; the heading counts them."""
-        # As in Calendar, remove each item before releasing its wrapper and Python data.
-        # QListWidget.clear() deletes them inside Qt's bulk reset; collecting Python
-        # objects during that native traversal can crash on Cocoa.
-        with paused_collection():
-            while self.list.count():
-                item = self.list.takeItem(0)
-                del item
+        clear_list(self.list)
         for row, target in rows:
             item = QListWidgetItem(row.text())
             item.setData(ROW_ROLE, row)

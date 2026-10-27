@@ -27,6 +27,7 @@ from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
+from mailbrief.ui.lists import clear_list
 from mailbrief.ui.theme import current_tokens, icon_pixmap, ui_font
 from mailbrief.ui.weak import weak_method
 
@@ -229,7 +230,7 @@ class CachedMailDialog(QDialog):
 
     def begin_load(self) -> None:
         self._page = None
-        self.messages.clear()
+        clear_list(self.messages)
         self.details.clear()
         self._clear_message()
         self.set_status("Loading saved metadata…")
@@ -262,7 +263,7 @@ class CachedMailDialog(QDialog):
         self.set_status(
             f"{len(page.messages)} messages saved · {cache_time}", accessible_name=status
         )
-        self.messages.clear()
+        clear_list(self.messages)
         for message in page.messages:
             item = QListWidgetItem(
                 f"{message.subject}\n{message.sender.name or message.sender.address}\n"

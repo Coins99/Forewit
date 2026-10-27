@@ -39,8 +39,8 @@ from mailbrief.ui.calendar_layout import (
 from mailbrief.ui.deadline_text import MONTH_NAMES, day_text, full_day_text, month_day
 from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, AgendaRowDelegate, DisplayRow
-from mailbrief.ui.lists import ActivatingList
-from mailbrief.ui.theme import TEXT_PX, TITLE_PX, paused_collection, ui_font
+from mailbrief.ui.lists import ActivatingList, clear_list
+from mailbrief.ui.theme import TEXT_PX, TITLE_PX, ui_font
 
 __all__ = [
     "CalendarPanel",
@@ -372,10 +372,7 @@ class CalendarPanel(QWidget):
         self._rows = []
         self.list.blockSignals(True)
         try:
-            with paused_collection():
-                while self.list.count():
-                    item = self.list.takeItem(0)
-                    del item
+            clear_list(self.list)
             day = shown.first_day
             while day <= shown.last_day:
                 self._rows.append((day, None))

@@ -84,6 +84,8 @@ shadows), in the system's light or dark mode. Its approved renders are
   `HairlineFrame`, `HairlineDivider`, `HairlineSplitter`), never with QSS borders, so they
   stay one device pixel at every scale.
 - Keep MainWindow's attribute names; tests and other modules use them.
+- Empty a `QListWidget` with `clear_list()` (ui/lists.py), never `QListWidget.clear()`,
+  which can crash on Cocoa when a garbage collection runs inside Qt's deletion.
 - Nothing inside a window may keep a reference back to the window: no attribute holding
   it, and no function or bound method over it kept in an attribute (a clock, a
   callback, a theme follower's `apply`). That makes a cycle, and a dropped window in a

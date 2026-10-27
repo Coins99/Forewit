@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.labels import button_label, outline_button, wrap_label
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 
 
 class ProjectsDialog(QDialog):
@@ -130,7 +130,7 @@ class ProjectsDialog(QDialog):
                 break
 
     def _fill(self) -> None:
-        self.list.clear()
+        clear_list(self.list)
         for record in self.records():
             suffix = " (archived)" if isinstance(record, Project) and record.archived_at_utc else ""
             self.list.addItem(record.name + suffix)
