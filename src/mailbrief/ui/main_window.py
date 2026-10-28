@@ -3855,15 +3855,16 @@ class MainWindow(QMainWindow):
     # no review, no consent question and no dialog; everything it says goes to the status line.
 
     def _dialog_open(self) -> bool:
-        """Whether the owner is working in one of the window's dialogs or editors, or is
-        confirming a replacement on the Briefs page."""
+        """Whether the owner is working in one of the window's dialogs, or is confirming a
+        replacement on the Briefs page. An editor that sits in a page (the New task form, the
+        Drafts page's or Today's draft editor) is not a dialog: see ``_editing_in_page``."""
         if (
             self.workspace.current_page() == "briefs"
             and not self.history_panel.confirm_panel.isHidden()
         ):
             return True
         return (self.data_dialog is not None and self.data_dialog.isVisible()) or any(
-            widget.isVisible()
+            widget.isVisible() and widget.isWindow()
             for widget in (
                 self.settings_dialog,
                 self.auto_send_dialog,
@@ -3879,6 +3880,13 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _editing_in_page(self) -> bool:
+        """Whether the owner is typing in a draft editor that sits in a page (Drafts, or a
+        reply on Today): text not yet sent to be saved, which autosave sends within moments.
+        A refresh waits for that, but not for an editor that is merely open; the New task
+        form keeps its input through one (only its Save waits)."""
+        return self.draft_editor.embedded and self.draft_editor.dirty
+
     def _refresh_due(self) -> None:
         """The scheduler says a run is due: start one unless something is in the way.
 
@@ -3887,7 +3895,11 @@ class MainWindow(QMainWindow):
         """
         if self._closing or not self._ready:
             return
-        busy = self._dialog_open() or (self.task is not None and not self.task.done())
+        busy = (
+            self._dialog_open()
+            or self._editing_in_page()
+            or (self.task is not None and not self.task.done())
+        )
         if busy:
             self.scheduler.retry_soon()
             return

@@ -369,6 +369,47 @@ async def test_a_refresh_waits_while_the_owner_is_in_a_dialog(
     assert backend.automatic_calls == 1
 
 
+async def test_the_new_task_form_keeps_its_input_through_a_refresh(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    window.show()
+    window._request_new_task()  # The New task form, in the Actions page.
+    assert window.action_editor.isVisible()
+    window.action_editor.title.setText("Half-typed")
+
+    await due(window)
+
+    assert backend.automatic_calls == 1
+    assert window.action_editor.embedded
+    assert window.action_editor.title.text() == "Half-typed"
+
+
+async def test_a_draft_open_on_its_page_holds_the_palette_and_a_refresh_only_while_typed(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    window.show()
+    window.page_shortcuts["drafts"].activated.emit()
+    window.drafts_panel.new_menu.actions()[1].trigger()  # A note, in the Drafts page.
+    assert window.task is not None
+    await window.task
+    editor = window.draft_editor
+    assert editor.embedded and editor.isVisible()
+
+    window._open_palette()
+    assert window.command_palette.isVisible()
+    window.command_palette.reject()
+
+    editor.body.insertPlainText("Typing")  # Not yet sent to be saved.
+    window._refresh_due()
+    assert backend.automatic_calls == 0
+    assert due_at(window) == NOW  # Retried at the next tick, not skipped.
+    editor._autosave_now()
+    await due(window)
+    assert backend.automatic_calls == 1
+
+
 async def open_briefs(window: MainWindow) -> None:
     window.start(window._open_history)
     assert window.task is not None
