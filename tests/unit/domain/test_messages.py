@@ -12,8 +12,25 @@ from mailbrief.domain.messages import (
     ProviderKind,
     RankedMessage,
     RankReason,
+    display_name,
 )
 from tests.factories import make_message
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("  Alex\n Doe ", "Alex Doe"),
+        (None, None),
+        ("   ", None),
+        ("ALEX@example.com", None),  # The address itself.
+        ("Alex (alex@example.com)", None),
+        ("billing＠bank.example", None),  # A fullwidth at sign.
+        ("ceo﹫corp.example", None),  # A small at sign.
+    ],
+)
+def test_a_display_name_never_carries_an_address(name: str | None, expected: str | None) -> None:
+    assert display_name(name, "alex@example.com") == expected
 
 
 def test_provider_kinds_keep_microsoft_and_add_gmail() -> None:

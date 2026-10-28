@@ -84,6 +84,8 @@ def test_a_deadline_in_another_year_names_the_year() -> None:
         (None, "sam@example.com", "sam@example.com"),
         ("SAM@example.com", "sam@example.com", "sam@example.com"),  # The address itself.
         ("  Priya\n Shah ", "priya@example.com", "Priya Shah <priya@example.com>"),
+        ("billing＠bank.example", "attacker@evil.example", "attacker@evil.example"),
+        ("ceo﹫corp.example", "attacker@evil.example", "attacker@evil.example"),
     ],
 )
 def test_sender_with_address_never_hides_the_address(

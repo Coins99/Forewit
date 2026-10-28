@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 from mailbrief.domain.actions import ActionProposal, ProposalState
 from mailbrief.domain.analysis import DeadlinePrecision, FollowUpKind
 from mailbrief.domain.digests import DailyDigest, DigestItem, DigestSection
-from mailbrief.domain.messages import EmailContact
+from mailbrief.domain.messages import EmailContact, display_name
 from mailbrief.ui.deadline_text import month_day, weekday
 from mailbrief.ui.hairline import (
     SELECTION_INSET_X,
@@ -128,12 +128,10 @@ def sender_with_address(contact: EmailContact) -> str:
 
 def with_address(name: str | None, address: str) -> str:
     """A sender as "Name <address>"; the address alone when the name is empty or the
-    address itself, or contains "@": a name that looks like an address is how a sender
-    poses as another."""
-    shown = " ".join((name or "").split())
-    if not shown or shown.casefold() == address.casefold() or "@" in shown:
-        return address
-    return f"{shown} <{address}>"
+    address itself, or contains an at sign: a name that looks like an address is how a
+    sender poses as another (``display_name``)."""
+    shown = display_name(name, address)
+    return address if shown is None else f"{shown} <{address}>"
 
 
 def deadline_chip(
