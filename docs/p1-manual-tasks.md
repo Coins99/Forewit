@@ -14,6 +14,9 @@ reopening, drafts and deletion workflow as email-derived actions. They need no G
 connection or source snapshot. Adding an email later retains its provenance; undoing
 that first addition restores the manual task to zero sources.
 
+An open task's steps can also be ticked and added from the detail pane, each saved at once
+as one revision ([checklists in place](p1-checklists.md), B04).
+
 ## Durable activity
 
 Additive migration `20261013_0015` follows the Google calendar cache migration
@@ -31,8 +34,9 @@ to the reversed revision. Undo reopen restores the original completion time rath
 creating another completion. A stale undo is refused. Future charts must treat undo
 references explicitly and query uncapped history, rather than count completed UI rows.
 
-The detail pane shows the latest 20 activity entries in the owner's time zone. Task reads
-fetch only those entries with an indexed query. All entries remain stored and are included
+The detail pane shows the latest 20 lines of activity in the owner's time zone, where edits
+in a row share one line (B04). Task reads fetch at most the latest 200 entries with an
+indexed query. All entries remain stored and are included
 in the writing export's `action_activity` records (an
 additive extension of format version 1) and consistent database backups. Recovery validates
 and restores the new table alongside actions. Acceptance undo now hides the unchanged

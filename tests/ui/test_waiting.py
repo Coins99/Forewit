@@ -186,6 +186,7 @@ def test_the_detail_names_whom_it_waits_on_and_for_how_long(panel: ActionsPanel)
         "Wed Sep 30 · 3 days",
         "FOLLOW-UP",
         "Mon Oct 5",
+        "Plan",  # An open task's field to add a step (B04).
     ]
     assert panel.complete_button.text() == "Mark received"
     assert panel.draft_button.text() == "Draft follow-up"

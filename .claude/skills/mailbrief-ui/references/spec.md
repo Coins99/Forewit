@@ -403,9 +403,10 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
   detail pane all read it, so they never disagree.
 - `ActionDetailPane(QScrollArea)`: objectName `actionDetail`, "Selected action",
   `ClickFocus`, content (`actionDetailContent`) at most 720 px wide at the left, margins
-  16, 20, 16, 20, spacing 10. Its seven buttons are made once and stay (the panel exposes
-  them under its old names), so only the text between them is rebuilt. In order, every
-  mail-, AI- or owner-written line a `WrapLabel`:
+  16, 20, 16, 20, spacing 10. Its eight buttons and the plan's `newStepField` are made once
+  and stay (the panel exposes the buttons under their old names), so only the text between
+  them, with an open task's step check boxes, is rebuilt. In order, every mail-, AI- or
+  owner-written line a `WrapLabel`:
   1. Title, 20px Semibold (`actionTitle`).
   2. State, secondary: "Yours · open", "Waiting for someone · open", or with the person the
      owner named (B08) "Yours, for Sam · open" and "Waiting on Alex · open" (each with
@@ -423,8 +424,16 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
      (`actionDeadline`); the target with its reason while it is still the suggested one
      ("Target Fri Oct 2, one working day before the deadline"), secondary
      (`actionTarget`).
-  4. "Plan · 2 of 5 done" (12px muted heading), then each step in order: "✓ {text}"
-     muted when done, "○ {text}" otherwise.
+  4. "Plan · 2 of 5 done" (12px muted heading; "Plan" for an open task without steps), then
+     each step in order. An open task's (B04) is a `StepRow` (`actionStep`): a check box with
+     no text (`actionStepBox`, the step its accessible name, so an "&" is never a mnemonic)
+     beside the step's words (`actionStepText`, 11px, muted when done), which a click on also
+     ticks; then `newStepField` ("Add a step"; Return adds), hidden at 30 steps. A closed
+     task's steps read "✓ {text}" muted when done and "○ {text}" otherwise, with no field.
+     The same steps shown again (after a tick) update their rows in place (`show_step`),
+     keeping the focus and the Tab order; other changes make the rows anew, and a box that
+     had the focus gives it to its step's new box (`_release_focus` holds it on the pane).
+     In Activity, consecutive ordinary edits share one line ("Edited 3 times · …").
   5. "Notes" and the notes.
   6. "Thread" and `describe()`'s activity lines, first letter capitalised ("2 new in
      thread, latest Tue 14:02 from Sam", "You replied Sun Sep 20"); then `seenButton`
@@ -439,10 +448,18 @@ a `HairlineSplitter` (stretch 4 : 5, children not collapsible) holding the list 
   Empty states, muted (`actionEmpty`), with no buttons: Open "No open actions. Accept a
   suggestion in a brief to start one.", Waiting "Nothing you're waiting for.", Completed
   "No completed actions yet."
-- Tab: the tab bar, the list shown, then the detail's buttons in display order.
+- Tab: the tab bar, the list shown, then the detail's controls in display order
+  (`focus_order()`): the footer's buttons as laid out, the plan's boxes and field, Mark seen,
+  Proposals and Open source. The run from Delete is linked whole each time the boxes are
+  made (`_link_below_footer`): Qt 6 skips a `setTabOrder` link that already holds past
+  no-focus containers, so linking only part of it can leave other widgets in between.
 - Behaviour is unchanged: `_update_buttons` keeps its rules, every button emits
   `action_requested` or `draft_requested` for MainWindow's `start()`, and only Gmail
-  links open.
+  links open. The plan emits `step_toggled(action, step_id, done)` and
+  `step_added(action, text)` through the panel, busy or not, and nothing greys out: the
+  window says "Forewit is busy; try again in a moment." when it can't start, putting the box
+  back (`put_back_step`, never remade inside its own click) or leaving the step in its field.
+  Skip is parented in the footer from the start, so showing it never makes a window.
 
 ## Dates (`ui/deadline_text.py`)
 

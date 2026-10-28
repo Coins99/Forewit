@@ -4,6 +4,7 @@ check boxes and radio buttons."""
 import pytest
 from PySide6.QtCore import QDate, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,6 +36,7 @@ from mailbrief.ui.theme import (
 )
 from mailbrief.ui.theme.indicators import indicator_colors, paint_check_box, paint_radio
 from mailbrief.ui.theme.style import CHEVRON_PX, paint_chevron
+from tests.ui.test_keyboard import activate
 
 
 def grab(widget: QWidget) -> QImage:
@@ -168,6 +170,42 @@ def test_a_disabled_indicator_is_fainter(qapp: QApplication) -> None:
         return image.pixelColor(4, 10)
 
     assert centre(False).lightness() > centre(True).lightness()
+
+
+@pytest.mark.parametrize("checked", [False, True])
+@pytest.mark.parametrize("mode", list(ThemeMode))
+def test_a_check_box_without_text_shows_keyboard_focus_on_its_box(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode, checked: bool
+) -> None:
+    """A step's box (B04) has no label for the focus to ring, so the ring goes on the box,
+    ticked or not, once the keyboard moves the focus to it."""
+    apply_theme(qapp, mode)
+    host = QWidget()
+    qtbot.addWidget(host)
+    layout = QVBoxLayout(host)
+    first, box = QPushButton("First"), QCheckBox()
+    box.setChecked(checked)
+    layout.addWidget(first)
+    layout.addWidget(box)
+    activate(qtbot, host)
+    first.setFocus()
+    before = grab(box)
+
+    QTest.keyClick(first, Qt.Key.Key_Tab)
+
+    assert box.hasFocus()
+    after = grab(box)
+
+    def change(x: int, y: int) -> int:
+        was, now = before.pixelColor(x, y), after.pixelColor(x, y)
+        return max(
+            abs(was.red() - now.red()),
+            abs(was.green() - now.green()),
+            abs(was.blue() - now.blue()),
+        )
+
+    changed = sum(change(x, y) > 40 for y in range(after.height()) for x in range(after.width()))
+    assert changed >= 20  # Without the ring, no pixel changes by more than 40.
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))

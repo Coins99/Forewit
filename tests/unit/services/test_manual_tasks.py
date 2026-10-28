@@ -16,7 +16,7 @@ from mailbrief.domain.actions import ActionEdit, ActionFilter, ActionStatus, Ste
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
-from mailbrief.storage.actions import ActionRepository
+from mailbrief.storage.actions import DISPLAY_ACTIVITY_LIMIT, ActionRepository
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config, upgrade_database
@@ -269,16 +269,19 @@ async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path:
     async with database.session() as session:
         service = ActionService(session)
         action = await service.create(EDIT)
-        for _ in range(25):
+        for _ in range(DISPLAY_ACTIVITY_LIMIT + 5):
             action = await service.save(action.public_id, action.revision, EDIT)
         action = await service.complete(action.public_id, action.revision)
         undone = await service.undo_status(action.public_id, action.revision)
-        assert len(undone.activity) == 20
-        assert [event.revision for event in undone.activity] == list(range(9, 29))
-        assert undone.activity[-1].undo_of_revision == 27
+        total = DISPLAY_ACTIVITY_LIMIT + 8  # Created, the edits, Completed and its undo.
+        assert len(undone.activity) == DISPLAY_ACTIVITY_LIMIT
+        assert [event.revision for event in undone.activity] == list(
+            range(total - DISPLAY_ACTIVITY_LIMIT + 1, total + 1)
+        )
+        assert undone.activity[-1].undo_of_revision == total - 1
         row = await session.scalar(select(ActionTable))
         assert row is not None
-        assert len(await ActionRepository(session).activity_rows(row.id)) == 28
+        assert len(await ActionRepository(session).activity_rows(row.id)) == total
         short = await service.create(EDIT)
         for _ in range(4):
             short = await service.save(short.public_id, short.revision, EDIT)
@@ -288,7 +291,7 @@ async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path:
     exported = tmp_path / "history.json"
     await export_writing(database, exported)
     payload = json.loads(exported.read_text(encoding="utf-8"))
-    assert len(payload["records"]["action_activity"]) == 33
+    assert len(payload["records"]["action_activity"]) == total + 5
     await database.dispose()
 
 

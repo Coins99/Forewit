@@ -26,7 +26,7 @@ from mailbrief.ui.deadline_text import MONTHS, day_text, full_day_text
 from mailbrief.ui.hairline import HairlineDivider, HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
 NOT_CONNECTED = "Connect Gmail to brief missed days."
@@ -90,7 +90,7 @@ class BriefHistoryPanel(QWidget):
         self.saved.setAccessibleName("Saved briefs")
         layout.addWidget(self.saved, 2)
         layout.addWidget(plain_label("Missed days", px=12, medium=True))
-        self.missed = QListWidget()
+        self.missed = SafeList()
         self.missed.setObjectName("missedDayList")
         self.missed.setFrameShape(QFrame.Shape.NoFrame)
         self.missed.setAccessibleName("Missed days in the last 7 days")
@@ -251,7 +251,7 @@ class BriefHistoryPanel(QWidget):
         self.confirm_panel.hide()
         self.status.clear()
         self.saved.blockSignals(True)
-        self.saved.clear()
+        clear_list(self.saved)
         for summary in summaries:
             item = QListWidgetItem(summary_text(summary, self._today))
             item.setData(
@@ -293,7 +293,7 @@ class BriefHistoryPanel(QWidget):
         until that account's days are loaded; the note then claims nothing about them."""
         self._missed = missed or ()
         self.missed.blockSignals(True)
-        self.missed.clear()
+        clear_list(self.missed)
         for day in self._missed:
             self.missed.addItem(QListWidgetItem(f"{day_text(day, today=self._today)} · no brief"))
         self.missed.blockSignals(False)

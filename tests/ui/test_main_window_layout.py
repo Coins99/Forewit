@@ -569,7 +569,9 @@ def test_page_headings_use_the_title_size(
             "primary"
             if page_button.objectName() in ("newTaskButton", "completeButton", "newDraftButton")
             else "ghost"
-            if page_button.objectName() in ("editButton", "deleteButton", "organizeButton")
+            # Skip is the footer's too, hidden until a task repeats.
+            if page_button.objectName()
+            in ("editButton", "deleteButton", "skipButton", "organizeButton")
             else "outline"
         )
         assert page_button.property("variant") == expected

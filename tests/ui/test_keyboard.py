@@ -52,7 +52,7 @@ FIRST_EMAIL = [
 ]
 
 
-def activate(qtbot: QtBot, window: MainWindow) -> None:
+def activate(qtbot: QtBot, window: QWidget) -> None:
     """Shortcuts and focus need the window shown and active; this waits until it is, and
     fails with a timeout when macOS won't activate it (a locked screen, for one)."""
     with qtbot.waitActive(window, timeout=5000):
@@ -312,6 +312,7 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
 
     chain = tab_chain(window, panel.new_task_button)
 
+    # After the detail's buttons comes its plan's field: this task has no steps yet (B04).
     assert chain == [
         "newTaskButton",
         "actionGroup",
@@ -319,5 +320,6 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
         "actionsTabs",
         "actionList",
         *detail,
+        "newStepField",
         *HEADER_AND_SIDEBAR[2:],
     ]

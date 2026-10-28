@@ -26,7 +26,7 @@ from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
-from mailbrief.ui.lists import ActivatingList
+from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import TITLE_PX, ui_font
 
 NEW = "new"
@@ -189,7 +189,7 @@ class DraftsPanel(QWidget):
         row = self.list.currentRow()
         self._drafts = drafts
         self.draft_count.setText(f"{len(drafts)} drafts")
-        self.list.clear()
+        clear_list(self.list)
         for summary in drafts:
             changed = moment_text(summary.updated_at_utc, zone, today=today)
             item = QListWidgetItem(describe(summary, zone, today))

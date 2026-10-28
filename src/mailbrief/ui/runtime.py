@@ -866,6 +866,16 @@ class DesktopRuntime:
                 public_id, revision, edit, steps, repeat, deadline
             )
 
+    async def set_step_done(
+        self, public_id: str, revision: int, step_id: int, done: bool
+    ) -> Action:
+        async with self._storage().session() as session:
+            return await ActionService(session).set_step_done(public_id, revision, step_id, done)
+
+    async def add_step(self, public_id: str, revision: int, text: str) -> Action:
+        async with self._storage().session() as session:
+            return await ActionService(session).add_step(public_id, revision, text)
+
     async def complete_action(self, public_id: str, revision: int) -> Action:
         async with self._storage().session() as session:
             return await ActionService(session).complete(public_id, revision)

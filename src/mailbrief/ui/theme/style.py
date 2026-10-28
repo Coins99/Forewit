@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPalette, QP
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QProxyStyle,
@@ -34,7 +35,12 @@ from mailbrief.ui.theme.assets import (
     release_icon_cache,
     ui_font,
 )
-from mailbrief.ui.theme.indicators import paint_check_box, paint_radio
+from mailbrief.ui.theme.indicators import (
+    BOX_RADIUS,
+    indicator_colors,
+    paint_check_box,
+    paint_radio,
+)
 from mailbrief.ui.theme.tokens import (
     DARK,
     DEFAULT_SCHEME,
@@ -324,6 +330,13 @@ class ThemeStyle(QProxyStyle):
             if element is QStyle.PrimitiveElement.PE_FrameFocusRect:
                 paint_button_focus(painter, option, widget)
                 return
+        if (
+            element is QStyle.PrimitiveElement.PE_FrameFocusRect
+            and isinstance(widget, QCheckBox)
+            and not widget.text()
+        ):
+            paint_box_focus(painter, option)
+            return
         if element in _CHEVRONS:
             # A menu button's arrow on the primary pill is white, as its label is.
             on_fill = _is_pill(widget) and _is_primary(widget)
@@ -568,6 +581,29 @@ def paint_button_focus(painter: QPainter, option: QStyleOption, widget: QWidget 
     painter.setPen(QPen(QColor(color), _PILL_FOCUS_WIDTH))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+    painter.restore()
+
+
+def paint_box_focus(painter: QPainter, option: QStyleOption) -> None:
+    """A check box without text, as a step's (B04), has no label for the focus to ring: a
+    2 px ring on the box itself, only after the keyboard moved focus, in the accent, or the
+    mark's colour on a ticked box's fill."""
+    state = option.state
+    if not (
+        state & QStyle.StateFlag.State_HasFocus
+        and state & QStyle.StateFlag.State_KeyboardFocusChange
+    ):
+        return
+    tokens = current_tokens()
+    on = bool(state & (QStyle.StateFlag.State_On | QStyle.StateFlag.State_NoChange))
+    color = indicator_colors(on, tokens)[2] if on else tokens.accent_fg
+    inset = _PILL_FOCUS_WIDTH / 2
+    ring = QRectF(option.rect).adjusted(inset, inset, -inset, -inset)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(color), _PILL_FOCUS_WIDTH))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(ring, BOX_RADIUS, BOX_RADIUS)
     painter.restore()
 
 

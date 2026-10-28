@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.actions import (
+    ACTION_STEP_MAX_CHARS,
     MAX_ACTION_STEPS,
     PRIORITY_RANK,
     Action,
@@ -73,6 +74,10 @@ _STALE: Final = "The action changed since it was loaded; reload it and try again
 _UNDO_ADD: Final = "Only an unchanged addition can be undone."
 _UNDO_STATUS: Final = "Only an unchanged completion, skip or reopening can be undone."
 _NO_STATED: Final = "This task has no deadline from an email to go back to."
+_CLOSED_PLAN: Final = "Reopen the task to change its plan."
+_NO_STEP: Final = "That step is no longer in this task's plan."
+_TOO_MANY_STEPS: Final = f"An action has at most {MAX_ACTION_STEPS} steps."
+_STEP_TEXT: Final = f"A step needs 1 to {ACTION_STEP_MAX_CHARS} characters."
 # The changes undo_status() reverses: each records the status before it.
 _UNDOABLE: Final = frozenset(
     kind.value
@@ -160,7 +165,7 @@ def _mark(step: ActionStepTable, done: bool, now: datetime) -> None:
 def _check_step_list(steps: Sequence[StepEdit]) -> list[int]:
     """The listed step IDs; raises ActionConflictError for too many steps or a repeated ID."""
     if len(steps) > MAX_ACTION_STEPS:
-        raise ActionConflictError("An action has at most 30 steps.")
+        raise ActionConflictError(_TOO_MANY_STEPS)
     listed = [edit.step_id for edit in steps if edit.step_id is not None]
     if len(listed) != len(set(listed)):
         raise ActionConflictError("Each step may appear only once.")
@@ -733,6 +738,59 @@ class ActionService:
                 await self._apply_steps(row, steps, listed, now)
             if repeat is not None:
                 await self._apply_repeat(row, repeat, now)
+            touch(row, now)
+            await self._repository.record_activity(row, ActionActivityKind.EDITED, now)
+            return await self._load(row)
+
+        return await self._write(run)
+
+    async def _open_plan(self, public_id: str, expected_revision: int) -> ActionTable:
+        """The live, open action whose plan the owner changes in place (B04)."""
+        row = await self._live(public_id, expected_revision)
+        if row.status != ActionStatus.OPEN.value:
+            raise ActionConflictError(_CLOSED_PLAN)
+        return row
+
+    async def set_step_done(
+        self, public_id: str, expected_revision: int, step_id: int, done: bool
+    ) -> Action:
+        """Tick or untick one step of an open task (B04): one revision, recorded as an edit,
+        as the editor's would be. A step that becomes done is timed now and keeps that time
+        while it stays done. A step already as asked leaves the action as it is, without a
+        revision; one of another action raises ActionConflictError."""
+
+        async def run(now: datetime) -> Action:
+            row = await self._open_plan(public_id, expected_revision)
+            steps = {step.id: step for step in await self._repository.step_rows(row.id)}
+            step = steps.get(step_id)
+            if step is None:
+                raise ActionConflictError(_NO_STEP)
+            if step.done == done:
+                return await self._load(row)
+            _mark(step, done, now)
+            touch(row, now)
+            await self._repository.record_activity(row, ActionActivityKind.EDITED, now)
+            return await self._load(row)
+
+        return await self._write(run)
+
+    async def add_step(self, public_id: str, expected_revision: int, text: str) -> Action:
+        """Add a step, not yet done, after an open task's last one (B04): one revision,
+        recorded as an edit. ``text`` is the owner's, stored trimmed; one that is blank or
+        longer than ACTION_STEP_MAX_CHARS, or a step past MAX_ACTION_STEPS, raises
+        ActionConflictError. A repeating task's series keeps its template: the step is this
+        occurrence's alone, as an edit in the editor would be."""
+        step_text = text.strip()
+        if not 1 <= len(step_text) <= ACTION_STEP_MAX_CHARS:
+            raise ActionConflictError(_STEP_TEXT)
+
+        async def run(now: datetime) -> Action:
+            row = await self._open_plan(public_id, expected_revision)
+            steps = await self._repository.step_rows(row.id)
+            if len(steps) >= MAX_ACTION_STEPS:
+                raise ActionConflictError(_TOO_MANY_STEPS)
+            position = max((step.position for step in steps), default=-1) + 1
+            self._repository.add_step(row.id, position, step_text, None)
             touch(row, now)
             await self._repository.record_activity(row, ActionActivityKind.EDITED, now)
             return await self._load(row)

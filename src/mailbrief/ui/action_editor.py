@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
@@ -79,6 +78,7 @@ from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.event_editor import DateBox, TimeBox, parse_clock
 from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import outline_button, plain_label, primary_action, wrap_label
+from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
 _OWNERS = ((ActionOwnership.MINE, "Mine"), (ActionOwnership.WAITING_FOR, "Waiting for someone"))
@@ -545,7 +545,7 @@ class ActionEditor(QDialog):
         fields.addLayout(form)
         self.plan_heading = _plain("Plan (check a step when it's done; double-click to rename):")
         fields.addWidget(self.plan_heading)
-        self.steps = QListWidget()
+        self.steps = SafeList()
         self.steps.setMinimumHeight(100)
         self.steps.setAccessibleName("Plan steps")
         fields.addWidget(self.steps)
@@ -772,7 +772,7 @@ class ActionEditor(QDialog):
         for control in (self.repeat, self.month_day, self.repeat_ends, self.weekdays):
             control.setEnabled(is_open)  # A closed task's repeat can't change.
         self.repeat_end.setEnabled(is_open and self.repeat_ends.isChecked())
-        self.steps.clear()
+        clear_list(self.steps)
         for step in action.steps:
             self._append_step(step.text, step.done, step.step_id)
         self._original = self._current_steps()
@@ -810,7 +810,7 @@ class ActionEditor(QDialog):
         self._set_repeat(None, today)
         for control in (self.repeat, self.month_day, self.repeat_ends, self.weekdays):
             control.setEnabled(True)
-        self.steps.clear()
+        clear_list(self.steps)
         self._original = []
         self.status.clear()
         self._update_step_buttons()

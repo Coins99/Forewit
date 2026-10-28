@@ -109,6 +109,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   person and the wait and prompts a follow-up only when one is due; New task works there, and
   the Actions filter offers each person. Migration 0024 follows 0023. See
   `docs/p1-waiting.md` and ADR 0022.
+- P1 checklists in place (B04) implemented, awaiting owner desktop acceptance: an open task's
+  steps are check boxes in the Actions detail pane, with an **Add a step** field
+  (`ActionService.set_step_done` and `add_step`, one revision each, recorded as `edited`). No
+  migration. See `docs/p1-checklists.md`.
 - Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
@@ -217,7 +221,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
-  Return or Enter activates a row once on every platform; `HeaderRowsModel`
+  Return or Enter activates a row once on every platform, `clear_list`, which empties a
+  `QListWidget`, and `SafeList`, the list widget whose `clear()` is `clear_list`;
+  `HeaderRowsModel`
   (`brief_list.py`) is the model of a painted list with section headers, which the keyboard
   skips; `dialog_guard.py` shows dialogs
   non-modal behind a cover over the window, so Cmd+Q and the Dock's Quit work with one open.
@@ -334,6 +340,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `waiting_for`: becoming waiting sets it to now, staying waiting keeps it, becoming the
   owner's clears it, and a repeat's next occurrence waits from when it is made. AI drafting
   never sends the person.
+- Checklists in place (B04): ticking, unticking or adding a step outside the editor changes
+  only a live, open task, needs the revision the caller saw, and is one revision recorded as
+  `edited` (never a new activity kind without a migration: older builds must read the
+  history). A tick that changes nothing makes no revision. An added step is this occurrence's
+  alone; a series' template changes only with its rule. Ticking the last step never
+  completes a task.
 - Drafts and notes belong to the owner (ADR 0012). They may store the owner's writing
   (title or subject, recipients as typed, body and its versions), a source-email snapshot
   (subject, sender address, link, received time) and an action link with a title snapshot.
@@ -526,11 +538,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   statement/branch gate.
 - Tests run SQLite without disk flushes, CI runs tests in parallel (`pytest -n auto`), and CI
   runs macOS in Toronto and Windows in Tokyo time.
-- `tests/unit/test_source_rules.py` enforces two source rules, naming the file and line of
+- `tests/unit/test_source_rules.py` enforces three source rules, naming the file and line of
   each slip: no strftime directive that follows the system language (`%a`, `%A`, `%b`, `%B`,
   `%p`, `%c`, `%x`) anywhere in `src/mailbrief`, since weekday and month names come from
-  `ui/deadline_text.py`; and no hex colour literal in `src/mailbrief/ui` outside
-  `ui/theme/tokens.py`.
+  `ui/deadline_text.py`; no hex colour literal in `src/mailbrief/ui` outside
+  `ui/theme/tokens.py`; and no `QListWidget` made or subclassed in `src/mailbrief/ui`
+  outside `ui/lists.py`.
 
 ## UI work
 
@@ -549,6 +562,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
   repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
   Python code for each, and a garbage collection there could free one it still visits.
+- Make list widgets from `lists.SafeList` (an `ActivatingList` is one), never `QListWidget`
+  itself: Qt's `clear()` deletes the items inside its model reset, and a garbage collection
+  of their Python wrappers or data there can crash on Cocoa (CI's macOS UI step).
+  `SafeList.clear()` is `lists.clear_list()`, which takes each item out with collection
+  paused and changes the current row once, as Qt's `clear()` does.
 
 ## Dormant Microsoft notes
 

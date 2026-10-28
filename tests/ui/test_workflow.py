@@ -19,6 +19,7 @@ from mailbrief.domain.actions import (
     ActionFilter,
     ActionProposal,
     ActionRepeat,
+    ActionStep,
     DeadlineChange,
     StepEdit,
     SuggestionState,
@@ -454,6 +455,57 @@ class FakeBackend(FakeDrafts):
         self.deadlines.append(deadline)
         await self._act("save_action", public_id, revision, edit, steps)
         return make_action(title=edit.title, revision=revision + 1)
+
+    def _changed_action(
+        self, public_id: str, revision: int, change: Callable[[Action], dict[str, object]]
+    ) -> Action:
+        """The listed action as ``change`` leaves it, one revision on and kept in its list for
+        the next refresh; a new one when none is listed."""
+        for view, actions in self.actions.items():
+            for action in actions:
+                if action.public_id == public_id:
+                    updated = action.model_copy(update=change(action) | {"revision": revision + 1})
+                    self.actions[view] = tuple(
+                        updated if item is action else item for item in actions
+                    )
+                    return updated
+        return make_action(public_id=public_id, revision=revision + 1)
+
+    async def set_step_done(
+        self, public_id: str, revision: int, step_id: int, done: bool
+    ) -> Action:
+        await self._act("set_step_done", public_id, revision, step_id, done)
+        done_at = datetime(2026, 9, 28, 15, tzinfo=UTC) if done else None
+        return self._changed_action(
+            public_id,
+            revision,
+            lambda action: {
+                "steps": tuple(
+                    step.model_copy(update={"done": done, "done_at_utc": done_at})
+                    if step.step_id == step_id
+                    else step
+                    for step in action.steps
+                )
+            },
+        )
+
+    async def add_step(self, public_id: str, revision: int, text: str) -> Action:
+        await self._act("add_step", public_id, revision, text)
+        return self._changed_action(
+            public_id,
+            revision,
+            lambda action: {
+                "steps": (
+                    *action.steps,
+                    ActionStep(
+                        step_id=max((step.step_id for step in action.steps), default=0) + 1,
+                        position=len(action.steps),
+                        text=text,
+                        done=False,
+                    ),
+                )
+            },
+        )
 
     async def complete_action(self, public_id: str, revision: int) -> Action:
         await self._act("complete_action", public_id, revision)
