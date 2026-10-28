@@ -4202,8 +4202,8 @@ class MainWindow(QMainWindow):
 
     def ask_before_quitting(self) -> bool:
         """When quitting would lose unsaved input, ask first and return True: the quit
-        waits for the answer. MailBriefApplication calls this for Cmd+Q and the Dock's
-        Quit, and closeEvent for the window's own close button."""
+        waits for the answer. closeEvent calls this, for the window's own close button and
+        for Cmd+Q and the Dock's Quit, which MailBriefApplication hands to the window."""
         if self._closing or self._quit_confirmed:
             return False
         unsaved = self._unsaved_input()

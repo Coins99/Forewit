@@ -33,18 +33,20 @@ def use_english_locale() -> None:
 
 
 class MailBriefApplication(QApplication):
-    """Lets the window answer a quit request (Cmd+Q, the Dock's Quit) before Qt closes any
-    window. Qt closes every window it can for a quit, so a dialog holding unsaved input
-    would otherwise be closed, and the input lost, before the main window could ask."""
+    """Hands a quit request (Cmd+Q, the Dock's Quit) to the main window, which asks before
+    losing unsaved input and then shuts down in order, closing each dialog itself. Qt's own
+    quit closes windows in no set order and stops at the first that stays open, such as a
+    draft editor saving its text, so the quit would be lost or a dialog's input dropped."""
 
     def __init__(self, arguments: list[str]) -> None:
         super().__init__(arguments)
-        # True means "not now": the window is asking the owner first.
-        self.quit_check: Callable[[], bool] | None = None
+        # Closes the main window; its closeEvent asks first or starts the shutdown.
+        self.quit_request: Callable[[], object] | None = None
 
     def event(self, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.Quit and self.quit_check is not None and self.quit_check():
-            event.ignore()  # On macOS, the quit is cancelled.
+        if event.type() == QEvent.Type.Quit and self.quit_request is not None:
+            event.ignore()  # On macOS, the quit is cancelled; the window's close ends the app.
+            self.quit_request()
             return True
         return QApplication.event(self, event)
 
@@ -116,7 +118,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         window.closing.connect(closed.set)
         application = QApplication.instance()
         if isinstance(application, MailBriefApplication):
-            application.quit_check = window.ask_before_quitting
+            application.quit_request = window.close
         window.show()
         window.start(window.initialize)
         try:
@@ -124,7 +126,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         finally:
             await window.shutdown()
             if isinstance(application, MailBriefApplication):
-                application.quit_check = None
+                application.quit_request = None
         if window.pending_restore is not None:
             # The folder lock stays held across shutdown and publication. No editor,
             # autosave task or pooled connection can write to the restored database.
