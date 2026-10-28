@@ -68,7 +68,7 @@ _HIDDEN_STYLE = re.compile(
 )
 # Font size is inherited and a descendant can set its own, so a zero size hides only the
 # text that inherits it: templates set 0 on layout cells and the real size on the text.
-_FONT_SIZE = re.compile(r"(?<![\w-])font-size:([^;!]*)")
+_FONT_SIZE = re.compile(r"(?<![\w-])font-size:([^;!]*)(!important)?")
 _ZERO_SIZE = re.compile(r"0(?![.\d])[a-z%]*")
 _INHERITED = frozenset({"", "inherit", "unset"})
 # Quote markers stop growing past this depth, so deeply nested quotes can't multiply output.
@@ -115,9 +115,13 @@ def _zero_font_size(attrs: list[tuple[str, str | None]]) -> bool | None:
     """Whether the element's own font size is zero, or None when it sets none of its own."""
     for name, value in attrs:
         if name == "style" and value:
-            sizes = _FONT_SIZE.findall(value.lower().replace(" ", ""))
-            if sizes and sizes[-1] not in _INHERITED:  # The last declaration wins.
-                return _ZERO_SIZE.fullmatch(sizes[-1]) is not None
+            found = _FONT_SIZE.findall(value.lower().replace(" ", ""))
+            if found:
+                # The last !important declaration wins, as in CSS; else the last one.
+                important = [size for size, flag in found if flag]
+                size = important[-1] if important else found[-1][0]
+                if size not in _INHERITED:
+                    return _ZERO_SIZE.fullmatch(size) is not None
     return None
 
 

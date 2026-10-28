@@ -175,3 +175,12 @@ def test_whitespace_and_padding_do_not_use_up_the_budget(filler: str) -> None:
 def test_collapsed_spacing_between_words_is_kept() -> None:
     assert html_to_text("<p>Hello   \n  <b>big</b>\t\tworld</p>") == "Hello big world"
     assert html_to_text("<table><tr><td>Name</td><td>Due</td></tr></table>") == "Name Due"
+
+
+def test_an_important_font_size_wins_over_a_later_one() -> None:
+    """CSS lets an !important declaration beat a later plain one, so a zero size marked
+    important hides the text and a real size marked important shows it."""
+    hidden = '<div style="font-size:0 !important; font-size:12px">Hidden</div><p>Body</p>'
+    shown = '<div style="font-size:12px!important;font-size:0">Shown</div>'
+    assert html_to_text(hidden) == "Body"
+    assert html_to_text(shown) == "Shown"
