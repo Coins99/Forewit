@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QLocale, QLockFile
@@ -22,6 +23,9 @@ from mailbrief.ui.glass.profile import log_summary as log_paint_summary
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import apply_theme, current_mode, current_scheme, system_mode
+
+WORKER_PREFIX = "forewit-worker"
+"""The name of every thread that runs the desktop's blocking work."""
 
 
 def use_english_locale() -> None:
@@ -213,6 +217,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
     application.setQuitOnLastWindowClosed(False)
     with QEventLoop(application) as loop:
         asyncio.set_event_loop(loop)
+        # Blocking work (asyncio.to_thread) runs on plain Python threads. qasync's own default
+        # executor starts ten QThreads the first time it is needed, and on Windows CI building
+        # them crashed natively now and then (an access violation in QThread's constructor).
+        # The work needs no QObject or Qt event loop (a QLockFile at most, which any thread
+        # can use), and the loop's close() still waits for it to finish.
+        loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix=WORKER_PREFIX))
         if options.smoke_test_dir is not None:
             from mailbrief.ui.smoke import run_scenario
 
