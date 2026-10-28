@@ -36,7 +36,7 @@ UNREADABLE = "Saved preferences could not be read. Open Settings > Preferences a
 
 @pytest.fixture(autouse=True)
 def toronto_system_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("America/Toronto"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("America/Toronto"))
     for name in AI_LIMIT_FIELDS:
         monkeypatch.delenv(f"MAILBRIEF_{name.upper()}", raising=False)
 

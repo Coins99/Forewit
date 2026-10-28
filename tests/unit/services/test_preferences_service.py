@@ -240,7 +240,7 @@ def test_each_limit_names_its_source(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_owner_zone_prefers_explicit_then_saved_then_system(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("Asia/Tokyo"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("Asia/Tokyo"))
     saved = OwnerPreferences(revision=1, time_zone="America/Toronto")
     assert owner_zone(saved, "Europe/Paris") == ZoneInfo("Europe/Paris")
     assert owner_zone(saved) == ZoneInfo("America/Toronto")
