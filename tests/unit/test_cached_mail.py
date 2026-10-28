@@ -28,7 +28,7 @@ async def test_offline_pages_include_archived_metadata_and_respect_dst_and_accou
     monkeypatch.setattr(runtime, "groq_provider", forbidden)
     monkeypatch.setattr(runtime, "GroqKeyStore", forbidden)
     monkeypatch.setattr(runtime, "GmailCredentialStore", forbidden)
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("Asia/Tokyo"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("Asia/Tokyo"))
     path = tmp_path / "mailbrief.sqlite3"
     backend = DesktopRuntime(path)
     await backend.load_saved()
@@ -113,7 +113,7 @@ async def test_offline_browsing_falls_back_to_the_system_zone_when_preferences_a
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Browsing only displays local data, so it never fails closed."""
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("Asia/Tokyo"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("Asia/Tokyo"))
     path = tmp_path / "mailbrief.sqlite3"
     backend = DesktopRuntime(path)
     await backend.load_saved()

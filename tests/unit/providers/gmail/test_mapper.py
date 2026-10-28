@@ -66,6 +66,27 @@ def test_invalid_required_metadata_is_safe(key: str, value: object) -> None:
     assert "sender@example.com" not in str(error.value)
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("Subject", "=?UTF-8?B?abcde?="),  # Base64 of the wrong length.
+        ("From", "=?é?Q?x?= <a@example.com>"),  # A charset name no codec has.
+        ("Message-ID", "<=?é?Q?x?=@example.com>"),
+        ("To", "(" * 600 + "me@example.com"),  # Comments nested past the recursion limit.
+        ("From", "(" * 600 + "them@example.com"),
+    ],
+)
+def test_one_malformed_header_never_fails_the_message(name: str, value: str) -> None:
+    raw = metadata()
+    raw["payload"] = {"headers": [{"name": name, "value": value}]}
+    raw["snippet"] = "=?UTF-8?B?abcde?= starts the body"
+
+    item = map_metadata(raw, ACCOUNT)
+
+    assert item.provider_message_id == raw["id"]
+    assert item.body_preview == "=?UTF-8?B?abcde?= starts the body"
+
+
 def with_labels(*labels: str) -> dict[str, object]:
     raw = metadata()
     raw["labelIds"] = ["INBOX", *labels]

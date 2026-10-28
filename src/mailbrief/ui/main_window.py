@@ -738,6 +738,7 @@ class MainWindow(QMainWindow):
         # Carryover and overdue labels use the owner's local day.
         self.now: Callable[[], datetime] = utc_now
         self.zone = resolve_timezone(None)
+        self._system_zone = False  # No zone saved: the owner's zone follows the system's.
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)
         self._projects: tuple[Project, ...] = ()
@@ -762,6 +763,7 @@ class MainWindow(QMainWindow):
         self.planning_dialog.apply_requested.connect(self._request_apply_planning)
         self.planning_dialog.cancel_requested.connect(self._cancel_planning)
         self._planning_plan: PreparedPlan | None = None
+        self._planning_request = 0  # Each opening of Plan with AI; a stale prepare is dropped.
         self._planning_cancel: asyncio.Event | None = None
         self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
@@ -1305,15 +1307,30 @@ class MainWindow(QMainWindow):
         """When the owner's day has changed since the views were built: the check time
         gains its date and the brief's chips recount in place at once, and the actions and
         the Briefs page reload through ``start()``. While another operation runs, that
-        reload is held and retried on each tick until it starts."""
+        reload is held and retried on each tick until it starts. A change of the system's
+        zone, when the owner's follows it, is handled the same way."""
+        zone_changed = self._follow_system_zone()
         today = self._local_today()
-        if self._day is not None and today != self._day:
+        if self._day is not None and (today != self._day or zone_changed):
             self._render_checked()
             self.workspace.set_today(today, self.zone)
             self._day_refresh_pending = True
         self._day = today
         if self._day_refresh_pending:
             self._day_refresh_pending = not self.start(self._refresh_for_new_day, cancellable=False)
+
+    def _follow_system_zone(self) -> bool:
+        """With no zone saved, the owner's zone is the system's: when that changed while the
+        window was open (a laptop that travelled), take it up. True when it changed."""
+        if not self._system_zone:
+            return False
+        zone = resolve_timezone(None)
+        if zone.key == self.zone.key:
+            return False
+        self.zone = zone
+        self.inbox_panel.set_zone(zone)
+        self._set_dialog_zones()
+        return True
 
     async def _refresh_for_new_day(self) -> None:
         """What counts from the day: the actions' due labels, the Briefs page's missed days
@@ -1652,6 +1669,11 @@ class MainWindow(QMainWindow):
 
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
+            if self.action_editor.embedded and self.action_editor.has_unsaved_input():
+                # Editing loads the action into the same editor, over the new task's input.
+                self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
+                self.status.setText("Save or cancel the new task first.")
+                return
             self.action_editor.set_embedded(None, window=self)
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
             self.dialog_guard.show_dialog(self.action_editor)
@@ -2506,6 +2528,7 @@ class MainWindow(QMainWindow):
     def _request_planning(self) -> None:
         """Open the dialog; preparing and asking wait their turn through start()."""
         self._planning_plan = None
+        self._planning_request += 1
         self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
         self.dialog_guard.show_dialog(self.planning_dialog)
 
@@ -2541,24 +2564,31 @@ class MainWindow(QMainWindow):
     async def _prepare_planning(self, options: PlanningOptions) -> None:
         """Read Google first when its times are to be sent and the saved copy misses some of
         the four weeks; a failed read leaves what was saved, and the preview says which
-        days it holds. Quitting stops it."""
+        days it holds. Quitting stops it. A dialog opened again meanwhile is a new request:
+        it gets nothing of this one, whose instruction and parts it no longer shows."""
+        request = self._planning_request
         first = self._planning_first()
         if self._planning_google_due(options, first):
             self.planning_dialog.show_reading()
             try:
                 await self._sync_calendar(quiet=True)
             except AuthenticationRequiredError:
-                self.planning_dialog.show_problem(_PLAN_SIGN_IN)
+                if request == self._planning_request:
+                    self.planning_dialog.show_problem(_PLAN_SIGN_IN)
                 raise  # _run reports it as Gmail's, as for any calendar sync.
         try:
             plan = await self.backend.prepare_planning(options, first, self.zone)
         except ConfigurationError as exc:
             log_failure(exc)
-            self.planning_dialog.show_problem(configuration_guidance(exc))
+            if request == self._planning_request:
+                self.planning_dialog.show_problem(configuration_guidance(exc))
             return
         except Exception as exc:
             log_failure(exc)
-            self.planning_dialog.show_problem(_PLAN_FAILED)
+            if request == self._planning_request:
+                self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        if request != self._planning_request:
             return
         self._planning_plan = plan
         self.planning_dialog.show_preview(plan.preview)
@@ -3294,6 +3324,7 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        self._system_zone = not (preferences.time_zone or "").strip()
         self.inbox_panel.set_zone(self.zone)
         self._set_dialog_zones()
         self._render_checked()  # In the new zone.
@@ -3826,21 +3857,23 @@ class MainWindow(QMainWindow):
         if result.status is not BriefStatus.CANCELLED and self._calendar_allowed:
             await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
         if result.status is not BriefStatus.CANCELLED:
+            await self._refresh_actions()  # Thread activity and proposals may have changed.
             await self._refresh_day()  # The thread check may have brought new replies.
 
     # Automatic refresh (ADR 0017): while MailBrief is open, on the owner's schedule. It has
     # no review, no consent question and no dialog; everything it says goes to the status line.
 
     def _dialog_open(self) -> bool:
-        """Whether the owner is working in one of the window's dialogs or editors, or is
-        confirming a replacement on the Briefs page."""
+        """Whether the owner is working in one of the window's dialogs, or is confirming a
+        replacement on the Briefs page. An editor that sits in a page (the New task form, the
+        Drafts page's or Today's draft editor) is not a dialog: see ``_editing_in_page``."""
         if (
             self.workspace.current_page() == "briefs"
             and not self.history_panel.confirm_panel.isHidden()
         ):
             return True
         return (self.data_dialog is not None and self.data_dialog.isVisible()) or any(
-            widget.isVisible()
+            widget.isVisible() and widget.isWindow()
             for widget in (
                 self.settings_dialog,
                 self.auto_send_dialog,
@@ -3856,6 +3889,13 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _editing_in_page(self) -> bool:
+        """Whether the owner is typing in a draft editor that sits in a page (Drafts, or a
+        reply on Today): text not yet sent to be saved, which autosave sends within moments.
+        A refresh waits for that, but not for an editor that is merely open; the New task
+        form keeps its input through one (only its Save waits)."""
+        return self.draft_editor.embedded and self.draft_editor.dirty
+
     def _refresh_due(self) -> None:
         """The scheduler says a run is due: start one unless something is in the way.
 
@@ -3864,7 +3904,11 @@ class MainWindow(QMainWindow):
         """
         if self._closing or not self._ready:
             return
-        busy = self._dialog_open() or (self.task is not None and not self.task.done())
+        busy = (
+            self._dialog_open()
+            or self._editing_in_page()
+            or (self.task is not None and not self.task.done())
+        )
         if busy:
             self.scheduler.retry_soon()
             return
@@ -4167,8 +4211,8 @@ class MainWindow(QMainWindow):
 
     def ask_before_quitting(self) -> bool:
         """When quitting would lose unsaved input, ask first and return True: the quit
-        waits for the answer. MailBriefApplication calls this for Cmd+Q and the Dock's
-        Quit, and closeEvent for the window's own close button."""
+        waits for the answer. closeEvent calls this, for the window's own close button and
+        for Cmd+Q and the Dock's Quit, which MailBriefApplication hands to the window."""
         if self._closing or self._quit_confirmed:
             return False
         unsaved = self._unsaved_input()
@@ -4199,6 +4243,10 @@ class MainWindow(QMainWindow):
         if discard:
             self._quit_confirmed = True
             self.close()
+        elif self.pending_restore is not None:
+            # Kept, it would replace the database at some later quit the owner meant as a quit.
+            self.pending_restore = None
+            self.status.setText("Restore cancelled. Nothing was replaced.")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._shutdown_complete:

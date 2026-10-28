@@ -104,7 +104,7 @@ def service(
     )
 
 
-async def seed_reply(session: AsyncSession) -> str:
+async def seed_reply(session: AsyncSession, sender: EmailContact | None = None) -> str:
     account = await AccountRepository(session).upsert(
         AccountIdentity(
             provider=ProviderKind.GMAIL, provider_account_id="gmail-1", email_address=OWNER
@@ -118,7 +118,7 @@ async def seed_reply(session: AsyncSession) -> str:
                 provider_account_id="gmail-1",
                 provider_message_id="msg-1",
                 subject="Q3 numbers",
-                sender=EmailContact(name="Alex Doe", address="alex@example.com"),
+                sender=sender or EmailContact(name="Alex Doe", address="alex@example.com"),
                 received_at_utc=datetime(2026, 9, 28, 13, 30, tzinfo=UTC),
                 web_link="https://mail.google.com/mail/u/0/#all/msg-1",
             )
@@ -209,6 +209,19 @@ async def test_available_parts(session: AsyncSession, bodies: FakeBodies) -> Non
     assert DraftContextPart.ACTION not in await service(session, provider, bodies).available_parts(
         note
     )
+
+
+@pytest.mark.parametrize(
+    "name", ["alex@example.com", "Alex (alex@example.com)", "billing＠bank.example"]
+)
+async def test_a_name_that_looks_like_an_address_is_never_sent(
+    session: AsyncSession, bodies: FakeBodies, name: str
+) -> None:
+    public_id = await seed_reply(session, EmailContact(name=name, address="alex@example.com"))
+
+    plan = await service(session, FakeDraftingProvider(), bodies).prepare(public_id, OPTIONS)
+
+    assert plan.request.source is not None and plan.request.source.sender_name is None
 
 
 async def test_prepare_downloads_and_prepares_the_email_now(

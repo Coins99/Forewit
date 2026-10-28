@@ -45,7 +45,7 @@ from mailbrief.domain.drafting import (
     part_sizes,
 )
 from mailbrief.domain.drafts import Draft, DraftKind
-from mailbrief.domain.messages import ProviderKind, RankedMessage
+from mailbrief.domain.messages import ProviderKind, RankedMessage, display_name
 from mailbrief.domain.preferences import sender_excluded
 from mailbrief.ports.drafting import DraftingProvider
 from mailbrief.ports.errors import ProviderError
@@ -327,7 +327,7 @@ class DraftingService:
         received = normalize_utc(message.received_at_utc).astimezone(self._zone)
         return SourceContext(
             subject=message.subject,
-            sender_name=message.sender_name,
+            sender_name=display_name(message.sender_name, message.sender_address),
             received_local=received.isoformat(timespec="minutes"),
             body=prepared.text,
             body_truncated=prepared.truncated,

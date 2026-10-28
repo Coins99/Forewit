@@ -1,5 +1,6 @@
 """Normalized email and ranking models."""
 
+import unicodedata
 from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
@@ -155,6 +156,17 @@ class SentMessage(Protocol):
 
     @property
     def sender(self) -> EmailContact: ...
+
+
+def display_name(name: str | None, address: str) -> str | None:
+    """A sender's display name worth showing beside, or sending without, its address; None
+    when it is empty, the address itself, or holds an at sign in any Unicode form (a name
+    that looks like an address is how a sender poses as another, and it would carry an
+    address where only a name may go)."""
+    shown = " ".join((name or "").split())
+    if not shown or shown.casefold() == address.casefold():
+        return None
+    return None if "@" in unicodedata.normalize("NFKC", shown) else shown
 
 
 def own_addresses(primary: str, aliases: Sequence[str] | None) -> frozenset[str]:

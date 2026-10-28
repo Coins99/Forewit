@@ -32,6 +32,8 @@ from mailbrief.ui.calendar_layout import (
     add_months,
     clock,
     entry_key,
+    marker_label,
+    marker_note,
     marker_text,
     month_start,
     shown_month,
@@ -117,6 +119,20 @@ def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, to
     if last != day:
         end = f"{month_day(event.ends_at_utc.astimezone(zone).date(), today=today)} {end}"
     return f"{start}–{end}"
+
+
+def list_time(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo) -> str:
+    """The List view's time column for ``day``: "All day", the start on the event's first
+    day, "until 06:00" on its last and "All day" on the days between, so an event that began
+    on an earlier day never reads as starting at that day's time."""
+    if event.all_day:
+        return "All day"
+    if event.starts_at_utc is None or event.ends_at_utc is None:
+        return ""
+    first, last = event.days(zone)
+    if day == first:
+        return clock(event.starts_at_utc, zone)
+    return f"until {clock(event.ends_at_utc, zone)}" if day == last else "All day"
 
 
 def event_text(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, today: date) -> str:
@@ -391,21 +407,24 @@ class CalendarPanel(QWidget):
                     )
                     item = QListWidgetItem(text)
                     if isinstance(entry, ActionMarker):
-                        when = "Target" if entry.kind is MarkerKind.TARGET else "Deadline"
-                        preview = entry.kind.value.title()
-                    else:
+                        # A deadline's time goes in the time column; the second line
+                        # says what it is, and who it waits on or is for.
                         when = (
-                            "All day"
-                            if entry.all_day
-                            else clock(entry.starts_at_utc, zone)
-                            if entry.starts_at_utc is not None
-                            else ""
+                            clock(entry.due_at_utc, zone)
+                            if entry.kind is MarkerKind.DEADLINE and entry.due_at_utc
+                            else marker_label(entry, zone)
                         )
+                        preview = marker_note(entry, zone)
+                    else:
+                        when = list_time(entry, day, zone)
                         preview = (
                             entry.calendar_name
                             if isinstance(entry, GoogleEvent)
                             else "Your calendar"
                         )
+                        first, last = entry.days(zone)
+                        if not entry.all_day and first != last:  # Its whole span, each day.
+                            preview = f"{event_when(entry, day, zone, today)} · {preview}"
                     item.setData(
                         DISPLAY_ROW_ROLE,
                         DisplayRow(

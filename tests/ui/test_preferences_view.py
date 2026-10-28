@@ -253,7 +253,7 @@ async def test_startup_applies_the_owner_s_zone_and_drafting_defaults(
 async def test_unreadable_preferences_fall_back_to_the_system_zone_for_display(
     window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("Asia/Tokyo"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("Asia/Tokyo"))
     backend.owner_fail = PreferencesUnavailableError()
 
     await window.initialize()

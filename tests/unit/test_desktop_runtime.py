@@ -343,7 +343,7 @@ async def seed_briefs(path: Path) -> None:
 async def test_startup_shows_today_s_brief_after_catching_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("UTC"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("UTC"))
     path = tmp_path / "mailbrief.sqlite3"
     backend = DesktopRuntime(path)
     await backend.load_saved()

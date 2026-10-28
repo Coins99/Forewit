@@ -51,20 +51,16 @@ def test_calendar_pop_ups_read_in_english(qtbot: QtBot) -> None:
         QLocale.setDefault(previous)
 
 
-def test_a_quit_waits_while_the_window_asks(qapp: QApplication) -> None:
-    """Cmd+Q and the Dock's Quit arrive as a Quit event; while the window is asking about
-    unsaved input, it is ignored, which cancels the quit on macOS."""
-    asked: list[bool] = []
-
-    def check() -> bool:
-        asked.append(True)
-        return True
-
+def test_a_quit_goes_to_the_main_window(qapp: QApplication) -> None:
+    """Cmd+Q and the Dock's Quit arrive as a Quit event. It goes to the main window, whose
+    close asks before losing input and closes each dialog itself, and is ignored, so Qt
+    doesn't close windows in its own order (on macOS, the quit is cancelled)."""
+    closed: list[bool] = []
     application = cast(MailBriefApplication, qapp)  # The test's own QApplication.
-    application.quit_check = check  # Its __init__ never ran on this one.
+    application.quit_request = lambda: closed.append(True)  # Its __init__ never ran on it.
     try:
         event = QEvent(QEvent.Type.Quit)
         assert MailBriefApplication.event(application, event)
-        assert not event.isAccepted() and asked == [True]
+        assert not event.isAccepted() and closed == [True]
     finally:
-        del application.quit_check
+        del application.quit_request

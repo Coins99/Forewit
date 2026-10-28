@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.messages import EmailContact, NormalizedMessage
+from mailbrief.domain.messages import EmailContact, NormalizedMessage, display_name
 from mailbrief.ui.brief_list import NO_SUBJECT
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.hairline import HairlineDivider, HairlineFrame
@@ -67,10 +67,7 @@ def shown_name(contact: EmailContact) -> str | None:
     """The sender's name to show beside the address, or None when there is none worth
     showing: empty, the address itself, or holding "@" (a name that looks like an address
     is how a sender poses as another, so the address is shown alone)."""
-    name = " ".join((contact.name or "").split())
-    if not name or name.casefold() == contact.address.casefold() or "@" in name:
-        return None
-    return name
+    return display_name(contact.name, contact.address)
 
 
 def initials(text: str) -> str:

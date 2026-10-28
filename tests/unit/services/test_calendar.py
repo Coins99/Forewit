@@ -100,11 +100,20 @@ def test_resolve_timezone_default_none() -> None:
     assert isinstance(tz, ZoneInfo)
 
 
+def test_the_system_zone_is_read_afresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    assert resolve_timezone(None).key == "Asia/Tokyo"
+
+    monkeypatch.setenv("TZ", "America/Toronto")  # The laptop travelled.
+
+    assert resolve_timezone(None).key == "America/Toronto"
+
+
 def test_resolve_timezone_fallback_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_get_localzone() -> None:
+    def fake_reload_localzone() -> None:
         raise RuntimeError("tzlocal failed")
 
-    monkeypatch.setattr("tzlocal.get_localzone", fake_get_localzone)
+    monkeypatch.setattr("tzlocal.reload_localzone", fake_reload_localzone)
     tz = resolve_timezone(None)
     assert tz.key == "UTC"
 

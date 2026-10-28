@@ -42,6 +42,21 @@ def test_hidden_text_is_dropped() -> None:
     assert html_to_text(markup) == "Shown"
 
 
+def test_text_that_sets_its_own_size_shows_inside_a_zero_size_layout() -> None:
+    # MJML and other responsive templates zero the font size of layout cells, against gaps
+    # between inline blocks, and give the text inside its own size.
+    markup = (
+        '<table><tr><td style="direction:ltr;font-size:0px;padding:20px 0">'
+        '<div style="font-size:0px;display:inline-block;width:100%">'
+        '<table><tr><td style="font-size:0px;padding:10px 25px">gap'
+        '<div style="font-family:Arial;font-size:13px">Invoice INV-2041 is due Friday.</div>'
+        '<div style="font-size: 0 !important">spacer</div>'
+        '<div style="font-size:inherit">still hidden</div>'
+        "</td></tr></table></div></td></tr></table>"
+    )
+    assert html_to_text(markup) == "Invoice INV-2041 is due Friday."
+
+
 def test_links_keep_text_and_images_are_dropped() -> None:
     markup = (
         '<p>Read the <a href="https://track.example/abc?u=1">full report</a> '
@@ -160,3 +175,12 @@ def test_whitespace_and_padding_do_not_use_up_the_budget(filler: str) -> None:
 def test_collapsed_spacing_between_words_is_kept() -> None:
     assert html_to_text("<p>Hello   \n  <b>big</b>\t\tworld</p>") == "Hello big world"
     assert html_to_text("<table><tr><td>Name</td><td>Due</td></tr></table>") == "Name Due"
+
+
+def test_an_important_font_size_wins_over_a_later_one() -> None:
+    """CSS lets an !important declaration beat a later plain one, so a zero size marked
+    important hides the text and a real size marked important shows it."""
+    hidden = '<div style="font-size:0 !important; font-size:12px">Hidden</div><p>Body</p>'
+    shown = '<div style="font-size:12px!important;font-size:0">Shown</div>'
+    assert html_to_text(hidden) == "Body"
+    assert html_to_text(shown) == "Shown"

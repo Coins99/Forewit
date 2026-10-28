@@ -181,6 +181,9 @@ class GmailAuth:
             email_address=account.email_address,
             refresh_token=refresh,
         )
+        if restored and await asyncio.to_thread(self._store.load) is None:
+            # Disconnected while this refresh was on the network: saving would undo it.
+            raise AuthenticationRequiredError("Gmail was disconnected; connect again.")
         await asyncio.to_thread(self._store.save, credential)
         self._granted = frozenset((tokens.scope or "").split())
         self._token = tokens.access_token

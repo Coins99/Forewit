@@ -40,7 +40,9 @@ def resolve_timezone(tz_key: str | None = None) -> ZoneInfo:
             raise InvalidTimezoneError(f"Unknown or invalid timezone: '{tz_key}'") from exc
 
     try:
-        return tzlocal.get_localzone()
+        # Read afresh each time: get_localzone() keeps the first answer for the life of the
+        # process, so a laptop that changes zone (travel) would keep the old day until restart.
+        return tzlocal.reload_localzone()
     except Exception as exc:
         logger.warning("Failed to discover system local timezone (%s); falling back to UTC", exc)
         return ZoneInfo("UTC")

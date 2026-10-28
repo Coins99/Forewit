@@ -37,7 +37,7 @@ OUT_OF_RANGE = "Choose today or one of the previous 7 days."
 
 @pytest.fixture(autouse=True)
 def utc_system_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tzlocal.get_localzone", lambda: ZoneInfo("UTC"))
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo("UTC"))
 
 
 def run_brief(path: Path, *options: str) -> int:

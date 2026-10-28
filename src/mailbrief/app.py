@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QLocale, QLockFile
@@ -23,6 +24,9 @@ from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import apply_theme, current_mode, current_scheme, system_mode
 
+WORKER_PREFIX = "forewit-worker"
+"""The name of every thread that runs the desktop's blocking work."""
+
 
 def use_english_locale() -> None:
     """Make English the default locale, so Qt's own widgets (the calendar pop-ups' month
@@ -33,18 +37,20 @@ def use_english_locale() -> None:
 
 
 class MailBriefApplication(QApplication):
-    """Lets the window answer a quit request (Cmd+Q, the Dock's Quit) before Qt closes any
-    window. Qt closes every window it can for a quit, so a dialog holding unsaved input
-    would otherwise be closed, and the input lost, before the main window could ask."""
+    """Hands a quit request (Cmd+Q, the Dock's Quit) to the main window, which asks before
+    losing unsaved input and then shuts down in order, closing each dialog itself. Qt's own
+    quit closes windows in no set order and stops at the first that stays open, such as a
+    draft editor saving its text, so the quit would be lost or a dialog's input dropped."""
 
     def __init__(self, arguments: list[str]) -> None:
         super().__init__(arguments)
-        # True means "not now": the window is asking the owner first.
-        self.quit_check: Callable[[], bool] | None = None
+        # Closes the main window; its closeEvent asks first or starts the shutdown.
+        self.quit_request: Callable[[], object] | None = None
 
     def event(self, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.Quit and self.quit_check is not None and self.quit_check():
-            event.ignore()  # On macOS, the quit is cancelled.
+        if event.type() == QEvent.Type.Quit and self.quit_request is not None:
+            event.ignore()  # On macOS, the quit is cancelled; the window's close ends the app.
+            self.quit_request()
             return True
         return QApplication.event(self, event)
 
@@ -116,7 +122,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         window.closing.connect(closed.set)
         application = QApplication.instance()
         if isinstance(application, MailBriefApplication):
-            application.quit_check = window.ask_before_quitting
+            application.quit_request = window.close
         window.show()
         window.start(window.initialize)
         try:
@@ -124,7 +130,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         finally:
             await window.shutdown()
             if isinstance(application, MailBriefApplication):
-                application.quit_check = None
+                application.quit_request = None
         if window.pending_restore is not None:
             # The folder lock stays held across shutdown and publication. No editor,
             # autosave task or pooled connection can write to the restored database.
@@ -211,6 +217,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
     application.setQuitOnLastWindowClosed(False)
     with QEventLoop(application) as loop:
         asyncio.set_event_loop(loop)
+        # Blocking work (asyncio.to_thread) runs on plain Python threads. qasync's own default
+        # executor starts ten QThreads the first time it is needed, and on Windows CI building
+        # them crashed natively now and then (an access violation in QThread's constructor).
+        # The work needs no QObject or Qt event loop (a QLockFile at most, which any thread
+        # can use), and the loop's close() still waits for it to finish.
+        loop.set_default_executor(ThreadPoolExecutor(thread_name_prefix=WORKER_PREFIX))
         if options.smoke_test_dir is not None:
             from mailbrief.ui.smoke import run_scenario
 

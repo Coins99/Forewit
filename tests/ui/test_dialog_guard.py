@@ -4,6 +4,8 @@ open on macOS: the cover takes the window's input and activation brings the dial
 import gc
 import weakref
 from pathlib import Path
+from typing import cast
+from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -12,6 +14,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox, QWidget
 from pytestqt.qtbot import QtBot
 
+from mailbrief.app import MailBriefApplication
+from mailbrief.domain.backup import BackupMetadata
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
@@ -231,6 +235,52 @@ async def test_quitting_with_unsaved_input_asks_first(window: MainWindow) -> Non
     )
     discard.click()
     assert closing and not editor.isVisible()
+    await window.shutdown()
+
+
+async def test_a_restore_cancelled_at_the_quit_question_is_forgotten(
+    window: MainWindow,
+) -> None:
+    await window.initialize()
+    closing: list[bool] = []
+    window.closing.connect(lambda: closing.append(True))
+    window.page_shortcuts["calendar"].activated.emit()
+    window.calendar_panel.new_button.click()
+    window.event_editor.title.setText("Dentist")
+
+    window._request_restore(Path("backup.zip"), Mock(spec=BackupMetadata))
+    box = window.findChild(QMessageBox, "quitConfirmation")
+    assert box is not None and box.isVisible()
+    cancel = box.button(QMessageBox.StandardButton.Cancel)
+    assert cancel is not None
+    cancel.click()
+
+    assert window.pending_restore is None and not closing  # A later quit only quits.
+    assert window.status.text() == "Restore cancelled. Nothing was replaced."
+    window.event_editor.force_close()
+    window.close()
+    assert closing and window.pending_restore is None
+    await window.shutdown()
+
+
+async def test_a_quit_with_a_draft_dialog_open_closes_the_window(window: MainWindow) -> None:
+    await window.initialize()
+    closing: list[bool] = []
+    window.closing.connect(lambda: closing.append(True))
+    window.drafts_panel.new_menu.actions()[1].trigger()  # A note, away from Drafts: a dialog.
+    assert window.task is not None
+    await window.task
+    editor = window.draft_editor
+    assert editor.isVisible() and not editor.embedded
+    editor.body.setPlainText("Typed before Cmd+Q")
+    application = cast(MailBriefApplication, QApplication.instance())
+    application.quit_request = window.close  # As run_desktop sets it.
+    try:
+        assert MailBriefApplication.event(application, QEvent(QEvent.Type.Quit))
+    finally:
+        del application.quit_request
+
+    assert closing and not editor.isVisible()  # The window's own shutdown, not Qt's order.
     await window.shutdown()
 
 

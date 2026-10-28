@@ -60,7 +60,10 @@ class Tokens:
 
     @property
     def primary(self) -> str:
-        return self.primary_fill
+        """The accent as text and icons (a selected page, an unread dot, a state line). Not
+        the primary button's fill: in most schemes that is a pale or deep tint made to sit
+        under ``on_primary``, which as text all but disappears into the panel."""
+        return self.accent_fg
 
     @property
     def primary_text(self) -> str:

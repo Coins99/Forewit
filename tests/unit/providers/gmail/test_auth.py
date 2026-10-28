@@ -115,6 +115,24 @@ async def test_refresh_preserves_missing_refresh_token(
     assert cached and cached.refresh_token.get_secret_value() == "old-refresh"
 
 
+async def test_a_disconnect_during_a_silent_restore_is_not_undone(
+    http: httpx.AsyncClient, respx_mock: respx.MockRouter
+) -> None:
+    auth, store, browser = make_auth(http)
+    seed(store)
+
+    def disconnected_meanwhile(request: httpx.Request) -> httpx.Response:
+        store.clear()  # Settings > Disconnect while this refresh is on the network.
+        return httpx.Response(200, json=token_json())
+
+    respx_mock.post(TOKEN_URL).mock(side_effect=disconnected_meanwhile)
+    respx_mock.get(PROFILE_URL).respond(json={"emailAddress": "me@example.com"})
+
+    with pytest.raises(AuthenticationRequiredError, match="disconnected"):
+        await auth.connect(silent_only=True)
+    assert store.load() is None and auth._token is None and browser.calls == 0
+
+
 async def test_expired_access_refreshes_under_lock(
     http: httpx.AsyncClient, respx_mock: respx.MockRouter
 ) -> None:

@@ -16,6 +16,7 @@ from mailbrief.domain.actions import Action, ActionEdit, ActionFilter, ActionSta
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.services.actions import ActionConflictError
+from mailbrief.ui.actions_view import EDIT
 from mailbrief.ui.brief_detail import ACCEPT, DISMISS
 from mailbrief.ui.main_window import MainWindow
 from tests.factories import make_action
@@ -583,6 +584,19 @@ async def test_cancelled_inline_task_does_not_resume(
     assert editor.title.text() == ""
     assert editor.notes.toPlainText() == ""
     assert backend.action_calls == []
+
+
+async def test_editing_an_action_keeps_a_typed_new_task(window: MainWindow) -> None:
+    await window.initialize()
+    window._request_new_task()
+    editor = window.action_editor
+    editor.title.setText("Half-typed task")
+
+    window._request_action(EDIT, make_action())  # A row double-clicked beside the form.
+
+    assert editor.embedded and editor.title.text() == "Half-typed task"
+    assert window.actions_panel.detail_host.currentWidget() is editor
+    assert window.status.text() == "Save or cancel the new task first."
 
 
 async def test_new_task_shortcut_cancel_and_failed_save(

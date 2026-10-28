@@ -223,6 +223,53 @@ def test_a_theme_failure_never_stops_the_desktop(
         asyncio.set_event_loop(None)
 
 
+def test_blocking_work_runs_on_python_threads_not_qthreads(
+    qtbot: QtBot, themed: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """asyncio.to_thread runs on the app's thread pool. qasync's default executor would build
+    ten QThreads, which crashed natively now and then on Windows CI."""
+    import threading
+
+    from PySide6.QtWidgets import QApplication
+
+    from mailbrief import app
+    from mailbrief.paths import AppPaths
+
+    monkeypatch.setattr(app, "DesktopRuntime", lambda path: FakeBackend())
+    monkeypatch.setattr(
+        AppPaths,
+        "from_qt",
+        lambda: AppPaths(
+            data_dir=tmp_path,
+            database_path=tmp_path / "unused.sqlite3",
+            microsoft_token_cache_path=tmp_path / "unused.bin",
+        ),
+    )
+    ran_on: list[str] = []
+
+    def where() -> str:
+        return threading.current_thread().name
+
+    async def work_then_close(window: MainWindow) -> None:
+        ran_on.append(await asyncio.to_thread(where))
+        window.close()
+
+    def start(window: MainWindow) -> bool:
+        return window.start(lambda: work_then_close(window))  # Once start-up is done.
+
+    wait = WindowWait(start)
+    wait.start()
+    try:
+        assert wait.run(lambda: app.main([])) == 0
+        # A QThread would show as Python's "Dummy-N".
+        assert len(ran_on) == 1 and ran_on[0].startswith(app.WORKER_PREFIX)
+    finally:
+        application = QApplication.instance()
+        assert isinstance(application, QApplication)
+        application.setQuitOnLastWindowClosed(True)
+        asyncio.set_event_loop(None)
+
+
 def test_offline_package_mode_never_opens_profile_or_vault(
     qtbot: QtBot,
     themed: None,

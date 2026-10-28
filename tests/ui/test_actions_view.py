@@ -224,6 +224,19 @@ def test_buttons_and_activation_request_changes_for_the_selected_action(
     ]
 
 
+def test_a_search_typed_on_waiting_never_filters_another_view(panel: ActionsPanel) -> None:
+    show(panel, ActionFilter.OPEN, action(1, title="Call Alex"), action(2, title="Pay the bill"))
+    panel.show_view(ActionFilter.WAITING)
+    panel.search.setText("alex")
+
+    panel.show_view(ActionFilter.OPEN)  # The search field is hidden here.
+
+    listing = panel.lists[ActionFilter.OPEN]
+    items = [listing.item(row) for row in range(listing.count())]
+    assert panel.search.text() == "" and len(items) == 2
+    assert all(item is not None and not item.isHidden() for item in items)
+
+
 def test_a_refresh_keeps_the_selected_action_selected(panel: ActionsPanel) -> None:
     show(panel, ActionFilter.OPEN, action(1), action(2), action(3))
     panel.lists[ActionFilter.OPEN].setCurrentRow(2)
