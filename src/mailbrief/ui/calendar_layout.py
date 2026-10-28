@@ -38,18 +38,31 @@ def clock(moment: datetime, zone: ZoneInfo) -> str:
     return f"{moment.astimezone(zone):%H:%M}"
 
 
+def marker_label(marker: ActionMarker, zone: ZoneInfo) -> str:
+    """ "Deadline", "Deadline 17:00", "Target" or, for an action the owner waits for,
+    "Follow up" (B08)."""
+    if marker.kind is MarkerKind.TARGET:
+        return "Follow up" if marker.waiting else "Target"
+    if marker.due_at_utc is None:
+        return "Deadline"
+    return f"Deadline {clock(marker.due_at_utc, zone)}"
+
+
+def marker_note(marker: ActionMarker, zone: ZoneInfo) -> str:
+    """The label and who it is with: "Follow up · waiting on Alex" (or "waiting for others"
+    without a name), "Deadline 17:00 · for Sam", or the label alone."""
+    who = who_text(marker.waiting, marker.person, unnamed="Waiting for others")
+    label = marker_label(marker, zone)
+    return label if who is None else f"{label} · {in_sentence(who)}"
+
+
 def marker_text(marker: ActionMarker, zone: ZoneInfo) -> str:
     """ "Deadline · Pay the invoice", "Deadline 17:00 · …", "Target · …" or, for an action
     the owner waits for, "Follow up · …" (B08); and who it is with: "waiting on Alex" (or
     "waiting for others" without a name) or "for Sam"."""
-    if marker.kind is MarkerKind.TARGET:
-        label = "Follow up" if marker.waiting else "Target"
-    elif marker.due_at_utc is None:
-        label = "Deadline"
-    else:
-        label = f"Deadline {clock(marker.due_at_utc, zone)}"
     who = who_text(marker.waiting, marker.person, unnamed="Waiting for others")
-    return f"{label} · {marker.action_title}" + ("" if who is None else " · " + in_sentence(who))
+    text = f"{marker_label(marker, zone)} · {marker.action_title}"
+    return text if who is None else f"{text} · {in_sentence(who)}"
 
 
 def entry_key(entry: Entry) -> tuple[str, ...]:

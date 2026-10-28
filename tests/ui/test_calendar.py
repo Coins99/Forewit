@@ -41,6 +41,7 @@ from mailbrief.ui.event_editor import (
     local_instant,
     suggested_start,
 )
+from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow
 from mailbrief.ui.main_window import MainWindow
 from tests.ui.test_workflow import FakeBackend
 
@@ -230,6 +231,36 @@ def test_week_rows_order_each_day(panel: CalendarPanel) -> None:
     assert legend is not None and legend.accessibleName() == MARKER_NOTE
     # Day headings are read but never selected.
     assert not panel.list.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
+
+
+def painted(panel: CalendarPanel) -> list[tuple[str, str, str]]:
+    """What the List view paints for each entry: its time column, title and second line."""
+    result = []
+    for number in range(panel.list.count()):
+        item = panel.list.item(number)
+        row = None if item is None else item.data(DISPLAY_ROW_ROLE)
+        if isinstance(row, DisplayRow):
+            result.append((row.meta, row.title, row.preview))
+    return result
+
+
+def test_the_list_paints_each_day_s_own_time_and_what_a_marker_is(panel: CalendarPanel) -> None:
+    flight = stored(at_times(MONDAY, 22, MONDAY + timedelta(days=1), 6, "Flight"), 1)
+    summit = stored(at_times(MONDAY, 9, TODAY, 17, "Summit"), 2)
+    deadline = marker(
+        MarkerKind.DEADLINE, TODAY, due_at_utc=local_instant(TODAY, time(17), TORONTO)
+    )
+    follow_up = marker(MarkerKind.TARGET, TODAY, waiting=True, person="Alex")
+    panel.show_range(week(flight, summit, markers=(deadline, follow_up)), TORONTO, TODAY)
+
+    shown = painted(panel)
+
+    assert ("22:00", "Flight", "22:00–Oct 13 06:00 · Your calendar") in shown
+    assert ("until 06:00", "Flight", "Oct 12 22:00–06:00 · Your calendar") in shown
+    assert ("All day", "Summit", "Oct 12 09:00–Oct 14 17:00 · Your calendar") in shown
+    assert ("until 17:00", "Summit", "Oct 12 09:00–17:00 · Your calendar") in shown
+    assert ("17:00", "Pay the invoice", "Deadline 17:00") in shown
+    assert ("Follow up", "Pay the invoice", "Follow up · waiting on Alex") in shown
 
 
 def test_empty_week_says_how_to_add(panel: CalendarPanel) -> None:
