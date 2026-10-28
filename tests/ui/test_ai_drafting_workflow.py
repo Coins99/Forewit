@@ -236,6 +236,19 @@ async def test_cancelling_a_preview_sends_nothing(window: MainWindow, backend: F
     assert ai_calls(backend, "generate_draft") == []
 
 
+async def test_a_refused_draft_switch_keeps_the_preview_s_lock(window: MainWindow) -> None:
+    await open_note(window)
+    editor = window.draft_editor
+    await preview(window)
+    assert not editor.body.isEnabled()  # Locked from Continue until the generation ends.
+
+    editor.set_switching(True)  # Another draft was clicked, and the switch was refused.
+    editor.set_switching(False)
+
+    assert not editor.body.isEnabled() and not editor.close_button.isEnabled()
+    assert editor.ai_active()
+
+
 async def test_cancelling_a_generation_stops_it_and_writes_nothing(
     window: MainWindow, backend: FakeBackend
 ) -> None:

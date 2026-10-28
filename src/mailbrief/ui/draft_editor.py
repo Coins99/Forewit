@@ -142,6 +142,7 @@ class DraftEditor(QDialog):
         self._conflict = False
         self._closing = False
         self._locked = False  # A restore, close or AI generation is waiting for the window.
+        self._switching = False  # A draft switch is saving this text and loading the next.
         self._ai_ready = False  # A Groq model and key are configured.
         self._ai_busy = False  # A preview is shown or Groq is writing.
         self._discard_armed = False
@@ -635,23 +636,33 @@ class DraftEditor(QDialog):
     # Versions.
 
     def _update_buttons(self) -> None:
-        live = not self._conflict and not self._locked
+        live = not self._conflict and not self._frozen
         for button in (self.versions_button, self.checkpoint_button, self.restore_button):
             button.setEnabled(live)
         self.confirm_button.setEnabled(live)
         self.ai_button.setEnabled(live and self._ai_ready)
 
+    @property
+    def _frozen(self) -> bool:
+        return self._locked or self._switching
+
     def _set_locked(self, locked: bool) -> None:
         self._locked = locked
-        self._fields.setEnabled(not locked)
-        self.body.setEnabled(not locked)
-        self.close_button.setEnabled(not locked)
-        self.save_as_new_button.setEnabled(not locked)
+        self._show_frozen()
+
+    def _show_frozen(self) -> None:
+        frozen = self._frozen
+        self._fields.setEnabled(not frozen)
+        self.body.setEnabled(not frozen)
+        self.close_button.setEnabled(not frozen)
+        self.save_as_new_button.setEnabled(not frozen)
         self._update_buttons()
 
     def set_switching(self, switching: bool) -> None:
-        """Freeze typing while the owner-requested draft switch saves and loads."""
-        self._set_locked(switching)
+        """Freeze typing while the owner-requested draft switch saves and loads. A lock held
+        for a restore, close or AI generation outlasts a switch that is refused."""
+        self._switching = switching
+        self._show_frozen()
 
     def _checkpoint(self) -> None:
         if self.current_edit() is None:
@@ -697,7 +708,7 @@ class DraftEditor(QDialog):
         self.versions_panel.show()
         if versions:
             self.versions_list.setCurrentRow(0)
-        self.restore_button.setEnabled(bool(versions) and not self._conflict and not self._locked)
+        self.restore_button.setEnabled(bool(versions) and not self._conflict and not self._frozen)
 
     def _selected_version(self) -> DraftVersionInfo | None:
         row = self.versions_list.currentRow()
@@ -727,7 +738,7 @@ class DraftEditor(QDialog):
 
     def _confirm_restore(self) -> None:
         info = self._selected_version()
-        if info is None or self._conflict or self._locked:
+        if info is None or self._conflict or self._frozen:
             return
         if self.current_edit() is None:
             self.status.setText(_TOO_LONG)
@@ -776,7 +787,7 @@ class DraftEditor(QDialog):
         self.ai_panel.show()
 
     def _prepare_ai(self, options: DraftingOptions) -> None:
-        if self.draft is None or self._conflict or self._locked or self.current_edit() is None:
+        if self.draft is None or self._conflict or self._frozen or self.current_edit() is None:
             self.ai_panel.reset()
             if self.current_edit() is None:
                 self.status.setText(_TOO_LONG)
@@ -904,7 +915,7 @@ class DraftEditor(QDialog):
     def reject(self) -> None:
         """Close, Esc and the title-bar button ask the window to save and save a version;
         the editor closes once it confirms. After a failure, closing again discards."""
-        if self._closing or self._locked:
+        if self._closing or self._frozen:
             return
         if self._discard_armed or self.draft is None:
             self._close_now()
