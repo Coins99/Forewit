@@ -763,6 +763,7 @@ class MainWindow(QMainWindow):
         self.planning_dialog.apply_requested.connect(self._request_apply_planning)
         self.planning_dialog.cancel_requested.connect(self._cancel_planning)
         self._planning_plan: PreparedPlan | None = None
+        self._planning_request = 0  # Each opening of Plan with AI; a stale prepare is dropped.
         self._planning_cancel: asyncio.Event | None = None
         self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
@@ -2527,6 +2528,7 @@ class MainWindow(QMainWindow):
     def _request_planning(self) -> None:
         """Open the dialog; preparing and asking wait their turn through start()."""
         self._planning_plan = None
+        self._planning_request += 1
         self.planning_dialog.start_new(google_available=self._calendar_allowed is True)
         self.dialog_guard.show_dialog(self.planning_dialog)
 
@@ -2562,24 +2564,31 @@ class MainWindow(QMainWindow):
     async def _prepare_planning(self, options: PlanningOptions) -> None:
         """Read Google first when its times are to be sent and the saved copy misses some of
         the four weeks; a failed read leaves what was saved, and the preview says which
-        days it holds. Quitting stops it."""
+        days it holds. Quitting stops it. A dialog opened again meanwhile is a new request:
+        it gets nothing of this one, whose instruction and parts it no longer shows."""
+        request = self._planning_request
         first = self._planning_first()
         if self._planning_google_due(options, first):
             self.planning_dialog.show_reading()
             try:
                 await self._sync_calendar(quiet=True)
             except AuthenticationRequiredError:
-                self.planning_dialog.show_problem(_PLAN_SIGN_IN)
+                if request == self._planning_request:
+                    self.planning_dialog.show_problem(_PLAN_SIGN_IN)
                 raise  # _run reports it as Gmail's, as for any calendar sync.
         try:
             plan = await self.backend.prepare_planning(options, first, self.zone)
         except ConfigurationError as exc:
             log_failure(exc)
-            self.planning_dialog.show_problem(configuration_guidance(exc))
+            if request == self._planning_request:
+                self.planning_dialog.show_problem(configuration_guidance(exc))
             return
         except Exception as exc:
             log_failure(exc)
-            self.planning_dialog.show_problem(_PLAN_FAILED)
+            if request == self._planning_request:
+                self.planning_dialog.show_problem(_PLAN_FAILED)
+            return
+        if request != self._planning_request:
             return
         self._planning_plan = plan
         self.planning_dialog.show_preview(plan.preview)

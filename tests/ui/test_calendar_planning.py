@@ -315,6 +315,41 @@ async def test_google_is_read_first_when_its_saved_copy_misses_the_four_weeks(
     assert len(calls(backend, "prepare")) == 3  # Nothing more was prepared.
 
 
+async def test_what_is_previewed_and_sent_is_what_the_dialog_shows(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend.calendar_permission = True
+    backend.calendar_now = NOW.astimezone(UTC)
+    await window.initialize()
+    dialog = window.planning_dialog
+    released, sync = asyncio.Event(), backend.sync_calendar
+
+    async def slow(around: date, zone: ZoneInfo) -> CalendarSyncResult:
+        await released.wait()
+        return await sync(around, zone)
+
+    monkeypatch.setattr(backend, "sync_calendar", slow)
+    window.calendar_panel.plan_button.click()
+    dialog.instruction.setPlainText("Find two hours for the deck")
+    dialog.google_times.setChecked(True)
+    dialog.google_titles.setChecked(True)
+    dialog.preview_button.click()
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert dialog.reading.isVisibleTo(dialog)  # Google is read first.
+    # Held while the preview is prepared from them.
+    assert dialog.instruction.isReadOnly() and not dialog.google_titles.isEnabled()
+    assert not dialog.preview_button.isEnabled()
+
+    dialog.reject()  # Closed while Google is read, and opened again: a new request.
+    window.calendar_panel.plan_button.click()
+    released.set()
+    await finish(window)
+
+    assert dialog.pages.currentIndex() == 0 and window._planning_plan is None
+    assert not dialog.instruction.isReadOnly() and not dialog.google_titles.isChecked()
+
+
 async def test_google_parts_are_offered_only_when_calendar_is_allowed(
     window: MainWindow, backend: FakeBackend
 ) -> None:

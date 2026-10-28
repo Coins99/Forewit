@@ -271,8 +271,8 @@ class PlanningDialog(QDialog):
         self.reading.hide()
         for box in (self.google_times, self.google_titles, self.open_actions):
             box.setChecked(False)
-        self.google_times.setEnabled(google_available)
-        self.google_titles.setEnabled(False)
+        self._google_available = google_available
+        self._set_composing(True)
         self.consent.setChecked(False)
         self._proposals = ()
         clear_list(self.list)
@@ -283,6 +283,17 @@ class PlanningDialog(QDialog):
     def forget_instruction(self) -> None:
         """Changes were applied: the next request starts empty."""
         self.instruction.setPlainText("")
+
+    def _set_composing(self, editable: bool) -> None:
+        """The instruction and its parts can change, or are held while a preview is prepared
+        from them, so that what the preview lists and Ask sends is what the page shows."""
+        self.instruction.setReadOnly(not editable)
+        self.google_times.setEnabled(editable and self._google_available)
+        self.google_titles.setEnabled(
+            editable and self._google_available and self.google_times.isChecked()
+        )
+        self.open_actions.setEnabled(editable)
+        self.preview_button.setEnabled(editable)
 
     def show_reading(self) -> None:
         """Google Calendar is read before the preview, since its saved copy misses days."""
@@ -316,12 +327,14 @@ class PlanningDialog(QDialog):
             self._say(options)
             return
         self._say("")
+        self._set_composing(False)  # Until the preview, or a problem, shows.
         self.preview_requested.emit(options)
 
     def show_preview(self, preview: PlanningPreview) -> None:
         """What will be sent, part by part; first use also needs the ticked box."""
         self._first_use = preview.first_use
         self.reading.hide()
+        self._set_composing(True)
         self.preview_heading.setText(f"This is sent to {preview.provider} ({preview.model}):")
         self.preview_lines.setText(
             "\n".join(f"· {line.label} ({line.characters:,} characters)" for line in preview.lines)
@@ -429,6 +442,7 @@ class PlanningDialog(QDialog):
     def show_problem(self, message: str) -> None:
         """Back to the instruction, with what went wrong in fixed words."""
         self.reading.hide()
+        self._set_composing(True)
         self._show(0)
         self._say(message)
 
