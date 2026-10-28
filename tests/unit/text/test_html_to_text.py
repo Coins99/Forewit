@@ -42,6 +42,21 @@ def test_hidden_text_is_dropped() -> None:
     assert html_to_text(markup) == "Shown"
 
 
+def test_text_that_sets_its_own_size_shows_inside_a_zero_size_layout() -> None:
+    # MJML and other responsive templates zero the font size of layout cells, against gaps
+    # between inline blocks, and give the text inside its own size.
+    markup = (
+        '<table><tr><td style="direction:ltr;font-size:0px;padding:20px 0">'
+        '<div style="font-size:0px;display:inline-block;width:100%">'
+        '<table><tr><td style="font-size:0px;padding:10px 25px">gap'
+        '<div style="font-family:Arial;font-size:13px">Invoice INV-2041 is due Friday.</div>'
+        '<div style="font-size: 0 !important">spacer</div>'
+        '<div style="font-size:inherit">still hidden</div>'
+        "</td></tr></table></div></td></tr></table>"
+    )
+    assert html_to_text(markup) == "Invoice INV-2041 is due Friday."
+
+
 def test_links_keep_text_and_images_are_dropped() -> None:
     markup = (
         '<p>Read the <a href="https://track.example/abc?u=1">full report</a> '

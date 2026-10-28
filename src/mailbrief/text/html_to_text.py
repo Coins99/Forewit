@@ -64,9 +64,13 @@ _BLOCK = frozenset(
 )
 _LINE_ITEMS = frozenset({"dd", "dt", "li", "tr"})
 _HIDDEN_STYLE = re.compile(
-    r"display:none|visibility:hidden|mso-hide:all"
-    r"|opacity:0(?![.\d])|font-size:0(?![.\d])|max-height:0(?![.\d])"
+    r"display:none|visibility:hidden|mso-hide:all|opacity:0(?![.\d])|max-height:0(?![.\d])"
 )
+# Font size is inherited and a descendant can set its own, so a zero size hides only the
+# text that inherits it: templates set 0 on layout cells and the real size on the text.
+_FONT_SIZE = re.compile(r"(?<![\w-])font-size:([^;!]*)")
+_ZERO_SIZE = re.compile(r"0(?![.\d])[a-z%]*")
+_INHERITED = frozenset({"", "inherit", "unset"})
 # Quote markers stop growing past this depth, so deeply nested quotes can't multiply output.
 MAX_QUOTE_DEPTH = 5
 DEFAULT_MAX_CHARS = 1_000_000
@@ -107,12 +111,23 @@ def _is_hidden(attrs: list[tuple[str, str | None]]) -> bool:
     return False
 
 
+def _zero_font_size(attrs: list[tuple[str, str | None]]) -> bool | None:
+    """Whether the element's own font size is zero, or None when it sets none of its own."""
+    for name, value in attrs:
+        if name == "style" and value:
+            sizes = _FONT_SIZE.findall(value.lower().replace(" ", ""))
+            if sizes and sizes[-1] not in _INHERITED:  # The last declaration wins.
+                return _ZERO_SIZE.fullmatch(sizes[-1]) is not None
+    return None
+
+
 class _TextBuilder(HTMLParser):
     """Collect visible text; quoted blocks become '> ' lines like plain-text replies."""
 
     def __init__(self, max_chars: int) -> None:
         super().__init__(convert_charrefs=True)
-        self._open: list[tuple[str, bool]] = []
+        # Open elements: tag, whether its whole subtree is hidden, whether its font size is 0.
+        self._open: list[tuple[str, bool, bool]] = []
         self._open_counts: dict[str, int] = {}
         self._lines: list[tuple[int, list[str]]] = [(0, [])]
         self._quote_depth = 0
@@ -146,6 +161,9 @@ class _TextBuilder(HTMLParser):
     def _inside_hidden(self) -> bool:
         return bool(self._open) and self._open[-1][1]
 
+    def _inside_zero_size(self) -> bool:
+        return bool(self._open) and self._open[-1][2]
+
     def _new_line(self) -> None:
         # Two empty lines already render as a paragraph break; don't store more of them.
         if len(self._lines) >= 2 and not self._lines[-1][1] and not self._lines[-2][1]:
@@ -159,7 +177,9 @@ class _TextBuilder(HTMLParser):
             if tag in {"br", "hr"} and not hidden:
                 self._new_line()
             return
-        self._open.append((tag, hidden))
+        size = _zero_font_size(attrs)
+        zero_size = self._inside_zero_size() if size is None else size
+        self._open.append((tag, hidden, zero_size))
         self._open_counts[tag] = self._open_counts.get(tag, 0) + 1
         if hidden:
             return
@@ -169,6 +189,8 @@ class _TextBuilder(HTMLParser):
             self._pre_depth += 1
         if tag in _BLOCK:
             self._new_line()
+        if zero_size:
+            return  # Its markers would show; its children may still have text of a size.
         if tag == "li":
             self._append("- ")
         elif tag in {"td", "th"}:
@@ -188,7 +210,7 @@ class _TextBuilder(HTMLParser):
                 continue
             closed = self._open[index:]
             del self._open[index:]
-            for name, hidden in closed:
+            for name, hidden, _zero_size in closed:
                 self._open_counts[name] -= 1
                 if name == "blockquote" and not hidden:
                     self._quote_depth -= 1
@@ -199,7 +221,7 @@ class _TextBuilder(HTMLParser):
             return
 
     def handle_data(self, data: str) -> None:
-        if self._inside_hidden():
+        if self._inside_hidden() or self._inside_zero_size():
             return
         if not self._pre_depth:
             self._append(data)
