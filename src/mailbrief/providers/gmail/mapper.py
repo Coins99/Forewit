@@ -3,6 +3,7 @@
 import html
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from email.errors import MessageError
 from email.header import decode_header, make_header
 from email.utils import getaddresses
 from urllib.parse import urlencode
@@ -48,15 +49,20 @@ def is_bulk(headers: dict[str, list[str]]) -> bool:
 
 
 def clean_text(value: str, limit: int) -> str:
-    """Decode encoded headers and remove terminal/control characters."""
-    with suppress(ValueError, UnicodeError, LookupError):
+    """Decode encoded headers and remove terminal/control characters. A malformed encoded
+    word (a bad base64 length, an unusable charset name) stays as written."""
+    with suppress(ValueError, UnicodeError, LookupError, MessageError):
         value = str(make_header(decode_header(value)))
     return " ".join("".join(c for c in value if c.isprintable() or c.isspace()).split())[:limit]
 
 
 def contacts(value: str) -> tuple[EmailContact, ...]:
     result: list[EmailContact] = []
-    for name, address in getaddresses([value], strict=False):
+    try:
+        pairs = getaddresses([value], strict=False)
+    except RecursionError:  # The parser recurses once per nested comment "(".
+        return ()
+    for name, address in pairs:
         try:
             result.append(
                 EmailContact(name=clean_text(name, 255) or None, address=clean_text(address, 320))
@@ -125,5 +131,6 @@ def map_metadata(data: dict[str, object], account: AccountIdentity) -> Normalize
                 + thread
             ),
         )
-    except (ValueError, TypeError, OverflowError):
+    except (ValueError, TypeError, OverflowError, MessageError, RecursionError):
+        # One message's metadata, never the page or the sync it belongs to.
         raise response_error("Gmail message metadata could not be normalized.") from None
