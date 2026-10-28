@@ -653,6 +653,8 @@ class ActionsPanel(QWidget):
         self.tabs.setVisible(self.view() is not ActionFilter.WAITING)
         self.group_toolbar.setVisible(self.view() is not ActionFilter.WAITING)
         self.search_toolbar.setVisible(self.view() is ActionFilter.WAITING)
+        if self.search_toolbar.isHidden():
+            self.search.clear()  # A search nobody can see or clear must not hide actions.
         self.waiting_count.setVisible(self.view() is ActionFilter.WAITING)
         self.stack.setCurrentIndex(index)
         self.search.setPlaceholderText(
