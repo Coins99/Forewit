@@ -4,6 +4,7 @@ open on macOS: the cover takes the window's input and activation brings the dial
 import gc
 import weakref
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -12,6 +13,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox, QWidget
 from pytestqt.qtbot import QtBot
 
+from mailbrief.domain.backup import BackupMetadata
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
@@ -231,6 +233,31 @@ async def test_quitting_with_unsaved_input_asks_first(window: MainWindow) -> Non
     )
     discard.click()
     assert closing and not editor.isVisible()
+    await window.shutdown()
+
+
+async def test_a_restore_cancelled_at_the_quit_question_is_forgotten(
+    window: MainWindow,
+) -> None:
+    await window.initialize()
+    closing: list[bool] = []
+    window.closing.connect(lambda: closing.append(True))
+    window.page_shortcuts["calendar"].activated.emit()
+    window.calendar_panel.new_button.click()
+    window.event_editor.title.setText("Dentist")
+
+    window._request_restore(Path("backup.zip"), Mock(spec=BackupMetadata))
+    box = window.findChild(QMessageBox, "quitConfirmation")
+    assert box is not None and box.isVisible()
+    cancel = box.button(QMessageBox.StandardButton.Cancel)
+    assert cancel is not None
+    cancel.click()
+
+    assert window.pending_restore is None and not closing  # A later quit only quits.
+    assert window.status.text() == "Restore cancelled. Nothing was replaced."
+    window.event_editor.force_close()
+    window.close()
+    assert closing and window.pending_restore is None
     await window.shutdown()
 
 

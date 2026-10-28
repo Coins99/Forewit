@@ -738,6 +738,7 @@ class MainWindow(QMainWindow):
         # Carryover and overdue labels use the owner's local day.
         self.now: Callable[[], datetime] = utc_now
         self.zone = resolve_timezone(None)
+        self._system_zone = False  # No zone saved: the owner's zone follows the system's.
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)
         self._projects: tuple[Project, ...] = ()
@@ -1305,15 +1306,30 @@ class MainWindow(QMainWindow):
         """When the owner's day has changed since the views were built: the check time
         gains its date and the brief's chips recount in place at once, and the actions and
         the Briefs page reload through ``start()``. While another operation runs, that
-        reload is held and retried on each tick until it starts."""
+        reload is held and retried on each tick until it starts. A change of the system's
+        zone, when the owner's follows it, is handled the same way."""
+        zone_changed = self._follow_system_zone()
         today = self._local_today()
-        if self._day is not None and today != self._day:
+        if self._day is not None and (today != self._day or zone_changed):
             self._render_checked()
             self.workspace.set_today(today, self.zone)
             self._day_refresh_pending = True
         self._day = today
         if self._day_refresh_pending:
             self._day_refresh_pending = not self.start(self._refresh_for_new_day, cancellable=False)
+
+    def _follow_system_zone(self) -> bool:
+        """With no zone saved, the owner's zone is the system's: when that changed while the
+        window was open (a laptop that travelled), take it up. True when it changed."""
+        if not self._system_zone:
+            return False
+        zone = resolve_timezone(None)
+        if zone.key == self.zone.key:
+            return False
+        self.zone = zone
+        self.inbox_panel.set_zone(zone)
+        self._set_dialog_zones()
+        return True
 
     async def _refresh_for_new_day(self) -> None:
         """What counts from the day: the actions' due labels, the Briefs page's missed days
@@ -1652,6 +1668,11 @@ class MainWindow(QMainWindow):
 
     def _request_action(self, kind: str, action: Action) -> None:
         if kind == EDIT:
+            if self.action_editor.embedded and self.action_editor.has_unsaved_input():
+                # Editing loads the action into the same editor, over the new task's input.
+                self.actions_panel.detail_host.setCurrentWidget(self.action_editor)
+                self.status.setText("Save or cancel the new task first.")
+                return
             self.action_editor.set_embedded(None, window=self)
             self.action_editor.edit(action, self.now().astimezone(self.zone).date(), self.zone)
             self.dialog_guard.show_dialog(self.action_editor)
@@ -3294,6 +3315,7 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        self._system_zone = not (preferences.time_zone or "").strip()
         self.inbox_panel.set_zone(self.zone)
         self._set_dialog_zones()
         self._render_checked()  # In the new zone.
@@ -3826,6 +3848,7 @@ class MainWindow(QMainWindow):
         if result.status is not BriefStatus.CANCELLED and self._calendar_allowed:
             await self._sync_calendar(quiet=True)  # Calendar follows Gmail (ADR 0019).
         if result.status is not BriefStatus.CANCELLED:
+            await self._refresh_actions()  # Thread activity and proposals may have changed.
             await self._refresh_day()  # The thread check may have brought new replies.
 
     # Automatic refresh (ADR 0017): while MailBrief is open, on the owner's schedule. It has
@@ -4199,6 +4222,10 @@ class MainWindow(QMainWindow):
         if discard:
             self._quit_confirmed = True
             self.close()
+        elif self.pending_restore is not None:
+            # Kept, it would replace the database at some later quit the owner meant as a quit.
+            self.pending_restore = None
+            self.status.setText("Restore cancelled. Nothing was replaced.")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._shutdown_complete:

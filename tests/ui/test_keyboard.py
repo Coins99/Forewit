@@ -213,9 +213,12 @@ async def test_a_brief_that_opens_late_leaves_the_owner_where_they_went(
     assert window.workspace.current_page() == "drafts"  # Today has the brief, unshown.
 
 
-async def test_midnight_keeps_focus_on_a_detail_button(window: MainWindow) -> None:
+async def test_midnight_keeps_focus_on_a_detail_button(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The chips recount in place: the selected email's detail, and the button with focus
     in it, stay."""
+    monkeypatch.setenv("TZ", "America/Toronto")  # No zone is saved, so it is the system's.
     toronto = ZoneInfo("America/Toronto")
     window.zone = toronto
     clock = [datetime(2026, 10, 9, 23, 50, tzinfo=toronto)]  # The Fri 17:00 deadline's day.

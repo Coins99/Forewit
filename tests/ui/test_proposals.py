@@ -700,6 +700,18 @@ async def test_the_proposal_sentence_follows_the_thread_sentence(
     )
 
 
+async def test_a_run_reloads_the_actions_its_thread_check_may_change(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    backend.proposals_created = 1
+    await window.initialize()
+    lists = backend.list_calls
+
+    await run_brief(window)
+
+    assert backend.list_calls > lists  # New replies and the proposal show on Actions at once.
+
+
 async def test_a_cancelled_run_proposes_nothing(window: MainWindow, backend: FakeBackend) -> None:
     await window.initialize()
 

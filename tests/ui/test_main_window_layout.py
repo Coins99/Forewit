@@ -370,6 +370,27 @@ async def test_a_new_day_dates_the_check_time_and_recounts_the_chips(qtbot: QtBo
     await finish(window)  # The actions and Briefs reload for the new day.
 
 
+async def test_a_change_of_the_system_s_zone_is_taken_up(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TZ", "America/Toronto")
+    backend = mockup_backend()
+    backend.owner_preferences = OwnerPreferences(revision=1)  # No zone saved: the system's.
+    window = MainWindow(backend)
+    window.now = lambda: toronto(2026, 10, 9, 18, 0)
+    qtbot.addWidget(window)
+    window.start(window.initialize)
+    await finish(window)
+    assert window.zone.key == "America/Toronto"
+
+    monkeypatch.setenv("TZ", "Asia/Tokyo")  # The laptop landed in Tokyo.
+    window._minute_tick()
+
+    assert window.zone.key == "Asia/Tokyo"
+    assert window.inbox_panel.zone.key == "Asia/Tokyo"
+    await finish(window)  # The actions, Briefs and calendar reload in the new zone.
+
+
 def open_texts(window: MainWindow) -> list[str]:
     listing = window.actions_panel.lists[ActionFilter.OPEN]
     return [listing.item(row).text() for row in range(listing.count())]
