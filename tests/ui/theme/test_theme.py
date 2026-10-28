@@ -81,6 +81,8 @@ def test_text_meets_wcag_aa_contrast(scheme: ColorScheme, mode: ThemeMode) -> No
     ]
     pairs += [(t.warning_fg, t.warning_bg), (t.accent_fg, t.accent_bg)]
     pairs += [(t.on_primary, t.primary_fill)]
+    # The primary colour is text and icons on rows, cards and the accent tiles.
+    pairs += [(t.primary, background) for background in (t.panel, t.selection, t.card, t.accent_bg)]
     for foreground, background in pairs:
         assert contrast(foreground, background) >= 4.5, (scheme, mode, foreground, background)
 
