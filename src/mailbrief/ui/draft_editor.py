@@ -51,6 +51,7 @@ from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
@@ -385,8 +386,8 @@ class DraftEditor(QDialog):
             field.style().polish(field)
         self.counter.setVisible(not self.embedded)
         if self.embedded:
-            self._buttons.addWidget(self.checkpoint_button, 0, 2, Qt.AlignmentFlag.AlignRight)
-            self._buttons.addWidget(self.more_button, 0, 1, Qt.AlignmentFlag.AlignRight)
+            self._place(self.checkpoint_button, 0, 2, Qt.AlignmentFlag.AlignRight)
+            self._place(self.more_button, 0, 1, Qt.AlignmentFlag.AlignRight)
             self.ai_button.hide()
             for number in range(3):
                 self._buttons.setColumnStretch(number, 1 if number == 0 else 0)
@@ -401,8 +402,8 @@ class DraftEditor(QDialog):
                 self._content_layout.setContentsMargins(16, 0, 16, 0)
                 self.close_button.setText("Cancel")
                 self.close_button.show()
-                self._buttons.addWidget(self.more_button, 0, 0, Qt.AlignmentFlag.AlignLeft)
-                self._buttons.addWidget(self.close_button, 0, 1, Qt.AlignmentFlag.AlignRight)
+                self._place(self.more_button, 0, 0, Qt.AlignmentFlag.AlignLeft)
+                self._place(self.close_button, 0, 1, Qt.AlignmentFlag.AlignRight)
         else:
             self._fields.show()
             self.close_button.setText("C&lose")
@@ -417,9 +418,23 @@ class DraftEditor(QDialog):
                     self.close_button,
                 )
             ):
-                self._buttons.addWidget(button, number // 3, number % 3)
+                self._place(button, number // 3, number % 3)
             for column in range(3):
                 self._buttons.setColumnStretch(column, 0)
+
+    def _place(
+        self,
+        button: QPushButton,
+        row: int,
+        column: int,
+        alignment: Qt.AlignmentFlag | None = None,
+    ) -> None:
+        """Put ``button`` in the buttons' grid at ``row`` and ``column``, wherever it was."""
+        take_widget(button)
+        if alignment is None:
+            self._buttons.addWidget(button, row, column)
+        else:
+            self._buttons.addWidget(button, row, column, alignment)
 
     def _update_more(self) -> None:
         for action, button in self._more_actions:

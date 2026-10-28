@@ -1055,9 +1055,7 @@ class MainWindow(QMainWindow):
         workspace.add_page(
             "calendar", _page(self.calendar_panel, "calendarPage", "Calendar", margins=0)
         )
-        self.calendar_panel.refresh_button.setParent(workspace.header)
         workspace.add_header_action("calendar", self.calendar_panel.refresh_button)
-        self.calendar_panel.new_button.setParent(workspace.header)
         workspace.add_header_action("calendar", self.calendar_panel.new_button)
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
