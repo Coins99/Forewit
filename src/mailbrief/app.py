@@ -2,12 +2,13 @@
 
 import argparse
 import asyncio
+import gc
 import json
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QLocale, QLockFile
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QLockFile
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from qasync import QEventLoop
@@ -21,7 +22,13 @@ from mailbrief.ui.diagnostics import configure_logging, log_failure, logger
 from mailbrief.ui.glass.profile import log_summary as log_paint_summary
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
-from mailbrief.ui.theme import apply_theme, current_mode, current_scheme, system_mode
+from mailbrief.ui.theme import (
+    apply_theme,
+    current_mode,
+    current_scheme,
+    paused_collection,
+    system_mode,
+)
 
 
 def use_english_locale() -> None:
@@ -99,6 +106,7 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         QMessageBox.information(None, "Forewit", message)
         return
     handler = None
+    window: MainWindow | None = None
     try:
         handler = configure_logging(paths.data_dir)
         if theme_failure is not None:
@@ -162,6 +170,8 @@ async def run_desktop(theme_failure: Exception | None = None) -> None:
         log_failure(exc)
         QMessageBox.warning(None, "Forewit", "Forewit could not start or close cleanly.")
     finally:
+        if window is not None:
+            window.deleteLater()  # Deleted by release_event_loop(), once the loop ends.
         if handler is not None:
             log_paint_summary()  # Only with MAILBRIEF_PAINT_PROFILE=1.
             logger.removeHandler(handler)
@@ -209,6 +219,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
         # yet, so the failure is logged once it is.
         theme_failure = exc
     application.setQuitOnLastWindowClosed(False)
+    try:
+        return run_event_loop(application, options, theme_failure)
+    finally:
+        release_event_loop()
+
+
+def run_event_loop(
+    application: QApplication, options: argparse.Namespace, theme_failure: Exception | None
+) -> int:
+    """Run the desktop, or the offline package check, on one qasync loop."""
     with QEventLoop(application) as loop:
         asyncio.set_event_loop(loop)
         if options.smoke_test_dir is not None:
@@ -230,3 +250,19 @@ def main(arguments: Sequence[str] | None = None) -> int:
         else:
             loop.run_until_complete(run_desktop(theme_failure))
     return 0
+
+
+def release_event_loop() -> None:
+    """Free the closed loop and the window now, on this thread.
+
+    qasync's loop holds Qt objects that Python owns: the default executor's ten worker
+    QThreads, a timer and signal senders (and on Windows the completion-port poller's
+    QThread). The window's finished tasks refer to the loop, and Qt's connections to the
+    window's own lambdas keep the window alive. Left to the cycle collector, they would be
+    deleted whenever, and on whichever thread, a collection next ran. In the tests, which
+    run main() many times in one process, that was the next run, and Windows CI crashed
+    there while building the next executor's QThreads."""
+    asyncio.set_event_loop(None)
+    with paused_collection():  # As delete_windows() in the tests: none inside Qt's deletion.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()

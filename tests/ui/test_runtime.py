@@ -223,6 +223,68 @@ def test_a_theme_failure_never_stops_the_desktop(
         asyncio.set_event_loop(None)
 
 
+def test_main_leaves_no_qt_objects_to_the_cycle_collector(
+    qtbot: QtBot, themed: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When main() returns, its window and its loop's Qt objects (the default executor's
+    worker QThreads among them) are gone. Left behind, the next collection would free them
+    at whatever point it ran, on whatever thread: a native crash on Windows CI."""
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QApplication
+
+    from mailbrief import app
+    from mailbrief.paths import AppPaths
+
+    monkeypatch.setattr(app, "DesktopRuntime", lambda path: FakeBackend())
+    monkeypatch.setattr(
+        AppPaths,
+        "from_qt",
+        lambda: AppPaths(
+            data_dir=tmp_path,
+            database_path=tmp_path / "unused.sqlite3",
+            microsoft_token_cache_path=tmp_path / "unused.bin",
+        ),
+    )
+
+    async def close(window: MainWindow) -> None:
+        await asyncio.to_thread(int)  # Builds qasync's default executor, as a restore does.
+        window.close()
+
+    def start_closing(window: MainWindow) -> bool:
+        return window.start(lambda: close(window))  # Once the window's start-up is done.
+
+    def left_over() -> list[str]:
+        return [
+            type(item).__qualname__
+            for item in gc.get_objects()
+            if isinstance(item, shiboken6.Object)
+            and shiboken6.isValid(item)
+            and (isinstance(item, MainWindow) or type(item).__module__.startswith("qasync"))
+        ]
+
+    wait = WindowWait(start_closing)
+    wait.start()
+    try:
+        assert wait.run(lambda: app.main([])) == 0
+        assert left_over() == []
+        # Nor does any QObject wait for the collector.
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        try:
+            gc.collect()
+            assert not [item for item in gc.garbage if isinstance(item, QObject)]
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+    finally:
+        application = QApplication.instance()
+        assert isinstance(application, QApplication)
+        application.setQuitOnLastWindowClosed(True)
+        asyncio.set_event_loop(None)
+
+
 def test_offline_package_mode_never_opens_profile_or_vault(
     qtbot: QtBot,
     themed: None,
