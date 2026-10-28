@@ -10,15 +10,17 @@ shelved temporarily. Custom charts and configurable dashboards belong in the
 general-planner proof of concept, although advanced analytics can arrive later.
 
 This inventory preserves the features discussed with the owner, including deferred
-ideas. `POC` means the proposed first general-planner proof of concept; `Later`
-means a subsequent general-planner release; `Deferred` means a separate expansion.
+ideas. `P0` is the immediate local-first email privacy/latency priority. `POC`
+means the proposed first general-planner proof of concept; `Later` means a
+subsequent general-planner release; `Deferred` means a separate expansion.
 These priorities are proposals for review, not promises or evidence of existing
 implementation. Existing email functionality remains a foundation and still needs
 the live acceptance documented in AGENTS.md.
 
 Research, architecture, frontend integration and verification are recorded in
 [Future implementations](future-implementations.md). Each feature ID maps to a
-research and implementation cluster there.
+research and implementation cluster there. D09 was added on 2026-10-28
+as proposed P0 work and is not yet implemented.
 
 ## Complete inventory
 
@@ -79,6 +81,7 @@ research and implementation cluster there.
 | D06 | Reply drafting and reusable writing | POC | Reuse local drafts, selected context, versions, copy and export. |
 | D07 | Gmail draft saving or sending | Deferred | Explicit new scope and permission design; current Gmail remains read-only. |
 | D08 | What-changed brief | Later | New replies, changed deadlines, meetings and blockers since the last view. |
+| D09 | Local-first privacy-aware email summarization | P0 | Opt-in local summaries without per-message cloud approval; separate conservative consent for optional cloud enrichment; incremental sync, validated cache, progressive UI and optional OS precomputation. |
 
 ### E. Notes, knowledge and context
 
