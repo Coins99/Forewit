@@ -215,7 +215,7 @@ closed-app alerts.
 [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth),
 [Qt tray notifications](https://doc.qt.io/qt-6/qsystemtrayicon.html).
 
-### 3.4 Email and communication — D01–D08
+### 3.4 Email and communication — D01–D09
 
 **Observed constraint.** Gmail read-only access allows reading; draft management
 and sending use different scopes. Forewit currently has only read-only Gmail.
@@ -235,6 +235,12 @@ milestone is activated. What-changed views derive from last-seen watermarks and
 confirmed activity. Gmail draft saving/sending is deferred and requires an ADR
 that explicitly changes the current invariant; a local draft's copy/export event
 is not evidence of a sent message. The POC does not request write scopes.
+
+**P0 extension (D09).** Manual approval of 20 overnight emails is not a workable
+privacy model. The P0 goal is to summarize eligible email *locally* without
+per-message cloud approval, and to make optional cloud enhancement a separately
+consented operation. A classifier may block or flag content but must not be
+treated as proof that it is safe to disclose. See [P0-B](#71-p0-b-local-first-email-privacy-and-responsiveness-d09).
 
 **Fit/acceptance.** An accepted email task behaves exactly like a manual task while
 retaining its source snapshot. Clearing mail never deletes owner tasks/notes;
@@ -835,8 +841,9 @@ separate from existing M1–M9 so completed email history is not rewritten.
 
 | Phase | Deliverable and covered scope | Depends on | Acceptance gate |
 | --- | --- | --- | --- |
-| P0: Existing foundation | Finish relevant owner/platform/live acceptance for current email and recovery behavior; document known limits | Existing M4–M9 | Real owner records survive restart/export/restore; outstanding platform checks remain visible. Planning future work does not mark these accepted. |
-| P1: General task foundation | B01–B08 basics, project/area grouping, quick task capture, activity history, export/migration updates | P0 validation findings | A manual source-free task and accepted email task share edit/complete/reopen/undo paths; recurrence and history survive restart. |
+| P0-A: Existing foundation | Finish relevant owner/platform/live acceptance for current email and recovery behavior; document known limits | Existing M4–M9 | Real owner records survive restart/export/restore; outstanding platform checks remain visible. Planning future work does not mark these accepted. |
+| **P0-B: Privacy-first email AI** | **D09: local-first summaries, selective cloud enrichment, caching and background precomputation** | Existing email contracts; local-model feasibility spike | **20 mixed overnight emails need no per-message approval for on-device summaries; no third-party requests in local-only mode; cached results render without waiting for pending analyses.** |
+| P1: General task foundation | B01–B08 basics, project/area grouping, quick task capture, activity history, export/migration updates | P0-A validation findings; honor P0-B privacy contracts for email | A manual source-free task and accepted email task share edit/complete/reopen/undo paths; recurrence and history survive restart. |
 | P2: Personal workspace | A01–A05, A08, E01–E02, keyboard capture/search and linked notes; current brief routed to Mail | P1 | Manage a day without Gmail/AI. Search opens canonical records; owner writing survives conflict/cache clearing. |
 | P3: Local calendar | C01–C05, work blocks, availability settings and overload warnings | P1, P2 | Plan a week, move/resize/unschedule with keyboard and undo; respect fixed events, date semantics and missing estimates. |
 | P4: Custom progress dashboards | F02, G01–G03, G05–G07, G09; one saved layout/template, targets and data inspection | P1 history, P2; P3 for workload widgets | Create custom entries, edit/reorder/resize widgets, restart and restore them; totals match drill-down and handle corrections/gaps. |
@@ -846,9 +853,100 @@ separate from existing M1–M9 so completed email history is not rewritten.
 | P8: Web/mobile/server | Choose custody/sync model, private prototype, parity and independent job operation | Desktop completion gate in ecosystem roadmap | Offline conflict handling, tombstones, device revocation, restore and job ownership validated before seamless sync claims. |
 | P9: Separate expansions | Collaboration, bank connections and student feature packs | Their own product/data/privacy decisions | Separate reviewed implementation specifications. Student features remain shelved until explicitly reactivated. |
 
-P1–P5 collectively define the proposed general-planner POC. P0 is release
-validation, not an excuse to postpone defining or researching future work. Planning
-and small isolated design spikes can proceed while live checks are scheduled.
+P1–P5 collectively define the proposed general-planner POC. P0-A remains the
+existing release-validation gate; P0-B is the new immediate privacy/usability
+workstream. Both must preserve existing M4–M9 acceptance status. Planning and
+small isolated design spikes can proceed while live checks are scheduled.
+
+### 7.1 P0-B: Local-first email privacy and responsiveness (D09)
+
+**User problem.** A person who gets 20 emails overnight cannot reasonably
+inspect and approve each one before getting a useful morning brief. General
+cloud-analysis permission is not an adequate substitute: even well-ranked or
+apparently innocuous emails may contain sensitive content. Forewit must not
+depend on a sensitivity classifier to guarantee the absence of disclosure.
+
+**Decision.** Make basic summary and task/deadline extraction possible on the
+owner's device by default, with explicit, revocable permission for automatic
+*local* body processing. Keep cloud LLM enrichment *optional* with distinct,
+per-account, purpose-specific consent. In local-only mode there are no requests
+to Groq or other third-party AI services, regardless of model availability.
+This is an **unimplemented P0 requirement**, not a description of current M4/M8.
+
+**Proposed data flow**
+
+1. Incrementally sync Gmail metadata (history cursor if validated; bounded
+   reconciliation otherwise); apply existing sender exclusions before bodies
+   are fetched, deduplicate changed messages and maintain a bounded queue.
+2. With a one-time, understandable local-processing opt-in, temporarily fetch
+   eligible message bodies into memory, trim quoted history and unnecessary
+   fields, and avoid persisting raw body text. Keep this permission independent
+   of the existing provider/cloud disclosure consent.
+3. Prioritize important messages with existing *local metadata* ranking. Run a
+   resource-limited, on-device summarizer asynchronously. Validate its outputs
+   with the existing Pydantic contracts, evidence checks and conservative
+   deadline/time-zone resolver. Model-produced tasks remain suggestions.
+4. Store only bounded derived summaries/evidence, source linkage, version and
+   fingerprints; reuse unchanged results rather than reprocessing. Invalidate
+   when source content, model/prompt/validation version or retention requires it.
+5. Display existing cached summaries on startup and stream newly validated
+   summaries into the interface one by one. A still-processing email displays
+   its available metadata and a clear pending/unavailable state, never an
+   invented summary.
+6. Optionally run a *local* worker through OS scheduling before the main window
+   opens, only after explicit owner opt-in. Enforce cancellation, revocation,
+   single-writer/deduplication, bounded refresh, battery/CPU limits, credential
+   vault use and safe recovery. Closed-app background work is opt-in, not assumed.
+7. For advanced cloud enrichment, require a second explicit authorization that
+   identifies provider, data categories, allowed usage and message limits.
+   Apply deny rules before any request; conservative local detection can
+   *block or flag* suspicious messages but cannot itself authorize disclosure.
+   Ambiguous items stay on device or require an individual exception; no cloud
+   fallback is permitted after local failure or consent revocation.
+
+**Implementation slices**
+
+- **P0-B1 — Benchmark/feasibility:** compare a quantized local model with a
+  lightweight local baseline for accuracy, evidence quality, first-token
+  latency, throughput on a 20-message fixture, cold start, RAM/CPU/power,
+  Windows/macOS packaging, provenance/licensing and model integrity. Define
+  supported-device expectations before selecting the local inference stack.
+  If quality is insufficient, show an honest local metadata preview/unsupported
+  status rather than claiming it is an AI summary or silently using cloud AI.
+- **P0-B2 — Pipeline:** consent state, incremental ingestion, local model
+  adapter, bounded and deduplicated jobs, validation, cache, cancellation,
+  persistence/retention and tests forbidding outbound AI requests in local mode.
+- **P0-B3 — Responsiveness:** priority queue, cached-first UI, progressive
+  update states and optional OS-managed precomputation with pause/revoke.
+- **P0-B4 — Cloud policy:** separate opt-in, deterministic exclusions and
+  allowed categories, conservative local risk gates, audit-friendly request
+  counts (no raw text logs), exceptional-message approval and reauthorization
+  checks just before sending.
+
+**Acceptance gates**
+
+- A fixture with **20 new overnight messages including clearly sensitive,
+  apparently ordinary and ambiguous examples** yields useful *local* summaries
+  without 20 approvals or any third-party AI call. Instrumented network tests
+  verify the local-only boundary. No claim of zero privacy risk from classifiers.
+- Revoking local analysis stops new body reads/processing; revoking cloud
+  permission stops queued external sends. Denied categories and excluded
+  senders are never overridden by sender trust or a classifier's "safe" score.
+- Cached briefs appear without waiting for pending inference; new validated
+  results appear progressively. Measure p50/p95 time to first visible content,
+  first new summary and completion of the 20-message set, with cold/warm runs
+  and offline/background-disabled variants. Set numerical latency thresholds
+  after the hardware feasibility measurements, not from assumptions.
+- Test ambiguous deadlines, evidence verification, provider outages, restart,
+  cancelled work, duplicate scheduler runs, low-power mode, redacted diagnostics,
+  cache invalidation, body non-retention, exports and recovery. First-use model
+  setup and cold-start work may still take time; the UI must acknowledge this.
+
+This P0-B workstream does not supersede P0-A's existing live acceptance gate,
+create a new hosted server, request Gmail write scopes, or imply that local
+model selection and implementation have already been completed.
+
+
 The POC need not have external calendar sync, rich page databases, receipt OCR,
 bank connections, automatic sending, shared workspaces or student features.
 
@@ -920,7 +1018,7 @@ appearing in more than one cluster has a shared dependency rather than duplicate
 | A01–A08 | 3.1, 4, 6 | Sunsama, SQLite | Day plans and canonical records; bounded search; optional reflections. |
 | B01–B12 | 3.2, 4 | Todoist, Notion, iCalendar | Existing actions extended; recurrence instances, typed organization and views. |
 | C01–C10 | 3.3, 4, 6 | RFC 5545, Google Calendar, OR-Tools, Qt | Events/blocks/sessions separate; verified availability and permissions. |
-| D01–D08 | 3.4, 2 | Gmail documentation and current accepted Forewit ADRs | Existing minimized analysis; owner decisions; new scopes deferred. |
+| D01–D09 | 3.4, 7.1, 2 | Gmail documentation and accepted Forewit ADRs; local-model benchmarks required | Existing minimized analysis, new D09 local-first privacy/latency requirements; new Gmail scopes deferred. |
 | E01–E06 | 3.5, 4 | Obsidian, Notion | Existing owner writing plus typed links; assets need explicit storage policy. |
 | F01–F06 | 3.6, 5 | Loop, OpenTelemetry concepts | Measurements and expectations separate; typed units and aggregates. |
 | G01–G11 | 3.7, 5, 6 | Datadog, Notion, Qt, PyQtGraph, W3C | Validated query → explainable result → renderer/table. |
@@ -1000,13 +1098,18 @@ screenshots and source inspection support the frontend proposal; the future
 acceptance gates describe how implemented behavior will be checked. Existing live
 acceptance remains pending where recorded in AGENTS.md.
 
+Revision 2026-10-28: D09 added as a P0-B workstream. The 2026-10-11 counts
+above are a historical snapshot of 95 entries; the catalogs now have 96.
+This revision updates the design only and does not mark work implemented.
+
 ## 12. Complete feature catalog
 
 This snapshot makes the final plan self-contained. The separate inventory adds
 intended behavior for each feature; its IDs and priorities match this catalog.
 When scope changes, update both catalogs and the research coverage map together.
-POC means the bounded first version described in phases P1–P5; Later and Deferred
-are retained for future planning. Student features remain shelved.
+P0 identifies the new immediate email privacy requirement D09. POC means the
+bounded first version described in phases P1–P5; Later and Deferred are
+retained for future planning. Student features remain shelved.
 
 | ID | Feature | Scope |
 | --- | --- | --- |
@@ -1048,6 +1151,7 @@ are retained for future planning. Student features remain shelved.
 | D06 | Reply drafting and reusable writing | POC |
 | D07 | Gmail draft saving or sending | Deferred |
 | D08 | What-changed brief | Later |
+| D09 | Local-first privacy-aware email summarization | P0 |
 | E01 | Standalone and linked notes | POC |
 | E02 | Modest formatting and text/Markdown export | POC |
 | E03 | Backlinks and project context pages | Later |
