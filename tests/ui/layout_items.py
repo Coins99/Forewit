@@ -13,10 +13,10 @@ from PySide6.QtWidgets import QLayout, QLayoutItem
 from shiboken6 import Shiboken
 
 # Shiboken.dump names the wrapper that keeps an item's wrapper alive: the layout it was
-# added under, which holds the item or has a layout inside it that does. Its repr's address
-# is upper-case hex on Windows (0x0000022865B70F10) and lower-case on macOS.
+# added under, which holds the item or has a layout inside it that does. Its address is
+# printed with C's %p: 0x101da2980 on macOS, 00000164B5B1B6C0 on Windows.
 _PARENT_LINE = re.compile(r"^parent\.+ (.*)$", re.MULTILINE)
-_ADDRESS = re.compile(r"^<.* at (0x[0-9A-Fa-f]+)>$")
+_ADDRESS = re.compile(r"^<.* at (?:0x)?([0-9A-Fa-f]+)>$")
 
 
 def parent_id(dump: str) -> int | None:

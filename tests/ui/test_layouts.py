@@ -128,8 +128,8 @@ def test_the_check_reads_the_parent_on_every_platform() -> None:
         return f"id................ 0x1\nvalidCppObject.... 1\nparent............ {parent}\n"
 
     assert parent_id(dump("<PySide6.QtWidgets.QHBoxLayout at 0x101da2980>")) == 0x101DA2980
-    windows = "<PySide6.QtWidgets.QHBoxLayout at 0x0000022865B70F10>"  # Windows' repr.
-    assert parent_id(dump(windows)) == 0x22865B70F10
+    windows = "<PySide6.QtWidgets.QHBoxLayout at 00000164B5B1B6C0>"  # From Windows CI.
+    assert parent_id(dump(windows)) == 0x164B5B1B6C0
     assert parent_id("id................ 0x1\n") is None
     with pytest.raises(AssertionError, match="Unrecognized"):
         parent_id(dump("QHBoxLayout(0x1)"))
