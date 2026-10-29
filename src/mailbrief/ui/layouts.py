@@ -14,11 +14,17 @@ def take_widget(widget: QWidget) -> None:
     meta-object is then read from a layout item, and the app crashes (Windows CI, in a
     QCompleter's constructor). ``removeWidget`` on the layout that holds the item
     invalidates its wrapper first. Called on an outer layout instead, Qt finds the widget
-    but PySide doesn't, so this finds the layout that holds it."""
+    but PySide doesn't, so this finds the layout that holds it.
+
+    Too late, it can't help: once ``setParent`` or another layout has taken the widget, its
+    item is gone and this finds nothing to do. The UI tests check after every test that no
+    such wrapper is left (``tests/ui/layout_items.py``)."""
     parent = widget.parentWidget()
-    if parent is None:
+    top = parent.layout() if parent is not None else None
+    if top is None:
         return
-    for layout in parent.findChildren(QLayout):
+    # The parent's own layouts: those of the widgets inside it can't hold this one.
+    for layout in (top, *top.findChildren(QLayout)):
         if layout.indexOf(widget) >= 0:
             layout.removeWidget(widget)
             return

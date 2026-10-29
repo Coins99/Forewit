@@ -51,7 +51,6 @@ from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.labels import outline_button, plain_label
-from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
 
@@ -387,7 +386,8 @@ class DraftEditor(QDialog):
         self.counter.setVisible(not self.embedded)
         if self.embedded:
             self._place(self.checkpoint_button, 0, 2, Qt.AlignmentFlag.AlignRight)
-            self._place(self.more_button, 0, 1, Qt.AlignmentFlag.AlignRight)
+            if not self.reply_mode:  # A reply puts it first, below.
+                self._place(self.more_button, 0, 1, Qt.AlignmentFlag.AlignRight)
             self.ai_button.hide()
             for number in range(3):
                 self._buttons.setColumnStretch(number, 1 if number == 0 else 0)
@@ -429,8 +429,10 @@ class DraftEditor(QDialog):
         column: int,
         alignment: Qt.AlignmentFlag | None = None,
     ) -> None:
-        """Put ``button`` in the buttons' grid at ``row`` and ``column``, wherever it was."""
-        take_widget(button)
+        """Put ``button`` in the buttons' grid at ``row`` and ``column``, wherever it was.
+        Taken out first: the grid's ``removeWidget`` drops PySide's wrapper of its old item
+        (``layouts.take_widget``)."""
+        self._buttons.removeWidget(button)
         if alignment is None:
             self._buttons.addWidget(button, row, column)
         else:

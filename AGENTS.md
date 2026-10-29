@@ -570,12 +570,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `SafeList.clear()` is `lists.clear_list()`, which takes each item out with collection
   paused and changes the current row once, as Qt's `clear()` does.
 - Before another layout (or another cell of the same grid) takes a widget, call
-  `layouts.take_widget(widget)`, and never `setParent` a widget out of a layout. PySide
-  wraps the items of a filled layout added with `addLayout` or `insertLayout`; when Qt
-  deletes such an item behind PySide's back, its wrapper stays registered at the freed
-  address, and a QObject later made there gets it as its own wrapper (a Windows access
-  violation in `SignalManager::retrieveMetaObject`). `tests/ui/test_layouts.py` checks the
-  window leaves none.
+  `layouts.take_widget(widget)`, and never `setParent` a widget out of a layout added to
+  another with `addLayout` or `insertLayout` after it was filled. PySide wraps that
+  layout's items; when Qt deletes one behind PySide's back, its wrapper stays registered at
+  the freed address, and a QObject later made there gets it as its own wrapper (a Windows
+  access violation in `SignalManager::retrieveMetaObject`). A layout filled only by
+  `addWidget` on itself has no such wrappers. After every UI test, `tests/ui/conftest.py`
+  checks that none is left (`tests/ui/layout_items.py`).
 
 ## Dormant Microsoft notes
 

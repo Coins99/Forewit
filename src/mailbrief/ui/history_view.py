@@ -25,7 +25,6 @@ from mailbrief.ui.brief_detail import is_gmail_link
 from mailbrief.ui.deadline_text import MONTHS, day_text, full_day_text
 from mailbrief.ui.hairline import HairlineDivider, HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
-from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
 from mailbrief.ui.lists import ActivatingList, SafeList, clear_list
 from mailbrief.ui.theme import ui_font
@@ -98,15 +97,10 @@ class BriefHistoryPanel(QWidget):
         layout.addWidget(self.missed, 1)
         self.missed_note = _plain()
         layout.addWidget(self.missed_note)
-        buttons = QHBoxLayout()
         self.open_button = outline_button(
             "&Open brief", "openBriefButton", mnemonic=True, primary=True
         )
         self.brief_button = outline_button("&Brief this day…", "briefDayButton", mnemonic=True)
-        buttons.addWidget(self.open_button)
-        buttons.addWidget(self.brief_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
         self.confirm_panel = QWidget()
         self.confirm_panel.setObjectName("replaceConfirmation")
         self.confirm_panel.setAccessibleName("Replace the saved brief")
@@ -185,7 +179,6 @@ class BriefHistoryPanel(QWidget):
         metric_frame.addWidget(HairlineDivider())
         right.addWidget(metrics)
         choices = QHBoxLayout()
-        take_widget(self.open_button)
         choices.addWidget(self.open_button)
         self._source_url: str | None = None
         self.source_button = outline_button(
@@ -193,7 +186,6 @@ class BriefHistoryPanel(QWidget):
         )
         self.source_button.clicked.connect(self._open_source)
         choices.addWidget(self.source_button)
-        take_widget(self.brief_button)
         choices.addWidget(self.brief_button)
         choices.addStretch(1)
         right.addLayout(choices)

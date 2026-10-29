@@ -25,6 +25,7 @@ from mailbrief.domain.drafts import KIND_NAMES, Draft, DraftKind, DraftSummary
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
+from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, DisplayRow, DisplayRowDelegate
 from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import TITLE_PX, ui_font
@@ -179,6 +180,7 @@ class DraftsPanel(QWidget):
 
     def restore_list_controls(self) -> None:
         """Return controls moved into the inline editor before it becomes a dialog."""
+        take_widget(self.delete_button)
         self._list_buttons.insertWidget(1, self.delete_button)
         self.open_button.show()
         self.delete_button.show()

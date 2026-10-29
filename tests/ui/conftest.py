@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QProxyStyle
 from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
 from mailbrief.ui.theme import DARK, set_current_tokens
 from mailbrief.ui.theme import style as theme_style
+from tests.ui.layout_items import stale_item_wrappers
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +22,14 @@ def require_gui_session() -> None:
         and not os.environ.get("MACOS_GUI_AVAILABLE")
     ):
         pytest.skip("Requires active macOS GUI WindowServer session")
+
+
+@pytest.fixture(autouse=True)
+def no_stale_item_wrappers() -> Iterator[None]:
+    """After every test, no PySide wrapper of a layout item outlives the item: a widget
+    moved between layouts goes through ``take_widget`` (``tests/ui/layout_items.py``)."""
+    yield
+    assert stale_item_wrappers() == [], "A widget left a layout behind PySide's back"
 
 
 @pytest.fixture(autouse=True)
