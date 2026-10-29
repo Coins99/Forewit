@@ -6,13 +6,14 @@ here holds the moved widget's own item wrapper, so Qt reusing the freed memory f
 item can't hide one left valid; ``conftest.py`` also checks every UI test with
 ``layout_items.stale_item_wrappers``."""
 
+import pytest
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLayout, QLayoutItem, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 from shiboken6 import Shiboken
 
 from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.main_window import MainWindow
-from tests.ui.layout_items import stale_item_wrappers
+from tests.ui.layout_items import parent_id, stale_item_wrappers
 from tests.ui.test_draft_editor import make_draft
 from tests.ui.test_workflow import FakeBackend
 
@@ -120,3 +121,15 @@ def test_the_window_leaves_no_stale_layout_item_wrappers(qtbot: QtBot) -> None:
     for key in ("today", "actions", "drafts", "briefs", "calendar", "inbox", "today"):
         window._show_page(key)
     assert stale_item_wrappers() == []
+
+
+def test_the_check_reads_the_parent_on_every_platform() -> None:
+    def dump(parent: str) -> str:
+        return f"id................ 0x1\nvalidCppObject.... 1\nparent............ {parent}\n"
+
+    assert parent_id(dump("<PySide6.QtWidgets.QHBoxLayout at 0x101da2980>")) == 0x101DA2980
+    windows = "<PySide6.QtWidgets.QHBoxLayout at 0x0000022865B70F10>"  # Windows' repr.
+    assert parent_id(dump(windows)) == 0x22865B70F10
+    assert parent_id("id................ 0x1\n") is None
+    with pytest.raises(AssertionError, match="Unrecognized"):
+        parent_id(dump("QHBoxLayout(0x1)"))

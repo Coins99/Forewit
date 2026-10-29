@@ -13,8 +13,21 @@ from PySide6.QtWidgets import QLayout, QLayoutItem
 from shiboken6 import Shiboken
 
 # Shiboken.dump names the wrapper that keeps an item's wrapper alive: the layout it was
-# added under, which holds the item or has a layout inside it that does.
-_PARENT = re.compile(r"^parent\.+ <.* at (0x[0-9a-f]+)>$", re.MULTILINE)
+# added under, which holds the item or has a layout inside it that does. Its repr's address
+# is upper-case hex on Windows (0x0000022865B70F10) and lower-case on macOS.
+_PARENT_LINE = re.compile(r"^parent\.+ (.*)$", re.MULTILINE)
+_ADDRESS = re.compile(r"^<.* at (0x[0-9A-Fa-f]+)>$")
+
+
+def parent_id(dump: str) -> int | None:
+    """The ``id`` of the parent wrapper ``Shiboken.dump`` names, or None without one."""
+    line = _PARENT_LINE.search(dump)
+    if line is None:
+        return None
+    address = _ADDRESS.match(line.group(1).strip())
+    # Unread, every item would look stale: say so instead.
+    assert address is not None, f"Unrecognized Shiboken.dump parent: {line.group(1)!r}"
+    return int(address.group(1), 16)
 
 
 def stale_item_wrappers() -> list[str]:
@@ -30,8 +43,8 @@ def stale_item_wrappers() -> list[str]:
             continue
         if Shiboken.ownedByPython(wrapper):
             continue  # Python's to delete, so deleting it unregisters it.
-        match = _PARENT.search(Shiboken.dump(wrapper))
-        parent = by_id.get(int(match.group(1), 16)) if match else None
+        found = parent_id(Shiboken.dump(wrapper))
+        parent = by_id.get(found) if found is not None else None
         if isinstance(parent, QLayout) and any(
             layout.indexOf(wrapper) >= 0  # Compares addresses only.
             for layout in (parent, *parent.findChildren(QLayout))
