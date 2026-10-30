@@ -213,7 +213,7 @@
         "action_required": true,
         "deadline": {"date": "2026-11-02"},
         "follow_ups": ["none"],
-        "actions": [{"ownership": "mine", "any_of": ["review", "pull request", "#482", "pr"]}],
+        "actions": [{"ownership": "mine", "any_of": ["review", "pull request", "#482"]}],
         "summary_mentions": [["review"], ["pull request", "#482", "pr"]]
       }
     },

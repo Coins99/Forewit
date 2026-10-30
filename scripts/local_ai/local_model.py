@@ -27,7 +27,7 @@ from mailbrief.providers.groq.provider import (
     INSTRUCTIONS,
     PROMPT_VERSION,
     AnalysisWireBatch,
-    _request_input,  # The benchmark sends exactly what the Groq adapter sends.
+    analysis_input,
 )
 
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -45,11 +45,12 @@ class LocalModelError(RuntimeError):
 
 
 def require_loopback(url: str) -> str:
-    """``url`` without a trailing slash, when it is plain HTTP(S) to a loopback host."""
+    """``url`` without a trailing slash or "/v1" (the usual OpenAI-compatible base, which
+    CHAT_PATH adds), when it is plain HTTP(S) to a loopback host."""
     parsed = httpx.URL(url)
     if parsed.scheme not in ("http", "https") or parsed.host not in LOOPBACK_HOSTS:
         raise ValueError("the local model server must be on localhost, 127.0.0.1 or [::1]")
-    return url.rstrip("/")
+    return url.rstrip("/").removesuffix("/v1")
 
 
 class LoopbackGuard(httpx.AsyncBaseTransport):
@@ -77,12 +78,14 @@ class CallTiming:
     """One call's timing: until the first output token and until the last byte."""
 
     seconds: float
-    first_token_seconds: float | None
-    prompt_tokens: int | None
-    completion_tokens: int | None
-    # llama-server's own measurements, when it reports them.
-    prompt_per_second: float | None
-    predicted_per_second: float | None
+    first_token_seconds: float | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    # llama-server's own measurements, when it reports them. The prompt tokens it evaluated
+    # leave out those it reused from its cache.
+    prompt_evaluated: int | None = None
+    prompt_per_second: float | None = None
+    predicted_per_second: float | None = None
 
 
 def _count(value: object) -> int | None:
@@ -123,6 +126,7 @@ class LocalModel:
         model: str,
         max_output_tokens: int,
         template_kwargs: Mapping[str, object] | None = None,
+        api_key: str | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._client = client
@@ -130,6 +134,7 @@ class LocalModel:
         self._model = model
         self._max_output_tokens = max_output_tokens
         self._template_kwargs = dict(template_kwargs or {})
+        self._headers = {} if api_key is None else {"Authorization": f"Bearer {api_key}"}
         self._clock = clock
 
     @property
@@ -145,7 +150,7 @@ class LocalModel:
             "model": self._model,
             "messages": [
                 {"role": "system", "content": INSTRUCTIONS},
-                {"role": "user", "content": _request_input(requests)},
+                {"role": "user", "content": analysis_input(requests)},
             ],
             "response_format": {
                 "type": "json_schema",
@@ -179,7 +184,7 @@ class LocalModel:
         usage: dict[str, object] = {}
         timings: dict[str, object] = {}
         async with self._client.stream(
-            "POST", self._url, json=self._body(requests), timeout=TIMEOUT
+            "POST", self._url, json=self._body(requests), headers=self._headers, timeout=TIMEOUT
         ) as response:
             if not response.is_success:
                 await response.aread()
@@ -217,6 +222,7 @@ class LocalModel:
             first_token_seconds=first_token,
             prompt_tokens=_count(usage.get("prompt_tokens")),
             completion_tokens=_count(usage.get("completion_tokens")),
+            prompt_evaluated=_count(timings.get("prompt_n")),
             prompt_per_second=_rate(timings.get("prompt_per_second")),
             predicted_per_second=_rate(timings.get("predicted_per_second")),
         )

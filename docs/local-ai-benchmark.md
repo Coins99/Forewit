@@ -11,7 +11,8 @@ desktop app.
 
 On this laptop, yes, but as background work rather than at the click of a button.
 Qwen3-4B-Instruct-2507 (Q4_K_M, 2.5 GB) analyzed all 30 synthetic emails into results the app
-accepts, with no request leaving the computer. Its summaries are real summaries, in the email's
+accepts, and every request the benchmark sent went to this computer itself (what
+`llama-server` itself connects to wasn't watched). Its summaries are real summaries, in the email's
 own language, and it ignored a prompt-injection email. It takes about 15 seconds per email
 (about 6 minutes for the 20), so P0-B3's cached-first, one-by-one display and optional
 precomputation are required, not extras. Its weak points are follow-up signals (it found none
@@ -52,7 +53,7 @@ On the 20 emails:
 | Secret or injected text echoed | 2 | 1 | 2 |
 | Deadlines dated before the email arrived | 0 | 0 | 0 |
 | Numbers the email doesn't contain | 0 | 0 | 0 |
-| Requests to hosts other than loopback | none made | 0 of 41 | 0 of 41 |
+| Benchmark requests to hosts other than loopback | none made | 0 of 41 | 0 of 41 |
 
 The baseline's column is an upper bound: its rules were written with these 20 emails in view.
 The held-out emails are the fairer comparison:
@@ -68,7 +69,7 @@ The held-out emails are the fairer comparison:
 | Suggestions that were expected (precision) | 3/3 (100%) | 4/5 (80%) | 2/2 (100%) |
 | Summary facts | 19/20 (95%) | 20/20 (100%) | 18/20 (90%) |
 | Secret or injected text echoed | 0 | 0 | 0 |
-| Requests to hosts other than loopback | none made | 0 of 10 | 0 of 10 |
+| Benchmark requests to hosts other than loopback | none made | 0 of 10 | 0 of 10 |
 
 The 1.7B model's echoes on the 20 are the one-time code and the injected "Verified safe
 message from IT". Its summaries are also much thinner ("Salary adjustment effective December
@@ -136,7 +137,12 @@ The notes below are for the 4B model.
 - **Harden the side process**: `llama-server` warns that it has no API key and allows every
   CORS origin, so while it runs any program, and any web page in a browser on the computer,
   could send it requests. Bind 127.0.0.1 on a random port, pass a fresh `--api-key` on each
-  launch, turn the web UI off, and stop it with the app.
+  launch, turn the web UI off, refuse a port another program already holds, and stop it with
+  the app, also when starting is interrupted. The benchmark now runs it this way.
+- **Prove the side process stays local**: this benchmark shows only that its own requests
+  stayed on loopback. P0-B2's local-only test must also watch `llama-server`, for example by
+  listing its connections during a run or blocking its outbound traffic with the OS firewall
+  and checking that analysis still works.
 - **Model**: Qwen3-4B-Instruct-2507 Q4_K_M (Apache-2.0). Download it on first use from a pinned
   URL and check a pinned SHA-256 before loading, rather than adding 2.5 GB to the installer.
   The GGUF used here is a third-party quantization (unsloth); for release, quantize Qwen's
@@ -157,6 +163,7 @@ The notes below are for the 4B model.
 ## Not yet measured
 
 - macOS (Apple silicon with Metal), and a machine with 8 GB of RAM or no usable GPU.
+- `llama-server`'s own network connections (see the recommendation above).
 - Other small models (for example in the 3B class), which might fill the gap the 1.7B
   model leaves.
 - The laptop's idle power draw, to separate the model's energy from the screen's.
@@ -169,7 +176,7 @@ The notes below are for the 4B model.
 
 - **Local model**: a quantized model run by llama.cpp's `llama-server`, an external program
   on `127.0.0.1`, asked exactly what the Groq adapter asks: its instructions
-  (`providers/groq/provider.py` `INSTRUCTIONS`), its minimized input (`_request_input`) and
+  (`providers/groq/provider.py` `INSTRUCTIONS`), its minimized input (`analysis_input`) and
   its strict output schema (`AnalysisWireBatch`), one email per call, temperature 0. llama.cpp
   turns the schema into a grammar, so every answer is well-formed JSON. Two models, both
   Apache-2.0: Qwen3-4B-Instruct-2507 and Qwen3-1.7B (thinking off), each as a Q4_K_M GGUF.
@@ -226,9 +233,10 @@ Reports contain every analysis, so only synthetic fixtures belong in this harnes
   counters, dedicated plus shared, read at the end), its CPU time and the average number of
   busy cores, and the battery's charge before and after (Windows' `BatteryStatus`, only
   meaningful on battery power).
-- **Network**: every request goes through `LoopbackGuard`, which refuses any host other than
-  localhost, 127.0.0.1 and ::1 before anything is sent and counts what it sent by host. The
-  model and baseline runs report those counts.
+- **Network**: every request the benchmark makes goes through `LoopbackGuard`, which refuses
+  any host other than localhost, 127.0.0.1 and ::1 before anything is sent and counts what it
+  sent by host. The model and baseline runs report those counts. They cover the benchmark's
+  own requests only: what `llama-server` itself connects to isn't observed.
 
 ## Running it
 
@@ -240,11 +248,14 @@ uv run python -m scripts.local_ai.benchmark compare out/local-ai-benchmark/*/rep
 ```
 
 `model` starts `llama-server` itself (`--port`, `--context`, `--gpu-layers`, `--threads` and
-repeated `--server-arg` pass through), or uses a server that is already running on loopback
+repeated `--server-arg` pass through), with a fresh API key and no web UI, and refuses a port
+that something already listens on. Or it uses a server that is already running on loopback
 with `--base-url http://127.0.0.1:11434 --model NAME` (Ollama's OpenAI-compatible API, for
-example). `--no-think` turns off a hybrid model's thinking. Each run writes `report.json`,
-`report.md` and the server's log to its own folder under `out/local-ai-benchmark/`. The
-reports keep file names, never the folders they came from.
+example; a trailing `/v1` is fine). `--no-think` turns off a hybrid model's thinking. A
+`--batch-size` that wouldn't fit `--context` or `--max-output-tokens` is refused before the
+run, so it can't be scored as the model's failure. Each run writes `report.json`, `report.md`
+and the server's log to its own folder under `out/local-ai-benchmark/`. The reports keep file
+names, never the folders they came from, and never a secret flag's value.
 
 The runtime and models used here were downloaded outside the repository and checked against
 their published SHA-256 digests:

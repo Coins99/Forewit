@@ -12,14 +12,15 @@ The first pass after the server starts is cold; later passes are warm (prompt ca
 import argparse
 import asyncio
 import datetime as dt
-import hashlib
 import json
 import math
+import secrets
+import socket
 import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
@@ -49,12 +50,20 @@ from scripts.local_ai.resources import (
     process_usage,
 )
 from scripts.local_ai.scoring import MessageScore, Ratio, outcomes, quality, score
+from scripts.package_manifest import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "out" / "local-ai-benchmark"
-HARNESS_VERSION = 1
+HARNESS_VERSION = 2
 HEALTH_TIMEOUT_SECONDS = 600.0
 PROBE_KEY = "probe"
+# llama-server flags whose value is a secret, kept out of reports.
+SECRET_FLAGS = frozenset({"--api-key", "--api-key-file", "--hf-token", "-hft"})
+# A conservative context budget per call: the instructions, each email at the 8,000-character
+# limit (about 1,700 tokens measured) and the answer.
+INSTRUCTION_TOKENS = 1_000
+EMAIL_TOKENS = 2_000
+ANSWER_TOKENS_PER_EMAIL = 600
 
 
 class Analyzer(Protocol):
@@ -75,20 +84,13 @@ class BaselineAnalyzer:
         started = self._clock()
         candidates = tuple(baseline.analyze(request) for request in requests)
         seconds = self._clock() - started
-        return AnalysisResponse(candidates=candidates), CallTiming(
-            seconds, None, None, None, None, None
-        )
+        return AnalysisResponse(candidates=candidates), CallTiming(seconds=seconds)
 
 
 @dataclass(frozen=True, slots=True)
 class CallRecord:
     keys: tuple[str, ...]
-    seconds: float | None
-    first_token_seconds: float | None
-    prompt_tokens: int | None
-    completion_tokens: int | None
-    prompt_per_second: float | None
-    predicted_per_second: float | None
+    timing: CallTiming | None  # None when the call failed.
     visible_after_seconds: float  # From the pass's start until these results were ready.
     error: str | None = None
 
@@ -99,24 +101,6 @@ class Pass:
     seconds: float
     calls: tuple[CallRecord, ...]
     scores: tuple[MessageScore, ...]
-
-
-def _record(
-    keys: Sequence[str], timing: CallTiming | None, visible: float, error: str | None
-) -> CallRecord:
-    if timing is None:
-        return CallRecord(tuple(keys), None, None, None, None, None, None, visible, error)
-    return CallRecord(
-        tuple(keys),
-        timing.seconds,
-        timing.first_token_seconds,
-        timing.prompt_tokens,
-        timing.completion_tokens,
-        timing.prompt_per_second,
-        timing.predicted_per_second,
-        visible,
-        error,
-    )
 
 
 async def run_pass(
@@ -142,8 +126,8 @@ async def run_pass(
             response, timing = await analyzer.analyze(requests)
         except (LocalModelError, httpx.HTTPError) as exc:
             error = type(exc).__name__
-        keys = [request.message_key for request in requests]
-        calls.append(_record(keys, timing, clock() - started, error))
+        keys = tuple(request.message_key for request in requests)
+        calls.append(CallRecord(keys, timing, clock() - started, error))
         for message, request, outcome in zip(
             batch, requests, outcomes(requests, response), strict=True
         ):
@@ -172,9 +156,9 @@ async def run_probe(
     try:
         response, timing = await analyzer.analyze([request])
     except (LocalModelError, httpx.HTTPError) as exc:
-        return _record([PROBE_KEY], None, clock() - started, type(exc).__name__), "error"
+        return CallRecord((PROBE_KEY,), None, clock() - started, type(exc).__name__), "error"
     status = outcomes([request], response)[0].status
-    return _record([PROBE_KEY], timing, clock() - started, None), status
+    return CallRecord((PROBE_KEY,), timing, clock() - started), status
 
 
 def percentile(values: Sequence[float], share: float) -> float | None:
@@ -198,28 +182,63 @@ class Timing:
     prompt_per_second: float | None
 
 
+def weighted_rate(pairs: Iterable[tuple[int | None, float | None]]) -> float | None:
+    """Tokens per second across calls, each call's (tokens, rate): all the tokens over the
+    time they took, so a short call counts no more than its tokens."""
+    counted = [(tokens, rate) for tokens, rate in pairs if tokens and rate]
+    if not counted:
+        return None
+    return sum(tokens for tokens, _ in counted) / sum(tokens / rate for tokens, rate in counted)
+
+
 def timing(run: Pass) -> Timing:
-    calls = [call for call in run.calls if call.seconds is not None]
-    seconds = [call.seconds for call in calls if call.seconds is not None]
-    first = [c.first_token_seconds for c in calls if c.first_token_seconds is not None]
-    tokens = [c.completion_tokens for c in calls if c.completion_tokens is not None]
-    generation = [c.predicted_per_second for c in calls if c.predicted_per_second is not None]
-    prompt = [c.prompt_per_second for c in calls if c.prompt_per_second is not None]
+    timings = [call.timing for call in run.calls if call.timing is not None]
+    first = [t.first_token_seconds for t in timings if t.first_token_seconds is not None]
+    tokens = [t.completion_tokens for t in timings if t.completion_tokens is not None]
     return Timing(
         pass_seconds=run.seconds,
         first_visible_seconds=run.calls[0].visible_after_seconds if run.calls else None,
-        call_p50=percentile(seconds, 0.5),
-        call_p95=percentile(seconds, 0.95),
+        call_p50=percentile([t.seconds for t in timings], 0.5),
+        call_p95=percentile([t.seconds for t in timings], 0.95),
         first_token_p50=percentile(first, 0.5),
         first_token_p95=percentile(first, 0.95),
         completion_tokens=sum(tokens) if tokens else None,
-        generation_per_second=statistics.fmean(generation) if generation else None,
-        prompt_per_second=statistics.fmean(prompt) if prompt else None,
+        generation_per_second=weighted_rate(
+            (t.completion_tokens, t.predicted_per_second) for t in timings
+        ),
+        prompt_per_second=weighted_rate((t.prompt_evaluated, t.prompt_per_second) for t in timings),
     )
 
 
+def port_in_use(port: int) -> bool:
+    """Whether something already listens on 127.0.0.1:``port``."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def public_command(command: Sequence[str]) -> list[str]:
+    """``command`` as a report may keep it: secret values hidden, absolute paths cut to their
+    names (they would record the owner's folders)."""
+    shown: list[str] = []
+    hide_next = False
+    for part in command:
+        flag, equals, _ = part.partition("=")
+        if hide_next:
+            shown.append("<hidden>")
+        elif equals and flag in SECRET_FLAGS:
+            shown.append(f"{flag}=<hidden>")
+        else:
+            shown.append(Path(part).name if Path(part).is_absolute() else part)
+        hide_next = not hide_next and part in SECRET_FLAGS
+    return shown
+
+
 class LlamaServer:
-    """llama-server on 127.0.0.1, started for one benchmark and stopped after it."""
+    """llama-server on 127.0.0.1, started for one benchmark and stopped after it. It needs a
+    fresh API key and has no web UI, so other programs and web pages can't use it meanwhile."""
 
     def __init__(
         self,
@@ -235,6 +254,8 @@ class LlamaServer:
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.url = f"http://127.0.0.1:{port}"
+        self.port = port
+        self.api_key = secrets.token_urlsafe(32)
         self.command = [
             str(executable),
             "-m",
@@ -250,6 +271,9 @@ class LlamaServer:
             "--parallel",
             "1",
             "--jinja",
+            "--no-webui",
+            "--api-key",
+            self.api_key,
             *([] if threads is None else ["-t", str(threads)]),
             *extra,
         ]
@@ -261,27 +285,35 @@ class LlamaServer:
         self.cold_start_seconds = 0.0
 
     def __enter__(self) -> Self:
+        # Another server on the port would answer /health and be benchmarked instead.
+        if port_in_use(self.port):
+            raise RuntimeError(f"port {self.port} is already in use; stop that server first")
         self._log = self._log_path.open("w", encoding="utf-8")
-        self._started = self._clock()
-        self._process = subprocess.Popen(
-            self.command, stdout=self._log, stderr=subprocess.STDOUT, text=True
-        )
+        try:
+            self._started = self._clock()
+            self._process = subprocess.Popen(
+                self.command, stdout=self._log, stderr=subprocess.STDOUT, text=True
+            )
+            self._wait_until_ready(self._process)
+        except BaseException:  # Ctrl+C too: never leave the server running.
+            self.__exit__(None, None, None)
+            raise
+        self.cold_start_seconds = self._clock() - self._started
+        return self
+
+    def _wait_until_ready(self, process: subprocess.Popen[str]) -> None:
         with httpx.Client(timeout=5.0) as client:
             while True:
-                if self._process.poll() is not None:
-                    self.__exit__(None, None, None)
+                if process.poll() is not None:
                     raise RuntimeError(f"llama-server exited; see {self._log_path}")
                 try:
                     if client.get(f"{self.url}/health").status_code == 200:
-                        break
+                        return
                 except httpx.HTTPError:
                     pass
                 if self._clock() - self._started > HEALTH_TIMEOUT_SECONDS:
-                    self.__exit__(None, None, None)
                     raise RuntimeError("llama-server did not become ready in time")
                 time.sleep(0.25)
-        self.cold_start_seconds = self._clock() - self._started
-        return self
 
     def usage(self) -> tuple[ProcessUsage, float]:
         """The live server's usage so far and how long it has run."""
@@ -318,14 +350,6 @@ def server_version(executable: Path) -> str | None:
     return lines[0].strip() if lines else None
 
 
-def file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 async def run_analyzer(
     fixture: Fixture,
     analyzer: Analyzer,
@@ -351,6 +375,7 @@ async def run_local(
     max_output_tokens: int,
     template_kwargs: dict[str, object],
     long_probe: bool,
+    api_key: str | None = None,
 ) -> tuple[list[Pass], tuple[CallRecord, str] | None, dict[str, int], int]:
     """Run the model through the loopback guard; also return what the guard saw."""
     guard = LoopbackGuard()
@@ -361,6 +386,7 @@ async def run_local(
             model=model_name,
             max_output_tokens=max_output_tokens,
             template_kwargs=template_kwargs,
+            api_key=api_key,
         )
         passes, probe = await run_analyzer(
             fixture, model, repeats=repeats, batch_size=batch_size, long_probe=long_probe
@@ -529,11 +555,12 @@ def render_markdown(report: dict[str, object]) -> str:
         )
     probe = report["long_probe"]
     if isinstance(probe, dict):
+        call = probe["timing"] or {}
         lines += [
             "",
-            f"Longest email ({MAX_ANALYSIS_CHARS:,} characters): {_seconds(probe['seconds'])}, "
-            f"first token after {_seconds(probe['first_token_seconds'])}, "
-            f"{probe['prompt_tokens'] or 'n/a'} prompt tokens, {probe['status']}.",
+            f"Longest email ({MAX_ANALYSIS_CHARS:,} characters): {_seconds(call.get('seconds'))}, "
+            f"first token after {_seconds(call.get('first_token_seconds'))}, "
+            f"{call.get('prompt_tokens') or 'n/a'} prompt tokens, {probe['status']}.",
         ]
     resources = report["resources"]
     assert isinstance(resources, dict)
@@ -568,8 +595,10 @@ def _fixture_line(report: dict[str, object]) -> str:
     return f"{fixture['name']} ({fixture['messages']} messages, sha256 {fixture['sha256'][:12]})"
 
 
-def _mark(value: object) -> str:
-    return "–" if value is None else ("yes" if value else "no")
+def _mark(value: object, predicted: object = None) -> str:
+    """Right or wrong, with what the system said when it said something."""
+    mark = "–" if value is None else ("yes" if value else "no")
+    return mark if predicted is None else f"{mark} ({predicted})"
 
 
 def _message_row(item: dict[str, object]) -> str:
@@ -583,9 +612,12 @@ def _message_row(item: dict[str, object]) -> str:
     if isinstance(numbers, list) and numbers:
         flags.append("numbers " + ", ".join(str(n) for n in numbers))
     summary = str(item["summary"] or "").replace("|", "\\|").replace("\n", " ")
+    category = _mark(item["category"], item["predicted_category"])
+    deadline = _mark(item["deadline"], item["predicted_deadline"])
+    follow_up = _mark(item["follow_up"], item["predicted_follow_up"])
     return (
-        f"| {item['key']} | {item['sensitivity']} | {item['status']} | {_mark(item['category'])} "
-        f"| {_mark(item['deadline'])} | {_mark(item['follow_up'])} | {actions} "
+        f"| {item['key']} | {item['sensitivity']} | {item['status']} | {category} "
+        f"| {deadline} | {follow_up} | {actions} "
         f"| {item['summary_facts_found']}/{item['summary_facts']} | {'; '.join(flags) or '–'} "
         f"| {summary} |"
     )
@@ -633,7 +665,7 @@ def _probe(report: dict[str, object]) -> str:
     probe = report["long_probe"]
     if not isinstance(probe, dict):
         return "n/a"
-    return f"{_seconds(probe['seconds'])} ({probe['status']})"
+    return f"{_seconds((probe['timing'] or {}).get('seconds'))} ({probe['status']})"
 
 
 def _resource(report: dict[str, object], key: str) -> object:
@@ -706,7 +738,7 @@ def command_model(args: argparse.Namespace) -> Path:
     model_info: dict[str, object]
 
     def run(
-        base_url: str, name: str
+        base_url: str, name: str, api_key: str | None = None
     ) -> tuple[list[Pass], tuple[CallRecord, str] | None, dict[str, int], int]:
         return asyncio.run(
             run_local(
@@ -718,6 +750,7 @@ def command_model(args: argparse.Namespace) -> Path:
                 max_output_tokens=args.max_output_tokens,
                 template_kwargs=template_kwargs,
                 long_probe=not args.no_long_probe,
+                api_key=api_key,
             )
         )
 
@@ -726,7 +759,7 @@ def command_model(args: argparse.Namespace) -> Path:
         model_info = {
             "file": model_file.name,
             "bytes": model_file.stat().st_size,
-            "sha256": file_digest(model_file),
+            "sha256": sha256(model_file),
         }
         server = LlamaServer(
             args.server,
@@ -741,16 +774,12 @@ def command_model(args: argparse.Namespace) -> Path:
         runtime = {
             "server": "llama-server",
             "version": server_version(args.server),
-            # File names only: the full paths would record the owner's folders.
-            "command": [
-                Path(part).name if index in (0, 2) else part
-                for index, part in enumerate(server.command)
-            ],
+            "command": public_command(server.command),
         }
         before = battery_sample() if args.battery else None  # After hashing the model.
         with server:
             cold = server.cold_start_seconds
-            passes, probe, sent, refused = run(server.url, model_file.stem)
+            passes, probe, sent, refused = run(server.url, model_file.stem, server.api_key)
             usage, usage_seconds = server.usage()
         if usage is UNKNOWN:
             usage = finished_children_usage()
@@ -838,6 +867,18 @@ def parser() -> argparse.ArgumentParser:
     return parser
 
 
+def budget_problem(batch_size: int, context: int | None, max_output_tokens: int) -> str | None:
+    """Why a batch this large won't fit the context or the answer limit, or None. A failure
+    from either would be scored as the model's, so it is refused before the run."""
+    answer = batch_size * ANSWER_TOKENS_PER_EMAIL
+    if max_output_tokens < answer:
+        return f"--batch-size {batch_size} needs --max-output-tokens of at least {answer}"
+    needed = INSTRUCTION_TOKENS + batch_size * EMAIL_TOKENS + max_output_tokens
+    if context is not None and context < needed:
+        return f"--batch-size {batch_size} needs --context of at least {needed}"
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "model":
@@ -845,6 +886,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser().error("--server needs --model-file")
         if args.base_url is not None and args.model is None:
             parser().error("--base-url needs --model")
+        # An existing server's context is its own, so only the answer limit is checked then.
+        context = args.context if args.server is not None else None
+        problem = budget_problem(args.batch_size, context, args.max_output_tokens)
+        if problem is not None:
+            parser().error(problem)
         print(command_model(args))
     elif args.command == "baseline":
         print(command_baseline(args))

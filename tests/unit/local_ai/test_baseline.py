@@ -40,6 +40,13 @@ def test_text_without_a_deadline_has_none(text: str) -> None:
     assert baseline.find_deadline(text, FRIDAY) is None
 
 
+def test_a_month_day_long_past_is_next_years_in_both_languages() -> None:
+    december = dt.date(2026, 12, 20)
+    assert baseline.find_deadline("1月10日までに", december) == ("1月10日まで", "2027-01-10", None)
+    assert baseline.find_deadline("by Jan 10", december) == ("by Jan 10", "2027-01-10", None)
+    assert baseline.find_deadline("12月1日までに", december) == ("12月1日まで", "2026-12-01", None)
+
+
 def test_an_impossible_day_keeps_the_phrase_unresolved() -> None:
     assert baseline.find_deadline("2月30日までに", FRIDAY) == ("2月30日まで", None, None)
     assert baseline.find_deadline("by Feb 30", FRIDAY) == ("by Feb 30", None, None)

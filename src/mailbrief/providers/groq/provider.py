@@ -333,8 +333,9 @@ def _received_local(request: AnalysisRequest) -> str:
     return f"{local:%Y-%m-%d} ({_WEEKDAYS[local.weekday()]}) {local:%H:%M}"
 
 
-def _request_input(requests: Sequence[AnalysisRequest]) -> str:
-    """The call's input: exactly the minimized fields of each request, nothing else."""
+def analysis_input(requests: Sequence[AnalysisRequest]) -> str:
+    """The call's input: exactly the minimized fields of each request, nothing else. Public so
+    a local model is sent exactly the same (scripts/local_ai)."""
     messages = [
         {
             "message_key": request.message_key,
@@ -628,7 +629,7 @@ class GroqProvider:
         if not 1 <= len(keys) <= MAX_ANALYSIS_BATCH or len(set(keys)) != len(keys):
             raise ValueError("a Groq call needs 1 to 10 requests with unique message keys")
         envelope = await self._complete(
-            INSTRUCTIONS, _request_input(requests), "AnalysisWireBatch", AnalysisWireBatch
+            INSTRUCTIONS, analysis_input(requests), "AnalysisWireBatch", AnalysisWireBatch
         )
         if envelope is None:
             return AnalysisResponse(problem=AnalysisProblem.INCOMPLETE)

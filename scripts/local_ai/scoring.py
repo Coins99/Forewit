@@ -7,6 +7,7 @@ import datetime as dt
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -93,27 +94,51 @@ class MessageScore:
     unsupported_numbers: tuple[str, ...]  # Numbers in the summary or action the email lacks.
     summary: str | None
     suggestion_titles: tuple[str, ...]
+    # What the system said, so a miss can be told apart: None without a valid analysis.
+    predicted_category: str | None
+    predicted_action_required: bool | None
+    predicted_deadline: str | None  # Its day, or "unresolved" or "none".
+    predicted_follow_up: str | None
 
 
-def _digits(text: str) -> str:
-    return text.replace(",", "")
+def _number(token: str) -> Decimal | str:
+    """A number token's value, so "1,249" and "1249.00" match; text when it isn't one."""
+    try:
+        return Decimal(token.replace(",", ""))
+    except InvalidOperation:
+        return token
 
 
 def _unsupported_numbers(analysis: MessageAnalysis, request: AnalysisRequest) -> tuple[str, ...]:
-    """Numbers the summary or action states that the subject and body never write.
+    """Numbers the summary or action states that the subject and body never write, compared
+    as whole numbers: "49" isn't supported by "1,249".
 
     Clock times are left out (the model may turn 6pm into 18:00), and so is the received
     year, which a resolved date may add. A review flag, not a score.
     """
-    source = _digits(f"{request.subject}\n{request.body_text}")
-    year = str(request.received_at_utc.year)
+    source = {
+        _number(token) for token in _NUMBER.findall(f"{request.subject}\n{request.body_text}")
+    }
+    source.add(Decimal(request.received_at_utc.year))
     written = f"{analysis.summary}\n{analysis.action_text or ''}"
-    found = []
-    for token in _NUMBER.findall(_CLOCK.sub(" ", written)):
-        number = _digits(token).rstrip(".")
-        if number and number != year and number not in source:
-            found.append(token)
-    return tuple(found)
+    return tuple(
+        token for token in _NUMBER.findall(_CLOCK.sub(" ", written)) if _number(token) not in source
+    )
+
+
+def _mentions(title: str, word: str) -> bool:
+    """Whether a casefolded title uses a casefolded keyword: from the start of a word for a
+    Latin keyword, so "pr" isn't found in "approve", and anywhere for others, since Japanese
+    has no spaces."""
+    if word[:1].isascii() and word[:1].isalnum():
+        return re.search(r"(?<![a-z0-9])" + re.escape(word), title) is not None
+    return word in title
+
+
+def _predicted_deadline(analysis: MessageAnalysis) -> str:
+    if analysis.deadline_date is not None:
+        return analysis.deadline_date.isoformat()
+    return analysis.deadline_precision.value
 
 
 def _deadline_days(analysis: MessageAnalysis) -> Iterable[dt.date]:
@@ -154,7 +179,9 @@ def _match_actions(message: FixtureMessage, analysis: MessageAnalysis | None) ->
         words = [word.casefold() for word in action.any_of]
         for suggestion in unused:
             title = suggestion.title.casefold()
-            if suggestion.ownership is action.ownership and any(w in title for w in words):
+            if suggestion.ownership is action.ownership and any(
+                _mentions(title, word) for word in words
+            ):
                 unused.remove(suggestion)
                 matched += 1
                 break
@@ -214,6 +241,10 @@ def score(message: FixtureMessage, request: AnalysisRequest, outcome: Outcome) -
         unsupported_numbers=() if analysis is None else _unsupported_numbers(analysis, request),
         summary=None if analysis is None else analysis.summary,
         suggestion_titles=() if analysis is None else tuple(s.title for s in analysis.suggestions),
+        predicted_category=None if analysis is None else analysis.category.value,
+        predicted_action_required=None if analysis is None else analysis.action_required,
+        predicted_deadline=None if analysis is None else _predicted_deadline(analysis),
+        predicted_follow_up=None if analysis is None else analysis.follow_up.value,
     )
 
 

@@ -145,14 +145,24 @@ def _resolve_day(phrase: str, received: dt.date) -> dt.date | None:
     match = re.fullmatch(rf"({_MONTH})\.? (\d{{1,2}})(?:st|nd|rd|th)?(?:,? (\d{{4}}))?", text)
     if match is None:
         return None
-    year = int(match[3]) if match[3] else received.year
+    if not match[3]:
+        return _month_day(_MONTHS[match[1]], int(match[2]), received)
     try:
-        day = dt.date(year, _MONTHS[match[1]], int(match[2]))
+        return dt.date(int(match[3]), _MONTHS[match[1]], int(match[2]))
     except ValueError:
         return None
-    if not match[3] and day < received - dt.timedelta(days=31):
-        day = day.replace(year=year + 1)
-    return day
+
+
+def _month_day(month: int, day: int, received: dt.date) -> dt.date | None:
+    """A month and day without a year: this year's, or next year's once this year's is more
+    than 31 days past (the app's own window for past deadlines). None for no such day."""
+    try:
+        dated = dt.date(received.year, month, day)
+        if dated < received - dt.timedelta(days=31):
+            dated = dated.replace(year=received.year + 1)
+    except ValueError:
+        return None
+    return dated
 
 
 def find_deadline(text: str, received: dt.date) -> tuple[str, str | None, str | None] | None:
@@ -172,11 +182,8 @@ def find_deadline(text: str, received: dt.date) -> tuple[str, str | None, str | 
             monday += dt.timedelta(days=7)
         day = monday + dt.timedelta(days=_JA_WEEKDAYS.index(japanese["weekday"]))
         return japanese[0], day.isoformat(), None
-    try:
-        dated = dt.date(received.year, int(japanese["month"]), int(japanese["day"]))
-    except ValueError:
-        return japanese[0], None, None
-    return japanese[0], dated.isoformat(), None
+    dated = _month_day(int(japanese["month"]), int(japanese["day"]), received)
+    return japanese[0], None if dated is None else dated.isoformat(), None
 
 
 def _action(sentence: str, ownership: ActionOwnership, received: dt.date) -> ActionCandidate:

@@ -8,7 +8,7 @@ from mailbrief.domain.analysis import (
     AnalysisResponse,
 )
 from scripts.local_ai.fixture import FixtureMessage, load_fixture
-from scripts.local_ai.scoring import Outcome, outcomes, quality, score
+from scripts.local_ai.scoring import Outcome, _mentions, outcomes, quality, score
 from tests.unit.providers.groq.groq_fixtures import wire_action, wire_result
 
 FIXTURE = load_fixture()
@@ -59,6 +59,22 @@ def test_a_good_analysis_scores_every_field() -> None:
     assert (result.summary_facts_found, result.summary_facts) == (2, 2)
     assert result.forbidden == () and result.past_deadlines == 0
     assert result.unsupported_numbers == ()
+    assert (result.predicted_category, result.predicted_deadline) == ("action", "2026-10-30")
+    assert (result.predicted_action_required, result.predicted_follow_up) == (True, "none")
+
+
+def test_numbers_are_compared_whole() -> None:
+    message = _message("m01")
+    fields = GOOD_M01 | {"summary": "A $49 charge, not $1,249.00, from 1-800-555-0199."}
+    result = score(message, FIXTURE.request(message), _outcome("m01", **fields))
+    assert result.unsupported_numbers == ("49",)  # Inside "1,249", but not the same number.
+
+
+def test_latin_keywords_match_from_the_start_of_a_word() -> None:
+    assert _mentions("review pr #482", "pr") and _mentions("prepare slides", "pr")
+    assert not _mentions("approve the budget", "pr")
+    assert not _mentions("complete the form", "let")
+    assert _mentions("町内会費を払う", "払") and _mentions("check #482", "#482")
 
 
 def test_a_wrong_day_and_an_invented_number_are_caught() -> None:

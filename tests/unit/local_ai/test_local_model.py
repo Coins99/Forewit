@@ -44,7 +44,7 @@ def _content_chunks(content: str, finish: str = "stop") -> list[dict[str, Any]]:
         {
             "choices": [],
             "usage": {"prompt_tokens": 900, "completion_tokens": 300},
-            "timings": {"prompt_per_second": 180.5, "predicted_per_second": 12.5},
+            "timings": {"prompt_n": 125, "prompt_per_second": 180.5, "predicted_per_second": 12.5},
         },
     ]
 
@@ -58,6 +58,10 @@ def _clock() -> Iterator[float]:
 )
 def test_loopback_urls_are_accepted(url: str) -> None:
     assert require_loopback(url) == url.rstrip("/")
+
+
+def test_an_openai_style_base_url_loses_its_v1() -> None:
+    assert require_loopback("http://127.0.0.1:11434/v1/") == "http://127.0.0.1:11434"
 
 
 @pytest.mark.parametrize(
@@ -102,9 +106,11 @@ async def test_analyze_sends_groqs_instructions_and_schema_and_times_the_stream(
             model="qwen",
             max_output_tokens=512,
             template_kwargs={"enable_thinking": False},
+            api_key="per-run-key",
             clock=lambda: next(ticks),
         )
         response, timing = await model.analyze([request])
+    assert route.calls.last.request.headers["Authorization"] == "Bearer per-run-key"
     body = json.loads(route.calls.last.request.content)
     assert body["messages"][0] == {"role": "system", "content": INSTRUCTIONS}
     assert json.loads(body["messages"][1]["content"])["messages"][0]["body"] == request.body_text
@@ -118,6 +124,7 @@ async def test_analyze_sends_groqs_instructions_and_schema_and_times_the_stream(
     assert response.usage == AIUsage(input_tokens=900, output_tokens=300)
     assert timing.first_token_seconds == 0.5 and timing.seconds == 4.0
     assert (timing.prompt_per_second, timing.predicted_per_second) == (180.5, 12.5)
+    assert timing.prompt_evaluated == 125
 
 
 async def test_a_server_error_raises_without_its_text(respx_mock: respx.MockRouter) -> None:
@@ -147,11 +154,10 @@ async def test_a_batch_needs_one_to_ten_unique_keys() -> None:
             await model.analyze([])
 
 
-def test_a_model_on_another_host_cannot_be_configured() -> None:
-    with pytest.raises(ValueError, match="localhost"):
-        LocalModel(
-            httpx.AsyncClient(), base_url="https://api.groq.com", model="x", max_output_tokens=1
-        )
+async def test_a_model_on_another_host_cannot_be_configured() -> None:
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(ValueError, match="localhost"):
+            LocalModel(client, base_url="https://api.groq.com", model="x", max_output_tokens=1)
 
 
 @pytest.mark.parametrize(
