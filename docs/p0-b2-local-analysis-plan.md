@@ -1,7 +1,7 @@
 # P0-B2: local email analysis pipeline — implementation plan
 
 Date: 2026-10-30. Status: approved by the owner on 2026-10-30 with the four recommended
-decisions below. Part 1 is implemented; Parts 2–7 are not.
+decisions below. Parts 1 and 2 are implemented; Parts 3–7 are not.
 Branch: `feat/local-ai-pipeline`, cut from `feat/local-ai-benchmark` (P0-B1, not yet on
 `main`); rebase onto `main` once P0-B1 merges. One pull request, built in parts, as M8 was.
 
@@ -135,6 +135,34 @@ Done. What the real `llama-server` b12015 showed, and the code now relies on:
   to the manifest's hosts (redirects limited to them), and it carries no mail data.
 - CLI: `forewit-gmail-diagnostic local-ai status | setup | remove`.
 - Tests with respx and synthetic archives; no real downloads.
+
+Done. What the pinned downloads showed, and the code now relies on:
+
+- The pins (`providers/local/manifest.py`): llama.cpp b12015 (commit a34de86), the Windows
+  x64 Vulkan zip (37,515,234 bytes) and the macOS arm64 build, which is a `.tar.gz`
+  (16,509,291 bytes) with a `llama-b12015/` folder and versioned `.dylib` symlinks. The
+  model comes from `unsloth/Qwen3-4B-Instruct-2507-GGUF` at revision `a06e946b`. The SHA-256s
+  were checked against GitHub's and Hugging Face's API metadata. Setup also hashed the
+  Windows zip and the model locally. The macOS archive's full listing is inferred from
+  the release workflow; check it on a Mac.
+- Every pinned URL redirects to a signed, expiring address: GitHub to
+  `release-assets.githubusercontent.com`, Hugging Face to a CDN host that depends on where
+  the request comes from (`us.aws.cdn.hf.co` here). So only the first addresses are pinned,
+  and the allowlist takes `.hf.co` as "any host in that domain".
+- Resuming sends `Range: bytes=N-M`. GitHub's host refuses some range forms with 501, and
+  answers this one with 206.
+- On Windows, `llama-server.exe` is a 9.7 KB launcher for `llama-server-impl.dll`, so the
+  whole archive is unpacked and every regular file is recorded. The macOS archive goes
+  through `tarfile`'s "data" filter, which keeps the library symlinks inside the folder.
+- The Windows zip has no copy of llama.cpp's own MIT license (only libomp's). Forewit
+  should show that notice itself (Part 7).
+- Hugging Face's Protect AI scan lists this GGUF as safe, but with a "PAIT-GGUF-100" note,
+  probably about its chat template, which `--jinja` runs. Review it with the ADR (Part 7).
+- Live on the benchmark laptop, from a partial model download:
+  - Setup fetched the runtime from GitHub and only the missing last MiB of the model from
+    Hugging Face's CDN (HTTP 206). It checked both and was ready in 14 seconds.
+  - The unpacked server then passed `LlamaServer`'s checks with the model.
+  - `local-ai remove` cleared it all.
 
 ### Part 3 — Mode, consent and limit
 

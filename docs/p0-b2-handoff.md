@@ -5,17 +5,18 @@ commit that finishes Part 7**, and remove its mention from AGENTS.md. The plan i
 `docs/p0-b2-local-analysis-plan.md`, stays: it has the design, the owner's four decisions
 and the details of every part.
 
-Branch: `feat/local-ai-pipeline`, one pull request to `main` for all seven parts. It also
-carries P0-B1 (`feat/local-ai-benchmark`). Commit each part with its tests, then push.
+Branch: `feat/local-ai-pipeline`, one pull request to `main` for all seven parts (P0-B1 is
+already on `main`). Commit each part with its tests, then push only this branch: this
+checkout's `push.default` is `matching`, so a plain `git push` also tries every other branch.
 
 ## Parts
 
 - [x] **Part 1 — local provider and side process** (`1c619d1`): `providers/local/`
   (`transport.py`, `provider.py`, `server.py`), tests with a stand-in server in
   `tests/unit/providers/local/`, and the benchmark running this code.
-- [ ] **Part 2 — runtime and model setup**: `providers/local/manifest.py` (pinned URLs,
+- [x] **Part 2 — runtime and model setup**: `providers/local/manifest.py` (pinned URLs,
   sizes, SHA-256, licenses), `services/local_setup.py` (status, resumable download, digest
-  check, safe extraction, free-space check, remove), the device check and the
+  check, safe extraction, free-space check, remove), `providers/local/device.py` and the
   `forewit-gmail-diagnostic local-ai status | setup | remove` CLI.
 - [ ] **Part 3 — mode, consent and limit**: migration 0025 (`analysis_mode`,
   `local_message_limit`), the `local` consent (`local-1`), cleared by restore, and the
@@ -31,11 +32,11 @@ carries P0-B1 (`feat/local-ai-benchmark`). Commit each part with its tests, then
 
 ## Before starting on another computer
 
-- Run `uv sync --locked --all-groups`. A venv made before the Forewit rename has no
-  `forewit*` commands, and 4 tests in `tests/unit/test_branding.py` fail until it does.
-- Real `llama-server` checks need llama.cpp release b12015 (Vulkan build on Windows) and the
-  models listed in `docs/local-ai-benchmark.md` ("Running it"), with their SHA-256 digests.
-  They live outside the repository; on the first computer they are in `../local-ai/`. Part 2
+- Run `uv sync --locked --all-groups`. A venv made before the Forewit rename h- Real `llama-server` checks need the pinned runtime and model. Since Part 2, run
+  `forewit-gmail-diagnostic local-ai setup` (about 2.5 GB, checked against the pins; add
+  `--folder PATH` to keep them out of the app's data). A partial `.part` file in the folder's
+  `downloads/` is resumed, so a copy of an already downloaded model saves the download.
+he first computer they are in `../local-ai/`. Part 2
   pins these same files in the manifest.
 - The server tests start a stand-in server as real processes, about 30 seconds in all.
 

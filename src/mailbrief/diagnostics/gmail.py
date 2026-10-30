@@ -8,7 +8,7 @@ import getpass
 import logging
 import threading
 import unicodedata
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -72,6 +72,14 @@ from mailbrief.providers.gmail.factory import GmailBodies, gmail_auth, gmail_pro
 from mailbrief.providers.groq.credentials import GroqKeyStore, parse_api_key
 from mailbrief.providers.groq.factory import groq_provider
 from mailbrief.providers.groq.provider import KEY_MISSING_MESSAGE, PRIVACY_NOTICE, PROVIDER_NAME
+from mailbrief.providers.local.device import (
+    assess,
+    list_devices,
+    memory_note,
+    total_memory_bytes,
+)
+from mailbrief.providers.local.device import summary as device_summary
+from mailbrief.providers.local.manifest import manifest_for
 from mailbrief.services.actions import (
     COMPLETED_LIST_LIMIT,
     ActionConflictError,
@@ -112,6 +120,18 @@ from mailbrief.services.history import (
     check_brief_date,
     coverage_line,
     parse_brief_date,
+)
+from mailbrief.services.local_setup import (
+    UNSUPPORTED,
+    LocalSetup,
+    LocalSetupError,
+    NotEnoughSpaceError,
+    SetupProgress,
+    SetupStage,
+    SetupState,
+    SetupUnsupportedError,
+    gigabytes,
+    setup_lines,
 )
 from mailbrief.services.preferences import (
     PreferencesService,
@@ -618,6 +638,72 @@ async def _ask(prompt: str) -> str:
 
     threading.Thread(target=read, name="mailbrief-prompt", daemon=True).start()
     return (await answer).strip()
+
+
+def _setup_progress() -> Callable[[SetupProgress], None]:
+    """Print setup's progress in steps of 10%, and once when unpacking starts."""
+    shown: list[object] = []
+
+    def show(update: SetupProgress) -> None:
+        if update.stage is SetupStage.UNPACKING:
+            step: object = SetupStage.UNPACKING
+            text = "Unpacking llama.cpp..."
+        else:
+            step = update.done_bytes * 10 // max(update.total_bytes, 1)
+            text = f"Downloaded {gigabytes(update.done_bytes)} of {gigabytes(update.total_bytes)}"
+        if step not in shown:
+            shown.append(step)
+            print(text, flush=True)
+
+    return show
+
+
+async def local_ai(action: str, *, folder: Path | None, assume_yes: bool) -> int:
+    """Set up, check or remove the model that analyzes email on this computer (P0-B2); it
+    never reads mail, and only setup uses the internet."""
+    setup = LocalSetup(folder or AppPaths.from_qt().local_ai_dir, manifest_for())
+    memory = await asyncio.to_thread(total_memory_bytes)
+    if action == "remove":
+        answer = "yes" if assume_yes else await _ask("Remove the local AI files? [y/N] ")
+        if answer.lower() not in {"y", "yes"}:
+            print("Nothing removed.")
+            return 6
+        await setup.remove()
+        print("Local AI files removed.")
+        return 0
+    if action == "setup":
+        manifest = setup.manifest
+        if manifest is None:
+            raise SetupUnsupportedError(UNSUPPORTED)
+        if (await setup.status()).state is not SetupState.READY:
+            for line in setup_lines(manifest):
+                print(line)
+            note = memory_note(assess(memory, None))
+            if note is not None:
+                print(note)
+            answer = "yes" if assume_yes else await _ask("Download? [y/N] ")
+            if answer.lower() not in {"y", "yes"}:
+                print("Nothing downloaded.")
+                return 6
+            await setup.setup(_setup_progress())
+    status = await setup.status()
+    manifest = setup.manifest
+    if status.state is SetupState.UNSUPPORTED or manifest is None:
+        print(f"Local AI: not available. {UNSUPPORTED}")
+    elif status.state is SetupState.READY and status.server is not None:
+        print(f"Local AI: ready (llama.cpp {manifest.runtime.version}, {manifest.model.name})")
+        devices = await asyncio.to_thread(list_devices, status.server)
+        print(device_summary(assess(memory, devices)))
+    elif status.state is SetupState.DAMAGED:
+        print("Local AI: damaged. Run local-ai setup to download what changed again.")
+    else:
+        share = status.downloaded_bytes * 100 // max(status.total_bytes, 1)
+        total = gigabytes(status.total_bytes)
+        print(f"Local AI: not set up ({share}% of {total} downloaded). Run local-ai setup.")
+        note = memory_note(assess(memory, None))
+        if note is not None:
+            print(note)
+    return 0
 
 
 class CliConsentGate:
@@ -1620,6 +1706,21 @@ def main(arguments: Sequence[str] | None = None) -> int:
         choices=("set", "status", "clear"),
         help="set prompts without echoing; status never shows the key; clear is safe to repeat.",
     )
+    local_parser = commands.add_parser(
+        "local-ai",
+        help="Set up, check or remove the model that analyzes email on this computer.",
+    )
+    local_parser.add_argument(
+        "action",
+        choices=("status", "setup", "remove"),
+        help="setup downloads about 2.5 GB after asking; status and remove use no network.",
+    )
+    local_parser.add_argument(
+        "--yes", action="store_true", help="Answer yes to the download or removal question."
+    )
+    local_parser.add_argument(
+        "--folder", type=Path, help="Optional local AI folder; defaults to app data."
+    )
     consent_parser = commands.add_parser(
         "ai-consent",
         help=(
@@ -1860,6 +1961,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             )
         if args.command == "ai-key":
             return ai_key(args.action)
+        if args.command == "local-ai":
+            return asyncio.run(local_ai(args.action, folder=args.folder, assume_yes=args.yes))
         if args.command == "actions":
             return asyncio.run(
                 actions(
@@ -1955,6 +2058,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
     except DataInUseError as exc:
         print(str(exc))
         return 5
+    except LocalSetupError as exc:
+        print(str(exc))  # Static; names no path.
+        return 3 if isinstance(exc, NotEnoughSpaceError | SetupUnsupportedError) else 4
     except ConfigurationError as exc:
         # AI setup errors (model, key, vault) carry static, actionable messages.
         print(str(exc) if args.command in _OWN_MESSAGE_COMMANDS else _SETUP_UNAVAILABLE)
