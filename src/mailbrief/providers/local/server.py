@@ -220,6 +220,15 @@ def _terminate(pid: int) -> None:
     os.kill(pid, signal.SIGTERM)
 
 
+def _forget(record: Path) -> None:
+    """Remove the record if it can be. One that can't is harmless: it names no running
+    server, or the next start checks the process before ending it."""
+    try:
+        record.unlink(missing_ok=True)
+    except OSError:  # A parent that isn't a folder, or no permission.
+        logger.info("Local model server record could not be removed")
+
+
 def end_leftover(
     record: Path,
     *,
@@ -235,7 +244,7 @@ def end_leftover(
         return False
     except (OSError, ValueError):
         data = None
-    record.unlink(missing_ok=True)
+    _forget(record)
     if not isinstance(data, dict):
         return False
     pid, program, port = data.get("pid"), data.get("program"), data.get("port")
@@ -506,4 +515,4 @@ class LlamaServer:
             _release_job(self._job)
             self._job = None
         if self._record is not None and process is not None:
-            self._record.unlink(missing_ok=True)
+            _forget(self._record)

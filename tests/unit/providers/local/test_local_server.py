@@ -327,6 +327,14 @@ def never(pid: int) -> None:
     raise AssertionError(f"process {pid} must not be ended")
 
 
+def test_a_record_under_a_file_is_no_leftover(tmp_path: Path) -> None:
+    blocked = tmp_path / "a-file"
+    blocked.write_text("", encoding="utf-8")
+    # macOS and Linux refuse the path as NotADirectoryError, which missing_ok doesn't cover.
+    record = blocked / "server.json"
+    assert not end_leftover(record, command_line=lambda pid: None, terminate=never)
+
+
 def _record(tmp_path: Path, **values: object) -> Path:
     path = tmp_path / "server.json"
     path.write_text(
