@@ -126,6 +126,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `llama-server` on loopback) and a rule-based baseline, over synthetic fixtures, through the
   app's own `validate_candidate`. Results and the recommendation for P0-B2 are in
   `docs/local-ai-benchmark.md`.
+- P0-B2 (local email analysis), Part 1 of 7 implemented; nothing in the app uses it yet:
+  `providers/local/`, the local model behind the `AIProvider` port and `llama-server` as a
+  hardened side process. The plan, its parts and the owner's decisions are in
+  `docs/p0-b2-local-analysis-plan.md`.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
   reference, in the system's light or dark mode unless Settings > Appearance keeps one.
@@ -165,6 +169,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passes its own fixed messages, and `error_reasons()` reads Google's error reasons.
   `GmailBodies` (`gmail/factory.py`) opens Gmail for one body download.
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
+  `providers/local/` (P0-B2): `transport.py` (`LoopbackGuard`, which refuses every request
+  to a host other than localhost, 127.0.0.1 or ::1), `provider.py` (`LocalModelProvider`,
+  Groq's prompt and schema sent to a `ModelServer` on loopback) and `server.py`
+  (`LlamaServer`: a free port of 127.0.0.1, a fresh API key per launch, no web UI, a wrong-key
+  and right-key check that the server on the port is ours, output kept in memory only, a
+  Job Object on Windows and a leftover record elsewhere).
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
@@ -273,10 +283,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
-- `scripts/local_ai/`: the P0-B1 benchmark (`python -m scripts.local_ai.benchmark`). Its
-  `LoopbackGuard` refuses every request to a host other than localhost, 127.0.0.1 or ::1,
-  and the model server is an external program, so no local-model library is added. Reports
-  go to `out/local-ai-benchmark/`; use synthetic fixtures only, since reports hold analyses.
+- `scripts/local_ai/`: the P0-B1 benchmark (`python -m scripts.local_ai.benchmark`). It runs
+  the app's own `providers/local` provider and server, through `LoopbackGuard`; the model
+  server is an external program, so no local-model library is added. Reports go to
+  `out/local-ai-benchmark/`; use synthetic fixtures only, since reports hold analyses.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
   `out/dist/onefile/Forewit.exe`; check with `check_package.py --layout onefile
   --executable out/dist/onefile/Forewit.exe`. Keep the existing Qt profile identity.

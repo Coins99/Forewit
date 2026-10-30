@@ -1,6 +1,7 @@
 # P0-B2: local email analysis pipeline — implementation plan
 
-Date: 2026-10-30. Status: proposed, awaiting owner approval. Nothing is implemented yet.
+Date: 2026-10-30. Status: approved by the owner on 2026-10-30 with the four recommended
+decisions below. Part 1 is implemented; Parts 2–7 are not.
 Branch: `feat/local-ai-pipeline`, cut from `feat/local-ai-benchmark` (P0-B1, not yet on
 `main`); rebase onto `main` once P0-B1 merges. One pull request, built in parts, as M8 was.
 
@@ -65,7 +66,7 @@ Each has a recommendation; the plan below assumes it.
   proposals work unchanged, and local and Groq results never count as each other's hits.
   One email per call, as the benchmark measured.
 - **Side process.** `llama-server` on 127.0.0.1 only (so Windows shows no firewall
-  prompt), on a free port, with a fresh `--api-key` per launch, `--no-webui` and
+  prompt), on a free port, with a fresh `--api-key` per launch, `--no-ui` and
   `--parallel 1`. Its output goes to a bounded in-memory buffer, never to Forewit's logs or
   files, and only known startup failures (model won't load, out of memory) become static
   error codes; it never runs with verbose logging, which would print prompts. It starts on
@@ -99,6 +100,24 @@ Each part is one or more commits with its tests, and leaves the app working.
 - Tests: a stand-in `llama-server` (a small Python program on loopback that serves
   `/health` and `/v1/chat/completions`) for start, stop, interrupted start, a taken port,
   a crash and a missing key; the Job Object test runs on Windows only.
+
+Done. What the real `llama-server` b12015 showed, and the code now relies on:
+
+- Only `/health` and `/v1/health` answer without the key; `/v1/models`, `/props`,
+  `/tokenize` and the chat endpoint answer HTTP 401 to a missing or wrong key. So "ours"
+  means: a wrong key gets 401 from `/v1/chat/completions` and Forewit's key gets 200 from
+  `/props`, which runs no model. A program holding the port is sent `{}` and never an email.
+- `--no-webui` is deprecated; the flag is `--no-ui`.
+- A prompt over the context size gets HTTP 400 before the stream starts, so it is a
+  rejected request (that message alone fails), not a broken server.
+- At the default verbosity its output holds no prompt text; it is kept in memory anyway.
+- It listens before it loads the model, and fails to bind within 0.2 s ("couldn't bind HTTP
+  server socket"). Windows takes about 2 seconds to refuse a loopback connection nothing
+  listens on, so health checks connect with a 0.5-second limit.
+- Through `LlamaServer` and `LocalModelProvider`, the 4B model was ready in 3.7 seconds on
+  the benchmark laptop, and one email (376 output tokens) passed `validate_candidate`, with
+  requests to 127.0.0.1 only. The benchmark's 10 held-out emails, run through the same code
+  with the 1.7B model, all validated.
 
 ### Part 2 — Runtime and model setup
 
