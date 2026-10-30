@@ -227,7 +227,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
   Return or Enter activates a row once on every platform, `clear_list`, which empties a
-  `QListWidget`, and `SafeList`, the list widget whose `clear()` is `clear_list`;
+  `QListWidget`, and `SafeList`, the list widget whose `clear()` is `clear_list`; `layouts.py`
+  holds `take_widget`, which moves a widget out of its layout so PySide drops the item's
+  wrapper;
   `HeaderRowsModel`
   (`brief_list.py`) is the model of a painted list with section headers, which the keyboard
   skips; `dialog_guard.py` shows dialogs
@@ -576,6 +578,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   of their Python wrappers or data there can crash on Cocoa (CI's macOS UI step).
   `SafeList.clear()` is `lists.clear_list()`, which takes each item out with collection
   paused and changes the current row once, as Qt's `clear()` does.
+- Before another layout (or another cell of the same grid) takes a widget, call
+  `layouts.take_widget(widget)`, and never `setParent` a widget out of a layout added to
+  another with `addLayout` or `insertLayout` after it was filled. PySide wraps that
+  layout's items; when Qt deletes one behind PySide's back, its wrapper stays registered at
+  the freed address, and a QObject later made there gets it as its own wrapper (a Windows
+  access violation in `SignalManager::retrieveMetaObject`). A layout filled only by
+  `addWidget` on itself has no such wrappers. After every UI test, `tests/ui/conftest.py`
+  checks that none is left (`tests/ui/layout_items.py`).
 
 ## Dormant Microsoft notes
 
