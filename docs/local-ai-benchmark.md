@@ -4,7 +4,7 @@ P0-B1 of the [privacy-first email AI workstream](future-implementations.md#71-p0
 (D09) asks whether a model on the owner's own computer can analyze overnight mail well and
 fast enough to brief it without sending anything to Groq, and what a lightweight local
 alternative without a model would give instead. This page records how that was measured, what
-was found on one Windows laptop, and what P0-B2 should build. Nothing here ships in the
+was found on one Windows laptop and a MacBook Air, and what P0-B2 should build. Nothing here ships in the
 desktop app.
 
 ## Answer
@@ -132,6 +132,47 @@ The notes below are for the 4B model.
 - It did not follow the injected instruction: its summary of that email says the mailbox
   will be suspended unless the password is verified.
 
+### On a Mac
+
+The 4B model on a MacBook Air: Apple M2 (8 cores, 8-core GPU), 8 GB of RAM, macOS 27.2, on
+battery power, with other apps open. The same llama.cpp release (b12015, its Metal build),
+model file, settings and harness version 2. On the 20 emails, against the Windows laptop:
+
+| Measure | Windows laptop | MacBook Air M2 |
+| --- | --- | --- |
+| Valid analyses | 20/20 | 20/20 |
+| Category / action required / deadline day | 17/20, 13/17, 13/15 | 17/20, 13/17, 13/15 |
+| Follow-up signal | 16/20 (80%) | 17/20 (85%) |
+| Expected actions found / precision | 5/10, 5/6 | 6/10, 6/6 |
+| Summary facts / Japanese in Japanese | 35/35, 1/1 | 35/35, 1/1 |
+| Secret echoed / deadlines before arrival | 1 / 0 | 1 / 1 |
+| All 20, cold / warm pass | 354 s / 346 s | 190 s / 164 s |
+| First result, cold / warm pass | 31.6 s / 27.1 s | 20.0 s / 13.3 s |
+| Per email, p50 / p95 (cold pass) | 14.6 s / 30.6 s | 7.9 s / 14.6 s |
+| Generation / prompt rate (tokens per second, cold pass) | 12.9 / 191 | 25.7 / 248 |
+| Longest email | 22.2 s | 13.1 s |
+| Cold start | 5.3 s | 7.7 s |
+| Battery used (whole run) | 4.67 Wh | 3.68 Wh |
+| Benchmark requests to hosts other than loopback | 0 of 41 | 0 of 41 |
+
+- About 8 seconds per email and about 3 minutes for the 20: the M2 is about twice as fast
+  as the Radeon 780M, and the model fits in 8 GB.
+- Temperature 0 doesn't give the same answers on Metal as on Vulkan, but the quality is
+  within an email or two, with the same weak points: no follow-up on either cancellation,
+  来週の水曜日 resolved to Tuesday 3 November, the one-time code repeated. On the Q4 slides
+  email one of the two suggestions got a deadline dated before the email arrived.
+- An earlier run with harness version 1 gave the same quality figures, but its warm pass was
+  the slower one (206 s cold, 225 s warm) and its cold start 18.7 s: this fanless laptop's
+  timings vary from run to run by 10 to 20%.
+- Memory: macOS doesn't count the memory-mapped model file in a process's footprint, so the
+  1.23 GiB peak in the report (and `footprint`'s 1,237 MB) is the server without its 2.5 GB
+  of weights; with them, about 3.7 GB, close to Windows.
+- Energy: 3.68 Wh over the whole run (two passes and the long email, about 6.3 minutes), or
+  8% of the battery, about 35 W for the whole computer with its other apps; roughly 1.6 Wh
+  per 20 emails. macOS reports charge and voltage, not energy, so the harness counts the
+  charge used at the average voltage, since the voltage sags under load.
+- CPU: 239 s of CPU time, 0.6 cores busy on average.
+
 ## Recommendation for P0-B2
 
 - **Runtime**: llama.cpp's `llama-server` (MIT) as a side process that Forewit starts and
@@ -158,15 +199,16 @@ The notes below are for the 4B model.
   a cross-check).
 - **Shorter local output**: generation is most of the time, so asking for steps only when
   the owner opens a suggestion could cut per-email time sharply.
-- **Device expectations**, to confirm before release: 16 GB of RAM and a GPU llama.cpp can
-  use (Vulkan or Metal) for about 15 seconds per email; without one, expect about twice as
-  long, which still suits overnight precomputation. Qwen3-1.7B is too weak to serve smaller
+- **Device expectations**, to confirm before release: a GPU llama.cpp can use (Vulkan or
+  Metal), for about 15 seconds per email on the Windows laptop and about 8 on an Apple M2,
+  where 8 GB of RAM was enough; without one, expect about twice as long, which still suits
+  overnight precomputation. Qwen3-1.7B is too weak to serve smaller
   machines; on those, show the baseline's labelled preview until a better small model is
   measured.
 
 ## Not yet measured
 
-- macOS (Apple silicon with Metal), and a machine with 8 GB of RAM or no usable GPU.
+- A machine with no usable GPU, and on macOS the held-out 10 and the 1.7B model.
 - `llama-server`'s own network connections (see the recommendation above).
 - Other small models (for example in the 3B class), which might fill the gap the 1.7B
   model leaves.
@@ -235,8 +277,8 @@ Reports contain every analysis, so only synthetic fixtures belong in this harnes
   email (8,000 characters, the analysis limit).
 - **Resources**: the server's peak working set, its GPU memory (Windows' GPU Process Memory
   counters, dedicated plus shared, read at the end), its CPU time and the average number of
-  busy cores, and the battery's charge before and after (Windows' `BatteryStatus`, only
-  meaningful on battery power).
+  busy cores, and the battery's charge before and after (Windows' `BatteryStatus`, or on
+  macOS `ioreg`'s `AppleSmartBattery` charge and voltage; only meaningful on battery power).
 - **Network**: every request the benchmark makes goes through `LoopbackGuard`, which refuses
   any host other than localhost, 127.0.0.1 and ::1 before anything is sent and counts what it
   sent by host. The model and baseline runs report those counts. They cover the benchmark's
@@ -267,5 +309,6 @@ their published SHA-256 digests:
 | File | Source | SHA-256 |
 | --- | --- | --- |
 | `llama-b12015-bin-win-vulkan-x64.zip` (37.5 MB) | github.com/ggml-org/llama.cpp, release b12015 | `20129400daa3d8216a1985abf942d993ba732419053540cca1ad6487bfd8ebe6` |
+| `llama-b12015-bin-macos-arm64.tar.gz` (16.5 MB) | github.com/ggml-org/llama.cpp, release b12015 | `f43344dcede6ec565a0956e25dee199f21566768947092ca468a5671d154620c` |
 | `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (2.50 GB) | huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF | `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597` |
 | `Qwen3-1.7B-Q4_K_M.gguf` (1.11 GB) | huggingface.co/unsloth/Qwen3-1.7B-GGUF | `b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897` |
