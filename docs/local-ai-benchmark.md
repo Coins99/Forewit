@@ -34,7 +34,9 @@ email in English, and it obeyed the injected instruction, summarizing the phishi
 
 One Windows 11 laptop: AMD Ryzen 7 PRO 7840U (8 cores, 16 threads), Radeon 780M integrated
 GPU through Vulkan, 32 GB RAM, on battery power. llama.cpp b12015, all layers on the GPU,
-8,192-token context, one slot. Both fixtures are described [below](#the-fixtures).
+8,192-token context, one slot, a fresh API key and no web UI. Both fixtures are described
+[below](#the-fixtures). These are harness version 2's reports; the runs before its review
+fixes gave the same quality figures, with timings within a few percent.
 
 On the 20 emails:
 
@@ -79,31 +81,30 @@ Speed and resources on the 20 emails (the baseline takes milliseconds):
 
 | Measure | 4B, cold pass | 4B, warm pass | 1.7B, warm pass |
 | --- | --- | --- | --- |
-| All 20 emails | 365 s | 354 s | 145 s |
-| First result | 30.4 s | 27.4 s | 6.1 s |
-| Per email, p50 / p95 | 15.6 s / 30.4 s | 15.0 s / 27.4 s | 6.2 s / 11.9 s |
-| Time to first token, p50 | 0.8 s | 0.8 s | 0.4 s |
+| All 20 emails | 354 s | 346 s | 142 s |
+| First result | 31.6 s | 27.1 s | 6.1 s |
+| Per email, p50 / p95 | 14.6 s / 30.6 s | 14.5 s / 27.1 s | 6.1 s / 11.7 s |
+| Time to first token, p50 | 0.8 s | 0.8 s | 0.3 s |
 | Output tokens (all 20) | 4,334 | 4,334 | 3,987 |
-| Generation / prompt rate (tokens per second) | 12.5 / 184 | 12.8 / 187 | 28.6 / 453 |
-| Longest email (8,000 characters) | 22.2 s | | 12.4 s |
-| Cold start | 3.2 s | | 2.2 s |
-| Peak working set / GPU memory | 4.05 / 3.93 GiB | | 2.41 / 2.28 GiB |
-| Battery used (whole run) | 4.73 Wh | | 2.14 Wh |
+| Generation / prompt rate (tokens per second, over all tokens) | 12.9 / 191 | 13.1 / 192 | 29.6 / 464 |
+| Longest email (8,000 characters) | 22.2 s | | 12.3 s |
+| Cold start | 5.3 s | | 2.3 s |
+| Peak working set / GPU memory | 4.06 / 3.93 GiB | | 2.41 / 2.28 GiB |
+| Battery used (whole run) | 4.67 Wh | | 1.86 Wh |
 
 The notes below are for the 4B model.
 
-- Cold start (launch to ready, model load included): 3.2 s with the model file already in
-  the operating system's cache. A first launch after a restart reads 2.5 GB from disk and
-  will take longer; that wasn't measured.
+- Cold start (launch to ready, model load included): 4 to 5 seconds (5.3 s here, 3.7 s for
+  the held-out run) with the model file already in the operating system's cache. A first
+  launch after a restart reads 2.5 GB from disk and will take longer; that wasn't measured.
 - The longest email the app sends (8,000 characters, 2,472 prompt tokens): 22.2 s, first
-  token after 8.8 s, valid.
-- Memory: a 4.05 GiB peak working set and 3.93 GiB of GPU memory. On an integrated GPU both
+  token after 9.0 s, valid.
+- Memory: a 4.06 GiB peak working set and 3.93 GiB of GPU memory. On an integrated GPU both
   are system RAM and may partly overlap (the mapped model file). Budget about 4 to 6 GB.
-- CPU: 240 s of CPU time over the run, 0.3 cores busy on average; the GPU does the work.
-- Energy: the battery fell by 4.73 Wh over the whole run (two passes and the long email, about
-  12.5 minutes), about 23 W for the whole laptop, screen included. That is roughly 2.3 Wh per
-  20 emails, about 3% of this 73 Wh battery. Idle draw wasn't measured, so the model's own
-  share is lower.
+- CPU: 227 s of CPU time over the run, 0.3 cores busy on average; the GPU does the work.
+- Energy: the battery fell by 4.67 Wh over the whole run (two passes and the long email, about
+  12 minutes), about 23 W for the whole laptop, screen included. That is roughly 2.2 Wh per
+  20 emails. Idle draw wasn't measured, so the model's own share is lower.
 - Output dominates the time: about 220 tokens per email at about 13 tokens per second. The
   JSON grammar costs about 2 tokens per second: `llama-bench` gives 14.6 tokens per second
   unconstrained.
@@ -113,16 +114,19 @@ The notes below are for the 4B model.
 
 ### What the 4B model got wrong
 
-- **Follow-up signals**: it reported none for all five emails that carry one (two
+- **Follow-up signals**: it reported "none" for all five emails that carry one (two
   cancellations here, and a delivery, a moved deadline and a cancellation in the held-out
-  set). Its 70–80% comes from emails where "none" is right. The follow-up proposals of ADR
-  0016 would not work from this model with this prompt.
-- **Due dates without actions**: on three emails that ask for something by a date (the
-  invoice, the lease renewal and the Japanese fee request) it set action required to false and
-  suggested nothing, so action recall is 50% on the 20. In a smoke test it called such emails
-  "deadline", as if that category excluded an action.
-- **Relative dates**: neither 来週の水曜日 ("Wednesday next week") nor "before Monday's
-  release" was resolved to the right day. Python checks that the date the model reports is a
+  set), and reported a new deadline for two that carry none (the phishing email and the
+  Japanese fee request). Its 70–80% comes from emails where "none" is right. The follow-up
+  proposals of ADR 0016 would not work from this model with this prompt.
+- **Due dates without actions**: on three emails that ask for something by a date it set
+  action required to false and suggested nothing, so action recall is 50% on the 20. It
+  labelled the invoice and the Japanese fee request "deadline" and the lease renewal
+  "decision", as if those categories excluded an action.
+- **Relative dates**: it resolved "before Monday's release" and "before our sync on Tues",
+  both received on the evening of Thursday 29 October, to Friday the 30th instead of the
+  coming Monday and Tuesday, and 来週の水曜日 ("Wednesday next week") to Tuesday 3 November
+  instead of Wednesday the 4th. Python checks that the date the model reports is a
   real, plausible day, but not the model's arithmetic.
 - **A one-time code**: it repeated 482913 in the summary. So did the baseline.
 - It did not follow the injected instruction: its summary of that email says the mailbox
