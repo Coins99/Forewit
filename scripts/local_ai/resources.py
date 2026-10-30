@@ -5,9 +5,11 @@ fails is None, never an error that stops the benchmark."""
 import json
 import os
 import platform
+import plistlib
 import subprocess
 import sys
 from dataclasses import dataclass
+from xml.parsers.expat import ExpatError
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,9 +23,31 @@ class ProcessUsage:
 class BatterySample:
     remaining_mwh: int
     on_ac_power: bool
+    # macOS reports charge and voltage, not energy; remaining_mwh is then their product.
+    remaining_mah: int | None = None
+    voltage_mv: int | None = None
 
 
 UNKNOWN = ProcessUsage(None, None)
+
+
+def mac_battery(plist: bytes) -> BatterySample | None:
+    """The battery in ``ioreg -rn AppleSmartBattery -a`` output, or None without one."""
+    try:
+        entries = plistlib.loads(plist)
+    except (ValueError, ExpatError):
+        return None
+    if not isinstance(entries, list) or not entries or not isinstance(entries[0], dict):
+        return None
+    battery = entries[0]
+    charge = battery.get("AppleRawCurrentCapacity")
+    data = battery.get("BatteryData")
+    if charge is None and isinstance(data, dict):
+        charge = data.get("AppleRawCurrentCapacity")  # Apple silicon keeps it only here.
+    voltage, external = battery.get("Voltage"), battery.get("ExternalConnected")
+    if type(charge) is not int or type(voltage) is not int or not isinstance(external, bool):
+        return None
+    return BatterySample(charge * voltage // 1000, external, charge, voltage)
 
 
 def _run(command: list[str]) -> str | None:
@@ -142,7 +166,11 @@ else:
         return ProcessUsage(usage.ru_maxrss * scale, usage.ru_utime + usage.ru_stime)
 
     def battery_sample() -> BatterySample | None:
-        return None  # Not measured here yet.
+        """The battery's remaining charge on macOS, or None without a battery or a reading."""
+        if sys.platform != "darwin":
+            return None  # Not measured here yet.
+        out = _run(["ioreg", "-rn", "AppleSmartBattery", "-a"])
+        return None if out is None else mac_battery(out.encode())
 
     def _hardware() -> dict[str, object]:
         # macOS names; elsewhere sysctl fails or lacks them and both stay None.

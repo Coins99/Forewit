@@ -278,6 +278,19 @@ async def run_local(
     return passes, probe, dict(guard.sent), guard.refused
 
 
+def _used_mwh(before: BatterySample, after: BatterySample) -> int:
+    if (
+        before.remaining_mah is None
+        or after.remaining_mah is None
+        or before.voltage_mv is None
+        or after.voltage_mv is None
+    ):
+        return before.remaining_mwh - after.remaining_mwh
+    # macOS counts charge: the charge used at the average voltage, since the voltage drops too.
+    used_mah = before.remaining_mah - after.remaining_mah
+    return round(used_mah * (before.voltage_mv + after.voltage_mv) / 2000)
+
+
 def _battery(before: BatterySample | None, after: BatterySample | None) -> object:
     if before is None or after is None:
         return None
@@ -285,7 +298,7 @@ def _battery(before: BatterySample | None, after: BatterySample | None) -> objec
     return {
         "before": asdict(before),
         "after": asdict(after),
-        "used_mwh": before.remaining_mwh - after.remaining_mwh if on_battery else None,
+        "used_mwh": _used_mwh(before, after) if on_battery else None,
     }
 
 
@@ -753,7 +766,9 @@ def parser() -> argparse.ArgumentParser:
     model.add_argument("--max-output-tokens", type=_positive, default=2048)
     model.add_argument("--no-think", action="store_true", help="disable a hybrid model's thinking")
     model.add_argument("--no-long-probe", action="store_true")
-    model.add_argument("--battery", action="store_true", help="read battery charge (Windows)")
+    model.add_argument(
+        "--battery", action="store_true", help="read battery charge (Windows, macOS)"
+    )
 
     compare = commands.add_parser("compare", help="one table from several report.json files")
     compare.add_argument("reports", type=Path, nargs="+")

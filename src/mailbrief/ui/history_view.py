@@ -97,15 +97,10 @@ class BriefHistoryPanel(QWidget):
         layout.addWidget(self.missed, 1)
         self.missed_note = _plain()
         layout.addWidget(self.missed_note)
-        buttons = QHBoxLayout()
         self.open_button = outline_button(
             "&Open brief", "openBriefButton", mnemonic=True, primary=True
         )
         self.brief_button = outline_button("&Brief this day…", "briefDayButton", mnemonic=True)
-        buttons.addWidget(self.open_button)
-        buttons.addWidget(self.brief_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
         self.confirm_panel = QWidget()
         self.confirm_panel.setObjectName("replaceConfirmation")
         self.confirm_panel.setAccessibleName("Replace the saved brief")

@@ -81,6 +81,7 @@ from mailbrief.ui.hairline import (
     paint_focus_ring,
 )
 from mailbrief.ui.labels import ElidedLabel, button_label, outline_button, plain_label, wrap_label
+from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.theme import (
     CAPTION_PX,
     RADIUS,
@@ -1055,6 +1056,7 @@ class ThreePaneWorkspace(QWidget):
     def add_header_action(self, key: str, widget: QWidget) -> None:
         """Host an existing page action in the shared header without changing its signal."""
         self._header_actions.setdefault(key, []).append(widget)
+        take_widget(widget)  # Out of its page's layout first.
         self.header.add_widget(widget)
         widget.setVisible(self.current_page() == key)
 
