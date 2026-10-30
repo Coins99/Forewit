@@ -205,6 +205,7 @@ from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
+from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
@@ -1055,9 +1056,7 @@ class MainWindow(QMainWindow):
         workspace.add_page(
             "calendar", _page(self.calendar_panel, "calendarPage", "Calendar", margins=0)
         )
-        self.calendar_panel.refresh_button.setParent(workspace.header)
         workspace.add_header_action("calendar", self.calendar_panel.refresh_button)
-        self.calendar_panel.new_button.setParent(workspace.header)
         workspace.add_header_action("calendar", self.calendar_panel.new_button)
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
@@ -2804,6 +2803,7 @@ class MainWindow(QMainWindow):
         if inline:
             self.drafts_panel.open_button.hide()
             self.drafts_panel.delete_button.setProperty("variant", "ghost")
+            take_widget(self.drafts_panel.delete_button)
             self.draft_editor._buttons.addWidget(
                 self.drafts_panel.delete_button, 0, 0, Qt.AlignmentFlag.AlignLeft
             )
