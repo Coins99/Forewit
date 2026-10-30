@@ -28,6 +28,11 @@ later use after Microsoft Entra access is resolved.
   awaiting owner desktop acceptance: tick and add an open task's steps in its detail pane,
   one revision each ([checklists in place](p1-checklists.md)).
 
+- P0-B1 benchmark for local-first email AI (D09) done, as a developer tool only: a 4B model
+  on this computer, run through Forewit's own checks, against a rule-based baseline, with
+  speed, memory, energy and no-network evidence ([local AI benchmark](local-ai-benchmark.md)).
+  Nothing in the desktop app changes; P0-B2 builds the pipeline.
+
 - Implemented: provider-neutral models, SQLite storage, daily sync, ranking, and
   a tested Microsoft Graph adapter.
 - Implemented for M1: Gmail OAuth, OS credential storage (Windows Credential Manager or

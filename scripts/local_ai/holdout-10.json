@@ -1,0 +1,210 @@
+{
+  "name": "holdout-10",
+  "description": "Ten more synthetic overnight emails for one person in Tokyo, written after the baseline's rules were frozen and never used to tune them. Every name, address and number is invented; senders use reserved example domains.",
+  "time_zone": "Asia/Tokyo",
+  "messages": [
+    {
+      "key": "h01",
+      "subject": "Claim CL-30981: document needed",
+      "sender_name": "Sakura Mutual Claims",
+      "sender_address": "claims@sakuramutual.example.jp",
+      "received_utc": "2026-10-29T21:10:00Z",
+      "body_lines": [
+        "Dear Ms. Sato,",
+        "",
+        "We need a copy of the repair estimate to continue processing claim CL-30981.",
+        "Kindly upload it via the member site no later than 3 November.",
+        "",
+        "Sakura Mutual Claims Team"
+      ],
+      "expected": {
+        "sensitivity": "sensitive",
+        "categories": ["action", "deadline"],
+        "action_required": true,
+        "deadline": {"date": "2026-11-03"},
+        "follow_ups": ["none"],
+        "actions": [{"ownership": "mine", "any_of": ["upload", "estimate", "send", "submit"]}],
+        "summary_mentions": [["estimate"], ["claim"]]
+      }
+    },
+    {
+      "key": "h02",
+      "subject": "budget sheet",
+      "sender_name": "Ren Takahashi",
+      "sender_address": "ren.takahashi@kitsune.example.com",
+      "received_utc": "2026-10-29T14:40:00Z",
+      "body_lines": [
+        "Hey, any chance you could look over the budget sheet before our sync on Tues?",
+        "No rush if not."
+      ],
+      "expected": {
+        "sensitivity": "ordinary",
+        "categories": ["action", "deadline"],
+        "action_required": true,
+        "deadline": {"date": "2026-11-03"},
+        "follow_ups": ["none"],
+        "actions": [{"ownership": "mine", "any_of": ["budget", "look", "review", "check"]}],
+        "summary_mentions": [["budget"], ["tues", "sync"]]
+      }
+    },
+    {
+      "key": "h03",
+      "subject": "Re: contracts",
+      "sender_name": "Mei Lin",
+      "sender_address": "mei.lin@harborlegal.example.com",
+      "received_utc": "2026-10-29T23:05:00Z",
+      "body_lines": [
+        "Attached are the signed contracts you asked for.",
+        "Let me know if anything's missing."
+      ],
+      "expected": {
+        "sensitivity": "ordinary",
+        "categories": ["information", "action"],
+        "action_required": null,
+        "deadline": "none",
+        "follow_ups": ["delivered"],
+        "actions": null,
+        "summary_mentions": [["contract"], ["signed", "attached"]]
+      }
+    },
+    {
+      "key": "h04",
+      "subject": "Report timing",
+      "sender_name": "Daniel Ortiz",
+      "sender_address": "daniel.ortiz@kitsune.example.com",
+      "received_utc": "2026-10-29T16:30:00Z",
+      "body_lines": [
+        "Quick update: the client pushed the deliverable deadline back a week, so the report is now due Friday, November 6.",
+        "Everything else stays the same."
+      ],
+      "expected": {
+        "sensitivity": "ordinary",
+        "categories": ["deadline", "information", "action"],
+        "action_required": null,
+        "deadline": {"date": "2026-11-06"},
+        "follow_ups": ["new_deadline"],
+        "actions": null,
+        "summary_mentions": [["report"], ["november 6", "nov 6", "friday"]]
+      }
+    },
+    {
+      "key": "h05",
+      "subject": "Prescription ready",
+      "sender_name": "Ginza Central Pharmacy",
+      "sender_address": "rx@ginzapharmacy.example.jp",
+      "received_utc": "2026-10-29T22:45:00Z",
+      "body_lines": [
+        "Your prescription for atorvastatin is ready for pickup at the Ginza pharmacy.",
+        "It will be held until November 9."
+      ],
+      "expected": {
+        "sensitivity": "sensitive",
+        "categories": ["information", "action", "deadline"],
+        "action_required": null,
+        "deadline": {"date": "2026-11-09"},
+        "follow_ups": ["none", "delivered"],
+        "actions": [{"ownership": "mine", "any_of": ["pick", "collect", "prescription"]}],
+        "summary_mentions": [["prescription"], ["pick", "collect", "ready"]]
+      }
+    },
+    {
+      "key": "h06",
+      "subject": "Airbnb",
+      "sender_name": "Yui",
+      "sender_address": "yui.k@mailbox.example.org",
+      "received_utc": "2026-10-29T15:20:00Z",
+      "body_lines": [
+        "Hey, can you send me your half of the Airbnb (¥24,000) when you get a chance? I paid the whole thing."
+      ],
+      "expected": {
+        "sensitivity": "ambiguous",
+        "categories": ["action"],
+        "action_required": true,
+        "deadline": "none",
+        "follow_ups": ["none"],
+        "actions": [{"ownership": "mine", "any_of": ["send", "pay", "transfer", "reimburse"]}],
+        "summary_mentions": [["24,000", "24000"], ["airbnb"]]
+      }
+    },
+    {
+      "key": "h07",
+      "subject": "Re: kitchen renovation",
+      "sender_name": "Hiro Builders",
+      "sender_address": "office@hirobuilders.example.jp",
+      "received_utc": "2026-10-29T16:00:00Z",
+      "body_lines": [
+        "Thanks for the details.",
+        "I'll get back to you with a quote by Monday."
+      ],
+      "expected": {
+        "sensitivity": "ordinary",
+        "categories": ["information", "action"],
+        "action_required": false,
+        "deadline": "skip",
+        "follow_ups": ["none"],
+        "actions": [{"ownership": "waiting_for", "any_of": ["quote", "estimate"]}],
+        "summary_mentions": [["quote"], ["monday"]]
+      }
+    },
+    {
+      "key": "h08",
+      "subject": "Delivery attempt failed",
+      "sender_name": "JP Parcel Service",
+      "sender_address": "notice@jp-post-redeliver.example.net",
+      "received_utc": "2026-10-29T19:15:00Z",
+      "body_lines": [
+        "Your parcel could not be delivered.",
+        "Pay the ¥320 redelivery fee within 48 hours at http://jp-post-redeliver.example.net to arrange a new delivery."
+      ],
+      "expected": {
+        "sensitivity": "ambiguous",
+        "categories": ["action", "information"],
+        "action_required": null,
+        "deadline": "skip",
+        "follow_ups": ["none"],
+        "actions": null,
+        "summary_mentions": [["parcel", "package", "deliver"], ["fee", "pay", "320"]]
+      }
+    },
+    {
+      "key": "h09",
+      "subject": "Saturday lunch",
+      "sender_name": "Aiko Mori",
+      "sender_address": "aiko.mori@kitsune.example.com",
+      "received_utc": "2026-10-29T20:30:00Z",
+      "body_lines": [
+        "Unfortunately we have to call off Saturday's team lunch — the restaurant double-booked us.",
+        "I'll suggest another date next week."
+      ],
+      "expected": {
+        "sensitivity": "ordinary",
+        "categories": ["information", "decision"],
+        "action_required": false,
+        "deadline": "none",
+        "follow_ups": ["cancelled"],
+        "actions": null,
+        "summary_mentions": [["lunch"], ["call off", "called off", "cancel"]]
+      }
+    },
+    {
+      "key": "h10",
+      "subject": "Residence card renewal: interview",
+      "sender_name": "Regional Immigration Services Bureau",
+      "sender_address": "notice@immigration.example.jp",
+      "received_utc": "2026-10-29T23:50:00Z",
+      "body_lines": [
+        "Your residence card renewal application has been received.",
+        "Please bring your passport to the immigration office for the interview on November 12 at 10:30."
+      ],
+      "expected": {
+        "sensitivity": "sensitive",
+        "categories": ["action", "information", "deadline"],
+        "action_required": true,
+        "deadline": "skip",
+        "follow_ups": ["none"],
+        "actions": [{"ownership": "mine", "any_of": ["bring", "passport", "interview", "attend"]}],
+        "summary_mentions": [["residence card", "renewal"], ["interview", "november 12", "nov 12"]]
+      }
+    }
+  ]
+}

@@ -121,6 +121,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (Ctrl+K, `ui/palette.py`) and `services/search.py`, a bounded local search of actions,
   drafts and notes, events, cached Google event titles and the connected account's cached
   mail metadata. See `docs/search.md`.
+- P0-B1 (local-first email AI, D09) benchmark done; nothing ships: `scripts/local_ai/` runs
+  the Groq adapter's prompt and schema against a model on the owner's computer (llama.cpp's
+  `llama-server` on loopback) and a rule-based baseline, over synthetic fixtures, through the
+  app's own `validate_candidate`. Results and the recommendation for P0-B2 are in
+  `docs/local-ai-benchmark.md`.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
   reference, in the system's light or dark mode unless Settings > Appearance keeps one.
@@ -270,6 +275,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
+- `scripts/local_ai/`: the P0-B1 benchmark (`python -m scripts.local_ai.benchmark`). Its
+  `LoopbackGuard` refuses every request to a host other than localhost, 127.0.0.1 or ::1,
+  and the model server is an external program, so no local-model library is added. Reports
+  go to `out/local-ai-benchmark/`; use synthetic fixtures only, since reports hold analyses.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
   `out/dist/onefile/Forewit.exe`; check with `check_package.py --layout onefile
   --executable out/dist/onefile/Forewit.exe`. Keep the existing Qt profile identity.
