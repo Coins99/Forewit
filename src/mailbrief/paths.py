@@ -25,6 +25,11 @@ class AppPaths:
     database_path: Path
     microsoft_token_cache_path: Path
 
+    @property
+    def local_ai_dir(self) -> Path:
+        """Where local AI setup keeps the llama.cpp runtime and the model (P0-B2)."""
+        return self.data_dir / "local-ai"
+
     @classmethod
     def from_qt(cls) -> Self:
         """Resolve and create the platform-specific local application-data root."""

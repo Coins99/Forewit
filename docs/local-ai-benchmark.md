@@ -293,9 +293,11 @@ uv run python -m scripts.local_ai.benchmark model --server PATH/llama-server --m
 uv run python -m scripts.local_ai.benchmark compare out/local-ai-benchmark/*/report.json
 ```
 
-`model` starts `llama-server` itself (`--port`, `--context`, `--gpu-layers`, `--threads` and
-repeated `--server-arg` pass through), with a fresh API key and no web UI, and refuses a port
-that something already listens on. Or it uses a server that is already running on loopback
+`model` runs the app's own local provider and server (`providers/local`, P0-B2 Part 1;
+harness version 3). It starts `llama-server` itself (`--context`, `--gpu-layers`, `--threads`
+and repeated `--server-arg` pass through) as the app will: on a free port of 127.0.0.1, with
+a fresh API key and no web UI, used only once it refuses a wrong key and accepts the right
+one. Or it uses a server that is already running on loopback
 with `--base-url http://127.0.0.1:11434 --model NAME` (Ollama's OpenAI-compatible API, for
 example; a trailing `/v1` is fine). `--no-think` turns off a hybrid model's thinking. A
 `--batch-size` that wouldn't fit `--context` or `--max-output-tokens` is refused before the

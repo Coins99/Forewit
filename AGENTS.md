@@ -126,6 +126,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `llama-server` on loopback) and a rule-based baseline, over synthetic fixtures, through the
   app's own `validate_candidate`. Results and the recommendation for P0-B2 are in
   `docs/local-ai-benchmark.md`.
+- P0-B2 (local email analysis), Parts 1–2 of 7 implemented; nothing in the app uses them
+  yet: `providers/local/`, the local model behind the `AIProvider` port and `llama-server`
+  as a hardened side process, and `services/local_setup.py`, which downloads and checks the
+  pinned runtime and model (`forewit-gmail-diagnostic local-ai status | setup | remove`).
+  The plan, its parts and the owner's decisions are in
+  `docs/p0-b2-local-analysis-plan.md`; which parts are done and how to continue on another
+  computer is in `docs/p0-b2-handoff.md`. Tick each part there as it lands, and delete that
+  file (and this mention) in the commit that finishes Part 7.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
   reference, in the system's light or dark mode unless Settings > Appearance keeps one.
@@ -165,6 +173,16 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passes its own fixed messages, and `error_reasons()` reads Google's error reasons.
   `GmailBodies` (`gmail/factory.py`) opens Gmail for one body download.
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
+  `providers/local/` (P0-B2): `transport.py` (`LoopbackGuard`, which refuses every request
+  to a host other than localhost, 127.0.0.1 or ::1), `provider.py` (`LocalModelProvider`,
+  Groq's prompt and schema sent to a `ModelServer` on loopback) and `server.py`
+  (`LlamaServer`: a free port of 127.0.0.1, a fresh API key per launch, no web UI, a wrong-key
+  and right-key check that the server on the port is ours, output kept in memory only, a
+  Job Object on Windows and a leftover record elsewhere). `manifest.py` pins the runtime
+  and model per platform (URL, size, SHA-256, license, source, and the hosts downloads may
+  reach); `device.py` reads memory and `llama-server --list-devices` for the speed the
+  owner can expect. `transport.py`'s `AllowedHostsGuard` keeps setup's downloads to HTTPS
+  on those hosts, on every redirect.
 - `src/mailbrief/services/`: calendar, sync, ranking, bodies, application, and for M4:
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
@@ -275,10 +293,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   window ask before a quit (Cmd+Q, the Dock's Quit) would lose a dialog's unsaved input.
 - `scripts/build_desktop.py` and `scripts/check_package.py`: native PyInstaller builds
   and credential-free package checks. Build artifacts stay in `out/`.
-- `scripts/local_ai/`: the P0-B1 benchmark (`python -m scripts.local_ai.benchmark`). Its
-  `LoopbackGuard` refuses every request to a host other than localhost, 127.0.0.1 or ::1,
-  and the model server is an external program, so no local-model library is added. Reports
-  go to `out/local-ai-benchmark/`; use synthetic fixtures only, since reports hold analyses.
+- `scripts/local_ai/`: the P0-B1 benchmark (`python -m scripts.local_ai.benchmark`). It runs
+  the app's own `providers/local` provider and server, through `LoopbackGuard`; the model
+  server is an external program, so no local-model library is added. Reports go to
+  `out/local-ai-benchmark/`; use synthetic fixtures only, since reports hold analyses.
 - Windows single-file builds use `build_desktop.py --onefile` and produce
   `out/dist/onefile/Forewit.exe`; check with `check_package.py --layout onefile
   --executable out/dist/onefile/Forewit.exe`. Keep the existing Qt profile identity.
@@ -447,6 +465,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Gmail access is read-only (`gmail.readonly`). No mailbox writes or sends.
 - Email content is untrusted input. It can never authorize actions, settings changes,
   mail writes or sending other messages to the AI.
+- Local AI setup (`services/local_setup.py`, P0-B2) is the only local-AI step that uses the
+  internet: only when the owner asks, sending no mail or account data, and only to the
+  manifest's hosts over HTTPS. A downloaded file is used only once its size and SHA-256
+  match the manifest; an archive path that could leave its folder stops unpacking. Changing
+  a pin means editing `providers/local/manifest.py` and rerunning the benchmark.
 - Search (`services/search.py`) reads only local SQLite: never a provider, never a body
   (none is stored), and mail only for the connected account. The query is the owner's
   text: log only counts, and keep it out of exceptions.
