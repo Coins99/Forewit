@@ -129,7 +129,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - P0-B2 (local email analysis), Part 1 of 7 implemented; nothing in the app uses it yet:
   `providers/local/`, the local model behind the `AIProvider` port and `llama-server` as a
   hardened side process. The plan, its parts and the owner's decisions are in
-  `docs/p0-b2-local-analysis-plan.md`.
+  `docs/p0-b2-local-analysis-plan.md`; which parts are done and how to continue on another
+  computer is in `docs/p0-b2-handoff.md`. Tick each part there as it lands, and delete that
+  file (and this mention) in the commit that finishes Part 7.
 - The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
   Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
   reference, in the system's light or dark mode unless Settings > Appearance keeps one.
