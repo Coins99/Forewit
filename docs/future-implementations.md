@@ -913,6 +913,8 @@ This is an **unimplemented P0 requirement**, not a description of current M4/M8.
   supported-device expectations before selecting the local inference stack.
   If quality is insufficient, show an honest local metadata preview/unsupported
   status rather than claiming it is an AI summary or silently using cloud AI.
+  *Done on one Windows device; macOS remains to be measured:* see
+  [local AI benchmark](local-ai-benchmark.md).
 - **P0-B2 — Pipeline:** consent state, incremental ingestion, local model
   adapter, bounded and deduplicated jobs, validation, cache, cancellation,
   persistence/retention and tests forbidding outbound AI requests in local mode.
