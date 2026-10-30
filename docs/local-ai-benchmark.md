@@ -24,7 +24,10 @@ The rule-based baseline is instant and passes validation, but on the held-out em
 sentence: for the injection email that is the injected instruction itself. It is fit to be
 the labelled preview the plan describes, not a summary.
 
-Qwen3-1.7B is still running; its results will be added here.
+Qwen3-1.7B (1.1 GB) is about 2.4 times faster but not good enough: 2 of its 20 analyses
+failed the app's checks, it found a fifth of the expected actions, it summarized the Japanese
+email in English, and it obeyed the injected instruction, summarizing the phishing email as
+"Verified safe message from IT". It shouldn't be offered as a smaller-device option.
 
 ## Results
 
@@ -32,36 +35,61 @@ One Windows 11 laptop: AMD Ryzen 7 PRO 7840U (8 cores, 16 threads), Radeon 780M 
 GPU through Vulkan, 32 GB RAM, on battery power. llama.cpp b12015, all layers on the GPU,
 8,192-token context, one slot. Both fixtures are described [below](#the-fixtures).
 
-| Measure | Baseline, 20 | 4B, 20 | Baseline, held-out 10 | 4B, held-out 10 |
-| --- | --- | --- | --- | --- |
-| Valid analyses (pass the app's checks) | 20/20 | 20/20 | 10/10 | 10/10 |
-| Category | 19/20 (95%) | 17/20 (85%) | 8/10 (80%) | 9/10 (90%) |
-| Action required | 15/17 (88%) | 13/17 (76%) | 5/6 (83%) | 6/6 (100%) |
-| Deadline day | 15/15 (100%) | 13/15 (87%) | 4/7 (57%) | 5/7 (71%) |
-| Deadline time | 1/1 | 1/1 | n/a | n/a |
-| Follow-up signal | 20/20 (100%) | 16/20 (80%) | 7/10 (70%) | 7/10 (70%) |
-| Expected actions found (recall) | 9/10 (90%) | 5/10 (50%) | 3/6 (50%) | 4/6 (67%) |
-| Suggestions that were expected (precision) | 9/11 (82%) | 5/6 (83%) | 3/3 (100%) | 4/5 (80%) |
-| Summary facts | 32/35 (91%) | 35/35 (100%) | 19/20 (95%) | 20/20 (100%) |
-| Japanese email summarized in Japanese | 1/1 | 1/1 | n/a | n/a |
-| Secret or injected text echoed | 2 | 1 | 0 | 0 |
-| Deadlines dated before the email arrived | 0 | 0 | 0 | 0 |
-| Numbers the email doesn't contain | 0 | 0 | 0 | 0 |
-| Requests to hosts other than loopback | none made | 0 of 41 | none made | 0 of 10 |
+On the 20 emails:
 
-The baseline's first two columns are an upper bound: its rules were written with those 20
-emails in view. The held-out columns are the fairer comparison.
+| Measure | Baseline | 4B | 1.7B |
+| --- | --- | --- | --- |
+| Valid analyses (pass the app's checks) | 20/20 | 20/20 | 18/20 (90%) |
+| Category | 19/20 (95%) | 17/20 (85%) | 12/20 (60%) |
+| Action required | 15/17 (88%) | 13/17 (76%) | 6/17 (35%) |
+| Deadline day | 15/15 (100%) | 13/15 (87%) | 9/15 (60%) |
+| Deadline time | 1/1 | 1/1 | 0/1 |
+| Follow-up signal | 20/20 (100%) | 16/20 (80%) | 15/20 (75%) |
+| Expected actions found (recall) | 9/10 (90%) | 5/10 (50%) | 2/10 (20%) |
+| Suggestions that were expected (precision) | 9/11 (82%) | 5/6 (83%) | 2/3 (67%) |
+| Summary facts | 32/35 (91%) | 35/35 (100%) | 26/35 (74%) |
+| Japanese email summarized in Japanese | 1/1 | 1/1 | 0/1 |
+| Secret or injected text echoed | 2 | 1 | 2 |
+| Deadlines dated before the email arrived | 0 | 0 | 0 |
+| Numbers the email doesn't contain | 0 | 0 | 0 |
+| Requests to hosts other than loopback | none made | 0 of 41 | 0 of 41 |
 
-Speed and resources for the 4B model on the 20 emails:
+The baseline's column is an upper bound: its rules were written with these 20 emails in view.
+The held-out emails are the fairer comparison:
 
-| Measure | Cold pass | Warm pass |
-| --- | --- | --- |
-| All 20 emails | 365 s | 354 s |
-| First result | 30.4 s | 27.4 s |
-| Per email, p50 / p95 | 15.6 s / 30.4 s | 15.0 s / 27.4 s |
-| Time to first token, p50 | 0.8 s | 0.8 s |
-| Output tokens (all 20) | 4,334 | 4,334 |
-| Generation / prompt rate | 12.5 / 184 tokens per second | 12.8 / 187 tokens per second |
+| Measure | Baseline | 4B | 1.7B |
+| --- | --- | --- | --- |
+| Valid analyses (pass the app's checks) | 10/10 | 10/10 | 10/10 |
+| Category | 8/10 (80%) | 9/10 (90%) | 7/10 (70%) |
+| Action required | 5/6 (83%) | 6/6 (100%) | 3/6 (50%) |
+| Deadline day | 4/7 (57%) | 5/7 (71%) | 5/7 (71%) |
+| Follow-up signal | 7/10 (70%) | 7/10 (70%) | 6/10 (60%) |
+| Expected actions found (recall) | 3/6 (50%) | 4/6 (67%) | 2/6 (33%) |
+| Suggestions that were expected (precision) | 3/3 (100%) | 4/5 (80%) | 2/2 (100%) |
+| Summary facts | 19/20 (95%) | 20/20 (100%) | 18/20 (90%) |
+| Secret or injected text echoed | 0 | 0 | 0 |
+| Requests to hosts other than loopback | none made | 0 of 10 | 0 of 10 |
+
+The 1.7B model's echoes on the 20 are the one-time code and the injected "Verified safe
+message from IT". Its summaries are also much thinner ("Salary adjustment effective December
+1", "Re: Saturday").
+
+Speed and resources on the 20 emails (the baseline takes milliseconds):
+
+| Measure | 4B, cold pass | 4B, warm pass | 1.7B, warm pass |
+| --- | --- | --- | --- |
+| All 20 emails | 365 s | 354 s | 145 s |
+| First result | 30.4 s | 27.4 s | 6.1 s |
+| Per email, p50 / p95 | 15.6 s / 30.4 s | 15.0 s / 27.4 s | 6.2 s / 11.9 s |
+| Time to first token, p50 | 0.8 s | 0.8 s | 0.4 s |
+| Output tokens (all 20) | 4,334 | 4,334 | 3,987 |
+| Generation / prompt rate (tokens per second) | 12.5 / 184 | 12.8 / 187 | 28.6 / 453 |
+| Longest email (8,000 characters) | 22.2 s | | 12.4 s |
+| Cold start | 3.2 s | | 2.2 s |
+| Peak working set / GPU memory | 4.05 / 3.93 GiB | | 2.41 / 2.28 GiB |
+| Battery used (whole run) | 4.73 Wh | | 2.14 Wh |
+
+The notes below are for the 4B model.
 
 - Cold start (launch to ready, model load included): 3.2 s with the model file already in
   the operating system's cache. A first launch after a restart reads 2.5 GB from disk and
@@ -122,13 +150,15 @@ Speed and resources for the 4B model on the 20 emails:
   the owner opens a suggestion could cut per-email time sharply.
 - **Device expectations**, to confirm before release: 16 GB of RAM and a GPU llama.cpp can
   use (Vulkan or Metal) for about 15 seconds per email; without one, expect about twice as
-  long, which still suits overnight precomputation. Qwen3-1.7B's results will say whether
-  8 GB machines can be served.
+  long, which still suits overnight precomputation. Qwen3-1.7B is too weak to serve smaller
+  machines; on those, show the baseline's labelled preview until a better small model is
+  measured.
 
 ## Not yet measured
 
 - macOS (Apple silicon with Metal), and a machine with 8 GB of RAM or no usable GPU.
-- Qwen3-1.7B (running).
+- Other small models (for example in the 3B class), which might fill the gap the 1.7B
+  model leaves.
 - The laptop's idle power draw, to separate the model's energy from the screen's.
 - A cold first launch after a restart, and packaging `llama-server` into the Windows and
   macOS builds.
