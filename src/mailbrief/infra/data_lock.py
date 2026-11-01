@@ -21,6 +21,21 @@ def create_data_lock(directory: Path) -> QLockFile:
 
 
 @contextmanager
+def held_lock(path: Path, busy: str) -> Iterator[None]:
+    """Hold the lock file at ``path`` for the block; raise DataInUseError(``busy``) at once
+    when another process holds it. A lock its holder left by crashing is taken over."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(path))
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(0):
+        raise DataInUseError(busy)
+    try:
+        yield
+    finally:
+        lock.unlock()
+
+
+@contextmanager
 def data_directory_lock(database: Path) -> Iterator[None]:
     """Hold the desktop's lock until database operations and shutdown finish."""
     directory = database.resolve().parent

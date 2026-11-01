@@ -1,8 +1,6 @@
-"""The harness: passes, the long probe, the server's failure path and the reports."""
+"""The harness: passes, the long probe, the server's command line and the reports."""
 
 import json
-import socket
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,10 +9,11 @@ import pytest
 
 from mailbrief.domain.analysis import AnalysisRequest, AnalysisResponse
 from mailbrief.domain.bodies import MAX_ANALYSIS_CHARS
+from mailbrief.ports.errors import ProviderUnavailableError
+from mailbrief.providers.local.provider import CallTiming
 from scripts.local_ai import benchmark
 from scripts.local_ai.benchmark import (
     BaselineAnalyzer,
-    LlamaServer,
     budget_problem,
     build_report,
     percentile,
@@ -27,16 +26,15 @@ from scripts.local_ai.benchmark import (
     weighted_rate,
 )
 from scripts.local_ai.fixture import DEFAULT_FIXTURE, load_fixture
-from scripts.local_ai.local_model import CallTiming, LocalModelError
 
 FIXTURE = load_fixture()
 
 
 class FailingAnalyzer:
-    async def analyze(
+    async def analyze_timed(
         self, requests: Sequence[AnalysisRequest]
     ) -> tuple[AnalysisResponse, CallTiming]:
-        raise LocalModelError("the local server answered HTTP 500")
+        raise ProviderUnavailableError("The local model failed (HTTP 500).", http_status=500)
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +52,7 @@ async def test_a_pass_scores_every_message_in_batches() -> None:
 async def test_a_failed_call_marks_its_messages_and_the_pass_goes_on() -> None:
     run = await run_pass(0, FIXTURE, FailingAnalyzer(), batch_size=10)
     assert {item.status for item in run.scores} == {"error"}
-    assert [call.error for call in run.calls] == ["LocalModelError"] * 2
+    assert [call.error for call in run.calls] == ["ProviderUnavailableError"] * 2
 
 
 def test_the_probe_is_one_email_at_the_length_limit() -> None:
@@ -69,57 +67,21 @@ def test_percentile_is_nearest_rank() -> None:
     assert percentile([float(n) for n in range(1, 21)], 0.95) == 19.0
 
 
-def _server(tmp_path: Path, port: int = 8099) -> LlamaServer:
-    return LlamaServer(
-        Path(sys.executable),
-        Path("no_such_module_for_the_benchmark"),  # "python -m" it: exits at once.
-        port=port,
-        context=512,
-        gpu_layers=0,
-        threads=None,
-        extra=[],
-        log_path=tmp_path / "server.log",
-    )
-
-
-def test_a_server_that_exits_at_once_is_reported(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="exited"), _server(tmp_path):
-        pass
-    assert "No module named" in (tmp_path / "server.log").read_text(encoding="utf-8")
-
-
-def test_a_port_already_in_use_is_refused_before_launch(tmp_path: Path) -> None:
-    with socket.create_server(("127.0.0.1", 0)) as listener:
-        port = listener.getsockname()[1]
-        with pytest.raises(RuntimeError, match="already in use"), _server(tmp_path, port):
-            pass
-    assert not (tmp_path / "server.log").exists()
-
-
-def test_an_interrupted_start_stops_the_server_and_closes_its_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def interrupt(self: LlamaServer, process: subprocess.Popen[str]) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(LlamaServer, "_wait_until_ready", interrupt)
-    server = _server(tmp_path)
-    with pytest.raises(KeyboardInterrupt), server:
-        pass
-    assert server._process is not None and server._process.poll() is not None
-    assert server._log is None
-
-
-def test_the_server_needs_a_fresh_key_that_reports_never_keep() -> None:
-    server = _server(Path("unused"))
-    assert server.command[server.command.index("--api-key") + 1] == server.api_key
-    assert "--no-webui" in server.command
-    shown = public_command(
-        [*server.command, "--api-key=other", "--lora", str(Path.cwd() / "adapter.gguf")]
-    )
-    assert server.api_key not in " ".join(shown) and "other" not in " ".join(shown)
-    assert shown[0] == Path(sys.executable).name and shown[-1] == "adapter.gguf"
-    assert "--api-key=<hidden>" in shown
+def test_reports_never_keep_the_servers_key_or_the_owners_folders() -> None:
+    command = [
+        sys.executable,
+        "-m",
+        str(Path.cwd() / "model.gguf"),
+        "--api-key",
+        "per-launch-key",
+        "--api-key=other",
+        "--lora",
+        str(Path.cwd() / "adapter.gguf"),
+    ]
+    shown = public_command(command)
+    assert "per-launch-key" not in " ".join(shown) and "other" not in " ".join(shown)
+    assert shown[0] == Path(sys.executable).name and shown[2] == "model.gguf"
+    assert shown[-1] == "adapter.gguf" and "--api-key=<hidden>" in shown
 
 
 def test_rates_weigh_each_call_by_its_tokens() -> None:
