@@ -213,6 +213,12 @@ def coverage_short(brief: DailyDigest | SavedBriefSummary, today: date) -> str:
     outside = outside_count(brief)
     if outside:
         line += f", plus {outside} tracked repl{'y' if outside == 1 else 'ies'}"
+    if (
+        isinstance(brief, DailyDigest)
+        and brief.coverage is not None
+        and brief.coverage.ai_provider == "local"
+    ):
+        line += " · Summarized on this computer"
     return line
 
 
@@ -1007,6 +1013,7 @@ class ThreePaneWorkspace(QWidget):
         self.footer_bar = FooterBar()
         outer.addWidget(self.footer_bar)
         self._digest: DailyDigest | None = None
+        self._progressive = False
         self._brief_filter: str | None = None
         self._links: Mapping[str, Sequence[ThreadLink]] = {}
         self._proposals: Mapping[str, Sequence[ActionProposal]] = {}
@@ -1116,6 +1123,57 @@ class ThreePaneWorkspace(QWidget):
         current = self.pages.currentWidget()
         return next(key for key, widget in self._pages.items() if widget is current)
 
+    def show_progressive(
+        self, ready: DailyDigest, pending: int, *, owner_zone: ZoneInfo, today: date
+    ) -> None:
+        """Keep saved items and selection while exposing committed results from this run."""
+        previous = self._digest
+        items = list(ready.items)
+        if previous is not None and (previous.account_id, previous.local_date) == (
+            ready.account_id,
+            ready.local_date,
+        ):
+            replacements = {item.message_key: item for item in ready.items}
+            previous_keys = {item.message_key for item in previous.items}
+            items = [replacements.get(item.message_key, item) for item in previous.items]
+            items.extend(item for item in ready.items if item.message_key not in previous_keys)
+        preview = ready.model_copy(
+            update={
+                "items": tuple(
+                    item.model_copy(update={"position": i}) for i, item in enumerate(items)
+                ),
+                "coverage": None,
+            }
+        )
+        self.show_digest(
+            preview,
+            links=self._links,
+            proposals=self._proposals,
+            owner_zone=owner_zone,
+            today=today,
+            progressive=True,
+        )
+        text = f"Local analysis · {len(ready.items)} ready · {pending} remaining"
+        self.coverage.setText(
+            text,
+            text + ". Showing saved and committed summaries. The saved daily brief is unchanged.",
+        )
+
+    def finish_progressive(self) -> None:
+        """A stopped/failed run keeps its committed results visibly distinct from a saved brief."""
+        if self._progressive:
+            self.coverage.setText(
+                "Run stopped · completed summaries are cached",
+                "This run stopped. Completed summaries remain cached; "
+                "the saved daily brief is unchanged.",
+            )
+
+    def defer_brief_update(self) -> None:
+        self.coverage.setText(
+            "Brief updates available · finish writing to refresh",
+            "Brief updates are ready. Finish writing before refreshing this view.",
+        )
+
     def show_digest(
         self,
         digest: DailyDigest,
@@ -1124,15 +1182,22 @@ class ThreePaneWorkspace(QWidget):
         proposals: Mapping[str, Sequence[ActionProposal]] | None = None,
         owner_zone: ZoneInfo,
         today: date,
+        progressive: bool = False,
     ) -> None:
         """Show ``digest``, its deadline chips counted from ``today`` (the owner's current
         day). Showing the same saved brief again keeps the selected email and the detail's
         scroll position; another brief starts at its first email."""
         previous = self._digest
         same = previous is not None and _identity(previous) == _identity(digest)
+        if previous is not None and (progressive or self._progressive):
+            same = (previous.account_id, previous.local_date) == (
+                digest.account_id,
+                digest.local_date,
+            )
         select = self.brief_list.selected_key() if same else None
         scroll = self.detail.verticalScrollBar().value() if same else 0
         self._digest = digest
+        self._progressive = progressive
         self._links = links or {}
         self._proposals = proposals or {}
         self._owner_zone, self._today = owner_zone, today
@@ -1255,6 +1320,7 @@ class ThreePaneWorkspace(QWidget):
     def clear(self, message: str) -> None:
         """Show no brief, only ``message``."""
         self._digest = None
+        self._progressive = False
         self._brief_filter = None
         for key in ("actions", "waiting"):
             self.metrics[key].setChecked(False)

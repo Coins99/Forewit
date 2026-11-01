@@ -545,6 +545,53 @@ async def test_an_archived_project_takes_no_new_occurrence(session: AsyncSession
     assert (await only_open(actions)).project is None
 
 
+async def test_retry_reopen_and_archive_keep_an_owner_edited_successor(
+    session: AsyncSession,
+) -> None:
+    clock = Clock(START)
+    projects = ProjectService(session, clock=clock)
+    project = await projects.create_project(ProjectEdit(name="Garden"))
+    actions = service(session, clock)
+    edit = task(project_public_id=project.public_id)
+    command = "11111111-1111-4111-8111-111111111111"
+    first = await actions.create(edit, STEPS, DAILY, command_id=command)
+    done = await actions.complete(first.public_id, first.revision)
+    following = await only_open(actions)
+    await actions.save(
+        following.public_id,
+        following.revision,
+        same(
+            following,
+            title="Owner's next task",
+            notes="Keep this plan",
+            project_public_id=project.public_id,
+        ),
+    )
+    await projects.archive_project(project.public_id, project.revision, True)
+    other = await actions.create(task(title="Other work", tags=("HOME",)))
+    other = await actions.save(other.public_id, other.revision, same(other, tags=("HOME",)))
+    # Respelling the shared tag changed revisions, including the closed occurrence.
+    current = await actions.get(done.public_id)
+    reopened = await actions.reopen(current.public_id, current.revision)
+    clock.advance(hours=1)
+    closed = await actions.complete(reopened.public_id, reopened.revision)
+    assert await actions.create(edit, STEPS, DAILY, command_id=command) == closed
+    kept_next = await actions.get(following.public_id)
+    assert (kept_next.title, kept_next.notes, kept_next.tags) == (
+        "Owner's next task",
+        "Keep this plan",
+        ("HOME",),
+    )
+    assert {item.public_id for item in await open_tasks(actions)} == {
+        following.public_id,
+        other.public_id,
+    }
+    assert await session.scalar(select(func.count()).select_from(ActionSeriesTable)) == 1
+    episodes = (await actions.history(first.public_id)).completions
+    assert len(episodes) == 2
+    assert {item.project_public_id for item in episodes} == {project.public_id}
+
+
 async def test_a_template_tag_takes_the_spelling_in_use(session: AsyncSession) -> None:
     actions = service(session, Clock(START))
     first = await actions.create(task(), (), DAILY)

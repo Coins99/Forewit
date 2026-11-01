@@ -426,9 +426,11 @@ class ApplicationService:
                 or len(selected) != len(set(selected))
                 or not set(selected) <= available
             ):
+                maximum = (
+                    _COUNT_WORDS[shortlist_limit - 1] if shortlist_limit <= 10 else shortlist_limit
+                )
                 raise ShortlistReviewError(
-                    "Reviewed messages must be unique members of today's Inbox, up to "
-                    f"{_COUNT_WORDS[shortlist_limit - 1]}."
+                    f"Reviewed messages must be unique members of today's Inbox, up to {maximum}."
                 )
             if blocked & set(selected):
                 raise ExcludedSenderError()

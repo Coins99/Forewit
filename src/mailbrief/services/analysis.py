@@ -11,7 +11,7 @@ import math
 import re
 import secrets
 import unicodedata
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +45,7 @@ from mailbrief.domain.bodies import BodyStatus, PreparedBody
 from mailbrief.domain.briefs import AnalysisOutcome
 from mailbrief.domain.digests import SyncProgress, SyncStage
 from mailbrief.domain.messages import RankedMessage
+from mailbrief.infra.tasks import OperationStopped, guarded
 from mailbrief.ports.ai_provider import AIProvider
 from mailbrief.ports.errors import (
     NETWORK_BLOCKED_CODE,
@@ -585,6 +586,8 @@ class AnalysisService:
         *,
         cancel: asyncio.Event | None = None,
         progress: Callable[[SyncProgress], None] | None = None,
+        allowed: Callable[[], Awaitable[bool]] | None = None,
+        result_ready: Callable[[], Awaitable[None]] | None = None,
     ) -> AnalysisRun:
         """Send unresolved messages in batches, cache valid results and retry misses alone.
 
@@ -607,15 +610,21 @@ class AnalysisService:
         try:
             for start in range(0, len(pending), self._batch_size):
                 batch = pending[start : start + self._batch_size]
-                retry = await self._call(batch, tally, cancel, progress)
+                retry = await self._call(batch, tally, cancel, progress, allowed)
+                if result_ready is not None:
+                    await result_ready()
                 if len(batch) == 1:
                     deferred.extend(retry)
                     continue
                 for item in retry:
-                    _fail(await self._call([item], tally, cancel, progress))
+                    _fail(await self._call([item], tally, cancel, progress, allowed))
+                    if result_ready is not None:
+                        await result_ready()
             for item in deferred:  # Second and last attempts, after every first attempt.
-                _fail(await self._call([item], tally, cancel, progress))
-        except _Cancelled:
+                _fail(await self._call([item], tally, cancel, progress, allowed))
+                if result_ready is not None:
+                    await result_ready()
+        except (_Cancelled, OperationStopped):
             cancelled = True
         except _ProviderStopped as stop:
             error_code = stop.error_code
@@ -654,6 +663,7 @@ class AnalysisService:
         tally: _Tally,
         cancel: asyncio.Event | None,
         progress: Callable[[SyncProgress], None] | None,
+        allowed: Callable[[], Awaitable[bool]] | None,
     ) -> list[PlannedMessage]:
         """Make one provider call, commit its valid results and return the messages to retry."""
         if cancel is not None and cancel.is_set():
@@ -661,7 +671,11 @@ class AnalysisService:
         requests = [_request(item) for item in batch]
         tally.calls += 1
         try:
-            response = await self._provider.analyze(requests)
+            response = await guarded(
+                lambda: self._provider.analyze(requests),
+                allowed=allowed,
+                cancel=cancel if allowed is not None else None,
+            )
         except ProviderError as exc:
             code = provider_error_code(exc)
             # INFO: the CLI already reports the failure and its detail to the owner.

@@ -236,6 +236,10 @@ async def check_package(directory: Path) -> None:
         raise RuntimeError("Time zone list unavailable.")
     if FONT_FAMILY not in QFontDatabase.families():
         raise RuntimeError("Bundled font unavailable.")
+    from mailbrief.providers.local.notices import local_notices
+
+    if not local_notices():
+        raise RuntimeError("Local AI notices unavailable.")
     if icon_pixmap("refresh", current_tokens().text, 16).isNull():
         raise RuntimeError("Bundled icons unavailable.")
     if (

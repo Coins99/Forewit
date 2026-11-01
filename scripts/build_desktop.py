@@ -36,6 +36,7 @@ def main() -> int:
     if options.onefile and sys.platform != "win32":
         parser.error("--onefile is supported only on Windows; macOS uses an app bundle.")
     project_version(root)
+    local_licenses = root / "src" / "mailbrief" / "providers" / "local" / "licenses"
     mode = "onefile-console" if options.console else "onefile"
     dist = output / "dist" / mode if options.onefile else output / "dist"
     work = output / "build" / mode if options.onefile else output / "build"
@@ -80,6 +81,8 @@ def main() -> int:
         f"{root / 'src' / 'mailbrief' / 'ui' / 'theme' / 'fonts'}:mailbrief/ui/theme/fonts",
         "--add-data",
         f"{root / 'src' / 'mailbrief' / 'ui' / 'theme' / 'icons'}:mailbrief/ui/theme/icons",
+        "--add-data",
+        f"{local_licenses}:mailbrief/providers/local/licenses",
         "--collect-data",
         "tzdata",
         "--collect-submodules",

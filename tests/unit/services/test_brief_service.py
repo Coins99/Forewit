@@ -125,6 +125,7 @@ def build(
     body_limit: int = MAX_ANALYSIS_CHARS,
     proposals: ProposalService | None = None,
     threads: ThreadService | None = None,
+    reader: FakeBodyReader | None = None,
 ) -> BriefService:
     mailbox = list(inbox() if messages is None else messages)
     email = email or FakeEmailProvider(pages=[mailbox])
@@ -140,7 +141,9 @@ def build(
         session=session,
         application=application,
         bodies=BodyService(
-            FakeBodyReader(texts_for(mailbox) if texts is None else texts), limit=body_limit
+            reader or FakeBodyReader(texts_for(mailbox) if texts is None else texts),
+            limit=body_limit,
+            concurrency=1 if provider.provider_name == "local" else 5,
         ),
         analysis=AnalysisService(session, provider, batch_size=batch_size),
         digests=DigestService(session),

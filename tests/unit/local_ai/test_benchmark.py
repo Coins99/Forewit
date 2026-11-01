@@ -91,12 +91,12 @@ def test_rates_weigh_each_call_by_its_tokens() -> None:
 
 def test_batches_that_overflow_the_budget_are_refused(capsys: pytest.CaptureFixture[str]) -> None:
     assert budget_problem(1, 8192, 2048) is None
-    assert budget_problem(3, 8192, 2048) == "--batch-size 3 needs --context of at least 9048"
+    assert budget_problem(3, 8192, 2048) == "--batch-size 3 needs --context of at least 10048"
     answer = budget_problem(5, None, 2048)
     assert answer == "--batch-size 5 needs --max-output-tokens of at least 3000"
     with pytest.raises(SystemExit):
         benchmark.main(["model", "--server", "x", "--model-file", "m.gguf", "--batch-size", "3"])
-    assert "--context of at least 9048" in capsys.readouterr().err
+    assert "--context of at least 10048" in capsys.readouterr().err
 
 
 async def test_reports_render_as_markdown_tables() -> None:

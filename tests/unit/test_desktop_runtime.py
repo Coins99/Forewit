@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
@@ -22,6 +23,7 @@ from mailbrief.domain.drafting import DraftingOptions
 from mailbrief.domain.messages import AccountIdentity, ProviderKind
 from mailbrief.domain.preferences import AI_LIMIT_FIELDS, PreferencesEdit
 from mailbrief.errors import ConfigurationError
+from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.providers.groq.credentials import GroqKeyStore
 from mailbrief.services import brief as brief_module
 from mailbrief.services.brief import CONSENT_DISCLOSURE_VERSION
@@ -35,6 +37,37 @@ from mailbrief.ui import runtime
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.runtime import DesktopRuntime
 from tests.unit.providers.groq.groq_fixtures import TEST_KEY, MemoryVault
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+async def test_local_mode_never_constructs_cloud_when_gmail_needs_sign_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, automatic: bool
+) -> None:
+    monkeypatch.setenv("MAILBRIEF_EXPERIMENTAL_LOCAL_AI", "true")
+    backend = DesktopRuntime(tmp_path / "local.sqlite3")
+    forbidden = AsyncMock(side_effect=AssertionError("Local mode must never compose cloud"))
+
+    @asynccontextmanager
+    async def mailbox(settings: Settings, *, silent_only: bool) -> AsyncIterator[None]:
+        if silent_only:
+            raise AuthenticationRequiredError("Synthetic sign in required")
+        yield
+
+    monkeypatch.setattr(runtime, "gmail_provider", mailbox)
+    monkeypatch.setattr(runtime, "groq_provider", forbidden)
+    try:
+        await backend.load_saved()
+        await backend.save_owner_preferences(PreferencesEdit(analysis_mode="local"), 0)
+        with pytest.raises(AuthenticationRequiredError, match="Synthetic sign in required"):
+            if automatic:
+                await backend.generate_automatic(asyncio.Event(), lambda progress: None)
+            else:
+                await backend.generate(
+                    AsyncMock(), AsyncMock(), asyncio.Event(), lambda progress: None
+                )
+        forbidden.assert_not_called()
+    finally:
+        await backend.close()
 
 
 async def test_cancelled_startup_joins_migration_worker_before_shutdown(
@@ -119,7 +152,7 @@ async def test_vault_writes_stay_off_main_thread_and_out_of_settings(
     assert threads and threading.get_ident() not in threads
 
 
-async def test_revoke_only_groq_for_gmail_accounts(tmp_path: Path) -> None:
+async def test_revoke_current_ai_providers_for_gmail_accounts(tmp_path: Path) -> None:
     path = tmp_path / "mailbrief.sqlite3"
     backend = DesktopRuntime(path)
     await backend.load_saved()
@@ -137,20 +170,24 @@ async def test_revoke_only_groq_for_gmail_accounts(tmp_path: Path) -> None:
                     )
                 )
                 identities[kind] = account.id
-                for provider in ("groq", "openai"):
+                for provider in ("groq", "openai", "local"):
                     await ConsentRepository(session).grant(
                         account.id,
                         provider,
                         "test",
                         datetime.now(UTC),
                     )
-        assert await backend.revoke_consent() == 1
+        assert await backend.revoke_consent() == 2
         assert await backend.revoke_consent() == 0
         async with database.session() as session:
             consents = ConsentRepository(session)
             assert await consents.get_active(identities[ProviderKind.GMAIL], "groq", "test") is None
+            assert (
+                await consents.get_active(identities[ProviderKind.GMAIL], "local", "test") is None
+            )
             assert await consents.get_active(identities[ProviderKind.GMAIL], "openai", "test")
             assert await consents.get_active(identities[ProviderKind.MICROSOFT], "groq", "test")
+            assert await consents.get_active(identities[ProviderKind.MICROSOFT], "local", "test")
     finally:
         await database.dispose()
         await backend.close()
@@ -182,7 +219,7 @@ def provider_factory(settings_seen: list[Settings]) -> Any:
     @asynccontextmanager
     async def factory(settings: Settings, **kwargs: Any) -> AsyncIterator[object]:
         settings_seen.append(settings)
-        yield object()
+        yield SimpleNamespace(provider_name="groq")
 
     return factory
 

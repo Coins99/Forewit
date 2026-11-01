@@ -6,6 +6,29 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- Scoped planner P0 engineering verification is complete on Windows, and the first
+  P1 consolidation increment is implemented:
+  [P0 evidence](p0-planner-foundation.md) and [P1 history audit](p1-foundation-audit.md).
+  The task service now reads uncapped effective history with correction resolution,
+  original completion/group snapshots and explicit partial-coverage semantics.
+  P1 also implements retry-safe manual task capture with atomic receipts; see
+  [ADR 0024](adr/0024-retry-safe-task-creation.md). Windows source and packaged
+  checks passed; native macOS and owner acceptance remain open. Detailed test
+  results and the resolved rerun failures are recorded in the P1 audit.
+
+- Owner scope decision (2026-11-01): local email AI is experimental and disabled
+  unless `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true`. Saved local mode does not fall back
+  to cloud. Only data integrity, migrations, recovery/export and independent owner
+  workflows are P0 prerequisites for P1–P4. Local-model acceptance, background AI
+  scheduling and cloud enrichment remain deferred email work, not planner blockers.
+
+- P0-B2 local email analysis Parts 1–3 implemented; Parts 4–5 are connected and in final
+  verification: local CLI/desktop composition, bounded sequential analysis, cancellation,
+  permission rechecks and Settings setup/mode controls. Local mode never composes Groq.
+  Cloud remains the default. The dedicated prompt, notices/ADR, progressive operation
+  and live/platform acceptance remain pending;
+  see [implementation progress and review](p0-p2-implementation.md).
+
 - P1 first slice implemented, awaiting owner desktop acceptance: [manual tasks and activity
   history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
   lifecycle; completion/reopening/undo history survives recovery and export. Projects and

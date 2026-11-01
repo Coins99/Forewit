@@ -69,6 +69,8 @@ def require_resources(names: Iterable[str], revisions: Iterable[str]) -> None:
         "mailbrief/ui/theme/fonts/DM-Sans.ttf",
         "mailbrief/ui/theme/fonts/DM-Sans-OFL.txt",
         "mailbrief/ui/theme/icons/LICENSE",
+        "mailbrief/providers/local/licenses/llama-cpp-MIT.txt",
+        "mailbrief/providers/local/licenses/Qwen-Apache-2.0.txt",
         "mailbrief/resources/MailBrief.ico",
         "mailbrief/resources/THIRD_PARTY_NOTICES.txt",
         "certifi/cacert.pem",

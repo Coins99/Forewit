@@ -16,6 +16,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 
 ## Product and status
 
+- Owner scope decision (2026-11-01): local AI is experimental, behind
+  `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true` (default false). Flag-off local mode fails
+  closed; never substitute cloud. Setup and inference require the flag; revoke,
+  remove and saved-record access remain available. Enabling the flag grants no consent.
+  P1–P4 require the P0 data/recovery/owner-work foundations only. Local model quality,
+  AI queues, native scheduling and cloud enrichment remain separate deferred work;
+  their acceptance and the email trial do not block planner delivery.
+
 - Personal desktop app for Windows and macOS that turns today's important Gmail into a
   short brief. Both platforms are supported, from source or as native packages (M5).
 - Gmail is the active provider. Microsoft (Outlook/Graph) code is dormant: keep it
@@ -79,6 +87,17 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Revisioned activity is transactional and survives reopen, restart, backup/recovery and
   writing export. Undo reopen restores the original completion timestamp. See
   `docs/p1-manual-tasks.md`; the organization slice below builds on this foundation.
+- P1 consolidation started: `ActionService.history()` reads uncapped effective per-task
+  activity, including soft-deleted records. `domain/task_history.py` resolves correction
+  chains and marks legacy/gapped history partial; it never treats a capped UI list as
+  lifetime history. See `docs/p1-foundation-audit.md` for evidence and remaining retry/
+  integrated/native acceptance work, and `docs/p0-planner-foundation.md` for P0 closeout.
+- P1 retry-safe manual capture implemented: `ActionService.create(..., command_id=UUID)`
+  commits `task_commands` receipts atomically with owner records (migration 0026). The
+  editor retains its ID across failures; a retry returns the current canonical task.
+  Different input and deleted/purged results are refused. Receipts contain no owner text,
+  have no task FK, survive backup/restore and remain after purge; writing exports omit
+  this control metadata. See ADR 0024. Old callers without IDs retain independent creates.
 - P1 organization slice implemented, awaiting owner desktop acceptance: projects and
   optional life areas in Actions (Projects & areas), task assignment and grouped filters.
   Archived projects retain tasks; removing an area detaches projects and keeps work.
@@ -126,8 +145,18 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `llama-server` on loopback) and a rule-based baseline, over synthetic fixtures, through the
   app's own `validate_candidate`. Results and the recommendation for P0-B2 are in
   `docs/local-ai-benchmark.md`.
-- P0-B2 (local email analysis), Parts 1–2 of 7 implemented; nothing in the app uses them
-  yet: `providers/local/`, the local model behind the `AIProvider` port and `llama-server`
+- P0-B2 (local email analysis), Parts 1–3 implemented; Parts 4–5 are connected and in
+  final verification. Part 3 adds the cloud/local preference, a separate local
+  message limit, and per-account local consent (`ai-consent local grant | revoke`). Grant
+  needs a typed yes; revoke needs no credentials and clears every local disclosure.
+  Restore revokes local grants while preserving the selected mode. CLI/desktop local
+  briefs use `providers/analysis.py` and the lazy retained `LocalModelHost`; they never
+  compose Groq. Permission and preference revision checks guard body reads, model calls
+  and publication. Cancellation joins inference; setup cancellation joins disk workers
+  before releasing its lock. Settings > Preferences provides mode/limit/setup controls;
+  Settings can stop work and revoke while analysis runs. Dedicated local prompt,
+  ADR/notices, progressive operation and live/platform acceptance remain pending.
+  Parts 1–2 provide `providers/local/`, the local model behind the `AIProvider` port and `llama-server`
   as a hardened side process, and `services/local_setup.py`, which downloads and checks the
   pinned runtime and model (`forewit-gmail-diagnostic local-ai status | setup | remove`).
   The plan, its parts and the owner's decisions are in
@@ -175,7 +204,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `providers/groq/`: active AI adapter (Structured Outputs), API key store and factory.
   `providers/local/` (P0-B2): `transport.py` (`LoopbackGuard`, which refuses every request
   to a host other than localhost, 127.0.0.1 or ::1), `provider.py` (`LocalModelProvider`,
-  Groq's prompt and schema sent to a `ModelServer` on loopback) and `server.py`
+  a dedicated versioned local prompt with the shared analysis schema, sent to a
+  `ModelServer` on loopback) and `server.py`
   (`LlamaServer`: a free port of 127.0.0.1, a fresh API key per launch, no web UI, a wrong-key
   and right-key check that the server on the port is ours, output kept in memory only, a
   Job Object on Windows and a leftover record elsewhere). `manifest.py` pins the runtime
@@ -394,6 +424,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   are the owner's text: show them to the owner, but log only their count. Unreadable
   preferences fail closed (`PreferencesUnavailableError`) wherever data could be sent; display-only
   views fall back to the system time zone.
+- Local email consent (`local-1`) belongs to one Gmail account and is independent of Groq
+  brief/drafting consent and cloud automatic-analysis limits. Selecting local mode or
+  downloading a model grants nothing. Restore revokes every local disclosure; local
+  revoke works without vault access. No provider is composed for a local brief until
+  Part 4 connects the local path; never fall back to the cloud.
+  Changing analysis mode, including a reset from local to cloud, clears automatic-send
+  permissions in the same transaction; ordinary preference edits preserve them. The
+  desktop's Revoke AI consent action revokes both local and Groq grants for Gmail accounts.
 - Ranking (ADR 0020) stays local, deterministic and explained: every rule shows its reason.
   It learns only from the owner's own choices (picks, declines, Inbox marks, actions and
   kept briefs), never from AI output, and reads only senders' addresses for it. Important

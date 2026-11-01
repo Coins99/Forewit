@@ -78,6 +78,7 @@ from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import sync_window
+from mailbrief.services.local_setup import SetupProgress, SetupState, SetupStatus
 from mailbrief.services.preferences import PreferencesConflictError
 from mailbrief.services.today import needs_attention, new_replies
 from mailbrief.ui.main_window import MainWindow
@@ -88,6 +89,15 @@ from tests.ui.fake_drafts import FakeDrafts
 
 
 class FakeBackend(FakeDrafts):
+    async def local_ai_status(self) -> SetupStatus:
+        return SetupStatus(SetupState.NOT_SET_UP)
+
+    async def setup_local_ai(self, progress: Callable[[SetupProgress], None]) -> SetupStatus:
+        return SetupStatus(SetupState.READY)
+
+    async def remove_local_ai(self) -> None:
+        pass
+
     async def sync_inbox(
         self, cancel: asyncio.Event, progress: Callable[[SyncProgress], None]
     ) -> SyncResult:
@@ -432,6 +442,8 @@ class FakeBackend(FakeDrafts):
         steps: Sequence[StepEdit],
         repeat: RepeatRule | None = None,
         deadline: DeadlineChange | None = None,
+        *,
+        command_id: str | None = None,
     ) -> Action:
         self.repeats.append(repeat)
         self.deadlines.append(deadline)
@@ -1109,8 +1121,8 @@ _UNSAVED = {
     BriefStatus.CONSENT_DECLINED: "Transmission declined. No messages sent to AI in this run.",
     BriefStatus.SYNC_FAILED: _REFRESH_FAILED,
     BriefStatus.ANALYSIS_FAILED: _REFRESH_FAILED,
-    # Only an automatic run ends this way; from Sync and review it would read as a failure.
-    BriefStatus.READY_FOR_REVIEW: _REFRESH_FAILED,
+    # A bounded local run with nothing eligible keeps the last saved brief.
+    BriefStatus.READY_FOR_REVIEW: "No eligible messages to analyze. The saved brief is unchanged.",
 }
 
 

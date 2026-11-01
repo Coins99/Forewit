@@ -191,6 +191,8 @@ class SyncProgress(DomainModel):
     failed_message_count: int = Field(default=0, ge=0)
     ai_batches_completed: int = Field(default=0, ge=0)
     detail: str | None = Field(default=None, max_length=255)
+    ready_brief: DailyDigest | None = Field(default=None, repr=False)
+    pending_count: int | None = Field(default=None, ge=0)
 
 
 class SyncResult(DomainModel):

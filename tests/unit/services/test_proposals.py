@@ -818,10 +818,12 @@ async def test_a_completing_proposal_moves_a_repeating_task_on(
     applied = await service.apply(proposal_id, repeating.revision)
 
     assert applied.status is ActionStatus.COMPLETED
+    assert len((await actions.history(public_id)).completions) == 1
     (following,) = await actions.list_actions(ActionFilter.WAITING)
     assert following.target_date == date(2026, 10, 2)
     assert following.sources == ()  # A later occurrence is the owner's own task.
     await service.undo_apply(proposal_id, applied.revision)
+    assert (await actions.history(public_id)).completions == ()
     assert [action.public_id for action in await actions.list_actions(ActionFilter.WAITING)] == [
         public_id
     ]

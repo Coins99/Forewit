@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -14,11 +15,14 @@ import time_machine
 
 from mailbrief.config import Settings
 from mailbrief.diagnostics import gmail
+from mailbrief.domain.preferences import PreferencesEdit
+from mailbrief.providers import analysis as analysis_factory
 from mailbrief.providers.gmail.client import MESSAGES_URL, THREADS_URL, GmailClient
 from mailbrief.providers.gmail.provider import GmailProvider
 from mailbrief.providers.groq.credentials import ENTRY, SERVICE
 from mailbrief.providers.groq.factory import groq_provider
 from mailbrief.providers.groq.provider import PRIVACY_NOTICE, GroqProvider
+from mailbrief.providers.local.provider import Endpoint
 from tests.unit.providers.gmail.body_fixtures import message, part
 from tests.unit.providers.gmail.metadata_fixtures import FakeSession, metadata
 from tests.unit.providers.groq.groq_fixtures import (
@@ -32,6 +36,7 @@ from tests.unit.providers.groq.groq_fixtures import (
     wire_action,
     wire_result,
 )
+from tests.unit.providers.local.test_local_provider import _content_chunks, _stream
 
 pytestmark = pytest.mark.respx(assert_all_called=False)
 
@@ -171,6 +176,46 @@ def replies(monkeypatch: pytest.MonkeyPatch, *answers: str | EOFError) -> list[s
 def run_brief(path: Path, *options: str) -> int:
     arguments = ["brief", "--silent-only", "--database", str(path), "--timezone", "UTC"]
     return gmail.main([*arguments, *options])
+
+
+def test_local_twenty_message_brief_never_enters_cloud_and_reuses_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    respx_mock: respx.MockRouter,
+    mailbox: Mailbox,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tests.integration.test_preferences_cli import save_preferences
+
+    monkeypatch.setenv("MAILBRIEF_EXPERIMENTAL_LOCAL_AI", "true")
+    path = tmp_path / "local.sqlite3"
+    save_preferences(path, PreferencesEdit(analysis_mode="local"))
+    monkeypatch.delenv("MAILBRIEF_GROQ_MODEL")
+    cloud = Mock(side_effect=AssertionError("Local run entered Groq factory"))
+    monkeypatch.setattr(gmail, "groq_provider", cloud)
+
+    @asynccontextmanager
+    async def lease() -> AsyncIterator[Endpoint]:
+        yield Endpoint("http://127.0.0.1:8091", "synthetic-local-key")
+
+    host = Mock(available=AsyncMock(return_value=True), close=AsyncMock(), lease=lease)
+    monkeypatch.setattr(analysis_factory, "LocalModelHost", Mock(return_value=host))
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        content = answer_every_message(request).json()["choices"][0]["message"]["content"]
+        return httpx.Response(200, content=_stream(*_content_chunks(content)))
+
+    local = respx_mock.post("http://127.0.0.1:8091/v1/chat/completions").mock(side_effect=answer)
+    for index in range(2, 21):
+        mailbox.add(f"a{index}")
+    replies(monkeypatch, "yes")
+    assert run_brief(path, "--show") == 0
+    text = capsys.readouterr().out
+    assert "Summarized on this computer" in text
+    assert local.call_count == 20
+    assert run_brief(path, "--yes") == 0
+    assert local.call_count == 20
+    cloud.assert_not_called()
 
 
 def test_first_brief_asks_then_saves_and_prints_counts_only(

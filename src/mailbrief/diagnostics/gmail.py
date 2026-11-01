@@ -60,12 +60,13 @@ from mailbrief.domain.drafts import (
     still_to_fill,
 )
 from mailbrief.domain.messages import ProviderKind, RankReason
-from mailbrief.domain.preferences import OwnerPreferences, sender_excluded
+from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, sender_excluded
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.data_lock import DataInUseError, data_directory_lock
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.paths import AppPaths
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
+from mailbrief.providers.analysis import analysis_provider
 from mailbrief.providers.gmail.cache import GmailCredentialStore
 from mailbrief.providers.gmail.errors import GmailSetupError
 from mailbrief.providers.gmail.factory import GmailBodies, gmail_auth, gmail_provider
@@ -80,6 +81,7 @@ from mailbrief.providers.local.device import (
 )
 from mailbrief.providers.local.device import summary as device_summary
 from mailbrief.providers.local.manifest import manifest_for
+from mailbrief.providers.local.notices import local_notices
 from mailbrief.services.actions import (
     COMPLETED_LIST_LIMIT,
     ActionConflictError,
@@ -105,7 +107,17 @@ from mailbrief.services.calendar import (
     local_day_window,
     resolve_timezone,
 )
-from mailbrief.services.consent import NO_CONSENT, auto_send_permission, set_auto_send
+from mailbrief.services.consent import (
+    LOCAL_CONNECT_FIRST,
+    LOCAL_CONSENT_PROVIDER,
+    LOCAL_DISCLOSURE_VERSION,
+    NO_CONSENT,
+    auto_send_permission,
+    grant_local_consent,
+    local_disclosure_lines,
+    revoke_local_consent,
+    set_auto_send,
+)
 from mailbrief.services.drafting import (
     DRAFTING_DISCLOSURE_VERSION,
     DRAFTING_SCOPE,
@@ -162,7 +174,7 @@ from mailbrief.text.prepare import clean_generated_text
 
 _AI_COMMANDS = frozenset({"brief", "ai-key", "ai-consent"})
 # Commands whose setup errors are shown as they are: static, actionable messages.
-_OWN_MESSAGE_COMMANDS = _AI_COMMANDS | {"actions", "drafts", "preferences", "briefs"}
+_OWN_MESSAGE_COMMANDS = _AI_COMMANDS | {"actions", "drafts", "preferences", "briefs", "local-ai"}
 _CONNECT_FIRST = "Connect Gmail first."
 _NO_BRIEF = "No saved brief for that date."
 _SEVERAL_BRIEFS = "Several accounts have a brief for that date; pass --account."
@@ -185,6 +197,11 @@ _SETUP_UNAVAILABLE = (
     "Gmail configuration or secure storage is unavailable. See docs/gmail-setup.md."
 )
 _AI_ERROR_MESSAGES = {
+    "LOCAL_AI_NOT_READY": (
+        "Local AI is not ready. Run forewit-gmail-diagnostic local-ai status, "
+        "then local-ai setup if needed. Your saved brief remains available."
+    ),
+    "LOCAL_AI_FAILED": "Local AI could not finish. Retry when this computer is ready.",
     "AI_USAGE_LIMIT": (
         "Forewit's AI request limit for this run was reached. "
         "Review MAILBRIEF_AI_MAX_REQUESTS_PER_RUN before running again."
@@ -565,12 +582,38 @@ async def ai_consent(
     database_path: Path | None,
     limit: int | None = None,
     assume_yes: bool = False,
+    local_action: str | None = None,
 ) -> int:
-    """Show or revoke recorded Groq consent, each account's for briefs and the owner's for AI
-    drafting, or set how many messages automatic runs may send without asking (auto-send).
-    Needs no Gmail connection."""
+    """Manage local permission or Groq brief/drafting consent and automatic limits.
+
+    Reads a saved Gmail credential only when the command requires the connected account;
+    never connects to Gmail or starts processing.
+    """
     path = database_path or AppPaths.from_qt().database_path
     async with migrated_database(path) as database, database.session() as session:
+        if action == "local":
+            assert local_action in {"grant", "revoke"}
+            if local_action == "revoke":
+                count = await revoke_local_consent(session)
+                print(f"Local email analysis consent revoked for all accounts: {count}")
+                return 0
+            email = await _stored_account_email(required=True)
+            known = any(
+                account.provider == ProviderKind.GMAIL.value and account.email_address == email
+                for account in await AccountRepository(session).list_all()
+            )
+            if email is None or not known:
+                raise ConfigurationError(LOCAL_CONNECT_FIRST)
+            preferences = await PreferencesService(session).get()
+            print(f"Gmail account: {email}")
+            for line in local_disclosure_lines(preferences.local_message_limit):
+                print(line)
+            if await _ask('Type "yes" to allow local email analysis: ') != "yes":
+                print("Nothing was changed.")
+                return 6
+            await grant_local_consent(session, email)
+            print("Local processing consent saved. No analysis was started or mode changed.")
+            return 0
         if action == "auto-send":
             assert limit is not None
             return await _auto_send(session, limit, assume_yes=assume_yes)
@@ -591,6 +634,13 @@ async def ai_consent(
                         active.auto_send_limit, active.auto_send_granted_at_utc
                     )
                 print(line)
+                local = await consents.get_active(
+                    account.id, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION
+                )
+                print(
+                    f"Account {account.id}: Local email analysis consent "
+                    f"{_granted(None if local is None else local.granted_at_utc)}"
+                )
             drafting = await owner.get_active(
                 PROVIDER_NAME, DRAFTING_SCOPE, DRAFTING_DISCLOSURE_VERSION
             )
@@ -661,6 +711,11 @@ def _setup_progress() -> Callable[[SetupProgress], None]:
 async def local_ai(action: str, *, folder: Path | None, assume_yes: bool) -> int:
     """Set up, check or remove the model that analyzes email on this computer (P0-B2); it
     never reads mail, and only setup uses the internet."""
+    if action == "licenses":
+        print(local_notices())
+        return 0
+    if action == "setup":
+        Settings().require_local_ai()
     setup = LocalSetup(folder or AppPaths.from_qt().local_ai_dir, manifest_for())
     memory = await asyncio.to_thread(total_memory_bytes)
     if action == "remove":
@@ -719,7 +774,12 @@ class CliConsentGate:
             if self._assume_yes:
                 print("First use needs your interactive consent; run brief without --yes.")
                 return False
-            return await _ask('Type "yes" to consent and send: ') == "yes"
+            prompt = (
+                'Type "yes" to allow local email analysis: '
+                if preview.provider_name == "local"
+                else 'Type "yes" to consent and send: '
+            )
+            return await _ask(prompt) == "yes"
         if self._assume_yes:
             return True
         return (await _ask("Send? [y/N] ")).lower() in {"y", "yes"}
@@ -1076,13 +1136,17 @@ async def brief(
     day = None if date_text is None else parse_brief_date(date_text)
     owner = await _owner(database_path, timezone)
     settings, tz = owner.settings, owner.zone
+    if owner.preferences.analysis_mode is AnalysisMode.LOCAL:
+        settings.require_local_ai()
     now = datetime.now(UTC)
     today = local_day_window(now, tz).local_date
     check_brief_date(day or today, today)
     window = day_window(day or today, tz)
     async with (
         gmail_provider(settings, silent_only=silent_only) as provider,
-        groq_provider(settings) as ai,
+        analysis_provider(
+            settings, owner.preferences, folder=owner.path.parent / "local-ai", cloud=groq_provider
+        ) as ai,
     ):
         await provider.connect()
         async with owner.database() as database, database.session() as session:
@@ -1092,6 +1156,7 @@ async def brief(
                 ai,
                 settings,
                 consent_gate=NeverAsks() if automatic else CliConsentGate(assume_yes=assume_yes),
+                preferences=owner.preferences,
                 clock=lambda: now,
             )
             result = await service.generate(
@@ -1576,6 +1641,8 @@ async def preferences_show(*, database_path: Path | None) -> int:
     zone = preferences.time_zone or f"system ({owner_zone(preferences).key})"
     print(f"Time zone: {zone}")
     print(f"Messages per brief: {preferences.shortlist_limit}")
+    print(f"Email analysis mode: {preferences.analysis_mode.value}")
+    print(f"Local messages per brief: {preferences.local_message_limit}")
     rules = preferences.excluded_senders
     print(f"Excluded senders: {len(rules) or 'none'}")
     for rule in rules:
@@ -1712,7 +1779,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     )
     local_parser.add_argument(
         "action",
-        choices=("status", "setup", "remove"),
+        choices=("status", "setup", "remove", "licenses"),
         help="setup downloads about 2.5 GB after asking; status and remove use no network.",
     )
     local_parser.add_argument(
@@ -1724,26 +1791,26 @@ def main(arguments: Sequence[str] | None = None) -> int:
     consent_parser = commands.add_parser(
         "ai-consent",
         help=(
-            "Show or revoke your recorded consent to send email to Groq, or allow automatic "
-            "runs to send a few messages without asking."
+            "Show consent, manage local processing permission, or manage Groq consent "
+            "and automatic-analysis permission."
         ),
     )
     consent_parser.add_argument(
         "action",
-        choices=("status", "revoke", "auto-send"),
+        choices=("status", "revoke", "auto-send", "local"),
         help=(
-            "status shows consent and the automatic-analysis permission, revoke withdraws "
-            "both for every account, and auto-send LIMIT sets the permission for the "
-            "connected Gmail account."
+            "status shows local and cloud consent, revoke withdraws Groq brief/drafting "
+            "consent for every account, and auto-send LIMIT sets the permission for the "
+            "connected Gmail account. local grant requires a typed yes; local revoke "
+            "withdraws local permission for every account without credentials."
         ),
     )
     consent_parser.add_argument(
         "limit",
         nargs="?",
-        type=_auto_send_limit,
         help=(
             "With auto-send: how many messages an automatic run may send without asking, "
-            "0 to 10; 0 turns it off for every account."
+            "0 to 10; 0 turns it off for every account. With local: grant or revoke."
         ),
     )
     consent_parser.add_argument(
@@ -1926,9 +1993,19 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if conflicts:
             brief_parser.error(f"--automatic can't be used with {', '.join(conflicts)}")
     if args.command == "ai-consent":
+        args.local_action = None
         if args.action == "auto-send" and args.limit is None:
             consent_parser.error("auto-send needs a number of messages, 0 to 10")
-        if args.action != "auto-send" and (args.limit is not None or args.yes):
+        if args.action == "auto-send":
+            try:
+                args.limit = _auto_send_limit(args.limit)
+            except argparse.ArgumentTypeError as exc:
+                consent_parser.error(str(exc))
+        elif args.action == "local":
+            if args.limit not in {"grant", "revoke"} or args.yes:
+                consent_parser.error("local needs grant or revoke and takes no --yes")
+            args.local_action, args.limit = args.limit, None
+        elif args.limit is not None or args.yes:
             consent_parser.error(f"{args.action} takes no number and no --yes")
     # Wire/debug logging can expose authorization headers, loopback URLs and request bodies.
     for name in ("httpx", "httpcore", "groq"):
@@ -2008,6 +2085,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     database_path=args.database,
                     limit=args.limit,
                     assume_yes=args.yes,
+                    local_action=args.local_action,
                 )
             )
         if args.command == "preferences":

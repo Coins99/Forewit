@@ -37,6 +37,7 @@ from mailbrief.domain.preferences import (
     AI_REQUESTS_MAX,
     AI_TIMEOUT_MAX,
     AI_TIMEOUT_MIN,
+    LOCAL_MESSAGE_LIMIT_MAX,
     REFRESH_INTERVALS,
     SHORTLIST_LIMIT_MAX,
 )
@@ -637,6 +638,28 @@ class ActionTagTable(Base):
     name_key: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class TaskCommandTable(Base):
+    """Durable create receipts; no FK so purging a task cannot make a retry recreate it."""
+
+    __tablename__ = "task_commands"
+    __table_args__ = (
+        CheckConstraint("length(command_id) = 36", name="command_id_length"),
+        CheckConstraint("operation = 'task.create'", name="operation_known"),
+        CheckConstraint(
+            "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'",
+            name="input_hash_valid",
+        ),
+        CheckConstraint("result_revision >= 1", name="result_revision_positive"),
+    )
+
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class ActionActivityTable(Base):
     """Append-only owner activity; saved in the transaction that changes the action."""
 
@@ -966,6 +989,11 @@ class OwnerPreferencesTable(Base):
         CheckConstraint(
             f"shortlist_limit BETWEEN 1 AND {SHORTLIST_LIMIT_MAX}", name="shortlist_limit_range"
         ),
+        CheckConstraint("analysis_mode IN ('cloud', 'local')", name="analysis_mode_known"),
+        CheckConstraint(
+            f"local_message_limit BETWEEN 1 AND {LOCAL_MESSAGE_LIMIT_MAX}",
+            name="local_message_limit_range",
+        ),
         CheckConstraint(_DEFAULT_TONE_CHECK, name="draft_tone_known"),
         CheckConstraint(_DEFAULT_LENGTH_CHECK, name="draft_length_known"),
         CheckConstraint(_REFRESH_INTERVAL_CHECK, name="refresh_interval_known"),
@@ -981,6 +1009,12 @@ class OwnerPreferencesTable(Base):
     time_zone: Mapped[str | None] = mapped_column(String(64))
     shortlist_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=SHORTLIST_LIMIT_MAX, server_default=text("10")
+    )
+    analysis_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="cloud", server_default="cloud"
+    )
+    local_message_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LOCAL_MESSAGE_LIMIT_MAX, server_default=text("20")
     )
     excluded_senders_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     # Mail from these ranks higher (ADR 0020).

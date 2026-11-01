@@ -17,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.config import Settings
 from mailbrief.domain.common import utc_now
-from mailbrief.domain.preferences import AI_LIMIT_FIELDS, OwnerPreferences, PreferencesEdit
+from mailbrief.domain.preferences import (
+    AI_LIMIT_FIELDS,
+    AnalysisMode,
+    OwnerPreferences,
+    PreferencesEdit,
+)
 from mailbrief.errors import ConfigurationError
 from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.writes import commit_once
@@ -27,6 +32,7 @@ from mailbrief.storage.preferences import (
     apply_edit,
     preferences_from_row,
 )
+from mailbrief.storage.repositories import ConsentRepository
 from mailbrief.storage.tables import OwnerPreferencesTable
 
 logger = logging.getLogger(__name__)
@@ -77,7 +83,7 @@ class PreferencesService:
             row = await self._repository.get_row_to_replace()
             if (0 if row is None else row.revision) != expected_revision:
                 raise PreferencesConflictError()
-            return self._replace(row, edit, now)
+            return await self._replace(row, edit, now)
 
         saved = await self._write(operation)
         logger.info(
@@ -91,19 +97,27 @@ class PreferencesService:
         """Back to the defaults, whatever the saved revision; an unreadable row is replaced."""
 
         async def operation(now: datetime) -> OwnerPreferences:
-            return self._replace(await self._repository.get_row_to_replace(), None, now)
+            return await self._replace(await self._repository.get_row_to_replace(), None, now)
 
         reset = await self._write(operation)
         logger.info("Preferences reset to the defaults")
         return reset
 
-    def _replace(
+    async def _replace(
         self, row: OwnerPreferencesTable | None, edit: PreferencesEdit | None, now: datetime
     ) -> OwnerPreferences:
+        replacement = edit or PreferencesEdit()
+        old_mode = AnalysisMode.CLOUD.value if row is None else row.analysis_mode
+        if old_mode != replacement.analysis_mode.value:
+            # Returning to cloud mode must not revive an old unattended-send grant.
+            # Keep manual consent and commit permission/preference changes together.
+            for consent in await ConsentRepository(self._session).with_auto_send():
+                consent.auto_send_limit = 0
+                consent.auto_send_granted_at_utc = None
         if row is None:
             row = OwnerPreferencesTable(id=PREFERENCES_ROW_ID, revision=0)
             self._repository.add(row)
-        apply_edit(row, edit or PreferencesEdit())
+        apply_edit(row, replacement)
         row.revision += 1
         row.updated_at_utc = now
         return preferences_from_row(row)

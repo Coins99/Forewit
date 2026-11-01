@@ -56,6 +56,7 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
+from mailbrief.domain.common import new_public_id
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import (
     ENDS_FIRST,
@@ -351,6 +352,7 @@ class ActionEditor(QDialog):
         self.resize(620, 650)
         self._projects: tuple[Project, ...] = ()
         self._creating = False
+        self.creation_command_id = new_public_id()
         self.embedded = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
@@ -784,6 +786,7 @@ class ActionEditor(QDialog):
         """Open an empty editor; cancelling creates no record. ``zone`` is the owner's, and
         ``waiting`` starts the task as someone else's to do, as on the Waiting page."""
         self._creating = True
+        self.creation_command_id = new_public_id()
         self._action = None
         self._set_saving(False)
         self.setWindowTitle("New task")

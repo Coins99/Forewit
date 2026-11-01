@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     microsoft_client_id: str | None = None
     graph_base_url: HttpUrl = HttpUrl("https://graph.microsoft.com/v1.0")
     groq_model: str | None = None
+    experimental_local_ai: bool = False
     ai_batch_size: int = Field(default=1, ge=1, le=MAX_ANALYSIS_BATCH)
     ai_body_character_limit: int = Field(default=4_000, ge=1, le=AI_BODY_CHARS_MAX)
     ai_max_output_tokens: int = Field(
@@ -64,6 +65,15 @@ class Settings(BaseSettings):
                 "Microsoft integration is not configured; set MAILBRIEF_MICROSOFT_CLIENT_ID."
             )
         return value
+
+    def require_local_ai(self) -> None:
+        """Keep experimental local setup/inference off unless explicitly enabled."""
+        if not self.experimental_local_ai:
+            raise ConfigurationError(
+                "Local AI is experimental and disabled. "
+                "Set MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true to enable it. "
+                "No cloud fallback was selected."
+            )
 
     def require_groq_model(self) -> str:
         """Return the configured Groq model or an actionable error."""

@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.drafts import DraftLength, DraftTone
-from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, PreferencesEdit
 from mailbrief.storage.database import Database
 from mailbrief.storage.preferences import (
     PreferencesRepository,
@@ -49,6 +49,19 @@ async def test_a_saved_row_round_trips(database: Database, session: AsyncSession
     async with database.session() as other:
         loaded = preferences_from_row(await PreferencesRepository(other).get_row())
     assert loaded == OwnerPreferences(**EDIT.model_dump(), revision=1, updated_at_utc=AT)
+
+
+async def test_local_preferences_are_independent_of_cloud_limit(
+    database: Database, session: AsyncSession
+) -> None:
+    edit = PreferencesEdit(
+        analysis_mode=AnalysisMode.LOCAL, local_message_limit=17, shortlist_limit=3
+    )
+    await save(session, edit)
+    async with database.session() as other:
+        loaded = preferences_from_row(await PreferencesRepository(other).get_row())
+    assert loaded.analysis_mode is AnalysisMode.LOCAL
+    assert (loaded.local_message_limit, loaded.shortlist_limit) == (17, 3)
 
 
 async def test_get_row_reads_changes_made_elsewhere(

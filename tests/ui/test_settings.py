@@ -1,6 +1,7 @@
 """Settings interaction, secret-field lifetime and shutdown during durable writes."""
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 from pydantic import SecretStr
@@ -8,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
+from mailbrief.services.local_setup import SetupProgress, SetupState, SetupStatus
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.settings_view import SettingsDialog
@@ -60,6 +62,61 @@ async def test_invalid_key_never_reaches_backend(qtbot: QtBot) -> None:
     assert backend.key_value is None
     assert "invalid" in editor.status.text()
     assert editor.key.text() == ""
+
+
+async def test_revoke_during_analysis_joins_the_run_before_revoking(qtbot: QtBot) -> None:
+    entered, stopped = asyncio.Event(), asyncio.Event()
+
+    class Backend(FakeBackend):
+        async def revoke_consent(self) -> int:
+            assert stopped.is_set()
+            return await super().revoke_consent()
+
+    backend = Backend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window._open_settings()
+
+    async def analyze() -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    assert window.start(analyze)
+    await entered.wait()
+    assert window.settings_dialog.revoke_button.isEnabled()
+    window.settings_dialog.revoke_button.click()
+    await window.drain_calendar_reads()
+    await finish(window)
+    assert stopped.is_set()
+    assert backend.revoked
+
+
+async def test_settings_can_stop_local_setup_without_closing(qtbot: QtBot) -> None:
+    entered, stopped = asyncio.Event(), asyncio.Event()
+
+    class Backend(FakeBackend):
+        async def setup_local_ai(self, progress: Callable[[SetupProgress], None]) -> SetupStatus:
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+            return SetupStatus(SetupState.READY)
+
+    window = MainWindow(Backend())
+    qtbot.addWidget(window)
+    await window._open_settings()
+    assert window.start(window._setup_local_ai)
+    await entered.wait()
+    assert window.settings_dialog.stop_button.isVisible()
+    window.settings_dialog.stop_button.click()
+    await finish(window)
+    assert stopped.is_set()
+    assert window.settings_dialog.isVisible()
+    assert window.settings_dialog.preferences_panel.isEnabled()
 
 
 async def test_close_waits_for_settings_write(qtbot: QtBot) -> None:
@@ -225,6 +282,8 @@ async def test_account_card_gallery(
     dialog = window.settings_dialog
     qtbot.waitExposed(dialog)
     save_shot(dialog.grab(), f"dialog-settings-{mode}")
+    dialog.tabs.setCurrentIndex(1)
+    save_shot(dialog.grab(), f"dialog-local-ai-{mode}")
     dialog.reject()
 
 

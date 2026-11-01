@@ -13,7 +13,13 @@ from mailbrief.domain.analysis import (
     deadline_due_at,
 )
 from mailbrief.domain.briefs import AnalysisOutcome
-from mailbrief.domain.digests import DailyDigest, DigestCoverage, DigestSection, DigestStatus
+from mailbrief.domain.digests import (
+    DailyDigest,
+    DigestCoverage,
+    DigestItem,
+    DigestSection,
+    DigestStatus,
+)
 from mailbrief.domain.messages import RankedMessage
 from mailbrief.services.analysis import PlannedMessage
 from mailbrief.services.calendar import DayWindow
@@ -93,6 +99,55 @@ class DigestService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._digests = DigestRepository(session)
+
+    async def preview(
+        self,
+        *,
+        account_email: str,
+        window: DayWindow,
+        generated_at: datetime,
+        messages: Sequence[PlannedMessage],
+        outside_ids: frozenset[str] = frozenset(),
+    ) -> DailyDigest | None:
+        """Project committed analyses without saving or replacing a canonical brief."""
+        entries = sorted(
+            (_entry(item) for item in messages if item.outcome in IN_BRIEF),
+            key=lambda entry: _order(entry, outside_ids),
+        )
+        if not entries:
+            return None
+        views = await suggestion_views(
+            self._session, [(entry.message_row_id, entry.analysis_row_id) for entry in entries]
+        )
+        items = []
+        for position, entry in enumerate(entries):
+            message, analysis = entry.ranked.message, entry.analysis
+            items.append(
+                DigestItem(
+                    message_key=message.provider_message_id,
+                    section=_section(entry, outside_ids),
+                    position=position,
+                    subject=message.subject,
+                    sender=message.sender,
+                    summary=analysis.summary,
+                    action_text=analysis.action_text,
+                    deadline_text=analysis.deadline_text,
+                    deadline_precision=analysis.deadline_precision,
+                    deadline_date=analysis.deadline_date,
+                    deadline_at_utc=analysis.deadline_at_utc,
+                    evidence=analysis.evidence,
+                    source_url=message.web_link,
+                    suggestions=views.get(entry.message_row_id, ()),
+                )
+            )
+        return DailyDigest(
+            account_id=account_email,
+            local_date=window.local_date,
+            timezone_name=window.timezone_name,
+            generated_at_utc=generated_at,
+            status=DigestStatus.PARTIAL,
+            items=tuple(items),
+        )
 
     async def carried(
         self, account_id: int, local_date: date

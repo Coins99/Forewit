@@ -54,13 +54,14 @@ from mailbrief.domain.events import (
 )
 from mailbrief.domain.google_calendar import CalendarSyncResult
 from mailbrief.domain.messages import ProviderKind
-from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderResponseError
+from mailbrief.providers.analysis import analysis_provider
 from mailbrief.providers.gcal.auth import forget_legacy_sign_in
 from mailbrief.providers.gcal.errors import NOT_ALLOWED
 from mailbrief.providers.gcal.factory import google_calendar
@@ -70,6 +71,8 @@ from mailbrief.providers.gmail.oauth import DesktopClient
 from mailbrief.providers.groq.credentials import GroqKeyStore
 from mailbrief.providers.groq.factory import groq_provider
 from mailbrief.providers.groq.provider import PRIVACY_NOTICE, PROVIDER_NAME
+from mailbrief.providers.local.host import LocalModelHost
+from mailbrief.providers.local.manifest import manifest_for
 from mailbrief.services.actions import AcceptedInto, ActionService, DecisionSnapshot
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.brief import (
@@ -99,6 +102,7 @@ from mailbrief.services.events import EventService
 from mailbrief.services.google_calendar import CalendarSyncService, forget_cache
 from mailbrief.services.history import BriefHistory, check_brief_date
 from mailbrief.services.inbox import InboxService
+from mailbrief.services.local_setup import LocalSetup, SetupProgress, SetupStatus
 from mailbrief.services.preferences import (
     PreferencesService,
     PreferencesUnavailableError,
@@ -171,6 +175,10 @@ class DesktopRuntime:
         self._inbox_browse: dict[tuple[str, str], InboxBrowse] = {}
         self._inbox_generation = 0
         self._preferences = PreferencesStore(database_path.parent / "desktop-settings.json")
+        local_folder = database_path.parent / "local-ai"
+        self._local_host = LocalModelHost(
+            LocalSetup(local_folder, manifest_for()), record=local_folder / "server.json"
+        )
 
     async def load_saved(self) -> DailyDigest | None:
         if self._database is None:
@@ -242,6 +250,14 @@ class DesktopRuntime:
                 await forget_cache(session)
 
     async def ai_status(self) -> str:
+        if self._database is not None:
+            owner = await self.get_owner_preferences()
+            if owner.analysis_mode is AnalysisMode.LOCAL:
+                state = "Ready" if await self._local_host.available() else "Setup needed"
+                return (
+                    f"Email AI: on this computer. {state}; permission is checked for each run. "
+                    "Drafting and calendar AI use Groq."
+                )
         if not (await self.get_preferences()).groq_model:
             return "AI: choose a Structured Outputs model in Settings."
         if not await asyncio.to_thread(_groq_key_saved):
@@ -312,15 +328,25 @@ class DesktopRuntime:
     ) -> BriefRunResult:
         preferences = await self.get_owner_preferences()
         settings = await self._settings(preferences)
+        if preferences.analysis_mode is AnalysisMode.LOCAL:
+            settings.require_local_ai()
         zone = owner_zone(preferences)
         if local_date is not None:
             check_brief_date(local_date, datetime.now(UTC).astimezone(zone).date())
         async with (
             gmail_provider(settings, silent_only=True) as provider,
-            groq_provider(settings) as ai,
+            analysis_provider(
+                settings,
+                preferences,
+                folder=self._path.parent / "local-ai",
+                host=self._local_host,
+                cloud=groq_provider,
+            ) as ai,
             self._storage().session() as session,
         ):
-            service = compose_brief(session, provider, ai, settings, consent_gate=gate)
+            service = compose_brief(
+                session, provider, ai, settings, consent_gate=gate, preferences=preferences
+            )
             return await service.generate(
                 tz_key=zone.key,
                 cancel=cancel,
@@ -420,11 +446,37 @@ class DesktopRuntime:
         self, edit: PreferencesEdit, revision: int
     ) -> OwnerPreferences:
         async with self._storage().session() as session:
-            return await PreferencesService(session).save(edit, revision)
+            saved = await PreferencesService(session).save(edit, revision)
+        await self._stop_local_model()
+        return saved
 
     async def reset_owner_preferences(self) -> OwnerPreferences:
         async with self._storage().session() as session:
-            return await PreferencesService(session).reset()
+            saved = await PreferencesService(session).reset()
+        await self._stop_local_model()
+        return saved
+
+    async def _stop_local_model(self) -> None:
+        await self._local_host.close()
+        folder = self._path.parent / "local-ai"
+        self._local_host = LocalModelHost(
+            LocalSetup(folder, manifest_for()), record=folder / "server.json"
+        )
+
+    def _local_setup(self) -> LocalSetup:
+        return LocalSetup(self._path.parent / "local-ai", manifest_for())
+
+    async def local_ai_status(self) -> SetupStatus:
+        return await self._local_setup().status()
+
+    async def setup_local_ai(self, progress: Callable[[SetupProgress], None]) -> SetupStatus:
+        Settings().require_local_ai()
+        await self._stop_local_model()
+        return await self._local_setup().setup(progress)
+
+    async def remove_local_ai(self) -> None:
+        await self._stop_local_model()
+        await self._local_setup().remove()
 
     async def cached_accounts(self) -> tuple[CachedAccount, ...]:
         if self._database is None:
@@ -694,9 +746,11 @@ class DesktopRuntime:
             for account in accounts:
                 if account.provider == ProviderKind.GMAIL.value:
                     count += await consents.revoke_all(account.id, "groq", now)
+                    count += await consents.revoke_all(account.id, "local", now)
             # AI drafting's consent belongs to the owner, not an account (ADR 0013).
             count += await OwnerConsentRepository(session).revoke_all("groq", now)
-            return count
+        await self._stop_local_model()
+        return count
 
     def _storage(self) -> Database:
         if self._database is None:
@@ -844,9 +898,13 @@ class DesktopRuntime:
         steps: Sequence[StepEdit],
         repeat: RepeatRule | None = None,
         deadline: DeadlineChange | None = None,
+        *,
+        command_id: str | None = None,
     ) -> Action:
         async with self._storage().session() as session:
-            return await ActionService(session).create(edit, steps, repeat, deadline)
+            return await ActionService(session).create(
+                edit, steps, repeat, deadline, command_id=command_id
+            )
 
     async def undo_action_status(self, public_id: str, revision: int) -> Action:
         async with self._storage().session() as session:
@@ -1094,6 +1152,7 @@ class DesktopRuntime:
             return await CalendarSyncService(session, reader).sync(around, zone)
 
     async def close(self) -> None:
+        await self._local_host.close()
         if self._database is not None:
             await self._database.dispose()
             self._database = None

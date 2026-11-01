@@ -184,10 +184,14 @@ def summary(assessment: DeviceAssessment) -> str:
     seconds = assessment.seconds_per_email
     if assessment.gpus:
         gpus = ", ".join(assessment.gpus)
-        text = f"About {seconds} seconds per email on this computer ({gpus})."
+        text = (
+            f"Benchmark reference: about {seconds} seconds per email with GPU acceleration. "
+            f"Detected GPU: {gpus}. Actual speed varies."
+        )
     else:
         text = (
-            f"About {seconds} seconds per email: no graphics processor the model can use was found."
+            f"Benchmark reference: about {seconds} seconds per email on CPU; "
+            "no usable GPU was detected. Actual speed varies."
         )
     note = memory_note(assessment)
     return text if note is None else f"{text} {note}"

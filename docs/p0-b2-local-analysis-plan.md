@@ -1,9 +1,11 @@
 # P0-B2: local email analysis pipeline — implementation plan
 
 Date: 2026-10-30. Status: approved by the owner on 2026-10-30 with the four recommended
-decisions below. Parts 1 and 2 are implemented; Parts 3–7 are not.
-Branch: `feat/local-ai-pipeline`, cut from `feat/local-ai-benchmark` (P0-B1, not yet on
-`main`); rebase onto `main` once P0-B1 merges. One pull request, built in parts, as M8 was.
+decisions below. Parts 1–3 are implemented; Parts 4–7 are not. Local brief generation
+and owner live acceptance remain pending.
+Parts 1–2 merged in PR #97. Part 3 continues on `feat/p0-local-consent`, based on
+`main` at `d8e7b9b`; preserve the completed parts and implement the remaining work in
+reviewable increments.
 
 Inputs: [P0-B in future-implementations](future-implementations.md#71-p0-b-local-first-email-privacy-and-responsiveness-d09)
 and the [P0-B1 benchmark](local-ai-benchmark.md), whose recommendation this plan follows.
@@ -173,6 +175,19 @@ Done. What the pinned downloads showed, and the code now relies on:
   and its disclosure lines, shared by the CLI and the desktop. Restore clears it.
 - CLI: `ai-consent local grant` (shows the disclosure, needs a typed `yes`) and
   `ai-consent local revoke`; `ai-consent status` lists it.
+
+Implemented in migration `20261101_0025`. Existing profiles retain cloud mode and the
+unchanged cloud shortlist limit; local defaults to 20. Local grants are separate from
+Groq, and revocation clears all local accounts/disclosure versions without credentials.
+Restore revokes local consent but preserves the selected mode and message limit.
+Preferences saves preserve both fields even before their desktop controls arrive.
+Until Part 4, local-mode brief entrypoints refuse before composing Gmail or Groq.
+Granting consent changes neither mode nor schedule and starts no analysis/download.
+Staff review hardened the transition: changing analysis mode clears automatic-send
+permission atomically with the preferences, including Reset to defaults from local
+mode. Ordinary settings edits preserve permission. The desktop's existing Revoke AI
+consent action also revokes local grants, and Settings refreshes its permission line
+after changes so it does not display a stale allowance.
 
 ### Part 4 — The brief in local mode
 

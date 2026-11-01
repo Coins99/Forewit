@@ -184,13 +184,15 @@ def test_no_gpu_or_unknown_devices_take_twice_as_long(
 
 def test_the_summary_names_the_gpu() -> None:
     assert summary(assess(16 * GIB, (RADEON,))) == (
-        "About 15 seconds per email on this computer (AMD Radeon(TM) 780M)."
+        "Benchmark reference: about 15 seconds per email with GPU acceleration. "
+        "Detected GPU: AMD Radeon(TM) 780M. Actual speed varies."
     )
 
 
 def test_the_summary_says_no_gpu_was_found() -> None:
     assert summary(assess(None, ())) == (
-        "About 30 seconds per email: no graphics processor the model can use was found."
+        "Benchmark reference: about 30 seconds per email on CPU; "
+        "no usable GPU was detected. Actual speed varies."
     )
 
 
@@ -198,7 +200,8 @@ def test_the_summary_warns_about_low_memory_in_whole_gigabytes() -> None:
     # An "8 GB" computer reports a little less to programs.
     text = summary(assess(int(7.8 * GIB), None))
     assert text == (
-        "About 30 seconds per email: no graphics processor the model can use was found."
+        "Benchmark reference: about 30 seconds per email on CPU; "
+        "no usable GPU was detected. Actual speed varies."
         " This computer has 8 GB of memory; the local model was measured with 16 GB,"
         " so it may be slower or fail to load."
     )

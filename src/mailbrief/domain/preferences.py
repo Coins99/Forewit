@@ -8,6 +8,7 @@ import re
 import unicodedata
 from collections.abc import Iterable
 from datetime import datetime
+from enum import StrEnum
 from typing import Final, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -19,6 +20,7 @@ from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.drafts import DraftLength, DraftTone
 
 SHORTLIST_LIMIT_MAX: Final = 10
+LOCAL_MESSAGE_LIMIT_MAX: Final = 20
 # How often, in minutes, an open MailBrief may refresh on its own (ADR 0017); None is never.
 REFRESH_INTERVALS: Final = (60, 120, 240)
 EXCLUSIONS_MAX: Final = 200
@@ -135,6 +137,13 @@ def _sender_rules(value: tuple[str, ...], what: str) -> tuple[str, ...]:
     return rules
 
 
+class AnalysisMode(StrEnum):
+    """Where email analysis runs; changing it never grants processing permission."""
+
+    CLOUD = "cloud"
+    LOCAL = "local"
+
+
 class PreferencesEdit(DomainModel):
     """What the owner can change. None for an AI limit means "use the default"."""
 
@@ -142,6 +151,10 @@ class PreferencesEdit(DomainModel):
 
     time_zone: str | None = Field(default=None, max_length=TIME_ZONE_MAX_CHARS)
     shortlist_limit: int = Field(default=SHORTLIST_LIMIT_MAX, ge=1, le=SHORTLIST_LIMIT_MAX)
+    analysis_mode: AnalysisMode = AnalysisMode.CLOUD
+    local_message_limit: int = Field(
+        default=LOCAL_MESSAGE_LIMIT_MAX, ge=1, le=LOCAL_MESSAGE_LIMIT_MAX
+    )
     excluded_senders: tuple[str, ...] = ()
     # Mail from these ranks higher (ADR 0020); an exclusion always wins over them.
     important_senders: tuple[str, ...] = ()

@@ -52,6 +52,8 @@ including deleted records, source snapshots and saved versions, as portable UTF-
 Keep backups and exports private.
 Restore validates and upgrades the archive, closes Forewit, keeps a pre-restore copy
 beside the database, and clears automatic AI permission. Relaunch after restoring.
+Restore also revokes local email-analysis permission. Reconnect and opt in again before
+local processing. Model downloads are device setup and are not included in a backup.
 Device setup (OAuth client path and model) and vault credentials are configured separately.
 
 Cleanup is manual. Cache cleanup removes selected saved mail, analyses, suggestions,
@@ -69,7 +71,10 @@ offline restore command with a new filename and retain the damaged database and 
 Only restore archives you intend to use; a checksum verifies integrity, not origin.
 
 Setup: choose a Google Desktop OAuth client JSON in Settings, connect read-only Gmail,
-then choose a Structured Outputs model and save your Groq key if you want AI features.
+then choose email analysis in Settings > Preferences. On this computer downloads a pinned
+local model only after you approve setup, then asks once before reading mail for local AI.
+Local mode has no automatic cloud fallback. A suitable Groq model and key are needed
+for cloud email analysis, AI drafting and calendar planning. These are separate permissions.
 Enable Groq Zero Data Retention in its console before approving real mail transmission.
 Use Tab/Shift+Tab to navigate, Alt+underlined letter for buttons, and Escape to close.
 """

@@ -28,6 +28,7 @@ import httpx
 from mailbrief.domain.analysis import AnalysisRequest, AnalysisResponse
 from mailbrief.domain.bodies import MAX_ANALYSIS_CHARS
 from mailbrief.ports.errors import ProviderError
+from mailbrief.providers.local.prompt import PROMPT_VERSION
 from mailbrief.providers.local.provider import (
     CallTiming,
     LocalModelProvider,
@@ -56,7 +57,7 @@ from scripts.package_manifest import sha256
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "out" / "local-ai-benchmark"
 # 3: the model runs through the app's own local provider and server (P0-B2 Part 1).
-HARNESS_VERSION = 3
+HARNESS_VERSION = 4
 HEALTH_TIMEOUT_SECONDS = 600.0
 PROBE_KEY = "probe"
 # llama-server flags whose value is a secret, kept out of reports.
@@ -628,7 +629,7 @@ def command_model(args: argparse.Namespace) -> Path:
         "max_output_tokens": args.max_output_tokens,
         "temperature": 0,
         "template_kwargs": template_kwargs,
-        "prompt_version": "the Groq adapter's instructions and schema",
+        "prompt_version": PROMPT_VERSION,
     }
     usage, usage_seconds, cold = UNKNOWN, None, None
     runtime: dict[str, object]

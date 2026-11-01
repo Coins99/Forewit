@@ -358,6 +358,24 @@ class _ThreadMessage:
     sender: EmailContact
 
 
+def activity_from_row(record: ActionActivityTable) -> ActionActivity:
+    """The same activity representation for capped UI and uncapped history reads."""
+    return ActionActivity(
+        revision=record.revision,
+        kind=ActionActivityKind(record.kind),
+        occurred_at_utc=record.occurred_at_utc,
+        previous_status=(
+            None if record.previous_status is None else ActionStatus(record.previous_status)
+        ),
+        previous_completed_at_utc=record.previous_completed_at_utc,
+        undo_of_revision=record.undo_of_revision,
+        previous_source_count=record.previous_source_count,
+        project_public_id=record.project_public_id,
+        area_public_id=record.area_public_id,
+        legacy=record.legacy,
+    )
+
+
 def _activity(
     row: ActionTable,
     sources: Sequence[ActionSourceTable],
@@ -983,24 +1001,7 @@ class ActionRepository:
                 .order_by(ActionActivityTable.action_id, ActionActivityTable.revision)
             )
             for record in records:
-                activity.setdefault(record.action_id, []).append(
-                    ActionActivity(
-                        revision=record.revision,
-                        kind=ActionActivityKind(record.kind),
-                        occurred_at_utc=record.occurred_at_utc,
-                        previous_status=(
-                            None
-                            if record.previous_status is None
-                            else ActionStatus(record.previous_status)
-                        ),
-                        previous_completed_at_utc=record.previous_completed_at_utc,
-                        undo_of_revision=record.undo_of_revision,
-                        previous_source_count=record.previous_source_count,
-                        project_public_id=record.project_public_id,
-                        area_public_id=record.area_public_id,
-                        legacy=record.legacy,
-                    )
-                )
+                activity.setdefault(record.action_id, []).append(activity_from_row(record))
         tags: dict[int, list[str]] = {}
         for chunk in sorted_batches(ids):
             tag_result = await self._session.execute(

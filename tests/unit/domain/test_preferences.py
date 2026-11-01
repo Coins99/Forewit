@@ -230,6 +230,23 @@ def test_bounds(field: str, value: object) -> None:
         PreferencesEdit.model_validate({field: value})
 
 
+@pytest.mark.parametrize("mode", ["local", "cloud"])
+def test_local_limit_is_separate_from_cloud_limit(mode: str) -> None:
+    edit = PreferencesEdit(analysis_mode=mode, local_message_limit=20, shortlist_limit=3)
+    assert edit.analysis_mode == mode
+    assert edit.local_message_limit == 20
+    assert edit.shortlist_limit == 3
+    assert OwnerPreferences.defaults().analysis_mode == "cloud"
+
+
+@pytest.mark.parametrize(
+    "changes", [{"local_message_limit": 0}, {"local_message_limit": 21}, {"analysis_mode": "other"}]
+)
+def test_invalid_analysis_preferences_are_refused(changes: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        PreferencesEdit.model_validate(changes)
+
+
 def test_the_ai_bounds_match_the_settings() -> None:
     lowest = PreferencesEdit(
         shortlist_limit=1,

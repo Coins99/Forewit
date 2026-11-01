@@ -24,7 +24,9 @@ from mailbrief.services.preferences import (
     owner_zone,
 )
 from mailbrief.storage.database import Database
+from mailbrief.storage.repositories import ConsentRepository
 from mailbrief.ui.preferences import DesktopPreferences
+from tests.unit.services.test_consent import consent
 
 AT = datetime(2026, 9, 29, 13, tzinfo=UTC)
 RULES = ("private-sender@example.com", "@private-domain.example")
@@ -93,6 +95,68 @@ async def test_reset_needs_no_revision_and_bumps(session: AsyncSession) -> None:
 async def test_reset_before_any_save_writes_the_defaults(session: AsyncSession) -> None:
     reset = await service(session).reset()
     assert reset == OwnerPreferences(revision=1, updated_at_utc=AT)
+
+
+@pytest.mark.parametrize("reset", [False, True])
+async def test_changing_analysis_mode_never_reuses_automatic_cloud_permission(
+    session: AsyncSession, reset: bool
+) -> None:
+    account = await consent(session)
+    repository = ConsentRepository(session)
+    await repository.set_auto_send(account.id, "groq", "2", 5, AT)
+    await session.commit()
+    preferences = service(session)
+    local = await preferences.save(PreferencesEdit(analysis_mode="local"), 0)
+    cloud = await repository.get_active(account.id, "groq", "2")
+    assert cloud is not None and cloud.auto_send_limit == 0
+    # An old profile or explicit CLI grant can still hold cloud permission in local
+    # mode. Switching back, including via Reset, must clear it again.
+    await repository.set_auto_send(account.id, "groq", "2", 5, AT)
+    await session.commit()
+    if reset:
+        await preferences.reset()
+    else:
+        await preferences.save(PreferencesEdit(analysis_mode="cloud"), local.revision)
+    cloud = await repository.get_active(account.id, "groq", "2")
+    assert cloud is not None  # Manual cloud consent remains; automatic permission does not.
+    assert (cloud.auto_send_limit, cloud.auto_send_granted_at_utc) == (0, None)
+
+
+async def test_ordinary_preference_edits_keep_automatic_cloud_permission(
+    session: AsyncSession,
+) -> None:
+    account = await consent(session)
+    repository = ConsentRepository(session)
+    await repository.set_auto_send(account.id, "groq", "2", 5, AT)
+    await session.commit()
+    await service(session).save(PreferencesEdit(time_zone="Asia/Tokyo"), 0)
+    cloud = await repository.get_active(account.id, "groq", "2")
+    assert cloud is not None and cloud.auto_send_limit == 5
+
+
+async def test_failed_mode_change_rolls_back_permission_and_preferences_together(
+    database: Database, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account = await consent(session)
+    account_id = account.id
+    repository = ConsentRepository(session)
+    await repository.set_auto_send(account.id, "groq", "2", 5, AT)
+    await session.commit()
+    preferences = service(session)
+    await preferences.save(PreferencesEdit(), 0)
+
+    async def failed_commit() -> None:
+        await session.flush()
+        raise RuntimeError("synthetic commit failure")
+
+    monkeypatch.setattr(session, "commit", failed_commit)
+    with pytest.raises(RuntimeError, match="synthetic commit failure"):
+        await preferences.save(PreferencesEdit(analysis_mode="local"), 1)
+    async with database.session() as other:
+        saved = await PreferencesService(other).get()
+        cloud = await ConsentRepository(other).get_active(account_id, "groq", "2")
+        assert saved.analysis_mode == "cloud"
+        assert cloud is not None and cloud.auto_send_limit == 5
 
 
 async def test_the_refresh_settings_save_reload_and_reset(
