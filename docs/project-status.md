@@ -6,15 +6,17 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
-- Scoped planner P0 engineering verification is complete on Windows, and the first
-  P1 consolidation increment is implemented:
+- Scoped planner P0 and P1 implementation/platform verification are complete:
   [P0 evidence](p0-planner-foundation.md) and [P1 history audit](p1-foundation-audit.md).
   The task service now reads uncapped effective history with correction resolution,
   original completion/group snapshots and explicit partial-coverage semantics.
   P1 also implements retry-safe manual task capture with atomic receipts; see
-  [ADR 0024](adr/0024-retry-safe-task-creation.md). Windows source and packaged
-  checks passed; native macOS and owner acceptance remain open. Detailed test
-  results and the resolved rerun failures are recorded in the P1 audit.
+  [ADR 0024](adr/0024-retry-safe-task-creation.md). PR #98 passed Windows and macOS
+  CI, native Cocoa tests and offline package/lifecycle checks. Windows passed
+  4,938 tests; macOS passed 3,310 non-UI and 1,625 native UI/app tests. Both platforms
+  passed the coverage gates. Agent-operated Windows capture/lifecycle checks passed;
+  owner usability acceptance remains open. The P1 audit records the evidence and
+  limits, including the interrupted hands-on session. Main is unchanged.
 
 - Owner scope decision (2026-11-01): local email AI is experimental and disabled
   unless `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true`. Saved local mode does not fall back

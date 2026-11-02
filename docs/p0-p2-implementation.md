@@ -22,6 +22,12 @@ Execution checklist and evidence: [planner foundation](p0-planner-foundation.md)
 P1 continuation: [task foundation audit](p1-foundation-audit.md).
 The increment records below describe earlier implementation work and evidence.
 
+2026-11-02 closeout: P1 implementation and automated Windows/macOS platform gates
+passed in [PR #98](https://github.com/Coins99/Forewit/pull/98), including atomic
+create retries, effective history, integrated recurrence/recovery and native packages.
+The foundation audit records full test counts and the agent-operated Windows checks.
+Owner usability acceptance remains open; this does not accept the deferred email trial.
+
 ## Scoped P0 closeout and P1 start (2026-11-01)
 
 Windows engineering gate passed: 4,907 tests, nine platform/render skips, 95.92%
@@ -33,8 +39,8 @@ open; this does not accept the deferred experimental email milestones.
 P1's first consolidation increment adds uncapped effective task history, correction
 resolution, original completion/group snapshots and partial-coverage semantics.
 The final model uses the shared frozen domain base. All 41 focused history/lifecycle/
-recovery checks passed after that alignment. The next P1 work is uncertain-create
-retry protection and remaining cross-feature/native acceptance, not another task store.
+recovery checks passed after that alignment. The subsequent retry protection and
+cross-feature/native automated verification are complete in the closeout above.
 
 Started 2026-11-01 from `main` at `d8e7b9b`, on `feat/p0-local-consent`.
 This is the active checklist and review log. The approved

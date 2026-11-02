@@ -87,11 +87,17 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Revisioned activity is transactional and survives reopen, restart, backup/recovery and
   writing export. Undo reopen restores the original completion timestamp. See
   `docs/p1-manual-tasks.md`; the organization slice below builds on this foundation.
-- P1 consolidation started: `ActionService.history()` reads uncapped effective per-task
+- P1 implementation/platform verification complete (PR #98; owner acceptance open):
+  Windows CI passed 4,938 tests; macOS passed 3,310 non-UI plus 1,625 native Cocoa
+  UI/app tests. Both passed coverage gates and native offline package checks, including
+  Windows copied-executable lifecycle/recovery. Agent-operated Windows capture and
+  lifecycle checks passed; further hands-on checks stopped when the desktop helper
+  became unavailable. Do not represent these as owner usability or M9 live acceptance.
+  `ActionService.history()` reads uncapped effective per-task
   activity, including soft-deleted records. `domain/task_history.py` resolves correction
   chains and marks legacy/gapped history partial; it never treats a capped UI list as
-  lifetime history. See `docs/p1-foundation-audit.md` for evidence and remaining retry/
-  integrated/native acceptance work, and `docs/p0-planner-foundation.md` for P0 closeout.
+  lifetime history. See `docs/p1-foundation-audit.md` for the scope/evidence matrix and
+  outstanding owner acceptance, and `docs/p0-planner-foundation.md` for P0 closeout.
 - P1 retry-safe manual capture implemented: `ActionService.create(..., command_id=UUID)`
   commits `task_commands` receipts atomically with owner records (migration 0026). The
   editor retains its ID across failures; a retry returns the current canonical task.

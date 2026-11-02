@@ -51,6 +51,13 @@ fixtures. Historical M4–M9 email acceptance remains open independently of this
 
 ## Follow-on order
 
+Update 2026-11-02: the final P0/P1 source candidate passed Windows and macOS CI,
+including native Cocoa tests, both offline desktop packages and Windows frozen
+lifecycle/recovery. See [P1 closeout](p1-foundation-audit.md#closeout-record-2026-11-02)
+for the exact snapshot, test counts, publication audit and outstanding owner acceptance.
+This supersedes the platform limitation of the earlier local Windows run above;
+it does not claim owner or live-email acceptance.
+
 P1 consolidates the existing task lifecycle and history, then addresses uncertain
 create retries. P2 adds the independent daily workspace, P3 work blocks and planning,
 and P4 typed metrics/dashboard queries. Each stage extends migration/export/recovery
