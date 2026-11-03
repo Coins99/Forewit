@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -145,6 +146,16 @@ async def test_each_server_has_a_fresh_key_and_its_hardening_flags_win(tmp_path:
         await first.start()
 
 
+async def test_a_random_key_starting_with_a_dash_is_safe_on_the_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda size: "-synthetic-key")
+    async with stand_in(scenario(tmp_path)) as server, server.lease() as endpoint:
+        assert endpoint.api_key == "forewit--synthetic-key"
+        assert server.command[-1] == endpoint.api_key
+        assert await server.available()
+
+
 @pytest.mark.parametrize(
     ("printed", "code"),
     [
@@ -163,7 +174,7 @@ async def test_a_server_that_exits_while_starting_is_reported_by_a_code(
     server = stand_in(scenario(tmp_path, print=printed, exit=1))
     with pytest.raises(ProviderUnavailableError) as raised:
         await server.start()
-    assert raised.value.provider_error_code == code
+    assert raised.value.provider_error_code == code, server.output()
     assert str(raised.value) == str(unavailable(code))
     assert not any(line in str(raised.value) for line in printed)
     assert not server.running and server.output() == tuple(printed)
