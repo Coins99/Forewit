@@ -1,13 +1,93 @@
 """Local inference must coexist with owner work and finish before shutdown/revocation."""
 
 import asyncio
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import date, timedelta
 
+import pytest
 from pytestqt.qtbot import QtBot
 
+from mailbrief.domain.briefs import BriefRunResult, BriefStatus
+from mailbrief.domain.digests import SyncProgress
 from mailbrief.domain.preferences import OwnerPreferences
+from mailbrief.services.brief import ConsentGate, ShortlistGate
 from mailbrief.ui.main_window import MainWindow
 from tests.ui.test_workflow import FakeBackend, finish
+
+
+@pytest.mark.parametrize("move_away", [False, True])
+async def test_local_missed_day_opens_unless_owner_moves_away(
+    qtbot: QtBot, move_away: bool
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Backend(FakeBackend):
+        async def generate(
+            self,
+            gate: ConsentGate,
+            review: ShortlistGate,
+            cancel: asyncio.Event,
+            progress: Callable[[SyncProgress], None],
+            local_date: date | None = None,
+        ) -> BriefRunResult:
+            entered.set()
+            await release.wait()
+            digest = self.saved.model_copy(update={"local_date": local_date})
+            self.briefs[(digest.account_id, digest.local_date)] = digest
+            return BriefRunResult(status=BriefStatus.SAVED, sync=self.sync, digest=digest)
+
+    backend = Backend()
+    backend.owner_preferences = OwnerPreferences(revision=0, analysis_mode="local")
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window.initialize()
+    window._show_page("briefs")
+    day = backend.saved.local_date - timedelta(days=1)
+    window._request_brief_day(day)
+    local = window._local_run
+    assert local is not None
+    try:
+        await entered.wait()
+        if move_away:
+            window._show_page("actions")
+        release.set()
+        await local
+        digest = window.workspace._digest
+        assert digest is not None
+        if move_away:
+            assert window.workspace.current_page() == "actions"
+            assert digest == backend.saved
+        else:
+            assert window.workspace.current_page() == "today"
+            assert digest.local_date == day
+            assert window._shown == (digest.account_id, day)
+    finally:
+        release.set()
+        await local
+
+
+async def test_explicit_brief_view_supersedes_deferred_background_update(qtbot: QtBot) -> None:
+    backend = FakeBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    window.show()
+    await window.initialize()
+    window._show_page("today")
+    reply = await backend.create_reply_draft("owner@example.com", "local-1")
+    window._edit_draft(reply)
+    updated = backend.saved.model_copy(
+        update={"generated_at_utc": backend.saved.generated_at_utc + timedelta(hours=1)}
+    )
+    await window._show_digest(updated, defer_if_writing=True)
+    assert bool(window._pending_brief == updated)
+    past = backend.saved.model_copy(
+        update={"local_date": backend.saved.local_date - timedelta(days=1)}
+    )
+    await window._view(past)
+    await window._close_draft(None)
+    assert window._pending_brief is None
+    assert window.workspace._digest == past
+    assert window._shown == (past.account_id, past.local_date)
 
 
 async def test_owner_can_capture_and_save_a_task_during_local_analysis(qtbot: QtBot) -> None:

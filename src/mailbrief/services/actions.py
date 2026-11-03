@@ -1066,11 +1066,11 @@ class ActionService:
         Purged/missing tasks are unavailable; this read never implies lifetime coverage
         across purged tasks. It neither calls providers nor changes owner records.
         """
-        row = await self._repository.get_action(public_id, include_deleted=True)
-        if row is None:
+        stored = await self._repository.history_rows(public_id)
+        if stored is None:
             raise ActionNotFoundError(_NOT_FOUND)
-        records = await self._repository.activity_rows(row.id)
-        return resolve_task_history([activity_from_row(record) for record in records], row.revision)
+        revision, records = stored
+        return resolve_task_history([activity_from_row(record) for record in records], revision)
 
     async def list_actions(
         self,

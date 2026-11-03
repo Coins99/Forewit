@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from alembic import command
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionActivityKind as Kind
 from mailbrief.domain.actions import ActionEdit, ActionFilter, ActionStatus, StepEdit
@@ -36,6 +37,31 @@ EDIT = ActionEdit(
     target_date=date(2026, 10, 12),
     notes="Owner notes",
 )
+
+
+async def test_history_reads_current_revision_after_another_session_completes(
+    database: Database,
+) -> None:
+    async with database.session() as reader:
+        service = ActionService(reader)
+        created = await service.create(EDIT)
+        cached = await ActionRepository(reader).get_action(created.public_id)
+        assert cached is not None
+        async with database.session() as writer:
+            completed = await ActionService(writer).complete(created.public_id, created.revision)
+        history = await service.history(created.public_id)
+        assert history.complete
+        assert history.completions == (completed.activity[-1],)
+
+
+async def test_history_of_existing_task_without_activity_is_partial(session: AsyncSession) -> None:
+    service = ActionService(session)
+    created = await service.create(EDIT)
+    await session.execute(delete(ActionActivityTable))
+    await session.commit()
+    history = await service.history(created.public_id)
+    assert not history.complete
+    assert history.effective == ()
 
 
 @pytest.mark.parametrize("email_derived", [False, True])

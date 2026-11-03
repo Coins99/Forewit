@@ -1505,6 +1505,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_failure(exc)
             proposals = None
+        self._pending_brief = None  # An explicit/newer view supersedes any deferred update.
         self.workspace.show_digest(
             digest,
             links=links,
@@ -3976,6 +3977,7 @@ class MainWindow(QMainWindow):
     async def _generate_brief(
         self, local_date: date | None = None, *, cancel: asyncio.Event | None = None
     ) -> None:
+        origin = self.workspace.current_page()
         self._offer_undo()  # A new brief replaces the suggestions that Undo would refer to.
         if local_date is None and self._shown is not None:
             self._set_shown(None)  # Sync and review returns to the latest brief.
@@ -4011,8 +4013,15 @@ class MainWindow(QMainWindow):
                 assert digest is not None  # A saved result always carries its digest.
                 if self._local_running():
                     identity = (digest.account_id, digest.local_date)
-                    if self._shown == identity or (self._shown is None and local_date is None):
+                    if (
+                        local_date is not None
+                        and self.workspace.current_page() == origin
+                        and not self._inline_draft_open()
+                    ):
+                        await self._view(digest, origin)
+                    elif self._shown == identity or (self._shown is None and local_date is None):
                         await self._show_digest(digest, defer_if_writing=True)
+                    await self._reload_history()
                 elif local_date is None:
                     await self._show_digest(digest)
                 else:

@@ -469,6 +469,23 @@ class ActionRepository:
         )
         return list(rows)
 
+    async def history_rows(self, public_id: str) -> tuple[int, list[ActionActivityTable]] | None:
+        """Read the stored revision and uncapped activity in one database snapshot.
+
+        Select the revision as a scalar so a retained ORM task cannot supply an old
+        revision. The outer join also keeps existing tasks with no recorded activity.
+        """
+        result = await self._session.execute(
+            select(ActionTable.revision, ActionActivityTable)
+            .outerjoin(ActionActivityTable, ActionActivityTable.action_id == ActionTable.id)
+            .where(ActionTable.public_id == public_id)
+            .order_by(ActionActivityTable.revision)
+        )
+        rows = result.tuples().all()
+        if not rows:
+            return None
+        return rows[0][0], [record for _, record in rows if record is not None]
+
     async def latest_activity(self, action_id: int) -> ActionActivityTable | None:
         """Read the latest event directly, without hydrating the full audit trail."""
         result = await self._session.scalars(
