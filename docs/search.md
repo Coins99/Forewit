@@ -5,6 +5,10 @@ Type, then use Up and Down and press Return to open the highlighted row; Esc clo
 
 ## Commands
 
+**Capture task or note** opens global capture from any page, also available through
+the header's **Capture** button and Ctrl+Shift+N / Cmd+Shift+N. See
+[capture, retry and close behavior](p2-capture.md).
+
 With the field empty, every command is listed; typing narrows them to those that contain
 each word: **Go to** any page, in the sidebar's order (Today, Inbox, Actions, Waiting,
 Drafts, Briefs, Calendar); **New task**, **New event today**, **New note**; **Sync and
@@ -24,6 +28,13 @@ Two or more letters search your own records on this computer, once typing pauses
 | Mail | the connected account's saved subject, sender and Gmail's short preview | the Inbox page with that email open; an email no longer in the Inbox opens in Gmail |
 
 In the Calendar's Month view, an event opens on its month rather than its week.
+
+Opening now uses the [P2 canonical navigation dispatcher](p2-navigation.md).
+Tasks hidden by text/organization filters are revealed, including completed tasks
+outside the normal list limit. A missing task leaves the page usable and says it
+is unavailable. Pending opens are discarded after another navigation or account
+change, and account changes clear old palette results. Screens and shortcuts keep
+their existing names during this first increment.
 
 Every word must appear in a record, in any order. Letters A to Z match in either case;
 other letters match as typed. Each section shows its first 8 matches, open actions and the

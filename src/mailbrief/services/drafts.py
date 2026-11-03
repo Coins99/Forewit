@@ -6,11 +6,15 @@ and never changes an action. Errors carry static messages, and nothing logs draf
 AI drafting (services/drafting.py) changes drafts only through apply_generated().
 """
 
+import hashlib
+import json
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Final
+from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.common import new_public_id, utc_now
@@ -38,7 +42,7 @@ from mailbrief.storage.drafts import (
     version_info,
 )
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
-from mailbrief.storage.tables import ActionSourceTable, DraftTable
+from mailbrief.storage.tables import ActionSourceTable, DraftTable, NoteCommandTable
 from mailbrief.text.prepare import clean_generated_text
 
 UNKNOWN_SENDER: Final = "unknown@invalid"  # What the Gmail adapter stores without a From.
@@ -57,6 +61,10 @@ class DraftNotFoundError(LookupError):
 
 class DraftConflictError(ValueError):
     """The draft changed since it was read, or the change does not fit its kind."""
+
+
+class NoteCreateConflictError(ValueError):
+    """A note-create command already committed different input or a removed result."""
 
 
 class SourceNotFoundError(LookupError):
@@ -168,6 +176,71 @@ class DraftService:
             return await self._load(await self._new_draft(kind, DraftEdit(), now))
 
         return await self._write(run)
+
+    async def create_note(self, content: DraftEdit, *, command_id: str) -> Draft:
+        """Atomically save initial owner text, its first version and a retry receipt."""
+        command = str(UUID(command_id))
+        if content.has_recipients() or not (content.title.strip() or content.body.strip()):
+            raise ValueError("A note needs a title or text and cannot have recipients.")
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "version": 1,
+                    "command": command,
+                    "operation": "note.create",
+                    "content": content.model_dump(mode="json"),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        async def run(now: datetime) -> Draft:
+            previous = await self._created_note(command, fingerprint)
+            if previous is not None:
+                return previous
+            row = await self._new_draft(DraftKind.NOTE, content, now)
+            self._session.add(
+                NoteCommandTable(
+                    command_id=command,
+                    operation="note.create",
+                    input_hash=fingerprint,
+                    result_public_id=row.public_id,
+                    result_revision=row.revision,
+                    created_at_utc=now,
+                )
+            )
+            return await self._load(row)
+
+        try:
+            return await self._write(run)
+        except IntegrityError as exc:
+            if getattr(exc.orig, "sqlite_errorname", None) in {
+                "SQLITE_CONSTRAINT_PRIMARYKEY",
+                "SQLITE_CONSTRAINT_UNIQUE",
+            } and "note_commands.command_id" in str(exc.orig):
+                previous = await self._created_note(command, fingerprint)
+                if previous is not None:
+                    return previous
+            raise
+
+    async def _created_note(self, command: str, fingerprint: str) -> Draft | None:
+        receipt = await self._session.get(NoteCommandTable, command)
+        if receipt is None:
+            return None
+        if receipt.operation != "note.create" or receipt.input_hash != fingerprint:
+            raise NoteCreateConflictError(
+                "This save already created a note with different input. "
+                "Check your saved notes before starting another capture."
+            )
+        row = await self._repository.get_draft(receipt.result_public_id, include_deleted=True)
+        if row is not None:
+            await self._session.refresh(row)
+        if row is None or row.deleted_at_utc is not None:
+            raise NoteCreateConflictError(
+                "This save already created a note that was removed. It will not be recreated."
+            )
+        return await self._load(row)
 
     async def create_reply(self, account_email: str, provider_message_id: str) -> Draft:
         """A reply to a cached message, addressed to its sender, with "Re:" in the title.

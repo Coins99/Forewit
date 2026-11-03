@@ -11,6 +11,7 @@ from pydantic import ConfigDict
 
 from mailbrief.domain.actions import Action
 from mailbrief.domain.common import DomainModel
+from mailbrief.domain.day_plans import DayPlan
 from mailbrief.domain.events import CalendarRange
 
 
@@ -43,3 +44,4 @@ class DaySummary(DomainModel):
     attention: tuple[AttentionItem, ...] = ()
     replies: tuple[Action, ...] = ()
     calendar: CalendarRange
+    focus: DayPlan | None = None

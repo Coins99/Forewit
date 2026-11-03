@@ -43,6 +43,7 @@ from mailbrief.domain.messages import EmailContact, is_own_message, own_addresse
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule, mask_weekdays
 from mailbrief.storage.database import sorted_batches
+from mailbrief.storage.day_plans import remove_task_references
 from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.proposals import ProposalRepository, proposal_from_row
 from mailbrief.storage.tables import (
@@ -55,6 +56,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     ActionTagTable,
     AnalysisTable,
+    DayPlanItemTable,
     DraftTable,
     MessageTable,
     ProjectTable,
@@ -581,9 +583,20 @@ class ActionRepository:
         """The action with this row ID, even when it is soft-deleted."""
         return await self._session.get(ActionTable, action_id)
 
-    async def delete_action(self, row: ActionTable) -> None:
+    async def delete_action(self, row: ActionTable, now: datetime) -> None:
         """Delete an action outright; its steps and sources go with it."""
+        await remove_task_references(self._session, [row.public_id], now)
         await self._session.delete(row)
+
+    async def planned(self, public_id: str) -> bool:
+        return (
+            await self._session.scalar(
+                select(DayPlanItemTable.id)
+                .where(DayPlanItemTable.task_public_id == public_id)
+                .limit(1)
+            )
+            is not None
+        )
 
     async def step_rows(self, action_id: int) -> list[ActionStepTable]:
         result = await self._session.scalars(

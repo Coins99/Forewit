@@ -57,7 +57,9 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningStatus,
 )
+from mailbrief.domain.capture import CaptureRequest
 from mailbrief.domain.common import utc_now
+from mailbrief.domain.day_plans import DayPlan
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -96,7 +98,18 @@ from mailbrief.domain.messages import RankedMessage
 from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
-from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
+from mailbrief.domain.routes import (
+    BriefRoute,
+    CalendarRoute,
+    MailRoute,
+    MessageRoute,
+    NavigationStamp,
+    PageRoute,
+    Route,
+    TaskRoute,
+    WritingRoute,
+)
+from mailbrief.domain.search import SearchHit, SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
@@ -129,13 +142,19 @@ from mailbrief.services.brief import (
 from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan, overlaps_for
 from mailbrief.services.consent import NO_CONSENT
+from mailbrief.services.day_plans import DayPlanConflictError
 from mailbrief.services.drafting import (
     DraftingContextError,
     DraftingGate,
     DraftingPlan,
 )
 from mailbrief.services.drafting import disclosure_lines as drafting_disclosure_lines
-from mailbrief.services.drafts import DraftConflictError, DraftNotFoundError, SourceNotFoundError
+from mailbrief.services.drafts import (
+    DraftConflictError,
+    DraftNotFoundError,
+    NoteCreateConflictError,
+    SourceNotFoundError,
+)
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import needs_sync
 from mailbrief.services.history import BriefDateError
@@ -196,6 +215,7 @@ from mailbrief.ui.calendar_view import (
 from mailbrief.ui.calendar_view import NEW as NEW_EVENT
 from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
 from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
+from mailbrief.ui.capture_view import CaptureDialog
 from mailbrief.ui.data_view import DataDialog
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
 from mailbrief.ui.diagnostics import (
@@ -211,6 +231,7 @@ from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor
+from mailbrief.ui.focus_view import FocusDialog, FocusPanel
 from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
@@ -220,6 +241,7 @@ from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.lists import SafeList, clear_list
+from mailbrief.ui.navigation import legacy_page_route, search_route
 from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
@@ -309,6 +331,17 @@ class DesktopBackend(Protocol):
     async def missed_days(self, account_email: str) -> tuple[date, ...]: ...
     async def close(self) -> None: ...
     async def list_actions(self, view: ActionFilter) -> tuple[Action, ...]: ...
+
+    async def get_action(self, public_id: str) -> Action: ...
+    async def capture(self, request: CaptureRequest) -> Action | Draft: ...
+    async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]: ...
+    async def select_day_task(
+        self, day: date, zone: ZoneInfo, task_id: str, revision: int
+    ) -> DayPlan: ...
+    async def deselect_day_task(self, day: date, item_id: str, revision: int) -> DayPlan: ...
+    async def reorder_day_tasks(
+        self, day: date, item_ids: tuple[str, ...], revision: int
+    ) -> DayPlan: ...
     async def accept_suggestion(self, suggestion_id: int) -> Action: ...
     async def brief_links(self, digest: DailyDigest) -> dict[str, tuple[ThreadLink, ...]]: ...
     async def brief_proposals(
@@ -703,6 +736,16 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.backend = backend
+        self._navigation_generation = 0
+        self._search_account: str | None = None
+        self._history_preview_read = 0
+        self._capture_task: asyncio.Task[None] | None = None
+        self._focus_task: asyncio.Task[None] | None = None
+        self._focus_search_read = 0
+        self.capture_dialog = CaptureDialog(self)
+        self.capture_dialog.save_requested.connect(self._request_capture_save)
+        self.capture_dialog.open_requested.connect(self._open_captured)
+        self.capture_dialog.today_requested.connect(self._add_captured_today)
         # Without a store (in tests), an appearance change applies but isn't saved.
         self.appearance_writes = (
             None if appearance is None else AppearanceWriter(appearance, self._appearance_not_saved)
@@ -888,6 +931,15 @@ class MainWindow(QMainWindow):
         self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True, glass=True)
         workspace.add_header_action("today", self.generate_button)
         workspace.header.add_widget(self.cancel_button)
+        self.capture_button = outline_button("Capture", "globalCapture", glass=True)
+        self.capture_button.setAccessibleName("Capture task or note")
+        self.capture_button.setToolTip(
+            "Capture a task or note (Ctrl+Shift+N, Cmd+Shift+N on macOS)."
+        )
+        workspace.header.add_widget(self.capture_button)
+        self.capture_button.clicked.connect(self._request_capture)
+        self.capture_shortcut = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
+        self.capture_shortcut.activated.connect(self._request_capture)
         # The sidebar's rows, under the names the rest of the window uses.
         self.settings_button = sidebar.settings
         self.cached_button = sidebar.saved_mail
@@ -933,7 +985,20 @@ class MainWindow(QMainWindow):
         retry.addWidget(self.retry_button)
         retry.addStretch(1)
         workspace.today_top.addWidget(self.retry_row)
-        # "Your day" above the brief: local data only, so it shows without Gmail or AI.
+        self.focus_panel = FocusPanel()
+        self.focus_dialog = FocusDialog(self)
+        for panel in (self.focus_panel, self.focus_dialog.panel):
+            panel.change_requested.connect(self._request_focus_change)
+            panel.open_requested.connect(self._open_focus_task)
+        self.focus_panel.plan_requested.connect(self._open_focus)
+        self.focus_panel.agenda_requested.connect(self._open_focus_agenda)
+        self.focus_dialog.search_requested.connect(self._search_focus)
+        self.focus_dialog.select_requested.connect(self._add_captured_today)
+        workspace.today_top.addWidget(self.focus_panel)
+        # The focus preview replaces the older equal-weight mail metric strip.
+        if (overview := workspace.findChild(QWidget, "todayOverview")) is not None:
+            overview.hide()
+        # Existing full day cards remain reachable from the attention summary.
         self.day_panel = DayPanel()
         self.day_panel.action_requested.connect(self._open_day_action)
         self.day_panel.event_requested.connect(self._open_day_event)
@@ -943,6 +1008,7 @@ class MainWindow(QMainWindow):
         self.day_toggle = outline_button("Your day", "dayOverviewToggle")
         self.day_toggle.setCheckable(True)
         self.day_toggle.toggled.connect(self.day_area.setVisible)
+        self.focus_panel.attention_requested.connect(lambda: self.day_toggle.setChecked(True))
         workspace.add_header_action("today", self.day_toggle)
         # The run page: step 1 reviews the shortlist, step 2 approves sending.
         self.review_panel = QWidget()
@@ -1050,6 +1116,10 @@ class MainWindow(QMainWindow):
             "actions", _page(self.actions_panel, "actionsPage", "Actions", margins=0)
         )
         workspace.add_header_action("actions", self.actions_panel.new_task_button)
+        self.focus_button = outline_button("Plan today", "planFocusButton")
+        self.focus_button.setAccessibleName("Choose today's focus")
+        self.focus_button.clicked.connect(self._open_focus)
+        workspace.add_header_action("actions", self.focus_button)
         self.drafts_panel = DraftsPanel()
         self.drafts_panel.draft_requested.connect(self._request_draft)
         self.drafts_panel.preview_requested.connect(self._request_draft_preview)
@@ -1174,6 +1244,7 @@ class MainWindow(QMainWindow):
             self.generate_button,
             self.day_toggle,
             self.cancel_button,
+            self.capture_button,
             workspace.sidebar.nav,
             self.cached_button,
             self.data_button,
@@ -1181,6 +1252,13 @@ class MainWindow(QMainWindow):
             self.workspace.sidebar.account_button,
             self.latest_button,
             self.retry_button,
+            self.focus_panel.plan_button,
+            self.focus_panel.list,
+            self.focus_panel.open_button,
+            self.focus_panel.complete_button,
+            self.focus_panel.remove_button,
+            self.focus_panel.agenda_button,
+            self.focus_panel.attention_button,
             *workspace.metrics.values(),
             self.day_panel.attention.list,
             self.day_panel.agenda.list,
@@ -1200,6 +1278,12 @@ class MainWindow(QMainWindow):
     def _set_account(self, email: str | None) -> None:
         """The connected Gmail account, or None; Connect shows only without one and
         Disconnect only with one, and the Briefs page follows it."""
+        if self._account_email != email:
+            self._navigation_generation += 1
+            if self._search_read:
+                self._search_read += 1
+            self._search_account = email
+            self.command_palette.open_fresh(self.zone, self._local_today())
         self._account_email = email
         self.workspace.sidebar.set_account(email)
         self.connect_button.setVisible(email is None)
@@ -1249,6 +1333,7 @@ class MainWindow(QMainWindow):
         )
 
     def _show_page(self, key: str) -> None:
+        self._navigation_generation += 1
         if key == "today":
             self.workspace.show_page("run" if self._gate_pending() else "today")
         elif key in ("actions", "waiting"):
@@ -1277,12 +1362,82 @@ class MainWindow(QMainWindow):
         return page
 
     def _actions_tab_changed(self, _index: int) -> None:
+        self._navigation_generation += 1
         if self.workspace.current_page() == "actions":
             self.workspace.sidebar.set_current(self._sidebar_key())
             waiting = self.actions_panel.view() is ActionFilter.WAITING
             self.workspace.show_actions_heading(waiting=waiting)
 
     def _request_page(self, key: str) -> None:
+        route = legacy_page_route(key)
+        if route is not None:
+            self._navigate(route)
+
+    def _navigation_stamp(self) -> NavigationStamp:
+        return NavigationStamp(
+            generation=self._navigation_generation, account_email=self._account_email
+        )
+
+    def _navigation_current(self, stamp: NavigationStamp) -> bool:
+        return not self._closing and stamp == self._navigation_stamp()
+
+    def _navigate(self, route: Route) -> None:
+        """One dispatch point; compatibility methods remain available to old callers."""
+        if self._closing:
+            return
+        self._navigation_generation += 1
+        if isinstance(route, PageRoute):
+            if route.page == "projects":
+                self._open_organization()
+            else:
+                self._request_legacy_page(
+                    {"tasks": "actions", "notes": "drafts", "mail": "inbox"}.get(
+                        route.page, route.page
+                    )
+                )
+        elif isinstance(route, TaskRoute):
+            if route.public_id is None:
+                self._show_page("actions")
+                self.actions_panel.show_view(route.view)
+                self._actions_tab_changed(self.actions_panel.tabs.currentIndex())
+            else:
+                self._show_action_route(route.public_id, route.view)
+        elif isinstance(route, WritingRoute):
+            self._show_page("drafts")
+            stamp = self._navigation_stamp()
+            self._start_or_busy(lambda: self._open_draft_by_id(route.public_id, stamp))
+        elif isinstance(route, CalendarRoute):
+            self._show_calendar_day(route.day)
+            self._show_page("calendar")
+            self._read_calendar(select=route.entry, day=route.day)
+        elif isinstance(route, MailRoute):
+            if route.view == "saved":
+                self.cached_button.click()
+            else:
+                self._request_legacy_page(
+                    {"inbox": "inbox", "current": "today", "history": "briefs", "drafts": "drafts"}[
+                        route.view
+                    ]
+                )
+        elif isinstance(route, MessageRoute):
+            if route.account_email != self._account_email:
+                self.status.setText("The mail account changed. Search again to open this message.")
+                return
+            stamp = self._navigation_stamp()
+            if route.in_inbox:
+                self._start_or_busy(
+                    lambda: self._open_mail(route.message_id, route.web_link, stamp)
+                )
+            elif route.web_link is not None:
+                self._open_source(route.web_link)
+        elif isinstance(route, BriefRoute):
+            # Saved briefs remain readable for disconnected accounts, as before.
+            stamp = self._navigation_stamp()
+            self._start_or_busy(lambda: self._show_brief(route.account_email, route.day, stamp))
+        else:
+            assert_never(route)
+
+    def _request_legacy_page(self, key: str) -> None:
         if key == "inbox":
             # The Inbox opens on its list, as Gmail's does; a message opens on a click.
             self.inbox_panel.close_message()
@@ -1349,6 +1504,8 @@ class MainWindow(QMainWindow):
             self._render_checked()
             self.workspace.set_today(today, self.zone)
             self._day_refresh_pending = True
+            # Current local focus must not wait for an email/review foreground slot.
+            self._read_focus()
         self._day = today
         if self._day_refresh_pending:
             self._day_refresh_pending = not self.start(self._refresh_for_new_day, cancellable=False)
@@ -1486,7 +1643,13 @@ class MainWindow(QMainWindow):
         if saved is not None:
             await self._show_digest(saved)
 
-    async def _show_digest(self, digest: DailyDigest, *, defer_if_writing: bool = False) -> None:
+    async def _show_digest(
+        self,
+        digest: DailyDigest,
+        *,
+        defer_if_writing: bool = False,
+        stamp: NavigationStamp | None = None,
+    ) -> None:
         """Every brief is shown here, with the actions that continue its threads and the
         updates its emails propose; when either can't be read, the brief is shown without it."""
         if defer_if_writing and self._inline_draft_open() and self.draft_editor.reply_mode:
@@ -1505,6 +1668,8 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_failure(exc)
             proposals = None
+        if stamp is not None and not self._navigation_current(stamp):
+            return
         self._pending_brief = None  # An explicit/newer view supersedes any deferred update.
         self.workspace.show_digest(
             digest,
@@ -2115,16 +2280,184 @@ class MainWindow(QMainWindow):
         self._day_read += 1
         read = self._day_read
         now = self.now()
+        day, zone = now.astimezone(self.zone).date(), self.zone
+        if self.focus_panel.plan is not None and self.focus_panel.plan.day != day:
+            # Midnight changes the view, never yesterday's durable selection.
+            self.focus_panel.show_plan(DayPlan(day=day), zone, now)
+            if self.focus_dialog.isVisible():
+                self.focus_dialog.panel.show_plan(DayPlan(day=day), zone, now)
         try:
-            summary = await self.backend.today_summary(
-                now.astimezone(self.zone).date(), self.zone, now
-            )
+            summary = await self.backend.today_summary(day, zone, now)
         except Exception as exc:
             if read == self._day_read:
                 self._note_not_refreshed(exc)
             return
-        if read == self._day_read:
+        if (
+            read == self._day_read
+            and day == self._local_today()
+            and zone == self.zone
+            and not self._closing
+        ):
             self.day_panel.show_summary(summary, self.zone)
+            plan = summary.focus or DayPlan(day=summary.day)
+            self.focus_panel.show_plan(plan, zone, now)
+            self.focus_panel.show_overview(summary, zone)
+            if self.focus_dialog.isVisible():
+                self.focus_dialog.panel.show_plan(plan, zone, now)
+
+    def _open_focus(self) -> None:
+        if self._closing or self._dialog_open():
+            return
+        self.dialog_guard.show_dialog(self.focus_dialog)
+        self.focus_dialog.panel.status.clear()
+        self.focus_dialog.panel.status.hide()
+        self._read_focus()
+
+    def _read_focus(self) -> None:
+        if self._closing:
+            return
+
+        async def read() -> None:
+            await self._refresh_day()
+            if self.focus_dialog.isVisible() and not self._closing:
+                self._search_focus(self.focus_dialog.query.text())
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _open_focus_agenda(self) -> None:
+        self._navigate(CalendarRoute(day=self._local_today()))
+
+    def _search_focus(self, text: str) -> None:
+        if self._closing or not self.focus_dialog.isVisible():
+            return
+        self._focus_search_read += 1
+        read_id = self._focus_search_read
+        day, zone = self._local_today(), self.zone
+
+        async def read() -> None:
+            try:
+                actions = await self.backend.focus_candidates(day, text)
+                if (
+                    not self._closing
+                    and self.focus_dialog.isVisible()
+                    and read_id == self._focus_search_read
+                    and text == self.focus_dialog.query.text()
+                    and day == self._local_today()
+                    and zone == self.zone
+                ):
+                    self.focus_dialog.show_candidates(actions)
+            except Exception as exc:
+                log_failure(exc)
+                if read_id == self._focus_search_read and not self._closing:
+                    self.focus_dialog.panel.status.setText(
+                        "Task choices could not be loaded. Try again."
+                    )
+                    self.focus_dialog.panel.status.show()
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _add_captured_today(self, action: object) -> None:
+        if isinstance(action, Action):
+            plan = (
+                self.focus_dialog.panel.plan
+                if self.focus_dialog.isVisible()
+                else self.focus_panel.plan
+            )
+            self._request_focus_change("select", action, plan or DayPlan(day=self._local_today()))
+
+    def _open_focus_task(self, action: object) -> None:
+        if isinstance(action, Action):
+            self.focus_dialog.reject()
+            view = (
+                ActionFilter.COMPLETED
+                if action.status is not ActionStatus.OPEN
+                else ActionFilter.WAITING
+                if action.ownership is ActionOwnership.WAITING_FOR
+                else ActionFilter.OPEN
+            )
+            self._open_action(action.public_id, view)
+
+    def _request_focus_change(self, operation: str, value: object, plan: object) -> None:
+        if self._closing or not isinstance(plan, DayPlan):
+            return
+        if plan.day != self._local_today():
+            self._read_focus()
+            self.status.setText("Today changed. Review the current plan and try again.")
+            return
+        if self._focus_task is not None and not self._focus_task.done():
+            return
+        for panel in (self.focus_panel, self.focus_dialog.panel):
+            panel.set_busy(True)
+        self.focus_dialog.add_button.setEnabled(False)
+        self._focus_task = asyncio.get_running_loop().create_task(
+            self._change_focus(operation, value, plan, self.zone)
+        )
+
+    async def _change_focus(
+        self, operation: str, value: object, plan: DayPlan, zone: ZoneInfo
+    ) -> None:
+        try:
+            if operation == "select" and isinstance(value, Action):
+                await self.backend.select_day_task(plan.day, zone, value.public_id, plan.revision)
+            elif operation == "remove" and isinstance(value, str):
+                await self.backend.deselect_day_task(plan.day, value, plan.revision)
+            elif (
+                operation == "reorder"
+                and isinstance(value, tuple)
+                and all(isinstance(v, str) for v in value)
+            ):
+                await self.backend.reorder_day_tasks(plan.day, value, plan.revision)
+            elif operation == "status" and isinstance(value, Action):
+                if value.status is ActionStatus.OPEN:
+                    await self._complete_action(value)
+                elif value.status is ActionStatus.COMPLETED:
+                    await self._reopen_action(value)
+            else:
+                return
+            if not self._closing and operation != "status":
+                self.focus_panel.status.setText("Focus saved. Task dates are unchanged.")
+                self.focus_panel.status.hide()
+                self.focus_dialog.panel.status.setText("Focus saved. Task dates are unchanged.")
+                self.focus_dialog.panel.status.show()
+                if self.capture_dialog.isVisible():
+                    self.capture_dialog.status.setText("Task saved and added to My focus.")
+        except DayPlanConflictError as exc:
+            if not self._closing:
+                self.focus_panel.status.setText(str(exc))
+                self.focus_panel.status.show()
+                self.focus_dialog.panel.status.setText(str(exc))
+                self.focus_dialog.panel.status.show()
+                if self.capture_dialog.isVisible():
+                    self.capture_dialog.status.setText(str(exc))
+        except Exception as exc:
+            log_failure(exc)
+            if not self._closing:
+                message = (
+                    "The change was not confirmed. "
+                    "The plan was reloaded; review it before retrying."
+                )
+                self.focus_panel.status.setText(message)
+                self.focus_panel.status.show()
+                self.focus_dialog.panel.status.setText(message)
+                self.focus_dialog.panel.status.show()
+        finally:
+            if not self._closing:
+                await self._refresh_day()
+                for panel in (self.focus_panel, self.focus_dialog.panel):
+                    panel.set_busy(False)
+                self.focus_dialog.add_button.setEnabled(bool(self.focus_dialog.candidates.count()))
+                if self.focus_dialog.isVisible():
+                    self._search_focus(self.focus_dialog.query.text())
+            self._focus_task = None
+
+    async def drain_focus(self) -> None:
+        task = self._focus_task
+        if task is not None:
+            await asyncio.shield(task)
 
     def _open_day_action(self, public_id: str, waiting: bool) -> None:
         """Show an action from "Your day" on the Actions page (Waiting when someone else
@@ -2133,12 +2466,13 @@ class MainWindow(QMainWindow):
 
     def _open_day_event(self, key: object) -> None:
         """Show an event from "Your day" on the Calendar page, in this week, selected."""
-        if not isinstance(key, tuple):
-            return
-        today = self._local_today()
-        self._show_calendar_day(today)
-        self._show_page("calendar")
-        self._read_calendar(select=key, day=today)
+        if isinstance(key, tuple):
+            # Signals carry untyped objects. Validate the identity before dispatch.
+            try:
+                route = CalendarRoute(day=self._local_today(), entry=key)
+            except ValueError:
+                return
+            self._navigate(route)
 
     def _calendar_bounds(self) -> tuple[date, date]:
         """The days the Calendar page shows: a week (Week and List views), or the six weeks
@@ -2199,8 +2533,12 @@ class MainWindow(QMainWindow):
         if self._closing:
             return
 
+        stamp = self._navigation_stamp()
+
         async def read() -> None:
             await self._refresh_calendar()
+            if not self._navigation_current(stamp):
+                return
             if select is not None:
                 self.calendar_panel.select_entry(select, day)
             if sync and self._calendar_sync_due():
@@ -2260,6 +2598,68 @@ class MainWindow(QMainWindow):
     # The command palette (Ctrl+K). A search reads local records beside any running
     # operation, like the calendar's reads; what it opens goes through the usual paths.
 
+    def _request_capture(self) -> None:
+        if self._closing:
+            return
+        if self.capture_dialog.isVisible():
+            self.capture_dialog.raise_()
+            return
+        if self._dialog_open():
+            return
+        self.capture_dialog.open_fresh()
+        self.dialog_guard.show_dialog(self.capture_dialog)
+
+    def _request_capture_save(self, value: object) -> None:
+        if not isinstance(value, CaptureRequest) or self._closing:
+            return
+        if self._capture_task is not None and not self._capture_task.done():
+            return
+        # Owner writes have their own session/lifecycle and do not wait for network work.
+        self._capture_task = asyncio.get_running_loop().create_task(self._save_capture(value))
+
+    async def _save_capture(self, request: CaptureRequest) -> None:
+        try:
+            try:
+                saved = await self.backend.capture(request)
+            except (ActionCreateConflictError, NoteCreateConflictError) as exc:
+                if not self._closing:
+                    self.capture_dialog.failed(str(exc))  # These errors have static messages.
+                return
+            except Exception as exc:
+                log_failure(exc)
+                if not self._closing:
+                    self.capture_dialog.failed(
+                        "Save was not confirmed. Your input is kept; retry the same capture safely."
+                    )
+                return
+            if self._closing:
+                return
+            # View refresh failure must never turn a confirmed save into an uncertain one.
+            try:
+                if isinstance(saved, Action):
+                    await self._refresh_actions()
+                else:
+                    await self._refresh_drafts()
+            except Exception as exc:
+                log_failure(exc)
+            if not self._closing:
+                self.capture_dialog.saved(saved)
+        finally:
+            self._capture_task = None
+
+    async def drain_capture(self) -> None:
+        task = self._capture_task
+        if task is not None:
+            await asyncio.shield(task)
+
+    def _open_captured(self, saved: object) -> None:
+        if isinstance(saved, Action):
+            self.capture_dialog.force_close()
+            self._open_action(saved.public_id, ActionFilter.OPEN)
+        elif isinstance(saved, Draft):
+            self.capture_dialog.force_close()
+            self._navigate(WritingRoute(public_id=saved.public_id, draft_kind=saved.kind))
+
     def _open_palette(self) -> None:
         if self._closing or self._dialog_open():
             return
@@ -2271,16 +2671,18 @@ class MainWindow(QMainWindow):
             return
         self._search_read += 1
         read = self._search_read
+        email = self._account_email
 
         async def search() -> None:
             try:
-                results = await self.backend.search(text, self._account_email)
+                results = await self.backend.search(text, email)
             except Exception as exc:
                 log_failure(exc)
                 if read == self._search_read:
                     self.command_palette.show_failure(text)
                 return
-            if read == self._search_read:
+            if read == self._search_read and email == self._account_email and not self._closing:
+                self._search_account = email
                 self.command_palette.show_results(text, results)
 
         task = asyncio.get_running_loop().create_task(search())
@@ -2290,7 +2692,9 @@ class MainWindow(QMainWindow):
 
     def _run_command(self, key: str) -> None:
         kind, _, page = key.partition(":")
-        if kind == "page":
+        if key == "capture":
+            self._request_capture()
+        elif kind == "page":
             self._request_page(page)
         elif key == "new:task":
             self._request_new_task()
@@ -2316,33 +2720,18 @@ class MainWindow(QMainWindow):
         it has left the Inbox)."""
         if not isinstance(hit, SearchHit):
             return
-        if hit.kind is SearchKind.ACTION and hit.public_id is not None:
-            view = (
-                ActionFilter.COMPLETED
-                if not hit.open
-                else ActionFilter.WAITING
-                if hit.waiting
-                else ActionFilter.OPEN
-            )
-            self._open_action(hit.public_id, view)
-        elif hit.kind is SearchKind.WRITING and hit.public_id is not None:
-            public_id = hit.public_id
-            self._show_page("drafts")
-            self._start_or_busy(lambda: self._open_draft_by_id(public_id))
-        elif hit.kind in (SearchKind.EVENT, SearchKind.GOOGLE_EVENT):
-            self._open_event_hit(hit)
-        elif hit.kind is SearchKind.MAIL and hit.message_id is not None:
-            message_id, link = hit.message_id, hit.web_link
-            if hit.open and self._account_email is not None:
-                self._start_or_busy(lambda: self._open_mail(message_id, link))
-            elif link is not None:
-                self._open_source(link)
+        route = search_route(hit, self.zone, self._search_account)
+        if route is not None:
+            self._navigate(route)
 
     def _start_or_busy(self, operation: Callable[[], Awaitable[None]]) -> None:
         if not self.start(operation, cancellable=False) and not self._closing:
             self.status.setText(_BUSY)
 
     def _open_action(self, public_id: str, view: ActionFilter) -> None:
+        self._navigate(TaskRoute(public_id=public_id, view=view))
+
+    def _show_action_route(self, public_id: str, view: ActionFilter) -> None:
         """Show an action selected in ``view``; when a project or area filter (or the
         completed list's cap) hides it, show every task first."""
         self._show_page("actions")
@@ -2351,59 +2740,92 @@ class MainWindow(QMainWindow):
         self.actions_panel.select_action(public_id)
         selected = self.actions_panel.selected()
         if selected is not None and selected.public_id == public_id:
+            self.actions_panel.search.clear()
             return
 
+        stamp = self._navigation_stamp()
+
         async def unfiltered() -> None:
+            try:
+                action = await self.backend.get_action(public_id)
+            except ActionNotFoundError:
+                if self._navigation_current(stamp):
+                    self.status.setText("That task is no longer available. Choose another task.")
+                return
+            if not self._navigation_current(stamp):
+                return
+            filtered = self.actions_panel.grouping()[0] != "all"
             self.actions_panel.clear_group()
             await self._refresh_actions()
-            self.actions_panel.select_action(public_id)
+            if not self._navigation_current(stamp):
+                return
+            actual_view = (
+                ActionFilter.COMPLETED
+                if action.status is not ActionStatus.OPEN
+                else ActionFilter.WAITING
+                if action.ownership is ActionOwnership.WAITING_FOR
+                else ActionFilter.OPEN
+            )
+            self.actions_panel.reveal_action(action, actual_view)
+            self.workspace.sidebar.set_current(self._sidebar_key())
+            self.status.setText(
+                "Showing the task. Project, tag and person filters reset to All tasks."
+                if filtered
+                else "Showing the requested task."
+            )
 
         self._start_or_busy(unfiltered)
 
-    async def _open_draft_by_id(self, public_id: str) -> None:
+    async def _open_draft_by_id(self, public_id: str, stamp: NavigationStamp | None = None) -> None:
+        stamp = self._navigation_stamp() if stamp is None else stamp
         await self.draft_writes.drain()
+        if not self._navigation_current(stamp):
+            return
         editor = self.draft_editor
         editor.set_switching(True)
         try:
             if not await self._save_inline_draft():
                 return
+            if not self._navigation_current(stamp):
+                return
             draft = await self._unless_stale(self.backend.get_draft(public_id))
-            if draft is _GONE:
+            if draft is _GONE or not self._navigation_current(stamp):
                 return
             self._edit_draft(draft)
         finally:
             editor.set_switching(False)
 
     def _open_event_hit(self, hit: SearchHit) -> None:
-        day = hit.when.astimezone(self.zone).date() if hit.when is not None else hit.day
-        if day is None:
-            return
-        key: tuple[str, ...] = (
-            ("event", hit.public_id or "")
-            if hit.kind is SearchKind.EVENT
-            else ("google", hit.calendar_id or "", hit.event_id or "")
-        )
-        self._show_calendar_day(day)
-        self._show_page("calendar")
-        self._read_calendar(select=key, day=day)
+        route = search_route(hit, self.zone, self._account_email)
+        if isinstance(route, CalendarRoute):
+            self._navigate(route)
 
-    async def _open_mail(self, message_id: str, link: str | None) -> None:
+    async def _open_mail(
+        self, message_id: str, link: str | None, stamp: NavigationStamp | None = None
+    ) -> None:
         """The Inbox page holding the message, with it selected; Gmail when the cached
         Inbox no longer has it."""
-        email = self._account_email
-        position = None if email is None else await self.backend.inbox_position(email, message_id)
-        if position is None or email is None:
+        stamp = self._navigation_stamp() if stamp is None else stamp
+        if not self._navigation_current(stamp):
+            return
+        email = stamp.account_email
+        if email is None:
+            return
+        position = await self.backend.inbox_position(email, message_id)
+        if not self._navigation_current(stamp):
+            return
+        if position is None:
             if link is not None:
                 self._open_source(link)
             return
+        page = await self.backend.inbox_messages(
+            email, position - position % INBOX_PAGE_SIZE, cached_page=True
+        )
+        if not self._navigation_current(stamp):
+            return
         self._show_page("inbox")
         self.inbox_panel.zone = self.zone
-        self.inbox_panel.show_page(
-            await self.backend.inbox_messages(
-                email, position - position % INBOX_PAGE_SIZE, cached_page=True
-            ),
-            select=message_id,
-        )
+        self.inbox_panel.show_page(page, select=message_id)
 
     def _request_save_event(self, edit: object) -> None:
         if not isinstance(edit, EventEdit):
@@ -3870,17 +4292,27 @@ class MainWindow(QMainWindow):
     # owner's explicit choice, one day at a time, for the connected account.
 
     async def _load_history(self) -> None:
-        briefs = await self.backend.list_briefs()
+        stamp = self._navigation_stamp()
         email = self._account_email
+        briefs = await self.backend.list_briefs()
         missed = await self.backend.missed_days(email) if email is not None else ()
         today = self.now().astimezone(self.zone).date()
-        self.history_panel.configure(briefs, missed, email, today)
+        if self._navigation_current(stamp):
+            self.history_panel.configure(briefs, missed, email, today)
 
     def _request_history_preview(self, email: str, day: date) -> None:
+        self._history_preview_read += 1
+        read_id = self._history_preview_read
+        stamp = self._navigation_stamp()
+
         async def read() -> None:
             try:
                 digest = await self.backend.load_brief(email, day)
-                if digest is not None and not self._closing:
+                if (
+                    digest is not None
+                    and self._navigation_current(stamp)
+                    and read_id == self._history_preview_read
+                ):
                     self.history_panel.show_preview(digest)
             except Exception as exc:
                 log_failure(exc)
@@ -3909,34 +4341,52 @@ class MainWindow(QMainWindow):
 
     async def _open_history(self) -> None:
         origin = self.workspace.current_page()
+        stamp = self._navigation_stamp()
         await self._load_history()
-        if self._show_page_unless_moved(origin, "briefs"):
+        if self._navigation_current(stamp) and self._show_page_unless_moved(origin, "briefs"):
             self.status.setText("Open a saved brief, or brief a missed day.")
 
     def _request_open_brief(self, account_email: str, local_date: date) -> None:
-        self.start(lambda: self._show_brief(account_email, local_date), cancellable=False)
+        self._navigate(BriefRoute(account_email=account_email, day=local_date))
 
-    async def _show_brief(self, account_email: str, local_date: date) -> None:
+    async def _show_brief(
+        self, account_email: str, local_date: date, stamp: NavigationStamp | None = None
+    ) -> None:
+        stamp = self._navigation_stamp() if stamp is None else stamp
         origin = self.workspace.current_page()
         digest = await self.backend.load_brief(account_email, local_date)
+        if not self._navigation_current(stamp):
+            return
         if digest is None:
             self.status.setText("That brief is no longer saved.")
             return
-        await self._view(digest, origin)  # Back on Today.
+        if not await self._view(digest, origin, stamp=stamp):
+            return
         self.status.setText(
             f"Showing the brief for {day_text(local_date, today=self._local_today())}."
         )
 
-    async def _view(self, digest: DailyDigest, origin: str | None = None) -> None:
+    async def _view(
+        self,
+        digest: DailyDigest,
+        origin: str | None = None,
+        *,
+        stamp: NavigationStamp | None = None,
+    ) -> bool:
         """Show a brief; the banner appears unless it is the latest. Today shows it unless
         the owner moved from ``origin`` (by default, the page shown now) while it loaded."""
         origin = self.workspace.current_page() if origin is None else origin
         latest = await self.backend.load_saved()
+        if stamp is not None and not self._navigation_current(stamp):
+            return False
         identity = (digest.account_id, digest.local_date)
         is_latest = latest is not None and (latest.account_id, latest.local_date) == identity
+        await self._show_digest(digest, stamp=stamp)
+        if stamp is not None and not self._navigation_current(stamp):
+            return False
         self._set_shown(None if is_latest else identity)
-        await self._show_digest(digest)
         self._show_page_unless_moved(origin, "today")
+        return True
 
     async def _back_to_latest(self) -> None:
         origin = self.workspace.current_page()
@@ -4104,6 +4554,8 @@ class MainWindow(QMainWindow):
                 self.google_event_dialog,
                 self.planning_dialog,
                 self.command_palette,
+                self.capture_dialog,
+                self.focus_dialog,
             )
         )
 
@@ -4469,6 +4921,7 @@ class MainWindow(QMainWindow):
             (self.action_editor, "this action"),
             (self.event_editor, "this event"),
             (self.settings_dialog, "Settings"),
+            (self.capture_dialog, "this capture"),
         ):
             if (
                 not dialog.isHidden() or getattr(dialog, "embedded", False)
@@ -4556,6 +5009,8 @@ class MainWindow(QMainWindow):
         self.scheduler.stop()  # No timer outlives the window.
         self.cancel()
         try:
+            await self.drain_capture()
+            await self.drain_focus()
             local = self._local_run
             if local is not None:
                 await asyncio.gather(local, return_exceptions=True)

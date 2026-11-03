@@ -73,6 +73,10 @@ Since PR #21 the window is the three-pane workspace
   lists drafts and notes, and **Briefs** lists saved briefs and missed days.
 - The **status strip** along the bottom shows the latest status, with **Undo** after a
   change you can reverse.
+- **Capture**, Ctrl+Shift+N (Cmd+Shift+N on macOS), or the palette's **Capture task
+  or note** saves a task/note from any page. See [capture and safe retries](p2-capture.md).
+  Today now starts with **My focus**; **Plan today** on Today/Actions selects and
+  orders ordinary tasks without changing dates. See [daily focus](p2-focus.md).
 - Ctrl+K (Cmd+K on macOS) opens **Go to or search**: commands, and search across your
   actions, drafts, notes, events and saved mail ([Go to or search](search.md)).
 - Ctrl+1 to Ctrl+7 (Cmd+1 to Cmd+7 on macOS) open the sidebar's pages in order: Today,

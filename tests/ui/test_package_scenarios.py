@@ -12,7 +12,7 @@ from mailbrief.domain.drafts import DraftEdit, DraftKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.runtime import DesktopRuntime
-from mailbrief.ui.smoke import SMOKE_ZONE, check_upgrade, verify_persistence
+from mailbrief.ui.smoke import SMOKE_ZONE, check_upgrade, seed_focus, verify_persistence
 
 
 async def seed_profile(directory: Path) -> None:
@@ -28,6 +28,7 @@ async def seed_profile(directory: Path) -> None:
             DraftEdit(title="Package note", body="Synthetic owner writing."),
         )
         await runtime.checkpoint_draft(note.public_id, note.revision)
+        await seed_focus(runtime)
     finally:
         await runtime.close()
 

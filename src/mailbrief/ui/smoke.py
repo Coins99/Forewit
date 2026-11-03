@@ -18,7 +18,9 @@ from PySide6.QtCore import QLibraryInfo
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from mailbrief.domain.drafts import DraftEdit, DraftKind
+from mailbrief.domain.actions import Action
+from mailbrief.domain.capture import CaptureRequest
+from mailbrief.domain.drafts import Draft, DraftEdit, DraftKind
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.infra.data_lock import create_data_lock
@@ -42,6 +44,18 @@ from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import FONT_FAMILY, current_tokens, icon_pixmap
 
 SMOKE_ZONE = "America/New_York"
+SMOKE_NOW = datetime(2026, 11, 3, 15, tzinfo=UTC)
+SMOKE_TASK = CaptureRequest(
+    command_id="12345678-1234-4234-8234-123456789abd",
+    kind="task",
+    title="Package focus task",
+)
+SMOKE_CAPTURE = CaptureRequest(
+    command_id="12345678-1234-4234-8234-123456789abc",
+    kind="note",
+    title="Package note",
+    body="Synthetic owner writing.",
+)
 
 
 async def verify_writing(runtime: DesktopRuntime) -> None:
@@ -58,6 +72,28 @@ async def verify_writing(runtime: DesktopRuntime) -> None:
         raise RuntimeError("Previous writing checkpoint was not preserved.")
 
 
+async def seed_focus(runtime: DesktopRuntime) -> None:
+    task = await runtime.capture(SMOKE_TASK)
+    if not isinstance(task, Action):
+        raise RuntimeError("Capture did not save a task.")
+    zone = ZoneInfo(SMOKE_ZONE)
+    summary = await runtime.today_summary(SMOKE_NOW.astimezone(zone).date(), zone, SMOKE_NOW)
+    revision = 0 if summary.focus is None else summary.focus.revision
+    await runtime.select_day_task(summary.day, zone, task.public_id, revision)
+
+
+async def verify_focus(runtime: DesktopRuntime) -> None:
+    """Read previous selection and task without recreating either record."""
+    zone = ZoneInfo(SMOKE_ZONE)
+    summary = await runtime.today_summary(SMOKE_NOW.astimezone(zone).date(), zone, SMOKE_NOW)
+    plan = summary.focus
+    if plan is None or plan.revision != 1 or len(plan.items) != 1:
+        raise RuntimeError("Previous daily focus was not preserved.")
+    task = plan.items[0].action
+    if task is None or task.title != SMOKE_TASK.title or plan.items[0].position != 0:
+        raise RuntimeError("Previous focus task was not preserved.")
+
+
 async def verify_persistence(directory: Path) -> None:
     """Inspect the previous process's records before performing any seed or save."""
     if not (directory / "smoke.sqlite3").is_file():
@@ -70,6 +106,7 @@ async def verify_persistence(directory: Path) -> None:
         if (await runtime.get_owner_preferences()).time_zone != SMOKE_ZONE:
             raise RuntimeError("Previous preferences were not preserved.")
         await verify_writing(runtime)
+        await verify_focus(runtime)
     finally:
         await runtime.close()
 
@@ -264,16 +301,19 @@ async def check_package(directory: Path) -> None:
             if owner.time_zone != SMOKE_ZONE:
                 raise RuntimeError("Preferences restoration failed.")
             if not await runtime.list_drafts():
-                note = await runtime.create_draft(DraftKind.NOTE)
-                note = await runtime.autosave_draft(
-                    note.public_id,
-                    note.revision,
-                    DraftEdit(title="Package note", body="Synthetic owner writing."),
-                )
+                note = await runtime.capture(SMOKE_CAPTURE)
+                if not isinstance(note, Draft):
+                    raise RuntimeError("Capture did not save a note.")
                 await runtime.checkpoint_draft(note.public_id, note.revision)
             await verify_writing(runtime)
+            if _ == 0:
+                await seed_focus(runtime)
+            await verify_focus(runtime)
             window = MainWindow(runtime, database_path=directory / "smoke.sqlite3")
+            window.now = lambda: SMOKE_NOW
+            window.zone = ZoneInfo(SMOKE_ZONE)
             window.show()
+            await window._refresh_day()
             QApplication.processEvents()
             if window.grab().isNull():
                 raise RuntimeError("Qt rendering failed.")
@@ -312,6 +352,8 @@ async def check_package(directory: Path) -> None:
         payload = json.loads(await asyncio.to_thread(export.read_text, encoding="utf-8"))
         if payload["records"]["drafts"][0]["body"] != "Synthetic owner writing.":
             raise RuntimeError("Portable writing export failed.")
+        if len(payload["records"]["day_plan_items"]) != 1:
+            raise RuntimeError("Portable focus export failed.")
         preview = await preview_cleanup(database, CleanupRequest(CleanupKind.CACHE, 1))
         await apply_cleanup(database, preview)
     finally:
@@ -319,8 +361,10 @@ async def check_package(directory: Path) -> None:
     recovered = DesktopRuntime(restored)
     try:
         await recovered.load_saved()
+        await verify_focus(recovered)
+        await recovered.capture(SMOKE_CAPTURE)
         if len(await recovered.list_drafts()) != 1:
-            raise RuntimeError("Cache cleanup removed owner writing.")
+            raise RuntimeError("Recovery lost owner writing or duplicated a captured note.")
     finally:
         await recovered.close()
     report = json.dumps({"ok": True, "platform": sys.platform, "launches": 2})

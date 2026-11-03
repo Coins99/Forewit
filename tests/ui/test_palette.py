@@ -490,7 +490,7 @@ async def test_runtime_search_and_inbox_position_read_only_local_data(tmp_path: 
                 ],
             )
             await session.commit()
-        await backend.create_action(
+        created = await backend.create_action(
             ActionEdit(
                 title="Approve the budget",
                 ownership=ActionOwnership.MINE,
@@ -504,6 +504,7 @@ async def test_runtime_search_and_inbox_position_read_only_local_data(tmp_path: 
             ),
             (),
         )
+        assert await backend.get_action(created.public_id) == created
 
         found = await backend.search("budget", "owner@example.com")
 

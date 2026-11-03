@@ -369,6 +369,7 @@ class ActionsPanel(QWidget):
         super().__init__()
         self.setObjectName("actionsPanel")
         self._actions: dict[ActionFilter, tuple[Action, ...]] = dict.fromkeys(ActionFilter, ())
+        self._totals: dict[ActionFilter, int | None] = dict.fromkeys(ActionFilter)
         # The day, zone and moment the lists were last shown for; the detail uses them too.
         self._moment: tuple[date, ZoneInfo, datetime] | None = None
         self._filling = False
@@ -596,6 +597,25 @@ class ActionsPanel(QWidget):
         actions = self._actions[view]
         return actions[row] if 0 <= row < len(actions) else None
 
+    def reveal_action(self, action: Action, view: ActionFilter) -> None:
+        """Reveal a canonical task even when it falls beyond a bounded completed list."""
+        self.show_view(view)
+        self.search.clear()
+        actions = self._actions[view]
+        if self._moment is not None and not any(
+            item.public_id == action.public_id for item in actions
+        ):
+            today, zone, now = self._moment
+            self.show_actions(
+                view,
+                (action, *actions),
+                today=today,
+                zone=zone,
+                now=now,
+                total=self._totals[view],
+            )
+        self.select_action(action.public_id)
+
     def show_actions(
         self,
         view: ActionFilter,
@@ -616,6 +636,7 @@ class ActionsPanel(QWidget):
         row = listing.currentRow()
         kept = previous[row].public_id if 0 <= row < len(previous) else None
         self._actions[view] = actions
+        self._totals[view] = total
         if view is ActionFilter.WAITING:
             self.waiting_count.setText(f"{len(actions)} active")
         self._moment = (today, zone, now)
