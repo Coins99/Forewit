@@ -101,3 +101,16 @@ real mailboxes or paid AI. Logs are under ignored `out/p2-focus-*`; renders unde
 P2-04 adds Notes and project context. Dedicated Tasks/Waiting/Completed and Mail
 pages follow in their planned increments. Historical date browsing, carry/move and
 capacity/Upcoming belong to P2-07/P2-08; this checkpoint does not implement them.
+
+## Windows CI time-zone follow-up
+
+The first PR #99 Windows run exposed two test failures on its Tokyo-configured
+runner: travel rollover started in Tokyo already, and the shutdown assertion
+looked for a Toronto-date selection that had been saved for the Tokyo date.
+The shared UI helper applied a Toronto zone before initialization, which then
+reloaded the fake backend's unset preference and replaced it with the system zone.
+
+The helper now seeds the backend preference before initialization. Two explicit
+UTC/Tokyo-host cases assert that the saved fixture zone and local date survive
+startup. All 81 focus/palette/navigation/capture checks passed with `TZ=Asia/Tokyo`.
+Production code is unchanged by this follow-up; PR CI reruns the full platform checks.

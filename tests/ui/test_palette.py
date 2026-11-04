@@ -19,7 +19,6 @@ from mailbrief.domain.drafts import DraftEdit, DraftKind
 from mailbrief.domain.events import CalendarEvent
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.messages import AccountIdentity, ProviderKind
-from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.search import HITS_PER_KIND, SearchHit, SearchKind, SearchResults
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
 from mailbrief.ui.main_window import MainWindow
@@ -237,14 +236,28 @@ def backend() -> FakeBackend:
 
 
 async def window_for(qtbot: QtBot, backend: FakeBackend) -> MainWindow:
+    # Initialization reloads preferences from storage; seed that source so the
+    # fixture's local day is stable on both Toronto and Tokyo CI runners.
+    backend.owner_preferences = backend.owner_preferences.model_copy(update={"time_zone": ZONE.key})
     window = MainWindow(backend)
     qtbot.addWidget(window)
     window.now = lambda: NOW
-    window._apply_owner_preferences(OwnerPreferences(revision=1, time_zone=ZONE.key))
     window.start(window.initialize)
     await finish(window)
     window.show()
     return window
+
+
+@pytest.mark.parametrize("system_zone", ["UTC", "Asia/Tokyo"])
+async def test_saved_fixture_zone_survives_initialization(
+    qtbot: QtBot, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch, system_zone: str
+) -> None:
+    monkeypatch.setattr("tzlocal.reload_localzone", lambda: ZoneInfo(system_zone))
+    window = await window_for(qtbot, backend)
+    assert window.zone.key == ZONE.key
+    assert window._local_today() == TODAY
+    assert not window._system_zone
+    assert (await backend.get_owner_preferences()).time_zone == ZONE.key
 
 
 async def test_ctrl_k_opens_the_palette_once_and_searches_locally(
