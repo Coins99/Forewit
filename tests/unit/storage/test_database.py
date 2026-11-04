@@ -62,6 +62,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "projects",
         "life_areas",
         "action_activity",
+        "task_commands",
         "action_suggestions",
         "action_steps",
         "action_tags",

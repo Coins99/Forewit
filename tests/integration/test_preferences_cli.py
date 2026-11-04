@@ -76,6 +76,8 @@ def test_show_on_a_fresh_database_prints_the_defaults_and_creates_nothing(
         "No database yet: these are the defaults.",
         "Time zone: system (America/Toronto)",
         "Messages per brief: 10",
+        "Email analysis mode: cloud",
+        "Local messages per brief: 20",
         "Excluded senders: none",
         "Important senders: none",
         "Drafting defaults: tone neutral, length medium",

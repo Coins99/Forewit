@@ -65,6 +65,7 @@ class SettingsDialog(QDialog):
     key_requested = Signal(object)
     remove_key_requested = Signal()
     revoke_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -112,8 +113,8 @@ class SettingsDialog(QDialog):
         form.addRow(self.key_button)
         form.addRow(self.remove_key_button)
         self.revoke_button = QPushButton("Revoke AI consent (briefs and &drafting)")
-        form.addRow(self.revoke_button)
         connection_layout.addWidget(self.fields)
+        connection_layout.addWidget(self.revoke_button)
         notice = QLabel(
             "Sign in with Google using Forewit's configuration. A custom Desktop OAuth "
             "client file is optional for development builds. Choose a Groq model that supports "
@@ -139,6 +140,12 @@ class SettingsDialog(QDialog):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status)
         self.close_button = QPushButton("&Close")
+        self.stop_button = QPushButton("Stop current operation")
+        self.stop_button.setObjectName("settingsStopButton")
+        self.stop_button.setAccessibleName("Stop the current operation")
+        self.stop_button.clicked.connect(self.stop_requested.emit)
+        self.stop_button.hide()
+        layout.addWidget(self.stop_button)
         layout.addWidget(self.close_button)
         self.close_button.clicked.connect(self.reject)
         self.browse_button.clicked.connect(self._browse)
@@ -215,6 +222,7 @@ class SettingsDialog(QDialog):
         waits; Appearance works at once. The dialog can be open all the while."""
         self.fields.setEnabled(not busy)
         self.preferences_panel.setEnabled(not busy)
+        self.stop_button.setVisible(busy)
         if busy:
             self.status.setText(BUSY)
         elif self.status.text() == BUSY:

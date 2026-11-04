@@ -33,6 +33,23 @@ from mailbrief.services.local_setup import (
 )
 
 GIB = 1024**3
+
+
+def test_licenses_work_offline_without_setup_or_profile(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Reading licenses must not access setup, hardware or the owner profile")
+
+    monkeypatch.setattr(gmail, "LocalSetup", forbidden)
+    monkeypatch.setattr(gmail, "total_memory_bytes", forbidden)
+    assert gmail.main(["local-ai", "licenses"]) == 0
+    text = capsys.readouterr().out
+    assert "The ggml authors" in text
+    assert "Apache License" in text
+    assert "Copyright 2024 Alibaba Cloud" in text
+
+
 HOSTS = frozenset({"github.com", "huggingface.co", ".hf.co"})
 RUNTIME_URL = "https://github.com/ggml-org/llama.cpp/releases/download/b-test/llama-b-test.zip"
 MODEL_URL = "https://huggingface.co/test/model/resolve/0123abc/test-model.gguf"
@@ -43,8 +60,14 @@ RUNTIME_FILES = {"llama-server.exe": SERVER_BYTES, "ggml-base.dll": b"stand-in l
 MODEL_BYTES = random.Random(20261030).randbytes(2 * CHUNK_BYTES + 4321)
 GPU = GpuDevice(id="Vulkan0", name="Test GPU", memory_mib=8192, free_mib=8000)
 READY = "Local AI: ready (llama.cpp b-test, Test-Model-Q4)"
-WITH_GPU = "About 15 seconds per email on this computer (Test GPU)."
-WITHOUT_GPU = "About 30 seconds per email: no graphics processor the model can use was found."
+WITH_GPU = (
+    "Benchmark reference: about 15 seconds per email with GPU acceleration. "
+    "Detected GPU: Test GPU. Actual speed varies."
+)
+WITHOUT_GPU = (
+    "Benchmark reference: about 30 seconds per email on CPU; "
+    "no usable GPU was detected. Actual speed varies."
+)
 LOW_MEMORY = (
     "This computer has 8 GB of memory; the local model was measured with 16 GB, so it may be "
     "slower or fail to load."
@@ -167,6 +190,7 @@ class Computer:
 
 @pytest.fixture
 def computer(monkeypatch: pytest.MonkeyPatch) -> Computer:
+    monkeypatch.setenv("MAILBRIEF_EXPERIMENTAL_LOCAL_AI", "true")
     fake = Computer()
     monkeypatch.setattr(gmail, "manifest_for", lambda: fake.manifest)
     monkeypatch.setattr(gmail, "LocalSetup", fake.local_setup)

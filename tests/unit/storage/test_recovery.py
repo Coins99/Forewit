@@ -257,6 +257,41 @@ def archive(tmp_path: Path) -> Path:
     return backup
 
 
+def test_restore_revokes_all_local_disclosures_and_keeps_mode_and_writing(
+    archive: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    with closing(sqlite3.connect(source)) as connection:
+        connection.execute(
+            "UPDATE owner_preferences SET analysis_mode='local',local_message_limit=17"
+        )
+        for version in ("local-1", "old-local"):
+            connection.execute(
+                "INSERT INTO ai_consents(account_id,provider,disclosure_version,granted_at_utc) "
+                "VALUES(1,'local',?,?)",
+                (version, STAMP),
+            )
+        connection.commit()
+    local_backup = tmp_path / "local-backup.zip"
+    create_backup(source, local_backup)
+    restored = tmp_path / "restored-local.sqlite3"
+    restore_backup(local_backup, restored)
+    assert query(
+        restored,
+        "SELECT count(*) FROM ai_consents WHERE provider='local' AND revoked_at_utc IS NULL",
+    ) == [(0,)]
+    assert query(
+        source, "SELECT count(*) FROM ai_consents WHERE provider='local' AND revoked_at_utc IS NULL"
+    ) == [(2,)]
+    assert query(
+        restored, "SELECT revoked_at_utc,auto_send_limit FROM ai_consents WHERE provider='groq'"
+    ) == [(None, 0)]
+    assert query(restored, "SELECT analysis_mode,local_message_limit FROM owner_preferences") == [
+        ("local", 17)
+    ]
+    assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]
+
+
 def rewrite_archive(
     archive: Path,
     *,
@@ -278,7 +313,7 @@ def rewrite_archive(
 
 def test_inspect_checks_supported_archive(archive: Path) -> None:
     metadata = inspect_backup(archive)
-    assert metadata.schema_revisions == ("20261023_0024",)
+    assert metadata.schema_revisions == ("20261101_0026",)
     assert metadata.credentials_included is False
 
 
@@ -443,7 +478,7 @@ def test_older_backup_is_upgraded_in_staging(tmp_path: Path, revision: str) -> N
     restored = tmp_path / "restored.sqlite3"
     restore_backup(backup, restored)
     assert query(restored, "SELECT body FROM drafts") == [("owner writing",)]
-    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261023_0024",)]
+    assert query(restored, "SELECT version_num FROM alembic_version") == [("20261101_0026",)]
     assert query(original, "SELECT version_num FROM alembic_version") == [(revision,)]
 
 

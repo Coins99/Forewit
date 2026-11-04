@@ -19,7 +19,11 @@ from mailbrief.domain.messages import (
     is_own_message,
     own_addresses,
 )
-from mailbrief.domain.preferences import SHORTLIST_LIMIT_MAX, sender_matches
+from mailbrief.domain.preferences import (
+    LOCAL_MESSAGE_LIMIT_MAX,
+    SHORTLIST_LIMIT_MAX,
+    sender_matches,
+)
 
 DEFAULT_THRESHOLD: int = 10
 MIN_SHORTLIST_SIZE: int = 3
@@ -407,8 +411,8 @@ def review_shortlist(
     take a slot in the automatic selection, but unlike blocked ones an explicit choice can
     include them again.
     """
-    if not 1 <= limit <= MAX_SHORTLIST_SIZE:
-        raise ValueError("The shortlist limit must be 1 to 10.")
+    if not 1 <= limit <= LOCAL_MESSAGE_LIMIT_MAX:
+        raise ValueError("The shortlist limit must be 1 to 20.")
     include, exclude = set(include_ids), set(exclude_ids)
     available = {item.message.provider_message_id: item for item in ranked}
     if include & exclude or (include | exclude) - available.keys():

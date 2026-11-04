@@ -17,9 +17,10 @@ from mailbrief.ports.errors import (
     ProviderRequestRejectedError,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    ProviderUsageLimitError,
 )
-from mailbrief.providers.groq.provider import INSTRUCTIONS, AnalysisWireBatch
-from mailbrief.providers.groq.provider import PROMPT_VERSION as GROQ_PROMPT_VERSION
+from mailbrief.providers.groq.provider import AnalysisWireBatch
+from mailbrief.providers.local.prompt import INSTRUCTIONS, PROMPT_VERSION
 from mailbrief.providers.local.provider import (
     PROVIDER_NAME,
     TIMEOUT_MESSAGE,
@@ -30,6 +31,7 @@ from mailbrief.providers.local.provider import (
     RunningServer,
     answer_tokens,
     context_tokens,
+    local_response_schema,
     to_response,
 )
 from mailbrief.providers.local.transport import LoopbackGuard
@@ -118,14 +120,43 @@ async def test_it_is_an_ai_provider_named_local_with_its_own_prompt_version() ->
     async with provider() as model:
         assert isinstance(model, AIProvider)
         assert (model.provider_name, model.model_name) == (PROVIDER_NAME, "qwen")
-        assert model.prompt_version == f"local-{GROQ_PROMPT_VERSION}"
+        assert model.prompt_version == PROMPT_VERSION
         assert "this computer" in model.privacy_notice
         assert await model.credentials_available()
     async with provider(LeaseLog(ready=False)) as model:
         assert not await model.credentials_available()
 
 
-async def test_analyze_sends_groqs_instructions_and_schema_and_times_the_stream(
+async def test_local_request_budget_stops_before_another_lease(
+    respx_mock: respx.MockRouter,
+) -> None:
+    server = LeaseLog()
+    route = respx_mock.post(CHAT).respond(200, content=_answer())
+    async with provider(server, max_requests=1) as model:
+        await model.analyze([make_request()])
+        with pytest.raises(ProviderUsageLimitError):
+            await model.analyze([make_request()])
+        assert model.requests_sent == 1
+    assert route.call_count == 1
+    assert server.events == ["leased", "returned"]
+
+
+def test_local_generation_limits_preserve_the_shared_contract_without_mutating_it() -> None:
+    shared = AnalysisWireBatch.model_json_schema()
+    local = local_response_schema()
+    assert AnalysisWireBatch.model_json_schema() == shared
+    result = local["$defs"]["AnalysisWireResult"]
+    original = shared["$defs"]["AnalysisWireResult"]
+    assert set(result["properties"]) == set(original["properties"])
+    assert result["required"] == original["required"]
+    order = list(result["properties"])
+    assert order.index("action_required") < order.index("category")
+    assert order.index("follow_up") < order.index("category")
+    assert result["properties"]["evidence"]["maxLength"] == 64
+    assert local["$defs"]["ActionWireResult"]["properties"]["evidence"]["maxLength"] == 64
+
+
+async def test_analyze_sends_local_instructions_and_shared_schema_and_times_the_stream(
     respx_mock: respx.MockRouter,
 ) -> None:
     request = make_request()
@@ -144,9 +175,7 @@ async def test_analyze_sends_groqs_instructions_and_schema_and_times_the_stream(
     body = json.loads(route.calls.last.request.content)
     assert body["messages"][0] == {"role": "system", "content": INSTRUCTIONS}
     assert json.loads(body["messages"][1]["content"])["messages"][0]["body"] == BODY
-    assert body["response_format"]["json_schema"]["schema"] == (
-        AnalysisWireBatch.model_json_schema()
-    )
+    assert body["response_format"]["json_schema"]["schema"] == local_response_schema()
     assert body["temperature"] == 0 and body["stream"] is True and body["max_tokens"] == 512
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert response.problem is None
@@ -258,8 +287,8 @@ def test_an_endpoint_keeps_its_key_out_of_its_repr() -> None:
 
 def test_a_call_budget_covers_instructions_emails_and_answers() -> None:
     assert answer_tokens(2) == 1_200
-    assert context_tokens(1, 2_048) == 5_048
-    assert context_tokens(3, 2_048) == 9_048
+    assert context_tokens(1, 2_048) == 6_048
+    assert context_tokens(3, 2_048) == 10_048
 
 
 @pytest.mark.parametrize(

@@ -9,12 +9,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from alembic import command
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionActivityKind as Kind
 from mailbrief.domain.actions import ActionEdit, ActionFilter, ActionStatus, StepEdit
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.services.actions import ActionConflictError, ActionService
+from mailbrief.services.actions import ActionConflictError, ActionNotFoundError, ActionService
 from mailbrief.services.data import export_writing
 from mailbrief.storage.actions import DISPLAY_ACTIVITY_LIMIT, ActionRepository
 from mailbrief.storage.backup import create_backup
@@ -36,6 +37,31 @@ EDIT = ActionEdit(
     target_date=date(2026, 10, 12),
     notes="Owner notes",
 )
+
+
+async def test_history_reads_current_revision_after_another_session_completes(
+    database: Database,
+) -> None:
+    async with database.session() as reader:
+        service = ActionService(reader)
+        created = await service.create(EDIT)
+        cached = await ActionRepository(reader).get_action(created.public_id)
+        assert cached is not None
+        async with database.session() as writer:
+            completed = await ActionService(writer).complete(created.public_id, created.revision)
+        history = await service.history(created.public_id)
+        assert history.complete
+        assert history.completions == (completed.activity[-1],)
+
+
+async def test_history_of_existing_task_without_activity_is_partial(session: AsyncSession) -> None:
+    service = ActionService(session)
+    created = await service.create(EDIT)
+    await session.execute(delete(ActionActivityTable))
+    await session.commit()
+    history = await service.history(created.public_id)
+    assert not history.complete
+    assert history.effective == ()
 
 
 @pytest.mark.parametrize("email_derived", [False, True])
@@ -79,10 +105,15 @@ async def test_full_workflow_survives_restart_backup_restore_and_export(
             Kind.REOPENED,
         ]
         assert final.activity[2].occurred_at_utc == completion
+        history = await service.history(final.public_id)
+        assert history.complete
+        assert len(history.completions) == 1
+        assert history.completions[0].occurred_at_utc == completion
     await database.dispose()
     restarted = Database.from_path(path)
     async with restarted.session() as session:
         assert await ActionService(session).get(final.public_id) == final
+        assert await ActionService(session).history(final.public_id) == history
     exported = tmp_path / "writing.json"
     await export_writing(restarted, exported)
     payload = json.loads(exported.read_text(encoding="utf-8"))
@@ -99,6 +130,7 @@ async def test_full_workflow_survives_restart_backup_restore_and_export(
     try:
         async with recovered.session() as session:
             assert await ActionService(session).get(final.public_id) == final
+            assert await ActionService(session).history(final.public_id) == history
     finally:
         await recovered.dispose()
 
@@ -222,6 +254,7 @@ async def test_legacy_deleted_task_restores_without_undoing_completion(
         restored = await ActionService(session).restore(public_id)
         assert restored.activity[-1].kind is Kind.RESTORED
         assert restored.activity[-1].undo_of_revision is None
+        assert not (await ActionService(session).history(public_id)).complete
         assert (restored.completed_at_utc is not None) == completed
         assert sum(event.kind is Kind.COMPLETED for event in restored.activity) == int(completed)
     await database.dispose()
@@ -282,6 +315,10 @@ async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path:
         row = await session.scalar(select(ActionTable))
         assert row is not None
         assert len(await ActionRepository(session).activity_rows(row.id)) == total
+        full_history = await service.history(undone.public_id)
+        assert full_history.complete
+        assert full_history.completions == ()
+        assert len(full_history.effective) == total - 2  # The completion and its undo cancel.
         short = await service.create(EDIT)
         for _ in range(4):
             short = await service.save(short.public_id, short.revision, EDIT)
@@ -293,6 +330,28 @@ async def test_display_history_is_bounded_but_full_history_is_exported(tmp_path:
     payload = json.loads(exported.read_text(encoding="utf-8"))
     assert len(payload["records"]["action_activity"]) == total + 5
     await database.dispose()
+
+
+async def test_history_retained_on_soft_delete_and_missing_after_purge(tmp_path: Path) -> None:
+    database = Database.from_path(tmp_path / "retained-history.sqlite3")
+    await database.create_schema_for_tests()
+    try:
+        async with database.session() as session:
+            service = ActionService(session)
+            task = await service.create(EDIT)
+            done = await service.complete(task.public_id, task.revision)
+            await service.delete(task.public_id, done.revision)
+            retained = await service.history(task.public_id)
+            assert retained.complete
+            assert len(retained.completions) == 1
+            row = await ActionRepository(session).get_action(task.public_id, include_deleted=True)
+            assert row is not None
+            await session.delete(row)
+            await session.commit()
+            with pytest.raises(ActionNotFoundError):
+                await service.history(task.public_id)
+    finally:
+        await database.dispose()
 
 
 async def test_an_estimate_is_set_changed_and_cleared_one_revision_at_a_time(

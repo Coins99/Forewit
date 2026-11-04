@@ -303,7 +303,9 @@ class LlamaServer:
         self._ready_timeout = ready_timeout
         self._clock = clock
         self._sleep = sleep
-        self._api_key = secrets.token_urlsafe(32)
+        # A leading '-' can be parsed as another option by command-line consumers.
+        # The fixed prefix keeps all 32 random bytes while making the value unambiguous.
+        self._api_key = f"forewit-{secrets.token_urlsafe(32)}"
         self._started = False
         self._process: subprocess.Popen[str] | None = None
         self._reader: threading.Thread | None = None

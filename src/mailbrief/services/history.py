@@ -75,6 +75,15 @@ def coverage_line(brief: DailyDigest | SavedBriefSummary) -> str:
             f" Also includes {outside} replies from threads you track that weren't in "
             "today's Inbox."
         )
+    if (
+        isinstance(brief, DailyDigest)
+        and brief.coverage is not None
+        and brief.coverage.ai_provider == "local"
+    ):
+        line += (
+            f" Summarized on this computer: {len(brief.items)} selected messages. "
+            "Check Inbox for other mail."
+        )
     return line
 
 

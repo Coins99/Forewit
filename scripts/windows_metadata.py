@@ -93,6 +93,8 @@ def write_resources(root: Path, directory: Path) -> tuple[Path, Path]:
         "src/mailbrief/ui/theme/fonts/OFL.txt",
         "src/mailbrief/ui/theme/fonts/DM-Sans-OFL.txt",
         "src/mailbrief/ui/theme/icons/LICENSE",
+        "src/mailbrief/providers/local/licenses/llama-cpp-MIT.txt",
+        "src/mailbrief/providers/local/licenses/Qwen-Apache-2.0.txt",
     ):
         notices.extend([f"\n{path}\n", (root / path).read_text("utf-8")])
     for package in runtime_packages():

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Final, Protocol
 
@@ -19,6 +20,9 @@ from mailbrief.domain.briefs import (
 )
 from mailbrief.domain.common import utc_now
 from mailbrief.domain.digests import DigestCoverage, SyncProgress, SyncResult, SyncStage, SyncStatus
+from mailbrief.domain.preferences import SHORTLIST_LIMIT_MAX, AnalysisMode, OwnerPreferences
+from mailbrief.errors import ConfigurationError
+from mailbrief.infra.tasks import OperationStopped
 from mailbrief.ports.ai_provider import AIProvider
 from mailbrief.ports.email_provider import EmailProvider
 from mailbrief.ports.threads import ThreadReader
@@ -33,8 +37,14 @@ from mailbrief.services.analysis import (
 from mailbrief.services.application import ApplicationService
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.calendar import day_window, local_day_window, resolve_timezone
+from mailbrief.services.consent import (
+    LOCAL_CONSENT_PROVIDER,
+    LOCAL_DISCLOSURE_VERSION,
+    local_disclosure_lines,
+)
 from mailbrief.services.digest import IN_BRIEF, DigestService
 from mailbrief.services.history import BriefDateError, check_brief_date
+from mailbrief.services.preferences import PreferencesService
 from mailbrief.services.proposals import ProposalService
 from mailbrief.services.ranking import MAX_SHORTLIST_SIZE
 from mailbrief.services.ranking import ShortlistGate as ShortlistGate
@@ -52,7 +62,8 @@ logger = logging.getLogger(__name__)
 CONSENT_DISCLOSURE_VERSION: Final = "2"
 # An automatic run stopped before sending because a carried message's body couldn't be read.
 CARRIED_BODY_FAILED: Final = "CARRIED_BODY_FAILED"
-_DISPLAY_NAMES: Final = {"openai": "OpenAI", "groq": "Groq"}
+_DISPLAY_NAMES: Final = {"openai": "OpenAI", "groq": "Groq", "local": "On this computer"}
+LOCAL_AI_NOT_READY: Final = "LOCAL_AI_NOT_READY"
 _AUTOMATIC_TODAY: Final = "Automatic runs brief today only."
 # What the body step leaves on a message it couldn't read: unreadable, empty or deleted.
 _UNREAD: Final = (AnalysisOutcome.FAILED, AnalysisOutcome.SKIPPED)
@@ -87,6 +98,11 @@ def provider_display_name(name: str) -> str:
 
 def disclosure_lines(preview: TransmissionPreview) -> tuple[str, ...]:
     """Plain sentences describing what will be sent, shared by the CLI and the UI."""
+    if preview.provider_name == LOCAL_CONSENT_PROVIDER:
+        account = (
+            () if preview.account_email is None else (f"Gmail account: {preview.account_email}",)
+        )
+        return account + local_disclosure_lines(preview.message_count)
     provider = provider_display_name(preview.provider_name)
     cut = preview.truncated_count
     lines = [
@@ -179,6 +195,7 @@ class BriefService:
         consent_gate: ConsentGate,
         clock: Callable[[], datetime] = utc_now,
         proposals: ProposalService | None = None,
+        preferences: OwnerPreferences | None = None,
     ) -> None:
         self._session = session
         self._application = application
@@ -189,6 +206,7 @@ class BriefService:
         self._clock = clock
         self._consents = ConsentRepository(session)
         self._proposals = proposals or ProposalService(session, clock=clock)
+        self._preferences = preferences
 
     async def generate(
         self,
@@ -238,6 +256,23 @@ class BriefService:
         if automatic and (shortlist_gate is not None or include_ids or exclude_ids):
             raise ValueError("An automatic run has no review.")
         now = self._clock()
+        local = self._analysis.provider_name == LOCAL_CONSENT_PROVIDER
+        local_preferences: OwnerPreferences | None = None
+        if local:
+            local_preferences = await PreferencesService(self._session).get()
+            if local_preferences.analysis_mode is not AnalysisMode.LOCAL or (
+                self._preferences is not None
+                and self._preferences.revision != local_preferences.revision
+            ):
+                raise ConfigurationError(
+                    "Analysis settings changed. Retry with the current settings."
+                )
+            shortlist_limit = local_preferences.local_message_limit
+            excluded_senders = local_preferences.excluded_senders
+            important_senders = local_preferences.important_senders
+            shortlist_gate = None  # One local opt-in replaces recurring review questions.
+        elif not 1 <= shortlist_limit <= SHORTLIST_LIMIT_MAX:
+            raise ValueError("The cloud shortlist limit must be 1 to 10.")
         zone = resolve_timezone(tz_key)
         today = local_day_window(now, zone).local_date
         if automatic and local_date not in (None, today):
@@ -245,6 +280,23 @@ class BriefService:
         check_brief_date(local_date or today, today)
         window = day_window(local_date or today, zone)
         account = await self._application.get_or_restore_account()
+
+        async def locally_allowed() -> bool:
+            # The watcher can be cancelled while a query is in flight. Give it
+            # its own short-lived transaction so it cannot invalidate the run's
+            # session or keep reading an old permission snapshot.
+            async with AsyncSession(bind=self._session.bind) as permission_session:
+                current = await PreferencesService(permission_session).get()
+                return (
+                    local_preferences is not None
+                    and current.analysis_mode is AnalysisMode.LOCAL
+                    and current.revision == local_preferences.revision
+                    and await ConsentRepository(permission_session).get_active(
+                        account.id, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION
+                    )
+                    is not None
+                )
+
         # Runs through a day are cumulative: the day's saved brief is carried forward.
         carried, carried_outside = await self._digests.carried(account.id, window.local_date)
         sync, shortlist = await self._application.prepare_daily_shortlist(
@@ -271,13 +323,53 @@ class BriefService:
 
         if cancel is not None and cancel.is_set():
             return BriefRunResult(status=BriefStatus.CANCELLED, sync=sync)
-        send_limit = await self._auto_send_limit(account.id) if automatic else 0
+        if local:
+            current = await PreferencesService(self._session).get()
+            if local_preferences is None or current.revision != local_preferences.revision:
+                return BriefRunResult(status=BriefStatus.CANCELLED, sync=sync)
+        if local and not await locally_allowed():
+            if automatic or not shortlist:
+                return BriefRunResult(
+                    status=BriefStatus.READY_FOR_REVIEW, sync=sync, ready=len(shortlist)
+                )
+            preview = TransmissionPreview(
+                provider_name=LOCAL_CONSENT_PROVIDER,
+                account_email=account.email_address,
+                model_name=self._analysis.model_name,
+                message_count=shortlist_limit,
+                truncated_count=0,
+                reused_count=0,
+                first_use=True,
+                body_character_limit=self._bodies.limit,
+                privacy_notice=self._analysis.privacy_notice,
+            )
+            if not await self._consent_gate.confirm(preview):
+                return BriefRunResult(status=BriefStatus.CONSENT_DECLINED, sync=sync)
+            await self._consents.grant(
+                account.id, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION, now
+            )
+            await self._session.commit()
+        send_limit = (
+            shortlist_limit
+            if local
+            else await self._auto_send_limit(account.id)
+            if automatic
+            else 0
+        )
         new = sum(item.message.provider_message_id not in carried for item in shortlist)
-        if automatic and (send_limit == 0 or new == 0):
+        if automatic and (send_limit == 0 or (new == 0 and not local)):
             # Nothing may be sent, or nothing is new: report, and leave the saved brief.
             logger.info("Automatic run: %d new messages ready, nothing sent", new)
             return BriefRunResult(status=BriefStatus.READY_FOR_REVIEW, sync=sync, ready=new)
-        prepared = await self._bodies.prepare(shortlist)
+        try:
+            if local:
+                prepared = await self._bodies.prepare(
+                    shortlist, allowed=locally_allowed, cancel=cancel
+                )
+            else:
+                prepared = await self._bodies.prepare(shortlist)
+        except OperationStopped:
+            return BriefRunResult(status=BriefStatus.CANCELLED, sync=sync)
         plan = await self._analysis.plan(
             account_id=account.id,
             shortlist=shortlist,
@@ -307,22 +399,84 @@ class BriefService:
                     ready=new,
                     unrefreshed=len(stale),
                 )
+
+        async def publish_ready() -> None:
+            if progress is None or (cancel is not None and cancel.is_set()):
+                return
+            if not await locally_allowed():
+                return
+            preview = await self._digests.preview(
+                account_email=account.email_address,
+                window=window,
+                generated_at=now,
+                messages=plan.messages,
+                outside_ids=sync.outside_ids,
+            )
+            if preview is not None and await locally_allowed():
+                pending = len(plan.to_send)
+                emit_progress(
+                    progress,
+                    SyncProgress(
+                        stage=SyncStage.ANALYZING,
+                        ready_brief=preview,
+                        pending_count=pending,
+                        detail=(
+                            f"Summarizing on this computer: {len(preview.items)} ready · "
+                            f"{pending} remaining"
+                        ),
+                    ),
+                )
+
+        if local:
+            await publish_ready()
         if plan.to_send and not await self._analysis.credentials_available():
             # Nothing can be sent, so there is nothing to consent to; cached and skipped
             # messages still make a brief.
-            run = self._analysis.fail_unsent(plan, KEY_MISSING)
+            run = self._analysis.fail_unsent(plan, LOCAL_AI_NOT_READY if local else KEY_MISSING)
         else:
             # An automatic run never asks: its permission is the owner's answer (ADR 0017).
-            if not automatic and plan.to_send and not await self._consented(account.id, plan, now):
+            if (
+                not local
+                and not automatic
+                and plan.to_send
+                and not await self._consented(account.id, plan, now)
+            ):
                 return BriefRunResult(status=BriefStatus.CONSENT_DECLINED, sync=sync)
-            run = await self._analysis.execute(plan, cancel=cancel, progress=progress)
+
+            def local_progress(update: SyncProgress) -> None:
+                completed = sum(item.outcome in IN_BRIEF for item in plan.messages)
+                detail = f"Analyzing on this computer: {completed} of {len(plan.messages)}"
+                emit_progress(progress, update.model_copy(update={"detail": detail}))
+
+            if local and plan.to_send:
+                emit_progress(
+                    progress,
+                    SyncProgress(stage=SyncStage.ANALYZING, detail="Starting the local model…"),
+                )
+            run = await self._analysis.execute(
+                plan,
+                cancel=cancel,
+                progress=local_progress if local else progress,
+                allowed=locally_allowed if local else None,
+                result_ready=publish_ready if local else None,
+            )
             if run.cancelled:
                 return BriefRunResult(
                     status=BriefStatus.CANCELLED, sync=sync, ai_calls=run.requests_sent
                 )
 
+        if local:
+            if not await locally_allowed():
+                return BriefRunResult(
+                    status=BriefStatus.CANCELLED, sync=sync, ai_calls=run.requests_sent
+                )
+            if run.error_code is not None and run.error_code not in (
+                LOCAL_AI_NOT_READY,
+                "AI_USAGE_LIMIT",
+            ):
+                run = replace(run, error_code="LOCAL_AI_FAILED")
         coverage = self._coverage(sync, len(shortlist), run)
-        lost = _not_refreshed(run.messages, carried) if automatic else []
+        lost = _not_refreshed(run.messages, carried) if automatic or local else []
         if lost:
             # A carried message's analysis failed, so a saved brief would lose it: no brief
             # is written. The analyses that succeeded are cached already (execute commits
@@ -440,6 +594,7 @@ def compose_brief(
     *,
     consent_gate: ConsentGate,
     clock: Callable[[], datetime] = utc_now,
+    preferences: OwnerPreferences | None = None,
 ) -> BriefService:
     """BriefService as the desktop and the CLI both run it: over ``provider`` and ``ai``,
     following tracked threads, with the body and batch limits of ``settings``."""
@@ -452,9 +607,18 @@ def compose_brief(
             AccountRepository(session),
             threads=ThreadService(session, provider),
         ),
-        bodies=BodyService(provider, limit=settings.ai_body_character_limit),
-        analysis=AnalysisService(session, ai, batch_size=settings.ai_batch_size),
+        bodies=BodyService(
+            provider,
+            limit=settings.ai_body_character_limit,
+            concurrency=1 if ai.provider_name == LOCAL_CONSENT_PROVIDER else 5,
+        ),
+        analysis=AnalysisService(
+            session,
+            ai,
+            batch_size=1 if ai.provider_name == LOCAL_CONSENT_PROVIDER else settings.ai_batch_size,
+        ),
         digests=DigestService(session),
         consent_gate=consent_gate,
         clock=clock,
+        preferences=preferences,
     )

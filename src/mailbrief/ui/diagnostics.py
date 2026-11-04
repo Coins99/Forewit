@@ -31,6 +31,8 @@ ERROR_MESSAGES = {
     "AI_PERMISSION_DENIED": "Groq denied access. Check your account permissions, region and quota.",
     "AI_RATE_LIMITED": "Groq rate limit reached; retry later.",
     "AI_TIMEOUT": "Groq did not respond in time; retry later.",
+    "LOCAL_AI_NOT_READY": "Local AI is not ready. Set it up in Settings, then retry.",
+    "LOCAL_AI_FAILED": "Local AI could not finish. Retry when this computer is ready.",
     "AI_SERVER_ERROR": "Groq had a server problem or sent an unreadable reply; retry later.",
     "AI_REQUEST_REJECTED": (
         "Groq rejected messages. Check the Structured Outputs model in Settings."

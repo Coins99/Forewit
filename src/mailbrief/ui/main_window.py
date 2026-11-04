@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QLabel,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
@@ -34,6 +35,7 @@ from mailbrief.domain.actions import (
     ActionEdit,
     ActionFilter,
     ActionProposal,
+    ActionStatus,
     DeadlineChange,
     StepEdit,
     ThreadLink,
@@ -91,7 +93,7 @@ from mailbrief.domain.events import (
 )
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
-from mailbrief.domain.preferences import OwnerPreferences, PreferencesEdit
+from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
@@ -105,10 +107,14 @@ from mailbrief.ports.errors import (
     ProviderPermissionError,
     ProviderRateLimitError,
 )
+from mailbrief.providers.local.device import assess, memory_note, total_memory_bytes
+from mailbrief.providers.local.manifest import manifest_for
+from mailbrief.providers.local.notices import local_notices
 from mailbrief.services.actions import (
     COMPLETED_LIST_LIMIT,
     AcceptedInto,
     ActionConflictError,
+    ActionCreateConflictError,
     ActionNotFoundError,
     ActionRepeatError,
     DecisionSnapshot,
@@ -133,6 +139,13 @@ from mailbrief.services.drafts import DraftConflictError, DraftNotFoundError, So
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import needs_sync
 from mailbrief.services.history import BriefDateError
+from mailbrief.services.local_setup import (
+    LocalSetupError,
+    SetupProgress,
+    SetupState,
+    SetupStatus,
+    setup_lines,
+)
 from mailbrief.services.preferences import (
     PreferencesConflictError,
     PreferencesUnavailableError,
@@ -266,6 +279,9 @@ class DesktopBackend(Protocol):
         self, edit: PreferencesEdit, revision: int
     ) -> OwnerPreferences: ...
     async def reset_owner_preferences(self) -> OwnerPreferences: ...
+    async def local_ai_status(self) -> SetupStatus: ...
+    async def setup_local_ai(self, progress: Callable[[SetupProgress], None]) -> SetupStatus: ...
+    async def remove_local_ai(self) -> None: ...
     async def save_key(self, key: SecretStr) -> None: ...
     async def remove_key(self) -> None: ...
     async def revoke_consent(self) -> int: ...
@@ -340,6 +356,8 @@ class DesktopBackend(Protocol):
         steps: Sequence[StepEdit],
         repeat: RepeatRule | None = None,
         deadline: DeadlineChange | None = None,
+        *,
+        command_id: str | None = None,
     ) -> Action: ...
     async def undo_action_status(self, public_id: str, revision: int) -> Action: ...
     async def save_action(
@@ -540,7 +558,7 @@ _RUN_WIDTH = 760
 PAGE_SHORTCUTS = tuple(key for key, _label, _icon in PAGES)
 
 
-def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
+def _step_heading(layout: QVBoxLayout, step: str, title: str) -> tuple[QLabel, QLabel]:
     """A run step's caption ("Step 1 of 2") above its title."""
     caption = plain_label(step, tone="muted", px=CAPTION_PX)
     caption.setObjectName("stepCaption")
@@ -548,6 +566,7 @@ def _step_heading(layout: QVBoxLayout, step: str, title: str) -> None:
     heading = plain_label(title, px=TITLE_PX, semibold=True)
     heading.setObjectName("stepTitle")
     layout.addWidget(heading)
+    return caption, heading
 
 
 def _page(widget: QWidget, name: str, accessible_name: str, *, margins: int = 12) -> QWidget:
@@ -708,6 +727,10 @@ class MainWindow(QMainWindow):
             )
         )
         self.task: asyncio.Task[None] | None = None
+        self._local_run: asyncio.Task[None] | None = None
+        self._local_cancel = asyncio.Event()
+        self._email_analysis_mode = AnalysisMode.CLOUD
+        self._pending_brief: DailyDigest | None = None
         self._cancel = asyncio.Event()
         self._review: asyncio.Future[tuple[str, ...] | None] | None = None
         # The review in progress: its message limit and the messages it can't select.
@@ -817,9 +840,8 @@ class MainWindow(QMainWindow):
         self.settings_dialog.remove_key_requested.connect(
             lambda: self.start(self._remove_key, cancellable=False)
         )
-        self.settings_dialog.revoke_requested.connect(
-            lambda: self.start(self._revoke_consent, cancellable=False)
-        )
+        self.settings_dialog.revoke_requested.connect(self._request_revoke_consent)
+        self.settings_dialog.stop_requested.connect(self.cancel)
         appearance_panel = self.settings_dialog.appearance_panel
         appearance_panel.scheme_chosen.connect(self._change_scheme)
         appearance_panel.mode_chosen.connect(self._change_mode)
@@ -836,6 +858,12 @@ class MainWindow(QMainWindow):
         self.glass_accessibility.changed.connect(appearance_panel.set_system)
         appearance_panel.set_system(self.glass_accessibility.system)
         preferences_panel = self.settings_dialog.preferences_panel
+        preferences_panel.local_setup_requested.connect(
+            lambda: self.start(self._open_local_setup, cancellable=True)
+        )
+        preferences_panel.local_remove_requested.connect(
+            lambda: self.start(self._remove_local_ai, cancellable=False)
+        )
         preferences_panel.save_requested.connect(self._request_save_owner_preferences)
         preferences_panel.reset_requested.connect(
             lambda: self.start(self._reset_owner_preferences, cancellable=False)
@@ -951,7 +979,9 @@ class MainWindow(QMainWindow):
         consent_layout = QVBoxLayout(self.consent_panel)
         consent_layout.setContentsMargins(0, 0, 0, 0)
         consent_layout.setSpacing(8)
-        _step_heading(consent_layout, "Step 2 of 2", "Approve sending to Groq")
+        self.consent_caption, self.consent_heading = _step_heading(
+            consent_layout, "Step 2 of 2", "Approve sending to Groq"
+        )
         disclosure_card = HairlineFrame()
         disclosure_card.setObjectName("disclosureCard")
         disclosure_card.setAccessibleName("What will be sent")
@@ -1114,7 +1144,7 @@ class MainWindow(QMainWindow):
         self.latest_button.clicked.connect(
             lambda: self.start(self._back_to_latest, cancellable=False)
         )
-        self.generate_button.clicked.connect(lambda: self.start(self._generate))
+        self.generate_button.clicked.connect(self._request_generate)
         self.cancel_button.clicked.connect(self.cancel)
         self.review_button.clicked.connect(self._accept_review)
         self.approve_button.clicked.connect(lambda: self._answer_consent(True))
@@ -1177,20 +1207,22 @@ class MainWindow(QMainWindow):
         self.history_panel.set_account(email)
 
     def _set_busy(self, busy: bool) -> None:
+        provider_busy = busy or self._local_running()
         self.retry_row.setVisible(not self._ready)
         self.retry_button.setVisible(not self._ready)
         self.retry_button.setEnabled(not busy)
-        self.connect_button.setEnabled(not busy)
-        self.disconnect_button.setEnabled(not busy)
-        self.settings_dialog.sign_in_button.setEnabled(not busy)
-        self.generate_button.setEnabled(not busy and self._ready)
-        self.cancel_button.setEnabled(busy and self._cancellable)
-        self.cancel_button.setVisible(busy)
-        self.settings_dialog.set_busy(busy)
+        self.connect_button.setEnabled(not provider_busy)
+        self.disconnect_button.setEnabled(not provider_busy)
+        self.settings_dialog.sign_in_button.setEnabled(not provider_busy)
+        self.generate_button.setEnabled(not provider_busy and self._ready)
+        self.cancel_button.setEnabled(self._local_running() or (busy and self._cancellable))
+        self.cancel_button.setVisible(provider_busy)
+        self.settings_dialog.set_busy(provider_busy)
+        self.settings_dialog.stop_button.setEnabled(self.cancel_button.isEnabled())
         self.cached_button.setEnabled(not busy and self._ready)
-        self.data_button.setEnabled(not busy and self.data_dialog is not None)
+        self.data_button.setEnabled(not provider_busy and self.data_dialog is not None)
         if self.data_dialog is not None:
-            self.data_dialog.set_busy(busy)
+            self.data_dialog.set_busy(provider_busy)
         self.history_panel.set_busy(busy)
         self.latest_button.setEnabled(not busy)
         self.cached_dialog.set_busy(busy)
@@ -1204,6 +1236,7 @@ class MainWindow(QMainWindow):
         self.drafts_panel.set_busy(busy)
         self.calendar_panel.set_busy(busy)
         self.inbox_panel.set_busy(busy)
+        self.inbox_panel.refresh.setEnabled(not provider_busy)
         self.event_editor.set_busy(busy)
 
     # Pages. The sidebar shows Today while the review or consent is up on the run page, and
@@ -1265,6 +1298,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(_BUSY)
             return
         self._show_page(key)
+        if key == "today" and self._pending_brief is not None and not self.draft_editor.reply_mode:
+            self.start(self._apply_pending_brief, cancellable=False)
         if key == "calendar" and self._calendar_sync_due():
             self._start_calendar_sync()
 
@@ -1451,9 +1486,13 @@ class MainWindow(QMainWindow):
         if saved is not None:
             await self._show_digest(saved)
 
-    async def _show_digest(self, digest: DailyDigest) -> None:
+    async def _show_digest(self, digest: DailyDigest, *, defer_if_writing: bool = False) -> None:
         """Every brief is shown here, with the actions that continue its threads and the
         updates its emails propose; when either can't be read, the brief is shown without it."""
+        if defer_if_writing and self._inline_draft_open() and self.draft_editor.reply_mode:
+            self._pending_brief = digest
+            self.workspace.defer_brief_update()
+            return
         links: dict[str, tuple[ThreadLink, ...]] | None
         try:
             links = await self.backend.brief_links(digest)
@@ -1466,6 +1505,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_failure(exc)
             proposals = None
+        self._pending_brief = None  # An explicit/newer view supersedes any deferred update.
         self.workspace.show_digest(
             digest,
             links=links,
@@ -1473,6 +1513,11 @@ class MainWindow(QMainWindow):
             owner_zone=self.zone,
             today=self._local_today(),
         )
+
+    async def _apply_pending_brief(self) -> None:
+        digest, self._pending_brief = self._pending_brief, None
+        if digest is not None:
+            await self._show_digest(digest)
 
     async def _refresh_actions(self) -> None:
         now = self.now()
@@ -1829,8 +1874,10 @@ class MainWindow(QMainWindow):
         deadline: DeadlineChange | None = None,
     ) -> None:
         try:
-            created = await self.backend.create_action(edit, steps, repeat, deadline)
-        except ActionRepeatError as exc:
+            created = await self.backend.create_action(
+                edit, steps, repeat, deadline, command_id=self.action_editor.creation_command_id
+            )
+        except (ActionRepeatError, ActionCreateConflictError) as exc:
             if not self._closing:
                 self.action_editor.keep_open(str(exc))  # Static: why the repeat can't be.
             return
@@ -1842,8 +1889,14 @@ class MainWindow(QMainWindow):
         self.actions_panel.clear_group()
         self._offer_undo()
         self.status.setText(f"Created: {created.title}.")
+        if created.status is ActionStatus.SKIPPED:
+            self.status.setText(f"Already saved and skipped: {created.title}.")
         self.actions_panel.show_view(
-            ActionFilter.OPEN if created.ownership is ActionOwnership.MINE else ActionFilter.WAITING
+            ActionFilter.COMPLETED
+            if created.status is ActionStatus.COMPLETED
+            else ActionFilter.OPEN
+            if created.ownership is ActionOwnership.MINE
+            else ActionFilter.WAITING
         )
         await self._refresh_views()
         self.actions_panel.select_action(created.public_id)
@@ -3165,6 +3218,29 @@ class MainWindow(QMainWindow):
         if not self._closing:
             self.status.setText(f"Saved: {draft.display_title}.")
             await self._refresh_drafts()
+            await self._apply_pending_brief()
+
+    def _local_running(self) -> bool:
+        return self._local_run is not None and not self._local_run.done()
+
+    def _start_local_run(self, operation: Callable[[asyncio.Event], Awaitable[None]]) -> bool:
+        if (
+            self._closing
+            or self._local_running()
+            or (self.task is not None and not self.task.done())
+        ):
+            return False
+        self._local_cancel = asyncio.Event()
+        self._local_run = asyncio.create_task(
+            self._run(
+                lambda: operation(self._local_cancel),
+                "Local analysis stopped. Completed summaries remain cached; "
+                "Sync resumes from the cache.",
+                background=True,
+            )
+        )
+        self._set_busy(False)
+        return True
 
     def start(
         self,
@@ -3173,7 +3249,7 @@ class MainWindow(QMainWindow):
         cancellable: bool = True,
         cancelled: str = _CANCELLED,
     ) -> bool:
-        """Only one operation may own the providers and workflow at a time.
+        """Serialize foreground work while an independent local analysis may continue.
 
         Returns whether this operation started; it does not while closing or busy.
         ``cancelled`` is what the status line says when Cancel or quitting stops it.
@@ -3186,7 +3262,9 @@ class MainWindow(QMainWindow):
         self.task = asyncio.create_task(self._run(operation, cancelled))
         return True
 
-    async def _run(self, operation: Callable[[], Awaitable[None]], cancelled: str) -> None:
+    async def _run(
+        self, operation: Callable[[], Awaitable[None]], cancelled: str, *, background: bool = False
+    ) -> None:
         failed = True
         try:
             await operation()
@@ -3217,7 +3295,7 @@ class MainWindow(QMainWindow):
             # Validation and HTTP exceptions can contain secret or mail-derived values.
             self.status.setText("Operation failed. The displayed saved brief is unchanged.")
         finally:
-            if self._automatic_active:
+            if self._automatic_active and (background or not self._local_running()):
                 self._automatic_active = False
                 if failed:
                     self.status.setText(_AUTOMATIC + self.status.text())
@@ -3225,14 +3303,23 @@ class MainWindow(QMainWindow):
                 self.cached_dialog.set_status(self.status.text())
             if self.settings_dialog.isVisible():
                 self.settings_dialog.status.setText(self.status.text())
-            self.review_panel.hide()
-            self.consent_panel.hide()
-            clear_list(self.shortlist)
-            self.disclosure.setText("")
-            self._review = None
-            self._consent = None
-            self._leave_run_page()
-            self._set_busy(False)
+            if background or not self._local_running():
+                self.review_panel.hide()
+                self.consent_panel.hide()
+                clear_list(self.shortlist)
+                self.disclosure.setText("")
+                self._review = None
+                self._consent = None
+                self._leave_run_page()
+                if self._pending_brief is not None:
+                    self.workspace.defer_brief_update()
+                else:
+                    self.workspace.finish_progressive()
+            if background:
+                self._local_run = None
+                self._set_busy(self.task is not None and not self.task.done())
+            else:
+                self._set_busy(False)
 
     async def _open_cached(self) -> None:
         self.cached_dialog.show_today()  # Today in the owner's zone, each time it opens.
@@ -3294,6 +3381,7 @@ class MainWindow(QMainWindow):
         appearance_panel.set_mode(self.appearance.mode)
         appearance_panel.set_choices(self.appearance.transparency, self.appearance.motion)
         panel = self.settings_dialog.preferences_panel
+        self._show_local_status(await self.backend.local_ai_status())
         panel.set_zones(str(resolve_timezone(None)), await asyncio.to_thread(region_zones))
         await self._show_auto_send()
         if not beside:
@@ -3324,6 +3412,12 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        self._email_analysis_mode = preferences.analysis_mode
+        self.generate_button.setText(
+            "&Sync and summarize"
+            if preferences.analysis_mode is AnalysisMode.LOCAL
+            else "&Sync and review"
+        )
         self._system_zone = not (preferences.time_zone or "").strip()
         self.inbox_panel.set_zone(self.zone)
         self._set_dialog_zones()
@@ -3365,6 +3459,8 @@ class MainWindow(QMainWindow):
     async def _owner_preferences_changed(self, saved: OwnerPreferences, message: str) -> None:
         self._apply_owner_preferences(saved)
         self.settings_dialog.preferences_panel.set_preferences(saved)
+        await self._show_auto_send()
+        await self._refresh_ai_status()
         self.status.setText(message)
         await self._refresh_views()
 
@@ -3457,12 +3553,97 @@ class MainWindow(QMainWindow):
         self.status.setText("Groq key removed from the OS credential store.")
         await self._refresh_ai_status()
 
+    def _show_local_status(self, status: SetupStatus) -> None:
+        text = {
+            SetupState.READY: (
+                "Ready: Qwen3-4B. About 15 seconds per email on a suitable GPU; CPU takes longer."
+            ),
+            SetupState.NOT_SET_UP: "Local AI is not set up. Download about 2.6 GB to use it.",
+            SetupState.DAMAGED: "Local AI files changed or are missing. Run setup to repair them.",
+            SetupState.UNSUPPORTED: "Local AI is not supported on this computer.",
+        }[status.state]
+        self.settings_dialog.preferences_panel.local_status.setText(text)
+
+    async def _open_local_setup(self) -> None:
+        manifest = manifest_for()
+        if manifest is None:
+            self._show_local_status(SetupStatus(SetupState.UNSUPPORTED))
+            return
+        box = QMessageBox(self.settings_dialog)
+        box.setObjectName("localSetupConfirmation")
+        box.setWindowTitle("Set up local AI")
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        memory = await asyncio.to_thread(total_memory_bytes)
+        note = memory_note(assess(memory, None))
+        disclosure = setup_lines(manifest) + (
+            "Measured with 16 GB of memory: about 15 seconds per email with a suitable GPU, "
+            "about 30 seconds on CPU. Timing varies with this computer and the email.",
+        )
+        box.setText("\n\n".join(disclosure + ((note,) if note else ())))
+        box.setDetailedText(local_notices())
+        download = box.addButton("Download and set up", QMessageBox.ButtonRole.AcceptRole)
+        box.setDefaultButton(box.addButton(QMessageBox.StandardButton.Cancel))
+        box.buttonClicked.connect(
+            lambda button: self.start(self._setup_local_ai) if button is download else None
+        )
+        self._local_setup_box = box
+        self.settings_dialog.dialog_guard.show_dialog(box)
+
+    def _local_setup_progress(self, progress: SetupProgress) -> None:
+        text = (
+            f"Local AI: {progress.stage.value}, "
+            f"{progress.done_bytes / 1e6:.0f} of {progress.total_bytes / 1e6:.0f} MB. "
+            "Cancel stops setup; the next attempt resumes the download."
+        )
+        self.settings_dialog.preferences_panel.local_status.setText(text)
+        self.status.setText(text)
+
+    async def _setup_local_ai(self) -> None:
+        try:
+            status = await self.backend.setup_local_ai(self._local_setup_progress)
+        except LocalSetupError as exc:
+            self.settings_dialog.preferences_panel.local_status.setText(str(exc))
+            self.status.setText(str(exc))
+            return
+        self._show_local_status(status)
+        self.status.setText("Local AI is ready. Save On this computer as your email analysis mode.")
+
+    async def _remove_local_ai(self) -> None:
+        await self.backend.remove_local_ai()
+        self._show_local_status(await self.backend.local_ai_status())
+        self.status.setText(
+            "Local AI files removed. Saved briefs and your writing remain available."
+        )
+
     async def _revoke_consent(self) -> None:
         count = await self.backend.revoke_consent()
+        await self._show_auto_send()
         self.status.setText(
             f"AI consent revoked for briefs and drafting ({count} consent records). "
-            "Forewit asks again before sending anything."
+            "Forewit asks again before local analysis or sending anything."
         )
+
+    def _request_revoke_consent(self) -> None:
+        active = [
+            task
+            for task in (self.task, self._local_run, self._drafting_task, self._planning_task)
+            if task is not None and not task.done()
+        ]
+        if not active:
+            self.start(self._revoke_consent, cancellable=False)
+            return
+        self.cancel()
+        self._cancel_drafting()
+        self._cancel_planning()
+
+        async def after_stop() -> None:
+            await asyncio.gather(*active, return_exceptions=True)
+            if not self._closing:
+                self.start(self._revoke_consent, cancellable=False)
+
+        task = asyncio.create_task(after_stop())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
 
     async def _refresh_ai_status(self) -> None:
         try:
@@ -3768,18 +3949,35 @@ class MainWindow(QMainWindow):
         if self._account_email is None:
             self.history_panel.status.setText(NEEDS_CONNECTION)
             return
-        self.start(lambda: self._generate(local_date))
+        self._start_brief(local_date)
 
-    async def _generate(self, local_date: date | None = None) -> None:
+    def _request_generate(self) -> None:
+        self._start_brief(None)
+
+    def _start_brief(self, local_date: date | None) -> None:
+        if self._email_analysis_mode is AnalysisMode.LOCAL:
+            if not self._start_local_run(lambda cancel: self._generate(local_date, cancel=cancel)):
+                self.status.setText(
+                    "Local analysis is already running. Stop it before another brief."
+                )
+        else:
+            self.start(lambda: self._generate(local_date))
+
+    async def _generate(
+        self, local_date: date | None = None, *, cancel: asyncio.Event | None = None
+    ) -> None:
         """Brief today (Sync and review), or a past day chosen on the Briefs page. However
         it ends, the next automatic run is an interval later (ADR 0017)."""
         self._synced_at = None  # Until this run's review opens.
         try:
-            await self._generate_brief(local_date)
+            await self._generate_brief(local_date, cancel=cancel)
         finally:
             self.scheduler.note_run(self.now())
 
-    async def _generate_brief(self, local_date: date | None = None) -> None:
+    async def _generate_brief(
+        self, local_date: date | None = None, *, cancel: asyncio.Event | None = None
+    ) -> None:
+        origin = self.workspace.current_page()
         self._offer_undo()  # A new brief replaces the suggestions that Undo would refer to.
         if local_date is None and self._shown is not None:
             self._set_shown(None)  # Sync and review returns to the latest brief.
@@ -3792,7 +3990,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Syncing {day}…")
         try:
             result = await self.backend.generate(
-                self, self, self._cancel, self._progress, local_date=local_date
+                self, self, cancel or self._cancel, self._progress, local_date=local_date
             )
         except ConfigurationError as exc:
             if "MAILBRIEF_GROQ_MODEL" not in str(exc):
@@ -3813,7 +4011,18 @@ class MainWindow(QMainWindow):
             case BriefStatus.SAVED:
                 digest = result.digest
                 assert digest is not None  # A saved result always carries its digest.
-                if local_date is None:
+                if self._local_running():
+                    identity = (digest.account_id, digest.local_date)
+                    if (
+                        local_date is not None
+                        and self.workspace.current_page() == origin
+                        and not self._inline_draft_open()
+                    ):
+                        await self._view(digest, origin)
+                    elif self._shown == identity or (self._shown is None and local_date is None):
+                        await self._show_digest(digest, defer_if_writing=True)
+                    await self._reload_history()
+                elif local_date is None:
                     await self._show_digest(digest)
                 else:
                     await self._view(digest)
@@ -3834,8 +4043,17 @@ class MainWindow(QMainWindow):
             case BriefStatus.ANALYSIS_FAILED:
                 self.status.setText(_REFRESH_FAILED)
             case BriefStatus.READY_FOR_REVIEW:
-                # Only an automatic run ends this way; from here it is reported as a failure.
-                self.status.setText(_REFRESH_FAILED)
+                if (
+                    result.ready == 0
+                    and result.unrefreshed == 0
+                    and result.error_code is None
+                    and result.sync.status is SyncStatus.COMPLETE
+                ):
+                    self.status.setText(
+                        "No eligible messages to analyze. The saved brief is unchanged."
+                    )
+                else:
+                    self.status.setText(_REFRESH_FAILED)
             case _:
                 assert_never(result.status)
         # A cancelled run's news is the cancellation; a partial count would invite misreading.
@@ -3896,6 +4114,9 @@ class MainWindow(QMainWindow):
         form keeps its input through one (only its Save waits)."""
         return self.draft_editor.embedded and self.draft_editor.dirty
 
+    def _inline_draft_open(self) -> bool:
+        return self.draft_editor.embedded and not self.draft_editor.isHidden()
+
     def _refresh_due(self) -> None:
         """The scheduler says a run is due: start one unless something is in the way.
 
@@ -3908,6 +4129,7 @@ class MainWindow(QMainWindow):
             self._dialog_open()
             or self._editing_in_page()
             or (self.task is not None and not self.task.done())
+            or self._local_running()
         )
         if busy:
             self.scheduler.retry_soon()
@@ -3915,19 +4137,25 @@ class MainWindow(QMainWindow):
         if self._account_email is None:
             self.status.setText(_REFRESH_DISCONNECTED)
             return
-        if not self.start(self._automatic_refresh):
+        started = (
+            self._start_local_run(lambda cancel: self._automatic_refresh(cancel=cancel))
+            if self._email_analysis_mode is AnalysisMode.LOCAL
+            else self.start(self._automatic_refresh)
+        )
+        if not started:
             self.scheduler.retry_soon()
 
-    async def _automatic_refresh(self) -> None:
+    async def _automatic_refresh(self, *, cancel: asyncio.Event | None = None) -> None:
         """One automatic run. However it ends, the next is an interval later."""
         self._automatic_active = True
         self._synced_at = None  # No review: its sync has just finished when it returns.
         self.status.setText(_AUTOMATIC + "checking Gmail…")
         try:
             await self._refresh_inbox(quiet=True)
-            if self._cancel.is_set() or self._account_email is None:
+            active_cancel = cancel or self._cancel
+            if active_cancel.is_set() or self._account_email is None:
                 return
-            result = await self.backend.generate_automatic(self._cancel, self._progress)
+            result = await self.backend.generate_automatic(active_cancel, self._progress)
             await self._automatic_finished(result)
         finally:
             self.scheduler.note_run(self.now())
@@ -3970,7 +4198,7 @@ class MainWindow(QMainWindow):
                 self._offer_undo()  # A new brief replaces the suggestions an Undo would refer to.
                 # Never pull the owner away from a past brief they're reading.
                 if self._shown is None:
-                    await self._show_digest(digest)
+                    await self._show_digest(digest, defer_if_writing=self._local_running())
             case BriefStatus.CANCELLED:
                 text = "Automatic refresh cancelled."
             case BriefStatus.SYNC_FAILED:
@@ -4053,6 +4281,26 @@ class MainWindow(QMainWindow):
             )
 
     def _progress(self, progress: SyncProgress) -> None:
+        if (
+            progress.ready_brief is not None
+            and progress.pending_count is not None
+            and not self._inline_draft_open()
+            and (
+                self._shown == (progress.ready_brief.account_id, progress.ready_brief.local_date)
+                or (self._shown is None and progress.ready_brief.local_date == self._local_today())
+            )
+        ):
+            self.workspace.show_progressive(
+                progress.ready_brief,
+                progress.pending_count,
+                owner_zone=self.zone,
+                today=self._local_today(),
+            )
+        if self._local_running() and self.task is not None and not self.task.done():
+            return  # A foreground owner change keeps its own status message.
+        if progress.detail is not None:
+            self.status.setText(progress.detail)
+            return
         self.status.setText(
             f"{progress.stage.value.capitalize()} · {progress.messages_fetched} messages · "
             f"{progress.ai_batches_completed} AI batches"
@@ -4175,9 +4423,21 @@ class MainWindow(QMainWindow):
         self._consent = asyncio.get_running_loop().create_future()
         self._show_page("today")  # The run page, while the consent waits.
         self.disclosure.setText("\n\n".join(disclosure_lines(preview)))
+        local = preview.provider_name == "local"
+        self.consent_caption.setText("Permission" if local else "Step 2 of 2")
+        self.consent_heading.setText(
+            "Allow local email analysis" if local else "Approve sending to Groq"
+        )
+        self.approve_button.setText(
+            "&Allow local email analysis" if local else "&Approve transmission to Groq"
+        )
         self.consent_panel.show()
         self.decline_button.setFocus()
-        self.status.setText("Review what will be sent to Groq. Enable Zero Data Retention first.")
+        self.status.setText(
+            "Review the permission for analysis on this computer."
+            if local
+            else "Review what will be sent to Groq. Enable Zero Data Retention first."
+        )
         try:
             return await self._consent
         finally:
@@ -4189,6 +4449,13 @@ class MainWindow(QMainWindow):
             self._consent.set_result(answer)
 
     def cancel(self) -> None:
+        self._local_cancel.set()
+        if (
+            self._local_run is not None
+            and not self._local_run.done()
+            and not self._local_run.cancelling()
+        ):
+            self._local_run.cancel()
         if not self._cancellable:
             return
         self._cancel.set()
@@ -4289,6 +4556,9 @@ class MainWindow(QMainWindow):
         self.scheduler.stop()  # No timer outlives the window.
         self.cancel()
         try:
+            local = self._local_run
+            if local is not None:
+                await asyncio.gather(local, return_exceptions=True)
             if self.task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.task

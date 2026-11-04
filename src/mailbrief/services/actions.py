@@ -4,12 +4,16 @@ Nothing here reads or sends email: suggestions come from stored analyses. Errors
 static messages, and nothing logs action text.
 """
 
+import hashlib
+import json
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Final
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -42,6 +46,7 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
+from mailbrief.domain.task_history import TaskHistory, resolve_task_history
 from mailbrief.services.deadlines import (
     ResolvedDeadline,
     due_day,
@@ -55,6 +60,7 @@ from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import (
     ActionRepository,
     DecisionKey,
+    activity_from_row,
     stated_deadline,
     suggestion_from_row,
 )
@@ -65,6 +71,7 @@ from mailbrief.storage.tables import (
     ActionTable,
     MessageTable,
     SuggestionDecisionTable,
+    TaskCommandTable,
     deadline_columns,
 )
 
@@ -106,6 +113,10 @@ class ActionConflictError(ValueError):
 
 class ActionRepeatError(ActionConflictError):
     """The repeat settings can't be applied; the static message says why, for the owner."""
+
+
+class ActionCreateConflictError(ActionConflictError):
+    """A prior create command must not create or overwrite another owner record."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,12 +412,39 @@ class ActionService:
         steps: Sequence[StepEdit] = (),
         repeat: RepeatRule | None = None,
         deadline: DeadlineChange | None = None,
+        *,
+        command_id: str | None = None,
     ) -> Action:
         """Create a task with no account or email source, using the same plan and workflow.
         With ``repeat`` it is the first occurrence of a new series (see Repeats.apply), and
-        with ``deadline`` the owner sets its deadline (only a new one: it has no email's)."""
+        with ``deadline`` the owner sets its deadline (only a new one: it has no email's).
+        An optional UUID ``command_id`` makes an uncertain retry return the existing
+        task's current state. Its receipt and the new owner records commit together.
+        Different input or a removed result is refused; no ID preserves legacy behavior.
+        """
+
+        command = None if command_id is None else str(UUID(command_id))
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "version": 1,
+                    "command": command,
+                    "operation": "task.create",
+                    "edit": edit.model_dump(mode="json"),
+                    "steps": [step.model_dump(mode="json") for step in steps],
+                    "repeat": None if repeat is None else repeat.model_dump(mode="json"),
+                    "deadline": None if deadline is None else deadline.model_dump(mode="json"),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
 
         async def run(now: datetime) -> Action:
+            if command is not None:
+                previous = await self._created_command(command, fingerprint)
+                if previous is not None:
+                    return previous
             listed = _check_step_list(steps)
             if listed:
                 raise ActionConflictError("New tasks cannot reuse existing steps.")
@@ -431,9 +469,47 @@ class ActionService:
             if repeat is not None:
                 await self._apply_repeat(row, RepeatEdit(rule=repeat), now)
             await self._repository.record_activity(row, ActionActivityKind.CREATED, now)
+            if command is not None:
+                self._session.add(
+                    TaskCommandTable(
+                        command_id=command,
+                        operation="task.create",
+                        input_hash=fingerprint,
+                        result_public_id=row.public_id,
+                        result_revision=row.revision,
+                        created_at_utc=now,
+                    )
+                )
             return await self._load(row)
 
-        return await self._write(run)
+        try:
+            return await self._write(run)
+        except IntegrityError as exc:
+            # Another writer may have committed this command after our initial read.
+            # _write rolled back our entire attempt, including its provisional task.
+            if command is not None and _command_collision(exc):
+                previous = await self._created_command(command, fingerprint)
+                if previous is not None:
+                    return previous
+            raise
+
+    async def _created_command(self, command: str, fingerprint: str) -> Action | None:
+        receipt = await self._session.get(TaskCommandTable, command)
+        if receipt is None:
+            return None
+        if receipt.operation != "task.create" or receipt.input_hash != fingerprint:
+            raise ActionCreateConflictError(
+                "This save already created a task with different input. "
+                "Check your saved tasks before starting a new task."
+            )
+        row = await self._repository.get_action(receipt.result_public_id, include_deleted=True)
+        if row is not None:
+            await self._session.refresh(row)
+        if row is None or row.deleted_at_utc is not None:
+            raise ActionCreateConflictError(
+                "This save already created a task that was removed. It will not be recreated."
+            )
+        return await self._load(row)
 
     async def undo_status(self, public_id: str, expected_revision: int) -> Action:
         """Undo the latest completion, skip or reopening, retaining the original completion
@@ -984,6 +1060,18 @@ class ActionService:
         """A live action; deleted actions are not found."""
         return await self._load(await self._live(public_id, None))
 
+    async def history(self, public_id: str) -> TaskHistory:
+        """Uncapped effective history, including a soft-deleted task's retained records.
+
+        Purged/missing tasks are unavailable; this read never implies lifetime coverage
+        across purged tasks. It neither calls providers nor changes owner records.
+        """
+        stored = await self._repository.history_rows(public_id)
+        if stored is None:
+            raise ActionNotFoundError(_NOT_FOUND)
+        revision, records = stored
+        return resolve_task_history([activity_from_row(record) for record in records], revision)
+
     async def list_actions(
         self,
         view: ActionFilter,
@@ -1027,3 +1115,11 @@ class ActionService:
     ) -> int:
         """How many live actions a view holds, however many list_actions() shows."""
         return await self._repository.count_rows(view, group=group, group_id=group_id)
+
+
+def _command_collision(error: IntegrityError) -> bool:
+    """Only a concurrent receipt-key collision can be treated as a successful replay."""
+    return getattr(error.orig, "sqlite_errorname", None) in {
+        "SQLITE_CONSTRAINT_PRIMARYKEY",
+        "SQLITE_CONSTRAINT_UNIQUE",
+    } and "task_commands.command_id" in str(error.orig)

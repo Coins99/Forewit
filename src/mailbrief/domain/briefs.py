@@ -38,6 +38,7 @@ class TransmissionPreview(DomainModel):
     """What the next provider calls will send, shown before the user consents."""
 
     provider_name: str = Field(min_length=1, max_length=64)
+    account_email: str | None = Field(default=None, min_length=3, max_length=320, repr=False)
     model_name: str = Field(min_length=1, max_length=128)
     message_count: int = Field(ge=1)  # Messages that will be sent now.
     truncated_count: int = Field(ge=0)

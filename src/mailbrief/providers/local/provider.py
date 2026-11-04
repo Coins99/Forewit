@@ -1,8 +1,8 @@
 """A model on this computer behind the AIProvider port: llama.cpp's llama-server, or another
-OpenAI-compatible server on loopback, asked exactly what the Groq adapter asks.
+OpenAI-compatible server on loopback, using dedicated local instructions.
 
-The instructions, the minimized input and the output schema are Groq's, so only the model
-differs (P0-B2 Part 6 gives the local model a prompt of its own). Requests reach loopback
+The minimized input and output schema are shared with Groq; the local prompt has its own
+version and cache identity. Requests reach loopback
 addresses only: an endpoint must be one, and the client the factory builds sends through
 LoopbackGuard. Raised errors carry static messages, never email or model text, and logs
 carry status codes only.
@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Final, Protocol
 
 import httpx
+from pydantic.json_schema import JsonSchemaValue
 
 from mailbrief.domain.analysis import (
     MAX_ANALYSIS_BATCH,
@@ -30,21 +31,15 @@ from mailbrief.ports.errors import (
     ProviderRequestRejectedError,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    ProviderUsageLimitError,
 )
-from mailbrief.providers.groq.provider import (
-    INSTRUCTIONS,
-    AnalysisWireBatch,
-    analysis_input,
-)
-from mailbrief.providers.groq.provider import PROMPT_VERSION as GROQ_PROMPT_VERSION
+from mailbrief.providers.groq.provider import AnalysisWireBatch, analysis_input
+from mailbrief.providers.local.prompt import INSTRUCTIONS, PROMPT_VERSION
 from mailbrief.providers.local.transport import require_loopback
 
 logger = logging.getLogger(__name__)
 
 PROVIDER_NAME: Final = "local"
-# Groq's instructions and schema until Part 6. The version follows Groq's, so a change there
-# analyzes local results again too.
-PROMPT_VERSION: Final = f"local-{GROQ_PROMPT_VERSION}"
 PRIVACY_NOTICE: Final = (
     "The model runs on this computer: no message is sent to an AI service, and only the "
     "summary, short quotes and suggestions are kept."
@@ -54,7 +49,7 @@ CHAT_PATH: Final = "/v1/chat/completions"
 DEFAULT_TIMEOUT: Final = httpx.Timeout(900.0, connect=10.0)
 # A conservative context budget per call: the instructions, each email at the 8,000-character
 # limit (about 1,700 tokens measured in P0-B1) and the answer.
-INSTRUCTION_TOKENS: Final = 1_000
+INSTRUCTION_TOKENS: Final = 2_000
 EMAIL_TOKENS: Final = 2_000
 ANSWER_TOKENS_PER_EMAIL: Final = 600
 
@@ -73,6 +68,44 @@ def answer_tokens(batch_size: int) -> int:
 def context_tokens(batch_size: int, max_output_tokens: int) -> int:
     """The context a call of ``batch_size`` emails needs: instructions, emails and answer."""
     return INSTRUCTION_TOKENS + batch_size * EMAIL_TOKENS + max_output_tokens
+
+
+def local_response_schema() -> JsonSchemaValue:
+    """Keep the shared contract, with short local quotes and decisions before category.
+
+    The small model otherwise spends the entire evidence budget on its main quote,
+    leaving a correctly recognized follow-up unusable. These are stricter local
+    generation limits; all normal application validation still applies.
+    """
+    schema = AnalysisWireBatch.model_json_schema()
+    result = schema["$defs"]["AnalysisWireResult"]
+    properties = result["properties"]
+    order = (
+        "message_key",
+        "follow_up",
+        "follow_up_evidence",
+        "action_required",
+        "action_text",
+        "actions",
+        "category",
+        "summary",
+        "deadline_text",
+        "deadline_date",
+        "deadline_time",
+        "stated_timezone",
+        "confidence",
+        "evidence",
+    )
+    if set(order) != set(properties):
+        raise ValueError("The local response schema needs updating with the shared contract")
+    result["properties"] = {name: properties[name] for name in order}
+    for name, limit in (("evidence", 64), ("follow_up_evidence", 64)):
+        node = properties[name]
+        for branch in node.get("anyOf", [node]):
+            if branch.get("type") == "string":
+                branch["maxLength"] = limit
+    schema["$defs"]["ActionWireResult"]["properties"]["evidence"]["maxLength"] = 64
+    return schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +211,7 @@ class LocalModelProvider:
         *,
         model: str,
         max_output_tokens: int,
+        max_requests: int | None = None,
         template_kwargs: Mapping[str, object] | None = None,
         timeout: httpx.Timeout = DEFAULT_TIMEOUT,
         clock: Callable[[], float] = time.perf_counter,
@@ -186,6 +220,9 @@ class LocalModelProvider:
         self._server = server
         self._model = model
         self._max_output_tokens = max_output_tokens
+        if max_requests is not None and max_requests < 1:
+            raise ValueError("max_requests must be positive")
+        self._max_requests = max_requests
         # Only for a hybrid model that thinks by default (the benchmark's --no-think).
         self._template_kwargs = dict(template_kwargs or {})
         self._timeout = timeout
@@ -233,6 +270,8 @@ class LocalModelProvider:
         keys = [request.message_key for request in requests]
         if not 1 <= len(keys) <= MAX_ANALYSIS_BATCH or len(set(keys)) != len(keys):
             raise ValueError("a local call needs 1 to 10 requests with unique message keys")
+        if self._max_requests is not None and self._requests_sent >= self._max_requests:
+            raise ProviderUsageLimitError("The local AI request limit for this run was reached.")
         body = self._body(requests)
         async with self._server.lease() as endpoint:
             headers = (
@@ -260,7 +299,7 @@ class LocalModelProvider:
                 "json_schema": {
                     "name": "AnalysisWireBatch",
                     "strict": True,
-                    "schema": AnalysisWireBatch.model_json_schema(),
+                    "schema": local_response_schema(),
                 },
             },
             "max_tokens": self._max_output_tokens,

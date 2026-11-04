@@ -10,10 +10,12 @@ from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
 from mailbrief.domain.drafting import DraftContextPart
 from mailbrief.domain.drafts import DraftKind, DraftLength, DraftTone
 from mailbrief.domain.preferences import EXCLUSIONS_MAX, OwnerPreferences, PreferencesEdit
+from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.preferences import PreferencesUnavailableError
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences_view import PreferencesPanel, region_zones
+from tests.factories import make_auto_send
 from tests.ui.brief_view import shown_text
 from tests.ui.test_workflow import FakeBackend, finish
 
@@ -61,6 +63,33 @@ def test_saved_preferences_round_trip_with_their_revision(panel: PreferencesPane
     ((edit, revision),) = saves
     assert revision == 4
     assert edit == PreferencesEdit(**SAVED.model_dump(exclude={"revision", "updated_at_utc"}))
+
+
+def test_saving_other_settings_preserves_local_analysis_choices(panel: PreferencesPanel) -> None:
+    saved = OwnerPreferences(revision=5, analysis_mode="local", local_message_limit=17)
+    panel.set_preferences(saved)
+    panel.shortlist_limit.setValue(3)
+    edit = panel.edit()
+    assert edit is not None
+    assert edit.analysis_mode == "local"
+    assert edit.local_message_limit == 17
+    assert edit.shortlist_limit == 3
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_local_setup_requires_feature_flag(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    monkeypatch.setenv("MAILBRIEF_EXPERIMENTAL_LOCAL_AI", str(enabled).lower())
+    view = PreferencesPanel()
+    qtbot.addWidget(view)
+    assert view.local_setup_button.isEnabled() is enabled
+    assert view.local_message_limit.isEnabled() is enabled
+    assert view.local_remove_button.isEnabled()
+    index = view.analysis_mode.model().index(1, 0)
+    from PySide6.QtCore import Qt
+
+    assert bool(index.flags() & Qt.ItemFlag.ItemIsEnabled) is enabled
 
 
 def test_sentinels_mean_the_defaults(panel: PreferencesPanel) -> None:
@@ -308,6 +337,24 @@ async def test_saving_applies_the_new_zone_and_refreshes_the_views(
     await finish(window)
     assert backend.owner_saves[-1][1] == 5
     window.settings_dialog.reject()
+
+
+@pytest.mark.parametrize("action", ["reset", "revoke"])
+async def test_permission_line_refreshes_after_preferences_reset_or_revocation(
+    window: MainWindow, backend: FakeBackend, action: str
+) -> None:
+    await window.initialize()
+    backend.permission = make_auto_send(limit=5, granted_at_utc=datetime(2026, 11, 1, tzinfo=UTC))
+    window.start(window._open_settings)
+    await finish(window)
+    panel = window.settings_dialog.preferences_panel
+    assert "Up to 5" in panel.auto_line.text()
+    # The backend's committed state changed; the UI must not keep the old permission.
+    backend.permission = make_auto_send() if action == "reset" else None
+    window.start(window._reset_owner_preferences if action == "reset" else window._revoke_consent)
+    await finish(window)
+    assert ("Off" if action == "reset" else NO_CONSENT) in panel.auto_line.text()
+    assert "Up to 5" not in panel.auto_line.text()
 
 
 async def test_a_stale_save_says_so_in_the_dialog(window: MainWindow, backend: FakeBackend) -> None:

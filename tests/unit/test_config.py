@@ -26,6 +26,13 @@ def test_gmail_is_the_default_email_provider() -> None:
     assert Settings().email_provider is ProviderKind.GMAIL
 
 
+def test_local_ai_requires_explicit_feature_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ConfigurationError, match="experimental and disabled"):
+        Settings().require_local_ai()
+    monkeypatch.setenv("MAILBRIEF_EXPERIMENTAL_LOCAL_AI", "true")
+    Settings().require_local_ai()
+
+
 def test_gmail_oauth_path_is_required_only_on_demand(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="MAILBRIEF_GMAIL_OAUTH_CLIENT_PATH"):
         Settings().require_gmail_oauth_client_path()

@@ -80,6 +80,10 @@ async def test_organization_lifecycle_history_and_recovery(tmp_path: Path) -> No
         assert project.revision == 5
         kept = await tasks.get(task.public_id)
         assert kept.activity[1].area_public_id == area.public_id  # Historical grouping stays.
+        history = await tasks.history(task.public_id)
+        assert history.complete
+        assert history.completions[0].project_public_id == project.public_id
+        assert history.completions[0].area_public_id == area.public_id
         assert kept.project is not None and kept.project.area_public_id is None
         assert (
             await tasks.count_actions(ActionFilter.COMPLETED, group="area", group_id=area.public_id)

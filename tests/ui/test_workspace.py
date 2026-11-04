@@ -95,6 +95,36 @@ def build(qtbot: QtBot) -> ThreePaneWorkspace:
     return workspace
 
 
+def test_progressive_results_keep_saved_items_selection_and_distinct_status(qtbot: QtBot) -> None:
+    workspace = build(qtbot)
+    view = workspace.brief_list
+    rows = view.brief_model.rows()
+    number = next(index for index, row in enumerate(rows) if row.item is not None)
+    view.setCurrentIndex(view.model().index(number, 0))
+    selected = view.selected_key()
+    saved = mockup_digest().digest
+    new_item = make_digest_item(message_key="new-progressive", deadline_at_utc=None)
+    ready = saved.model_copy(
+        update={
+            "items": (new_item,),
+            "status": DigestStatus.PARTIAL,
+            "generated_at_utc": saved.generated_at_utc + timedelta(minutes=1),
+        }
+    )
+    workspace.show_progressive(ready, 2, owner_zone=OWNER_ZONE, today=TODAY)
+    assert view.selected_key() == selected
+    shown_keys = {row.item.message_key for row in view.brief_model.rows() if row.item is not None}
+    assert {item.message_key for item in saved.items} <= shown_keys
+    assert "new-progressive" in shown_keys
+    assert "1 ready" in workspace.coverage.text()
+    assert "saved daily brief is unchanged" in workspace.coverage.accessibleName()
+    workspace.finish_progressive()
+    assert "Run stopped" in workspace.coverage.text()
+    workspace.show_digest(saved, owner_zone=OWNER_ZONE, today=TODAY)
+    assert view.selected_key() == selected
+    assert "Run stopped" not in workspace.coverage.text()
+
+
 @pytest.mark.parametrize("size", list(SIZES))
 @pytest.mark.parametrize("mode", list(ThemeMode))
 def test_workspace_renders(

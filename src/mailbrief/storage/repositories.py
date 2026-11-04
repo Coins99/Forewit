@@ -1220,14 +1220,17 @@ class ConsentRepository:
         assert consent is not None
         return consent
 
-    async def with_auto_send(self, provider: str) -> list[AIConsentTable]:
-        """Every consent to this provider that holds an automatic-analysis permission
-        (ADR 0017), whichever account or disclosure version it belongs to."""
+    async def with_auto_send(self, provider: str | None = None) -> list[AIConsentTable]:
+        """Consents holding automatic permission, across accounts and disclosure versions.
+
+        Without a provider, include all: a change of analysis mode clears old automatic
+        permissions in the same transaction as the preference change.
+        """
+        query = select(AIConsentTable).where(AIConsentTable.auto_send_limit > 0)
+        if provider is not None:
+            query = query.where(AIConsentTable.provider == provider)
         result = await self._session.scalars(
-            select(AIConsentTable)
-            .where(AIConsentTable.provider == provider, AIConsentTable.auto_send_limit > 0)
-            .order_by(AIConsentTable.id)
-            .execution_options(populate_existing=True)
+            query.order_by(AIConsentTable.id).execution_options(populate_existing=True)
         )
         return list(result)
 

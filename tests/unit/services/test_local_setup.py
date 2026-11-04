@@ -1,6 +1,7 @@
 """Local AI setup (P0-B2 Part 2): the pinned runtime and model downloaded, checked, unpacked
 and recorded, from a fake download server behind the real host guard, with no network."""
 
+import asyncio
 import hashlib
 import io
 import json
@@ -10,6 +11,7 @@ import random
 import re
 import stat
 import tarfile
+import threading
 import zipfile
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Iterable
@@ -56,6 +58,39 @@ from mailbrief.services.local_setup import (
 )
 
 HOSTS = frozenset({"downloads.test", ".cdn.test"})
+
+
+@pytest.mark.parametrize("removing", [False, True])
+async def test_cancelled_disk_work_keeps_setup_lock_until_thread_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, removing: bool
+) -> None:
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    setup = LocalSetup(tmp_path / "local", WINDOWS_X64)
+
+    def disk_work(*args: object) -> list[object]:
+        started.set()
+        assert release.wait(timeout=5)
+        finished.set()
+        return []
+
+    monkeypatch.setattr(setup, "_remove" if removing else "_prepare", disk_work)
+    task = asyncio.create_task(setup.remove() if removing else setup.setup())
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        with pytest.raises(DataInUseError), held_lock(tmp_path / "local" / LOCK, BUSY):
+            pytest.fail("Cancelled setup released its lock while the thread was writing")
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert finished.is_set()
+    with held_lock(tmp_path / "local" / LOCK, BUSY):
+        pass
+
+
 ZIP_URL = "https://downloads.test/runtime.zip"
 TAR_URL = "https://downloads.test/runtime.tar.gz"
 MODEL_URL = "https://downloads.test/model.gguf"

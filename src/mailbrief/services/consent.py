@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.briefs import AUTO_SEND_LIMIT_MAX, AutoSendPermission
 from mailbrief.domain.common import utc_now
 from mailbrief.domain.messages import ProviderKind
+from mailbrief.domain.preferences import LOCAL_MESSAGE_LIMIT_MAX
 from mailbrief.errors import ConfigurationError
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.repositories import ConsentRepository
@@ -28,6 +29,98 @@ from mailbrief.storage.tables import AccountTable, AIConsentTable
 logger = logging.getLogger(__name__)
 
 NO_CONSENT: Final = "Analyze once with Sync and review to give consent first."
+LOCAL_CONSENT_PROVIDER: Final = "local"
+LOCAL_DISCLOSURE_VERSION: Final = "local-1"
+LOCAL_CONNECT_FIRST: Final = "Connect Gmail and sync once before enabling local email analysis."
+
+
+def local_disclosure_lines(limit: int) -> tuple[str, ...]:
+    """The local-processing disclosure, shared by the CLI and future desktop setup."""
+    if not 1 <= limit <= LOCAL_MESSAGE_LIMIT_MAX:
+        raise ValueError(f"The local message limit must be 1 to {LOCAL_MESSAGE_LIMIT_MAX}.")
+    return (
+        f"Allow Forewit to read up to {limit} selected messages per brief from this Gmail account "
+        "and summarize them on this computer, in manual and automatic runs.",
+        "Reading Gmail still contacts Google. In local mode, email analysis sends nothing "
+        "to Groq or another AI service and never falls back to cloud analysis.",
+        "Incoming bodies are prepared in memory, not saved. Bounded summaries, short quotes "
+        "and suggestions are saved, alongside Gmail's existing preview snippets.",
+        "The local runtime and model download is about 2.6 GB. Processing can take several "
+        "minutes for 20 messages; speed and memory use depend on this computer.",
+        "This permission is separate from cloud and drafting consent. It does not switch "
+        "analysis mode, start a run, download a model or change the refresh schedule.",
+        "Revoke to stop future local body reads and analysis. Saved results remain until "
+        "you clear them; restoring a backup clears this permission.",
+    )
+
+
+async def _gmail_account(session: AsyncSession, email: str | None) -> AccountTable | None:
+    if email is None:
+        return None
+    result = await session.scalars(
+        select(AccountTable)
+        .where(
+            AccountTable.provider == ProviderKind.GMAIL.value,
+            AccountTable.email_address == email,
+        )
+        .execution_options(populate_existing=True)
+    )
+    return result.first()
+
+
+async def has_local_consent(session: AsyncSession, account_email: str | None) -> bool:
+    """Whether this Gmail account has current, unrevoked local-processing consent."""
+    return (
+        await _active(session, account_email, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION)
+        is not None
+    )
+
+
+async def grant_local_consent(
+    session: AsyncSession,
+    account_email: str | None,
+    *,
+    clock: Callable[[], datetime] = utc_now,
+) -> None:
+    """Record an explicitly approved local grant; no model, mail or cloud I/O.
+
+    Callers must show the disclosure and receive approval first. Repeating a current
+    grant preserves its original timestamp. An unknown account cannot acquire a grant.
+    """
+    account = await _gmail_account(session, account_email)
+    if account is None:
+        raise ConfigurationError(LOCAL_CONNECT_FIRST)
+
+    async def change(now: datetime) -> None:
+        repository = ConsentRepository(session)
+        if await repository.get_active(
+            account.id, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION
+        ):
+            return
+        await repository.grant(account.id, LOCAL_CONSENT_PROVIDER, LOCAL_DISCLOSURE_VERSION, now)
+
+    await commit_once(session, clock, change)
+    logger.info("Local email analysis consent granted")
+
+
+async def revoke_local_consent(
+    session: AsyncSession, *, clock: Callable[[], datetime] = utc_now
+) -> int:
+    """Revoke all local grants, including older disclosures, without credentials.
+
+    Other providers' consents and all saved analyses remain unchanged.
+    """
+    count = 0
+
+    async def change(now: datetime) -> None:
+        nonlocal count
+        repository = ConsentRepository(session)
+        for account in await session.scalars(select(AccountTable)):
+            count += await repository.revoke_all(account.id, LOCAL_CONSENT_PROVIDER, now)
+
+    await commit_once(session, clock, change)
+    logger.info("Local email analysis consent revoked: %d", count)
+    return count
 
 
 def _permission(consent: AIConsentTable, account: AccountTable) -> AutoSendPermission:
@@ -42,16 +135,7 @@ async def _active(
     session: AsyncSession, account_email: str | None, provider: str, version: str
 ) -> tuple[AIConsentTable, AccountTable] | None:
     """The Gmail account with this address and its active consent; None without either."""
-    if account_email is None:
-        return None
-    account = await session.scalar(
-        select(AccountTable)
-        .where(
-            AccountTable.provider == ProviderKind.GMAIL.value,
-            AccountTable.email_address == account_email,
-        )
-        .execution_options(populate_existing=True)
-    )
+    account = await _gmail_account(session, account_email)
     if account is None:
         return None
     consent = await ConsentRepository(session).get_active(account.id, provider, version)

@@ -1,5 +1,13 @@
 # Forewit future implementations
 
+Owner scope update (2026-11-01): P1–P4 require P0's data integrity, migration,
+recovery/export and independent owner-work foundations. Local AI is experimental,
+disabled unless `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true`. Its model-quality acceptance,
+AI queues, native scheduling and selective cloud enrichment are deferred email
+work, not prerequisites for planner completion. The original broad P0-B scope below
+remains a backlog reference; the active prerequisite checklist is
+[planner foundation](p0-planner-foundation.md).
+
 Research and repository review: 2026-10-11. Reviewed checkout: `afdbff6`.
 Status: proposed product and implementation plan; no application features implemented
 by this document. AGENTS.md and accepted ADRs still govern current behavior.

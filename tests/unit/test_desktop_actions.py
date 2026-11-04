@@ -191,9 +191,10 @@ async def test_the_runtime_ticks_and_adds_steps_in_place(tmp_path: Path) -> None
             target_date=None,
             notes="",
         )
-        created = await runtime.create_action(
-            edit, [StepEdit(step_id=None, text="Book the venue", done=False)]
-        )
+        steps = [StepEdit(step_id=None, text="Book the venue", done=False)]
+        command = "11111111-1111-4111-8111-111111111111"
+        created = await runtime.create_action(edit, steps, command_id=command)
+        assert await runtime.create_action(edit, steps, command_id=command) == created
 
         ticked = await runtime.set_step_done(created.public_id, 1, created.steps[0].step_id, True)
         added = await runtime.add_step(created.public_id, 2, "Send invites")
@@ -203,6 +204,7 @@ async def test_the_runtime_ticks_and_adds_steps_in_place(tmp_path: Path) -> None
             ("Book the venue", True),
             ("Send invites", False),
         ]
+        assert await runtime.create_action(edit, steps, command_id=command) == added
         with pytest.raises(ActionConflictError):
             await runtime.add_step(created.public_id, 2, "Too late")  # A stale revision.
     finally:

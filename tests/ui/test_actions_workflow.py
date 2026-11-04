@@ -15,7 +15,7 @@ from pytestqt.qtbot import QtBot
 from mailbrief.domain.actions import Action, ActionEdit, ActionFilter, ActionStatus
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.preferences import OwnerPreferences
-from mailbrief.services.actions import ActionConflictError
+from mailbrief.services.actions import ActionConflictError, ActionCreateConflictError
 from mailbrief.ui.actions_view import EDIT
 from mailbrief.ui.brief_detail import ACCEPT, DISMISS
 from mailbrief.ui.main_window import MainWindow
@@ -617,3 +617,71 @@ async def test_new_task_shortcut_cancel_and_failed_save(
     assert editor.isVisible()
     assert editor.title.text() == "Keep my input"
     assert editor.status.text()
+
+
+async def test_new_task_retries_keep_command_id_and_next_capture_gets_new_id(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await window.initialize()
+    window._request_new_task()
+    editor = window.action_editor
+    editor.title.setText("Keep one task")
+    create = AsyncMock(wraps=backend.create_action)
+    monkeypatch.setattr(backend, "create_action", create)
+    backend.action_fail = RuntimeError("Synthetic uncertain save")
+    editor._save()
+    await finish(window)
+    command = create.call_args.kwargs["command_id"]
+    assert command == editor.creation_command_id
+    assert editor.title.text() == "Keep one task"
+    backend.action_fail = None
+    editor._save()
+    await finish(window)
+    assert create.call_count == 2
+    assert create.call_args.kwargs["command_id"] == command
+    window._request_new_task()
+    assert editor.creation_command_id != command
+
+
+async def test_create_command_conflict_keeps_owner_input_with_actionable_message(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await window.initialize()
+    window._request_new_task()
+    editor = window.action_editor
+    editor.title.setText("Keep my changed input")
+    message = "This save already created a task with different input. Check your saved tasks."
+    monkeypatch.setattr(
+        backend, "create_action", AsyncMock(side_effect=ActionCreateConflictError(message))
+    )
+    editor._save()
+    await finish(window)
+    assert editor.isVisible()
+    assert editor.title.text() == "Keep my changed input"
+    assert editor.status.text() == message
+
+
+async def test_create_retry_opens_the_current_completed_task(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await window.initialize()
+    window._request_new_task()
+    window.action_editor.title.setText("Retry a saved task")
+    monkeypatch.setattr(backend, "create_action", AsyncMock(return_value=DONE))
+    window.action_editor._save()
+    await finish(window)
+    assert window.actions_panel.view() is ActionFilter.COMPLETED
+    assert window.actions_panel.selected() == DONE
+
+
+async def test_create_retry_does_not_claim_a_skipped_task_is_new(
+    window: MainWindow, backend: FakeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await window.initialize()
+    window._request_new_task()
+    window.action_editor.title.setText("Retry saved occurrence")
+    skipped = DONE.model_copy(update={"status": ActionStatus.SKIPPED, "completed_at_utc": None})
+    monkeypatch.setattr(backend, "create_action", AsyncMock(return_value=skipped))
+    window.action_editor._save()
+    await finish(window)
+    assert window.status.text() == f"Already saved and skipped: {skipped.title}."

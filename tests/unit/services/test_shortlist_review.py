@@ -105,9 +105,9 @@ def test_the_limit_caps_inclusions() -> None:
         review_shortlist(ranked, include_ids=("message-10", "message-11"), limit=1)
 
 
-@pytest.mark.parametrize("limit", [0, 11])
-def test_the_limit_must_be_one_to_ten(limit: int) -> None:
-    with pytest.raises(ValueError, match="1 to 10"):
+@pytest.mark.parametrize("limit", [0, 21])
+def test_the_local_limit_must_be_one_to_twenty(limit: int) -> None:
+    with pytest.raises(ValueError, match="1 to 20"):
         review_shortlist(ranked_inbox(1), limit=limit)
 
 

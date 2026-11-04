@@ -32,15 +32,21 @@ class PreferencesRepository:
         return result.scalar_one_or_none()
 
     async def get_row_to_replace(self) -> OwnerPreferencesTable | None:
-        """The row with only its identity and revision read.
+        """The row with only its identity, revision and analysis mode read.
 
-        A save or reset replaces every other column, so an unreadable row can still be
-        replaced.
+        Mode changes also clear automatic permission. Other columns will be replaced,
+        so unreadable JSON or sender rules do not prevent a safe reset.
         """
         result = await self._session.execute(
             select(OwnerPreferencesTable)
             .where(OwnerPreferencesTable.id == PREFERENCES_ROW_ID)
-            .options(load_only(OwnerPreferencesTable.id, OwnerPreferencesTable.revision))
+            .options(
+                load_only(
+                    OwnerPreferencesTable.id,
+                    OwnerPreferencesTable.revision,
+                    OwnerPreferencesTable.analysis_mode,
+                )
+            )
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
@@ -66,6 +72,8 @@ def preferences_from_row(row: OwnerPreferencesTable | None) -> OwnerPreferences:
         return OwnerPreferences(
             time_zone=row.time_zone,
             shortlist_limit=row.shortlist_limit,
+            analysis_mode=row.analysis_mode,
+            local_message_limit=row.local_message_limit,
             excluded_senders=tuple(rules),
             important_senders=tuple(important),
             draft_tone=row.draft_tone,
@@ -88,6 +96,8 @@ def apply_edit(row: OwnerPreferencesTable, edit: PreferencesEdit) -> None:
     """Replace every preference column with the edit's values."""
     row.time_zone = edit.time_zone
     row.shortlist_limit = edit.shortlist_limit
+    row.analysis_mode = edit.analysis_mode.value
+    row.local_message_limit = edit.local_message_limit
     row.excluded_senders_json = list(edit.excluded_senders)
     row.important_senders_json = list(edit.important_senders)
     row.draft_tone = edit.draft_tone.value

@@ -28,6 +28,7 @@ from typing import Any, Final
 import httpx
 
 from mailbrief.infra.data_lock import held_lock
+from mailbrief.infra.tasks import joined_thread
 from mailbrief.providers.local.manifest import Manifest, PinnedFile, Runtime
 from mailbrief.providers.local.transport import AllowedHostsGuard, UnlistedHostError
 
@@ -262,7 +263,7 @@ class LocalSetup:
         """What is on disk now; never downloads. Hashes only files that changed."""
         if self._manifest is None:
             return SetupStatus(SetupState.UNSUPPORTED)
-        return await asyncio.to_thread(self._status, self._manifest)
+        return await joined_thread(self._status, self._manifest)
 
     async def setup(self, progress: Callable[[SetupProgress], None] | None = None) -> SetupStatus:
         """Download, check and unpack whatever isn't ready yet, then return the status.
@@ -277,7 +278,7 @@ class LocalSetup:
         if manifest is None:
             raise SetupUnsupportedError(UNSUPPORTED)
         with held_lock(self._folder / LOCK, BUSY):
-            needed = await asyncio.to_thread(self._prepare, manifest)
+            needed = await joined_thread(self._prepare, manifest)
             if needed:
                 total = sum(pinned.size for _, pinned in needed)
                 done = 0
@@ -287,16 +288,16 @@ class LocalSetup:
                         done += pinned.size
                         if stage is SetupStage.RUNTIME:
                             _report(progress, SetupProgress(SetupStage.UNPACKING, done, total))
-                            await asyncio.to_thread(self._unpack, path, manifest.runtime)
+                            await joined_thread(self._unpack, path, manifest.runtime)
                         else:
-                            await asyncio.to_thread(self._install_model, path, manifest)
+                            await joined_thread(self._install_model, path, manifest)
                 logger.info("Local AI setup downloaded %d files", len(needed))
         return await self.status()
 
     async def remove(self) -> None:
         """Delete the runtime, the model, unfinished downloads and the record."""
         with held_lock(self._folder / LOCK, BUSY):
-            await asyncio.to_thread(self._remove)
+            await joined_thread(self._remove)
         logger.info("Local AI files removed")
 
     # Paths.
@@ -491,7 +492,7 @@ class LocalSetup:
         part: Path,
         report: Callable[[int], None],
     ) -> Path:
-        have, digest = await asyncio.to_thread(_resume_point, part, pinned)
+        have, digest = await joined_thread(_resume_point, part, pinned)
         if have == pinned.size:
             report(have)  # Complete and checked, from an earlier run.
             return part

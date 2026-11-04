@@ -83,6 +83,8 @@ def resource_names() -> set[str]:
         "certifi/cacert.pem",
         "mailbrief/resources/MailBrief.ico",
         "mailbrief/resources/THIRD_PARTY_NOTICES.txt",
+        "mailbrief/providers/local/licenses/llama-cpp-MIT.txt",
+        "mailbrief/providers/local/licenses/Qwen-Apache-2.0.txt",
         "PySide6/plugins/platforms/qwindows.dll",
         "tzdata/zoneinfo/America/Toronto",
     }
@@ -105,6 +107,8 @@ def resource_names() -> set[str]:
         "mailbrief/ui/theme/icons/trash.svg",
         "tzdata/zoneinfo/America/Toronto",
         "mailbrief/resources/THIRD_PARTY_NOTICES.txt",
+        "mailbrief/providers/local/licenses/llama-cpp-MIT.txt",
+        "mailbrief/providers/local/licenses/Qwen-Apache-2.0.txt",
     ],
 )
 def test_required_resources(missing: str) -> None:

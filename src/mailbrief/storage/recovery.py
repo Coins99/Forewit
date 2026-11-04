@@ -20,6 +20,7 @@ from sqlalchemy import CheckConstraint, create_engine, inspect
 from sqlalchemy.dialects.sqlite import dialect
 
 from mailbrief.domain.backup import MAX_DATABASE_BYTES, MAX_METADATA_BYTES, BackupMetadata
+from mailbrief.domain.common import utc_now
 from mailbrief.infra.data_lock import data_directory_lock
 from mailbrief.infra.files import publish_exclusively, sync_directory
 from mailbrief.storage.migrate import migration_config, upgrade_database
@@ -249,6 +250,12 @@ def _prepare_restored_database(database: Path) -> None:
         # Restoring history must not restore permission to send automatically.
         connection.execute(
             "UPDATE ai_consents SET auto_send_limit=0, auto_send_granted_at_utc=NULL"
+        )
+        # Local consent allows unattended body reads too; restored grants are inert.
+        connection.execute(
+            "UPDATE ai_consents SET revoked_at_utc=? WHERE provider='local' "
+            "AND revoked_at_utc IS NULL",
+            (utc_now().isoformat(),),
         )
         # Pagination checkpoints belong to a live scan, never restored history.
         connection.execute("UPDATE sync_runs SET inbox_continuation=NULL")

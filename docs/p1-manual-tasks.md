@@ -9,6 +9,11 @@ notes, checklist steps and an optional target date. The existing editor also off
 ownership (Mine / Waiting for someone) and effort. Cancel creates nothing. A failed
 save keeps the entered fields available to retry.
 
+Retries of one new-task save retain a command UUID, so a response lost after commit
+does not create a second task. A changed-input replay or a removed original task is
+refused with guidance; typed input remains available. Starting a new task starts a
+new command. See [ADR 0024](adr/0024-retry-safe-task-creation.md).
+
 Manual tasks use the same owner action, revision checks, lists, editing, completion,
 reopening, drafts and deletion workflow as email-derived actions. They need no Gmail
 connection or source snapshot. Adding an email later retains its provenance; undoing
@@ -18,6 +23,10 @@ An open task's steps can also be ticked and added from the detail pane, each sav
 as one revision ([checklists in place](p1-checklists.md), B04).
 
 ## Durable activity
+
+The read-only `ActionService.history()` now exposes full effective per-task history
+for later metrics, including correction resolution and explicit partial coverage.
+See [P1 consolidation and remaining work](p1-foundation-audit.md).
 
 Additive migration `20261013_0015` follows the Google calendar cache migration
 `20261012_0014` and creates `action_activity`, keyed uniquely by action and revision. Each owner change and its activity record commit together, or both roll

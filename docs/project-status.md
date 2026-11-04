@@ -6,6 +6,31 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- Scoped planner P0 and P1 implementation/platform verification are complete:
+  [P0 evidence](p0-planner-foundation.md) and [P1 history audit](p1-foundation-audit.md).
+  The task service now reads uncapped effective history with correction resolution,
+  original completion/group snapshots and explicit partial-coverage semantics.
+  P1 also implements retry-safe manual task capture with atomic receipts; see
+  [ADR 0024](adr/0024-retry-safe-task-creation.md). PR #98 passed Windows and macOS
+  CI, native Cocoa tests and offline package/lifecycle checks. Windows passed
+  4,938 tests; macOS passed 3,310 non-UI and 1,625 native UI/app tests. Both platforms
+  passed the coverage gates. Agent-operated Windows capture/lifecycle checks passed;
+  owner usability acceptance remains open. The P1 audit records the evidence and
+  limits, including the interrupted hands-on session. Main is unchanged.
+
+- Owner scope decision (2026-11-01): local email AI is experimental and disabled
+  unless `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true`. Saved local mode does not fall back
+  to cloud. Only data integrity, migrations, recovery/export and independent owner
+  workflows are P0 prerequisites for P1–P4. Local-model acceptance, background AI
+  scheduling and cloud enrichment remain deferred email work, not planner blockers.
+
+- P0-B2 local email analysis Parts 1–3 implemented; Parts 4–5 are connected and in final
+  verification: local CLI/desktop composition, bounded sequential analysis, cancellation,
+  permission rechecks and Settings setup/mode controls. Local mode never composes Groq.
+  Cloud remains the default. The dedicated prompt, notices/ADR, progressive operation
+  and live/platform acceptance remain pending;
+  see [implementation progress and review](p0-p2-implementation.md).
+
 - P1 first slice implemented, awaiting owner desktop acceptance: [manual tasks and activity
   history](p1-manual-tasks.md). Manual and email-derived actions share the editor and
   lifecycle; completion/reopening/undo history survives recovery and export. Projects and

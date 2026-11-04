@@ -1,7 +1,7 @@
 """Read and prepare the reviewed shortlist's bodies in memory; nothing is stored or logged."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol
 
 from mailbrief.domain.bodies import (
@@ -12,7 +12,7 @@ from mailbrief.domain.bodies import (
     PreparedBody,
 )
 from mailbrief.domain.messages import RankedMessage
-from mailbrief.infra.tasks import gather_or_cancel
+from mailbrief.infra.tasks import gather_or_cancel, guarded
 from mailbrief.ports.errors import MessageUnavailableError, ProviderResponseError
 from mailbrief.text.prepare import (
     looks_like_forward,
@@ -80,20 +80,37 @@ class BodyService:
         """The most prepared body characters kept per message."""
         return self._limit
 
-    async def prepare(self, shortlist: Sequence[RankedMessage]) -> tuple[PreparedBody, ...]:
+    async def prepare(
+        self,
+        shortlist: Sequence[RankedMessage],
+        *,
+        allowed: Callable[[], Awaitable[bool]] | None = None,
+        cancel: asyncio.Event | None = None,
+    ) -> tuple[PreparedBody, ...]:
         """Prepared bodies in shortlist order.
 
         A deleted message becomes "unavailable" and an unreadable one "failed". Sign-in,
         permission and rate-limit errors stop the whole batch, and cancelling the caller
         cancels every fetch still in flight.
         """
-        return tuple(await gather_or_cancel(self._prepare_one(item) for item in shortlist))
+        return tuple(
+            await gather_or_cancel(self._prepare_one(item, allowed, cancel) for item in shortlist)
+        )
 
-    async def _prepare_one(self, item: RankedMessage) -> PreparedBody:
+    async def _prepare_one(
+        self,
+        item: RankedMessage,
+        allowed: Callable[[], Awaitable[bool]] | None,
+        cancel: asyncio.Event | None,
+    ) -> PreparedBody:
         message_id = item.message.provider_message_id
         async with self._slots:
             try:
-                body = await self._provider.fetch_message_body(message_id)
+                body = await guarded(
+                    lambda: self._provider.fetch_message_body(message_id),
+                    allowed=allowed,
+                    cancel=cancel,
+                )
             except MessageUnavailableError:
                 return PreparedBody(provider_message_id=message_id, status=BodyStatus.UNAVAILABLE)
             except ProviderResponseError:

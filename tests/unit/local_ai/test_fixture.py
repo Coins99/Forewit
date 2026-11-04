@@ -9,9 +9,10 @@ import pytest
 from scripts.local_ai.fixture import DEFAULT_FIXTURE, ExpectedDeadline, load_fixture
 
 HOLDOUT = DEFAULT_FIXTURE.with_name("holdout-10.json")
+DEVELOPMENT = DEFAULT_FIXTURE.with_name("dev-30.json")
 
 
-@pytest.mark.parametrize("path", [DEFAULT_FIXTURE, HOLDOUT])
+@pytest.mark.parametrize("path", [DEFAULT_FIXTURE, HOLDOUT, DEVELOPMENT])
 def test_every_message_builds_a_request_the_app_accepts(path: Path) -> None:
     fixture = load_fixture(path)
     requests = fixture.requests()
@@ -26,7 +27,7 @@ def test_the_overnight_fixture_mixes_sensitive_ordinary_and_ambiguous_mail() -> 
     assert mix == {"sensitive": 6, "ordinary": 8, "ambiguous": 6}
 
 
-@pytest.mark.parametrize("path", [DEFAULT_FIXTURE, HOLDOUT])
+@pytest.mark.parametrize("path", [DEFAULT_FIXTURE, HOLDOUT, DEVELOPMENT])
 def test_expected_deadlines_fall_on_or_after_the_local_day_the_email_arrives(path: Path) -> None:
     fixture = load_fixture(path)
     zone = ZoneInfo(fixture.time_zone)
@@ -42,3 +43,12 @@ def test_duplicate_keys_are_refused(tmp_path: Path) -> None:
     copy.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="unique"):
         load_fixture(copy)
+
+
+def test_development_messages_are_separate_from_acceptance() -> None:
+    development = load_fixture(DEVELOPMENT)
+    acceptance = (*load_fixture().messages, *load_fixture(HOLDOUT).messages)
+    assert len(development.messages) == 30
+    assert not {message.body for message in development.messages} & {
+        message.body for message in acceptance
+    }

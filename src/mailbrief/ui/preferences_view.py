@@ -14,6 +14,7 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -40,7 +41,9 @@ from mailbrief.domain.preferences import (
     AI_TIMEOUT_MAX,
     AI_TIMEOUT_MIN,
     EXCLUSIONS_MAX,
+    LOCAL_MESSAGE_LIMIT_MAX,
     SHORTLIST_LIMIT_MAX,
+    AnalysisMode,
     OwnerPreferences,
     PreferencesEdit,
     is_region_zone,
@@ -115,6 +118,8 @@ class PreferencesPanel(QWidget):
     reset_requested = Signal()
     auto_send_requested = Signal()
     status_changed = Signal(str)
+    local_setup_requested = Signal()
+    local_remove_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -131,7 +136,49 @@ class PreferencesPanel(QWidget):
         self.shortlist_limit = QSpinBox()
         self.shortlist_limit.setRange(1, SHORTLIST_LIMIT_MAX)
         self.shortlist_limit.setAccessibleName("Messages per brief")
-        form.addRow("&Messages per brief", self.shortlist_limit)
+        form.addRow("Cloud &messages per brief", self.shortlist_limit)
+        self.analysis_mode = QComboBox()
+        self.analysis_mode.setObjectName("emailAnalysisMode")
+        self.analysis_mode.setAccessibleName("Email analysis location")
+        self.analysis_mode.addItem("Cloud (Groq)", AnalysisMode.CLOUD)
+        self.analysis_mode.addItem("On this computer", AnalysisMode.LOCAL)
+        local_enabled = Settings().experimental_local_ai
+        if not local_enabled:
+            self.analysis_mode.setItemText(1, "On this computer (experimental, disabled)")
+            model = self.analysis_mode.model()
+            if isinstance(model, QStandardItemModel):
+                item = model.item(1)
+                if item is not None:
+                    item.setEnabled(False)
+        form.addRow("Email analysis", self.analysis_mode)
+        self.local_message_limit = QSpinBox()
+        self.local_message_limit.setObjectName("localMessageLimit")
+        self.local_message_limit.setAccessibleName("Local messages per brief")
+        self.local_message_limit.setRange(1, LOCAL_MESSAGE_LIMIT_MAX)
+        self.local_message_limit.setEnabled(local_enabled)
+        form.addRow("Local messages per brief", self.local_message_limit)
+        form.addRow(
+            "",
+            _plain(
+                "Local analysis uses a model on this computer and never falls back to cloud. "
+                "The first local run asks your permission; later manual and scheduled runs "
+                "use it until you revoke consent. Drafting and calendar AI still use Groq."
+            ),
+        )
+        self.local_setup_button = QPushButton("Set up local AI…")
+        self.local_status = _plain("Local AI: not checked yet.")
+        self.local_status.setObjectName("localAIStatus")
+        self.local_status.setAccessibleName("Local AI setup status")
+        form.addRow("", self.local_status)
+        self.local_setup_button.setObjectName("localSetupButton")
+        self.local_setup_button.setAccessibleName("Download and set up local AI")
+        self.local_setup_button.setEnabled(local_enabled)
+        self.local_setup_button.clicked.connect(self.local_setup_requested.emit)
+        self.local_remove_button = QPushButton("Remove local AI files")
+        self.local_remove_button.setObjectName("localRemoveButton")
+        self.local_remove_button.setAccessibleName("Remove downloaded local AI files")
+        self.local_remove_button.clicked.connect(self.local_remove_requested.emit)
+        form.addRow(self.local_setup_button, self.local_remove_button)
         self.senders = QPlainTextEdit()
         self.senders.setAccessibleName("Excluded senders, one address or @domain per line")
         self.senders.setPlaceholderText("boss@example.com\n@newsletters.example.com")
@@ -192,7 +239,7 @@ class PreferencesPanel(QWidget):
         automatic_row.setContentsMargins(0, 0, 0, 0)
         automatic_row.addWidget(self.auto_line, 1)
         automatic_row.addWidget(self.auto_button)
-        form.addRow("Automatic analysis", automatic)
+        form.addRow("Cloud automatic analysis", automatic)
         form.addRow("", _plain(_REFRESH_NOTE))
         self.ai_limits: dict[str, QSpinBox] = {}
         for name, label, low, high, suffix in _AI_FIELDS:
@@ -232,6 +279,8 @@ class PreferencesPanel(QWidget):
         return (
             self.time_zone.currentIndex(),
             self.shortlist_limit.value(),
+            self.analysis_mode.currentIndex(),
+            self.local_message_limit.value(),
             self.senders.toPlainText(),
             self.important.toPlainText(),
             self.tone.currentIndex(),
@@ -266,6 +315,8 @@ class PreferencesPanel(QWidget):
             index = self.time_zone.count() - 1
         self.time_zone.setCurrentIndex(index)
         self.shortlist_limit.setValue(preferences.shortlist_limit)
+        self.analysis_mode.setCurrentIndex(self.analysis_mode.findData(preferences.analysis_mode))
+        self.local_message_limit.setValue(preferences.local_message_limit)
         self.senders.setPlainText("\n".join(preferences.excluded_senders))
         self.important.setPlainText("\n".join(preferences.important_senders))
         self.tone.setCurrentIndex([tone for tone, _ in TONE_CHOICES].index(preferences.draft_tone))
@@ -339,6 +390,8 @@ class PreferencesPanel(QWidget):
             for name, box in self.ai_limits.items()
         }
         values.update(
+            analysis_mode=self.analysis_mode.currentData(),
+            local_message_limit=self.local_message_limit.value(),
             time_zone=zone,
             shortlist_limit=self.shortlist_limit.value(),
             excluded_senders=rules,
