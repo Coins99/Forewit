@@ -225,7 +225,7 @@ class Repeats:
         await self._repository.record_activity(follower, ActionActivityKind.CREATED, now)
         return follower
 
-    async def withdraw(self, row: ActionTable) -> int:
+    async def withdraw(self, row: ActionTable, now: datetime) -> int:
         """Remove the occurrences ``row`` made that the owner never touched: live, open, with
         no change of their own since they were made (another task respelling a tag they share
         doesn't count) and no draft linked to them. One the owner touched stays; it is theirs
@@ -237,7 +237,7 @@ class Repeats:
                 and follower.status == ActionStatus.OPEN.value
                 and await self._untouched(follower)
             ):
-                await self._repository.delete_action(follower)
+                await self._repository.delete_action(follower, now)
                 removed += 1
         return removed
 
@@ -245,4 +245,6 @@ class Repeats:
         activity = await self._repository.activity_rows(row.id)
         if any(event.kind not in _UNTOUCHED for event in activity):
             return False
-        return not await self._repository.drafted(row.id)
+        return not await self._repository.drafted(row.id) and not await self._repository.planned(
+            row.public_id
+        )

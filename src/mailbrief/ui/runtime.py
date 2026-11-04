@@ -35,6 +35,8 @@ from mailbrief.domain.cached_mail import (
     InboxPage,
 )
 from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
+from mailbrief.domain.capture import CaptureRequest
+from mailbrief.domain.day_plans import DayPlan
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress, SyncResult
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
 from mailbrief.domain.drafts import (
@@ -90,6 +92,7 @@ from mailbrief.services.calendar_planning import (
     PreparedPlan,
 )
 from mailbrief.services.consent import auto_send_permission, set_auto_send
+from mailbrief.services.day_plans import DayPlanService
 from mailbrief.services.drafting import (
     DRAFTING_DISCLOSURE_VERSION,
     DRAFTING_SCOPE,
@@ -760,6 +763,42 @@ class DesktopRuntime:
     async def list_actions(self, view: ActionFilter) -> tuple[Action, ...]:
         async with self._storage().session() as session:
             return await ActionService(session).list_actions(view)
+
+    async def get_action(self, public_id: str) -> Action:
+        """Read one canonical task independently of view filters and list limits."""
+        async with self._storage().session() as session:
+            return await ActionService(session).get(public_id)
+
+    async def capture(self, request: CaptureRequest) -> Action | Draft:
+        """Owner capture uses a separate local session, including during email work."""
+        async with self._storage().session() as session:
+            if request.kind == "task":
+                return await ActionService(session).create(
+                    request.task_edit(), command_id=request.command_id
+                )
+            return await DraftService(session).create_note(
+                request.note_edit(), command_id=request.command_id
+            )
+
+    async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).candidates(text, day=day)
+
+    async def select_day_task(
+        self, day: date, zone: ZoneInfo, task_id: str, revision: int
+    ) -> DayPlan:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).select(day, zone, task_id, revision)
+
+    async def deselect_day_task(self, day: date, item_id: str, revision: int) -> DayPlan:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).deselect(day, item_id, revision)
+
+    async def reorder_day_tasks(
+        self, day: date, item_ids: tuple[str, ...], revision: int
+    ) -> DayPlan:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).reorder(day, item_ids, revision)
 
     async def accept_suggestion(self, suggestion_id: int) -> Action:
         async with self._storage().session() as session:

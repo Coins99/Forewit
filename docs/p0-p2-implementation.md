@@ -1,5 +1,39 @@
 # P0–P2 implementation progress
 
+## P2-03 durable daily focus (2026-11-03)
+
+Implemented ordered, revisioned daily selection with focus-first Today, workload,
+task chooser, keyboard reordering and existing complete/reopen/Undo. Capture can
+select its saved task for today. Migration 0028, recovery/export and purge keep
+selection separate from task dates and lifecycle. Windows verification passed
+5,057 tests after review repairs, 95.73% coverage and all service gates, win32/darwin typing, 1x/2x
+visual checks and fresh single-file package/lifecycle/recovery checks.
+See [scope and checks](p2-focus.md).
+Native macOS and owner acceptance remain open; dedicated workspace pages, later
+planning commands and full P2 remain incomplete.
+
+## P2-02 global capture (2026-11-03)
+
+Global Capture saves ordinary tasks/notes without Gmail/AI and preserves request
+identity/text after failures. Note creation, initial version and scoped receipt
+commit together (migration 0027; ADR 0025). Saves run independently of waiting email
+work and shutdown joins them. See [scope, verification and remaining checks](p2-capture.md).
+Windows verification passed 5,022 tests, 95.87% combined coverage and all service
+gates, strict win32/darwin typing, 1x/2x visual checks and fresh Windows single-file
+package/lifecycle/recovery checks. Native macOS and owner acceptance remain open.
+Daily focus follows in P2-03 above; optional capture review remains later P2 work.
+
+## P2 navigation foundation (2026-11-02)
+
+Implementation started on `feat/p2-navigation` from the P1 code at `bb60f94`.
+Canonical route identities and compatibility adapters now serve existing cross-page
+open paths, with navigation/account generation checks and canonical task reveal.
+See [scope, verification and remaining P2 increments](p2-navigation.md). This does
+not mark the future workspace pages, capture, day plans or full P2 complete.
+Final Windows source verification (2026-11-03) passed 4,972 tests, coverage gates,
+strict win32/darwin typing and 1x/2x gallery/theme checks. Native package/macOS and
+owner acceptance remain open.
+
 ## Owner scope decision: planner prerequisites (2026-11-01)
 
 Local AI is experimental and disabled by default. Explicit opt-in uses

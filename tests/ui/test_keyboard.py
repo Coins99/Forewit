@@ -29,6 +29,7 @@ from tests.ui.window_wait import show
 HEADER_AND_SIDEBAR = [
     "generateButton",
     "dayOverviewToggle",
+    "globalCapture",
     "sidebarNav",
     "savedMailButton",
     "dataButton",
@@ -36,9 +37,9 @@ HEADER_AND_SIDEBAR = [
     "accountControl",
 ]
 FIRST_EMAIL = [
-    "metricActions",
-    "metricCalendar",
-    "metricWaiting",
+    "focusPlanToday",
+    "focusAgendaOpen",
+    "focusAttention",
     "briefList",
     "viewEmailButton",
     "acceptButton",
@@ -271,9 +272,9 @@ async def test_another_email_relinks_its_buttons(window: MainWindow) -> None:
     assert names and names[0] == "viewEmailButton"
     assert tab_chain(window, window.generate_button) == [
         *HEADER_AND_SIDEBAR,
-        "metricActions",
-        "metricCalendar",
-        "metricWaiting",
+        "focusPlanToday",
+        "focusAgendaOpen",
+        "focusAttention",
         "briefList",
         *names,
     ]
@@ -296,6 +297,7 @@ async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> 
     # Sync and review, Saved mail and Data wait while busy; Settings opens beside it.
     assert chain == [
         "cancelButton",
+        "globalCapture",
         "sidebarNav",
         "settingsButton",
         "accountControl",
@@ -304,6 +306,14 @@ async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> 
     ]
     release.set()
     await finish(window)
+
+
+async def test_capture_shortcut_is_distinct_from_new_task(window: MainWindow) -> None:
+    QTest.keySequence(window, QKeySequence("Ctrl+Shift+N"))
+    assert window.capture_dialog.isVisible()
+    assert not window.action_editor.isVisible()
+    assert window.new_task_shortcut.key() == QKeySequence("Ctrl+N")
+    window.capture_dialog.reject()
 
 
 async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainWindow) -> None:
@@ -324,5 +334,6 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
         "actionList",
         *detail,
         "newStepField",
+        "planFocusButton",
         *HEADER_AND_SIDEBAR[2:],
     ]

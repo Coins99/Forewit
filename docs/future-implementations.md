@@ -844,6 +844,21 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P2-02 update (2026-11-03): global task/note capture and retry-safe initial note
+creation are implemented locally. Verification and remaining acceptance are in
+[the capture checkpoint](p2-capture.md). Optional capture review remains later work.
+
+P2-03 update (2026-11-03): persistent revisioned daily selection and focus-first Today
+are implemented locally, with workload, keyboard ordering, canonical task lifecycle
+and recovery/export/purge integration. See [the focus checkpoint](p2-focus.md).
+Historical planning commands, capacity and later workspace migration remain planned;
+native macOS and owner acceptance remain open.
+
+P2 implementation update (2026-11-03): the first canonical-navigation slice is
+implemented locally and verified on Windows, on the P1 code. Existing screens remain adapters; see
+[P2 navigation scope and verification](p2-navigation.md). Persistent daily
+selection and the full workspace/sidebar migration are not yet implemented.
+
 These are dependency-ordered milestones, not calendar estimates. Keep POC naming
 separate from existing M1–M9 so completed email history is not rewritten.
 

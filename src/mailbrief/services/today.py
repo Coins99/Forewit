@@ -15,6 +15,7 @@ from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
 from mailbrief.services.actions import ActionService, action_order
+from mailbrief.services.day_plans import DayPlanService
 from mailbrief.services.events import EventService
 
 _ORDER = {reason: number for number, reason in enumerate(AttentionReason)}
@@ -88,6 +89,7 @@ class TodayService:
     def __init__(self, session: AsyncSession) -> None:
         self._actions = ActionService(session)
         self._events = EventService(session)
+        self._plans = DayPlanService(session)
 
     async def summary(self, today: date, zone: ZoneInfo, now: datetime) -> DaySummary:
         """``today`` in ``zone``, as of ``now``: see DaySummary."""
@@ -95,9 +97,17 @@ class TodayService:
             *await self._actions.list_actions(ActionFilter.OPEN),
             *await self._actions.list_actions(ActionFilter.WAITING),
         ]
+        focus = await self._plans.load(today)
+        selected = {item.task_public_id for item in focus.items}
         return DaySummary(
             day=today,
-            attention=needs_attention(actions, today=today, zone=zone, now=now),
+            attention=needs_attention(
+                (action for action in actions if action.public_id not in selected),
+                today=today,
+                zone=zone,
+                now=now,
+            ),
             replies=new_replies(actions),
             calendar=await self._events.list_range(today, today, zone),
+            focus=focus,
         )

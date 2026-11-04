@@ -530,7 +530,7 @@ class ActionService:
             row.status = latest.previous_status
             row.completed_at_utc = latest.previous_completed_at_utc
             if row.status == ActionStatus.OPEN.value:
-                await self._repeats.withdraw(row)
+                await self._repeats.withdraw(row, now)
             else:
                 await self._repeats.follow(row, now)  # Undoing a reopening closes it again.
             touch(row, now)
@@ -927,7 +927,7 @@ class ActionService:
             previous_status, previous_completed = row.status, row.completed_at_utc
             row.status = ActionStatus.OPEN.value
             row.completed_at_utc = None
-            await self._repeats.withdraw(row)
+            await self._repeats.withdraw(row, now)
             touch(row, now)
             await self._repository.record_activity(
                 row,

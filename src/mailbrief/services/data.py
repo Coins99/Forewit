@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.storage.database import Database
+from mailbrief.storage.day_plans import remove_task_references
 from mailbrief.storage.tables import (
     AccountTable,
     ActionTable,
     Base,
+    DayPlanItemTable,
     DigestItemTable,
     DigestTable,
     DraftTable,
@@ -28,6 +30,8 @@ from mailbrief.storage.tables import (
 )
 
 EXPORT_TABLES = (
+    "day_plans",
+    "day_plan_items",
     "life_areas",
     "projects",
     "actions",
@@ -86,15 +90,19 @@ class CleanupPreview:
     drafts: int
     versions: int
     decisions: int
+    day_selections: int = 0
 
     @property
     def summary(self) -> str:
-        return (
+        summary = (
             f"Remove {self.messages} cached messages, {self.briefs} saved briefs, "
             f"{self.sync_runs} sync records, {self.accounts} accounts, "
             f"{self.actions} deleted actions, {self.drafts} deleted drafts/notes, "
             f"{self.versions} draft versions and {self.decisions} orphaned decisions."
         )
+        if self.day_selections:
+            summary += f" Remove {self.day_selections} daily selections; keep their day plans."
+        return summary
 
 
 class CleanupChangedError(ValueError):
@@ -250,6 +258,17 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
             )
             or 0
         )
+    day_selections = 0
+    if request.kind == CleanupKind.DELETED:
+        day_selections = (
+            await session.scalar(
+                select(func.count())
+                .select_from(DayPlanItemTable)
+                .join(ActionTable, DayPlanItemTable.task_public_id == ActionTable.public_id)
+                .where(ActionTable.deleted_at_utc < request.before)
+            )
+            or 0
+        )
     return CleanupPreview(
         request,
         await _fingerprint(session),
@@ -261,6 +280,7 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
         counts.get(DraftTable, 0),
         versions,
         counts.get(SuggestionDecisionTable, 0),
+        day_selections,
     )
 
 
@@ -277,8 +297,16 @@ async def apply_cleanup(database: Database, preview: CleanupPreview) -> None:
         current = await _preview(session, preview.request)
         if current != preview:
             raise CleanupChangedError()
+        changed_plans: set[int] = set()
+        cleanup_time = datetime.now(UTC)
         for query in (await _selections(session, preview.request)).values():
             while rows := list(await session.scalars(query.limit(100))):
+                await remove_task_references(
+                    session,
+                    [row.public_id for row in rows if isinstance(row, ActionTable)],
+                    cleanup_time,
+                    changed_plans,
+                )
                 for row in rows:
                     await session.delete(row)
                 await session.flush()

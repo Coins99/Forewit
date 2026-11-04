@@ -6,6 +6,30 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- P2-03 durable daily focus is implemented locally: ordered daily selections,
+  conflict checks, focus-first Today, known/unknown/waiting workload, keyboard
+  ordering and ordinary task completion/reopen/Undo. Migration 0028 includes
+  recovery/export and safe purge integration. Windows checks passed 5,057 tests,
+  coverage/service gates, win32/darwin typing, 1x/2x visual checks and native
+  single-file package checks. See [scope and verification](p2-focus.md).
+  The three two-round review findings are fixed with regressions. Native macOS and
+  owner acceptance remain open; full P2 is incomplete.
+
+- P2-02 global Task/Note capture is implemented locally, with atomic initial note
+  text/version and retry receipts, independent saves during email work, guarded
+  close/quit and canonical Open. Windows verification passed 5,022 tests, coverage,
+  strict win32/darwin typing, visual checks and native single-file package/recovery
+  checks; see [capture scope and verification](p2-capture.md). Native macOS and
+  owner acceptance remain open. Capture review remains a later checkpoint.
+
+- P2 implementation has started with canonical navigation and stale-load protection
+  on `feat/p2-navigation`, based on the P1 code. Existing screens remain adapters;
+  daily focus is recorded above and the larger workspace migration follows. See
+  [P2 navigation scope and verification](p2-navigation.md). Final Windows source
+  verification passed 4,972 tests, coverage gates, strict win32/darwin typing and
+  1x/2x gallery/theme checks. Native package/macOS and owner acceptance remain open;
+  full P2 is not claimed.
+
 - Scoped planner P0 and P1 implementation/platform verification are complete:
   [P0 evidence](p0-planner-foundation.md) and [P1 history audit](p1-foundation-audit.md).
   The task service now reads uncapped effective history with correction resolution,

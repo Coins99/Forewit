@@ -391,7 +391,7 @@ class HeaderBar(GlassChrome):
         self.date = ElidedLabel(tone="muted", px=CAPTION_PX)
         self.date.setText("Your daily workspace")
         self.date.setObjectName("pageHeaderDate")
-        self.title = _StatusLabel("Today’s brief", px=24)
+        self.title = _StatusLabel("Today", px=24)
         self.title.setFont(ui_font(24, medium=True))
         self.title.setObjectName("pageHeaderTitle")
         headings.addWidget(self.date)
@@ -1071,7 +1071,7 @@ class ThreePaneWorkspace(QWidget):
         """Show page ``key``; an unknown key raises KeyError."""
         self.pages.setCurrentWidget(self._pages[key])
         titles = {
-            "today": "Today’s brief",
+            "today": "Today",
             "actions": "Actions",
             "drafts": "Drafts",
             "briefs": "Briefs",

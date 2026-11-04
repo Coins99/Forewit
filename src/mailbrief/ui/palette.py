@@ -59,6 +59,7 @@ class Command:
 # The pages in the sidebar's order (workspace.PAGES), then the rest.
 COMMANDS: Final = (
     *(Command(f"page:{key}", f"Go to {label}") for key, label, _icon in PAGES),
+    Command("capture", "Capture task or note"),
     Command("new:task", "New task"),
     Command("new:event", "New event today"),
     Command("new:note", "New note"),

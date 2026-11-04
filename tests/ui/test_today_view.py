@@ -384,8 +384,9 @@ async def test_today_gallery(
     assert not window.day_panel.isVisible()
     window.day_toggle.click()
     assert window.day_panel.isVisible()
-    # However narrow, the cards never push the brief off the page.
-    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    # Focus now precedes both commitments and mail. Keep a readable mail row,
+    # while each commitments card still shows complete rows.
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() >= 48)
     assert_complete_day_cards(window)
     save_shot(window.grab(), f"today-day-{size[0]}-{mode}")
 
@@ -443,7 +444,7 @@ async def test_day_preview_fits_content_and_recovers_after_resizing(
     )
     window.day_panel.show_summary(data, ZONE)
     window.day_toggle.click()
-    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() >= 48)
     QApplication.processEvents()
     assert_complete_day_cards(window)
     tall_height = window.day_area.height()
@@ -451,7 +452,7 @@ async def test_day_preview_fits_content_and_recovers_after_resizing(
     tall_rows_height = listing.height()
 
     window.resize(1100, 520)
-    qtbot.waitUntil(lambda: window.workspace.brief_list.height() > window.day_area.height())
+    qtbot.waitUntil(lambda: window.workspace.brief_list.height() >= 48)
     QApplication.processEvents()
     assert_complete_day_cards(window)
     assert window.day_area.height() <= tall_height

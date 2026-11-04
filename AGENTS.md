@@ -142,6 +142,34 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
   `ui/today_view.py`). See `docs/today.md`.
+- P2 navigation foundation implemented locally on `feat/p2-navigation`: validated routes
+  and a shared dispatcher adapt legacy pages/commands, search, Today links and saved
+  briefs. Pending opens are guarded by navigation/account context; task reveal reads
+  canonical records beyond list filters/limits. Dedicated workspace pages remain later
+  P2 increments; daily plans are covered by P2-03 below. Windows source verification
+  passed 4,972 tests,
+  coverage gates, win32/darwin typing and 1x/2x gallery/theme checks. Native packages,
+  native macOS and owner acceptance remain open. See `docs/p2-navigation.md`.
+- P2-02 global capture implemented locally: Capture on every page, palette and
+  Ctrl+Shift+N/Cmd+Shift+N saves ordinary Task/Note records without Gmail/AI. Owner
+  saves have an independent local lifecycle and shutdown waits for them. Notes save
+  initial text/version plus retry receipts atomically (migration 0027, ADR 0025);
+  receipts survive purge/recovery and stay out of writing exports. Windows verification
+  passed 5,022 tests, coverage gates, strict win32/darwin typing, 1x/2x UI checks and a
+  fresh single-file package/lifecycle/recovery check. Native macOS/owner acceptance
+  remains open; see `docs/p2-capture.md`. Capture review/processed state remains
+  later P2 work.
+- P2-03 daily focus implemented locally: revisioned per-profile/date plans and stable
+  ordered task selections (migration 0028, ADR 0026). My focus leads Today, with
+  select/remove/keyboard reorder, existing completion/reopen/Undo and separate known,
+  unknown and waiting workload. Capture can add its saved task to today. Selections
+  survive restart/recovery/export; soft delete is unavailable/restore, purge removes
+  references and bumps each plan once. No task dates or lifecycle facts are copied.
+  Windows checks passed 5,057 tests after review repairs, coverage/service gates, win32/darwin typing,
+  1x/2x gallery/theme checks and a fresh single-file package/lifecycle/recovery check.
+  Review repairs bound the agenda, exclude selections before search limits, and
+  refresh the focus date during busy email work. Native macOS and owner
+  acceptance remain open; see `docs/p2-focus.md`. Full P2 remains incomplete.
 - Search and commands implemented, awaiting owner desktop acceptance: the command palette
   (Ctrl+K, `ui/palette.py`) and `services/search.py`, a bounded local search of actions,
   drafts and notes, events, cached Google event titles and the connected account's cached

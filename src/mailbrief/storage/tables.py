@@ -469,6 +469,41 @@ class ProjectTable(Base):
     __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
 
 
+class DayPlanTable(Base):
+    __tablename__ = "day_plans"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_day_plans_public_id"),
+        UniqueConstraint("local_date", name="uq_day_plans_local_date"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False)
+    creation_zone: Mapped[str] = mapped_column(String(128), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
+
+class DayPlanItemTable(Base):
+    __tablename__ = "day_plan_items"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_day_plan_items_public_id"),
+        UniqueConstraint("plan_id", "task_public_id", name="uq_day_plan_items_plan_task"),
+        UniqueConstraint("plan_id", "position", name="uq_day_plan_items_plan_position"),
+        CheckConstraint("position >= 0", name="position_nonnegative"),
+        Index("ix_day_plan_items_task_public_id", "task_public_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("day_plans.id", ondelete="CASCADE"))
+    task_public_id: Mapped[str] = mapped_column(ForeignKey("actions.public_id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class ActionSeriesTable(Base):
     """A repeating task's series (B05): its rule, and the template its later occurrences are
     made from. Its occurrences are ordinary actions; the series has no account and is never
@@ -645,6 +680,28 @@ class TaskCommandTable(Base):
     __table_args__ = (
         CheckConstraint("length(command_id) = 36", name="command_id_length"),
         CheckConstraint("operation = 'task.create'", name="operation_known"),
+        CheckConstraint(
+            "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'",
+            name="input_hash_valid",
+        ),
+        CheckConstraint("result_revision >= 1", name="result_revision_positive"),
+    )
+
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class NoteCommandTable(Base):
+    """Durable create receipts; no FK so purging a note cannot make a retry recreate it."""
+
+    __tablename__ = "note_commands"
+    __table_args__ = (
+        CheckConstraint("length(command_id) = 36", name="command_id_length"),
+        CheckConstraint("operation = 'note.create'", name="operation_known"),
         CheckConstraint(
             "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'",
             name="input_hash_valid",

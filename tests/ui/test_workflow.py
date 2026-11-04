@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -43,6 +44,8 @@ from mailbrief.domain.calendar_planning import (
     PlanningPreview,
     PlanningStatus,
 )
+from mailbrief.domain.capture import CaptureRequest
+from mailbrief.domain.day_plans import DayPlan, DayPlanItem
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -52,6 +55,7 @@ from mailbrief.domain.digests import (
     SyncStatus,
 )
 from mailbrief.domain.drafting import PreviewLine
+from mailbrief.domain.drafts import Draft, DraftKind
 from mailbrief.domain.events import (
     ActionMarker,
     AppliedBatch,
@@ -189,6 +193,7 @@ class FakeBackend(FakeDrafts):
         self.preferences = DesktopPreferences()
         # The owner's preferences, as the database would hold them.
         self.owner_preferences = OwnerPreferences.defaults()
+        self.focus_plans: dict[date, DayPlan] = {}
         self.owner_fail: Exception | None = None
         self.owner_saves: list[tuple[PreferencesEdit, int]] = []
         # Saved briefs by account and day, the missed days offered, and each generate's day.
@@ -277,6 +282,23 @@ class FakeBackend(FakeDrafts):
         if self.list_fail is not None:
             raise self.list_fail
         return self.actions.get(view, ())
+
+    async def get_action(self, public_id: str) -> Action:
+        from mailbrief.services.actions import ActionNotFoundError
+
+        for actions in self.actions.values():
+            for action in actions:
+                if action.public_id == public_id:
+                    return action
+        raise ActionNotFoundError("That action was not found.")
+
+    async def capture(self, request: CaptureRequest) -> Action | Draft:
+        if request.kind == "task":
+            saved = await self.create_action(request.task_edit(), (), command_id=request.command_id)
+            saved = saved.model_copy(update={"public_id": str(uuid4())})
+            self.actions[ActionFilter.OPEN] = (*self.actions.get(ActionFilter.OPEN, ()), saved)
+            return saved
+        return self._add(DraftKind.NOTE, request.note_edit())
 
     async def count_actions(self, view: ActionFilter) -> int:
         self.count_calls.append(view)
@@ -736,12 +758,78 @@ class FakeBackend(FakeDrafts):
             *self.actions.get(ActionFilter.OPEN, ()),
             *self.actions.get(ActionFilter.WAITING, ()),
         ]
+        all_actions = {a.public_id: a for rows in self.actions.values() for a in rows}
+        plan = self.focus_plans.get(day, DayPlan(day=day))
+        plan = plan.model_copy(
+            update={
+                "items": tuple(
+                    item.model_copy(update={"action": all_actions.get(item.task_public_id)})
+                    for item in plan.items
+                )
+            }
+        )
+        selected = {item.task_public_id for item in plan.items}
         return DaySummary(
             day=day,
-            attention=needs_attention(actions, today=day, zone=zone, now=now),
+            attention=needs_attention(
+                (action for action in actions if action.public_id not in selected),
+                today=day,
+                zone=zone,
+                now=now,
+            ),
             replies=new_replies(actions),
             calendar=self._range(day, day, zone),
+            focus=plan,
         )
+
+    async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]:
+        selected = {
+            item.task_public_id for item in self.focus_plans.get(day, DayPlan(day=day)).items
+        }
+        return tuple(
+            a
+            for view in (ActionFilter.OPEN, ActionFilter.WAITING)
+            for a in self.actions.get(view, ())
+            if text.casefold() in a.title.casefold() and a.public_id not in selected
+        )[:50]
+
+    async def select_day_task(
+        self, day: date, zone: ZoneInfo, task_id: str, revision: int
+    ) -> DayPlan:
+        plan = self.focus_plans.get(day, DayPlan(day=day))
+        if any(item.task_public_id == task_id for item in plan.items):
+            return plan
+        task = await self.get_action(task_id)
+        item = DayPlanItem(
+            public_id=str(uuid4()), task_public_id=task_id, position=len(plan.items), action=task
+        )
+        result = plan.model_copy(
+            update={"revision": plan.revision + 1, "items": (*plan.items, item)}
+        )
+        self.focus_plans[day] = result
+        return result
+
+    async def deselect_day_task(self, day: date, item_id: str, revision: int) -> DayPlan:
+        plan = self.focus_plans[day]
+        result = plan.model_copy(
+            update={
+                "revision": plan.revision + 1,
+                "items": tuple(item for item in plan.items if item.public_id != item_id),
+            }
+        )
+        self.focus_plans[day] = result
+        return result
+
+    async def reorder_day_tasks(
+        self, day: date, item_ids: tuple[str, ...], revision: int
+    ) -> DayPlan:
+        plan = self.focus_plans[day]
+        by_id = {item.public_id: item for item in plan.items}
+        result = plan.model_copy(
+            update={"revision": plan.revision + 1, "items": tuple(by_id[key] for key in item_ids)}
+        )
+        self.focus_plans[day] = result
+        return result
 
     def _range(self, first_day: date, last_day: date, zone: ZoneInfo) -> CalendarRange:
         live = [

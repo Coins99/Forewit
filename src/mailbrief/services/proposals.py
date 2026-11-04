@@ -477,7 +477,7 @@ class ProposalService:
             ):
                 raise ActionConflictError(_UNDO)
             if action.status != ActionStatus.OPEN.value:
-                await self._repeats.withdraw(action)
+                await self._repeats.withdraw(action, now)
             _restore(action, saved)
             if row.source_added and await self._actions.source_count(action.id) > 1:
                 await self._actions.remove_source(action.id, row.provider_message_id)
