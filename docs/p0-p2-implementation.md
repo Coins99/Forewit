@@ -1,16 +1,46 @@
 # P0–P2 implementation progress
 
+## P2-04b to P2-09 workspace (2026-11-05)
+
+PR #102 (`feat/p2-workspace`) merged on top of P2-04a. It was built in parallel on its
+own branch rather than stacked on #101, which is why both added a migration 0029 for the
+same note column. It adds:
+
+- the Projects page with project context;
+- the Today/Tasks/Projects/Calendar/Notes/Mail workspace;
+- explicit capture review;
+- Upcoming;
+- revision-bound dated-plan copy and move;
+- project and saved-brief search.
+
+Revision `20261105_0031` merges its `20261103_0029`/`0030` branch with #101's
+`20261104_0029` without editing them. `storage/migration_forks.py` runs their shared
+column change only once. When it adopts a column #102's revision made, it validates it
+and adds #101's index and `ck_drafts_project_only_for_notes`. On downgrade it keeps the
+column while the other fork still needs it.
+
+Its CI passed on Windows (5,135 tests) and macOS (3,406 regular plus 1,726 native Cocoa
+UI tests). Still open:
+
+- native macOS package and Cocoa scaling checks;
+- owner acceptance and the ordinary-use trial;
+- cold window-display timing and enabled-AI isolation;
+- the large-profile latency follow-up.
+
+See [the workspace register](p2-workspace.md).
+
 ## P2-04a notes and note links (2026-11-04)
 
 The owner approved P2-04 as two stacked pull requests. This first one adds the Notes
 sidebar row (Ctrl+8), the writing page's Notes view with a project filter, and a note's
-editable project and task links. Migration 0029 adds `drafts.project_public_id`
+editable project and task links. Migration `20261104_0029` adds `drafts.project_public_id`
 (ADR 0027). Backup, recovery, export and purge keep the links, and AI drafting never
 sends them. After the review fixes, Windows checks passed 5,106 tests (four branding command
 tests need the CI environment's Forewit commands), 95.69% coverage and every service gate,
 strict win32/darwin typing, 1x/2x renders and a fresh single-file package check.
 See [scope, verification and acceptance](p2-notes.md). Native macOS and owner
-acceptance remain open. P2-04b, the Projects page and project context, follows.
+acceptance remain open. P2-04b, the Projects page and project context, followed in
+PR #102 (above).
 
 ## P2-03 durable daily focus (2026-11-03)
 

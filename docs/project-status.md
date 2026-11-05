@@ -6,13 +6,26 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
-- P2-04a Notes and note links is implemented on `feat/p2-notes`: a Notes sidebar row
-  (Ctrl+8) with a project filter, and a note's editable project and task links
-  (migration 0029, [ADR 0027](adr/0027-note-links.md)). See
-  [scope and verification](p2-notes.md). Native macOS and owner acceptance remain open,
-  and P2-04b (the Projects page) follows.
+- P2-04b to P2-09 merged in PR #102:
+  - the Projects page with project context;
+  - the Today/Tasks/Projects/Calendar/Notes/Mail workspace;
+  - capture review;
+  - Upcoming;
+  - dated-plan copy and move;
+  - project and saved-brief search.
 
-- P2-03 durable daily focus is implemented locally: ordered daily selections,
+  Migration `20261105_0031` merges the two published 0029 forks. Windows and macOS CI
+  passed. Native macOS package and Cocoa scaling checks, owner acceptance, the
+  ordinary-use trial, cold window-display timing, enabled-AI isolation and the
+  large-profile latency follow-up remain open. See
+  [the workspace register](p2-workspace.md).
+
+- P2-04a Notes and note links merged in PR #101: Notes (Ctrl+8) with a project filter,
+  and a note's editable project and task links (migration `20261104_0029`,
+  [ADR 0027](adr/0027-note-links.md)). See [scope and verification](p2-notes.md). Native
+  macOS and owner acceptance remain open.
+
+- P2-03 durable daily focus merged in PR #99: ordered daily selections,
   conflict checks, focus-first Today, known/unknown/waiting workload, keyboard
   ordering and ordinary task completion/reopen/Undo. Migration 0028 includes
   recovery/export and safe purge integration. Windows checks passed 5,057 tests,
@@ -21,7 +34,7 @@ later use after Microsoft Entra access is resolved.
   The three two-round review findings are fixed with regressions. Native macOS and
   owner acceptance remain open; full P2 is incomplete.
 
-- P2-02 global Task/Note capture is implemented locally, with atomic initial note
+- P2-02 global Task/Note capture merged in PR #99, with atomic initial note
   text/version and retry receipts, independent saves during email work, guarded
   close/quit and canonical Open. Windows verification passed 5,022 tests, coverage,
   strict win32/darwin typing, visual checks and native single-file package/recovery

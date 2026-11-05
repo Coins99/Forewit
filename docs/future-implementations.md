@@ -844,9 +844,9 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
-P2-04–P2-09 update (2026-11-03): Notes/project context, workspace/Mail migration,
+P2-04–P2-09 update (2026-11-05): Notes/project context, workspace/Mail migration,
 explicit capture processing, upcoming commitments, dated-plan transfers and
-project/saved-brief search are implemented locally. See [workspace implementation
+project/saved-brief search are merged (PRs #101 and #102). See [workspace implementation
 and verification](p2-workspace.md). Native macOS, the larger performance/AI-isolation
 checks and owner ordinary-use acceptance are not implied by implementation.
 
@@ -861,8 +861,9 @@ Historical planning commands, capacity and later workspace migration remain plan
 native macOS and owner acceptance remain open.
 
 P2-04a update (2026-11-04): the Notes page and a note's project and task links (E01)
-are implemented; see [the notes checkpoint](p2-notes.md) and ADR 0027. P2-04b adds the
-Projects page with project context (E03's first slice).
+are implemented; see [the notes checkpoint](p2-notes.md) and ADR 0027. P2-04b, the
+Projects page with project context (E03's first slice), followed in PR #102 (the
+P2-04–P2-09 update above).
 
 P2 implementation update (2026-11-03): the first canonical-navigation slice is
 implemented locally and verified on Windows, on the P1 code. Existing screens remain adapters; see

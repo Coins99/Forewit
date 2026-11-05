@@ -5,21 +5,14 @@ description: Use for any change to Forewit's desktop UI under src/mailbrief/ui, 
 
 # Forewit desktop UI
 
-The October 15 Today-template alignment supersedes the older default-frame geometry and
-typography below: the sidebar is 214 px, the default header/sidebar use flat surfaces,
-and the bundled reading font is DM Sans (Inter remains for tabular figures). Ported pages
-use compact list/body/meta sizes from the template. See `docs/ui-redesign.md` and the
-updated Studio renders. Guarded center dialogs and right drawers use their own template
-layout instead of `DialogSheet`; other native dialogs and appearance choices retain the
-shared controls. Plain-text, non-modal, ownership and Qt-lifetime rules still apply.
-
 Read AGENTS.md first; its invariants win. Component specs and the token table are in
 `references/spec.md`. The default look is Studio (`docs/ui/studio.md`: white and Studio
 Mist grey, one blue, Semibold titles, glass pills, filled cards with no borders or
 shadows), in the system's light or dark mode. Its approved renders are
 `docs/ui/studio-light.png` and `docs/ui/studio-dark.png` (the window at 1100 × 720) and
 `docs/ui/studio-dialog.png` (a dialog). The layout's original mockup is
-`docs/ui/mockup-three-pane-dark.png`.
+`docs/ui/mockup-three-pane-dark.png`. Pages ported to the Today template use its compact
+list, body and meta sizes (`docs/ui-redesign.md`).
 
 ## Rules
 - Colours come only from `ui/theme/tokens.py`. Widgets read `current_tokens()` at paint
@@ -50,11 +43,12 @@ shadows), in the system's light or dark mode. Its approved renders are
   boxes. Never style `QPushButton` in the stylesheet; only the sidebar's `variant="nav"`
   rows are. Button text is escaped with `button_label()` unless it is app text carrying
   its own `&` mnemonic (`mnemonic=True`); long mail-derived text uses `shorten=True`.
-- Fonts are bundled Inter (`ui_font(px, medium=..., semibold=...)`): Medium for emphasis
-  in text, Semibold for titles; sizes are in pixels, never points, and display sizes are
-  tracked tighter automatically. Metrics: `TEXT_PX` 13, `READING_PX` 14, `SMALL_PX` 12,
-  `CAPTION_PX` 11, `HEADING_PX` 17, `TITLE_PX` 20, `RADIUS` 10, `CARD_RADIUS` 18,
-  `PILL_RADIUS` 14, `FIELD_RADIUS` 8, `SIDEBAR_WIDTH` 128.
+- Text is the bundled DM Sans (`FONT_FAMILY`), through `ui_font(px, medium=...,
+  semibold=...)`; `tabular=True` gives Inter's equal-width figures for times and counts
+  in columns. Medium is for emphasis in text, Semibold for titles; sizes are in pixels,
+  never points, and display sizes are tracked tighter automatically. Metrics: `TEXT_PX`
+  13, `READING_PX` 14, `SMALL_PX` 12, `CAPTION_PX` 11, `HEADING_PX` 17, `TITLE_PX` 20,
+  `RADIUS` 10, `CARD_RADIUS` 18, `PILL_RADIUS` 14, `FIELD_RADIUS` 8, `SIDEBAR_WIDTH` 214.
 - Buttons are pills; a screen has at most one primary (`primary_fill`). Status text
   (deadlines, proposals) is bare coloured text, never a filled chip. Cards are
   `HairlineFrame`s: a `card` fill, no border. Combo boxes, date, time and number fields,
@@ -64,14 +58,18 @@ shadows), in the system's light or dark mode. Its approved renders are
   glass button; give it an accessible name and a tooltip.
 - Glass panels are the chrome only: the header, sidebar, gutter, status strip and a
   dialog's frame. Pages and a dialog's content sit on a white sheet, and the selected
-  page is a fill, never a second layer of glass.
+  page is a fill, never a second layer of glass. Studio, the default scheme, keeps the
+  chrome flat: its glass backdrop is flat and its lights are off (`GlassTokens`).
 - Dialogs get the home screen's style automatically: `ThemeStyle.polish` installs
   `DialogSheet` (`ui/glass/dialog.py`) on every `QDialog`, which paints the glass with its
   colour field round a rounded sheet (`DIALOG_GUTTER` 8 from the edge, `SHEET_RADIUS`
   12), and gives the dialog's own layout `DIALOG_MARGIN` (22) so its content sits inside
   the sheet. Keep a dialog's content in its own top-level layout with those default
   margins; never paint a dialog's background, give it a stylesheet background or set its
-  top-level margins.
+  top-level margins. The exception is a dialog with the `presentation` property
+  `"center"` (Saved mail) or `"drawer"` (the Calendar's event editor, Google event and
+  Plan with AI): `dialog_guard` shows it inside the window, in the Today template's own
+  layout instead of a `DialogSheet`.
 - Nothing has a sharp corner. Pages sit on the workspace's rounded sheet; never add a
   divider that meets the chrome or another hairline. Anything filled or outlined is
   rounded (`RADIUS`, `CARD_RADIUS`, pills), and pop-ups are rounded by `ThemeStyle`.

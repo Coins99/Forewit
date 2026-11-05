@@ -16,6 +16,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 
 ## Product and status
 
+- Personal desktop app for Windows and macOS that turns today's important Gmail into a
+  short brief, and a general personal planner (tasks, projects, notes, calendar). Both
+  platforms are supported, from source or as native packages.
+- Gmail is the active provider. Microsoft (Outlook/Graph) code is dormant: keep it
+  compiling and its tests passing, but do not extend it unless a task says so.
 - Owner scope decision (2026-11-01): local AI is experimental, behind
   `MAILBRIEF_EXPERIMENTAL_LOCAL_AI=true` (default false). Flag-off local mode fails
   closed; never substitute cloud. Setup and inference require the flag; revoke,
@@ -23,218 +28,56 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   P1–P4 require the P0 data/recovery/owner-work foundations only. Local model quality,
   AI queues, native scheduling and cloud enrichment remain separate deferred work;
   their acceptance and the email trial do not block planner delivery.
+- Everything through P2 (email milestones M1–M9, planner P0–P2) is implemented and
+  merged, except the deferred experimental local-AI work (the dedicated local prompt,
+  its ADR and notices, progressive operation) and capacity planning against available
+  hours (Upcoming shows known commitments, not capacity). Apart from M1–M3, nearly all of
+  it awaits the owner's live or desktop
+  acceptance, and native macOS package checks remain open for the P2 increments. Never
+  claim a feature accepted from CI, agent-run or package checks alone. M9 is accepted
+  only after the owner completes real-record recovery and the 7–14-day release scenario.
+  `docs/project-status.md` and `docs/p0-p2-implementation.md` hold the current state and
+  evidence; read them, not old commit messages, for what is done.
+- Where each feature is specified (behavior, acceptance steps and limits):
 
-- Personal desktop app for Windows and macOS that turns today's important Gmail into a
-  short brief. Both platforms are supported, from source or as native packages (M5).
-- Gmail is the active provider. Microsoft (Outlook/Graph) code is dormant: keep it
-  compiling and its tests passing, but do not extend it unless a task says so.
-- Done: M1 Gmail OAuth and secure restore; M2 Inbox metadata sync, ranking and
-  shortlist review (`forewit-gmail-diagnostic sync`).
-- Implemented, live acceptance recorded in `docs/m3-validation.md`: M3 shortlisted-body
-  reading and preparation (`forewit-gmail-diagnostic bodies`, `docs/gmail-bodies.md`).
-- Implemented, awaiting live acceptance: M4 consented AI analysis and the saved daily brief
-  (`forewit-gmail-diagnostic brief`, `docs/ai-analysis.md`).
-- Implemented, awaiting platform/human acceptance: M5 workflow, settings, full-Inbox
-  shortlist review, offline metadata browser and native packages. See `docs/m5-desktop.md`
-  and `docs/m5-acceptance.md` for validation and the remaining checks. Scope remains
-  in `docs/mvp-plan.md` and `docs/email-implementation-plan.md`.
-- Implemented, awaiting live acceptance: M6 AI action suggestions, accepted actions with
-  editable plans and target dates, open/waiting/completed lists and undo (desktop, plus
-  `brief --show` and `forewit-gmail-diagnostic actions`). See `docs/m6-actions.md` and
-  ADR 0011.
-- M7 implemented, awaiting live acceptance: replies, emails, notes and messages with
-  autosave, versions, copy and export, and AI drafting with Groq from context the owner
-  chooses (desktop, plus `forewit-gmail-diagnostic drafts`). See `docs/m7-drafts.md`,
-  ADR 0012 and ADR 0013.
-- M8 implemented (merged in PR #17), awaiting live acceptance, built in nine parts
-  (`docs/m8-daily-operation.md`); preferences (Parts 1–2) implemented, awaiting live
-  acceptance: time zone, messages per brief, sender exclusions, drafting defaults and AI
-  limits, in the Settings Preferences tab and `forewit-gmail-diagnostic preferences show`.
-  See ADR 0014. Brief history and bounded catch-up (Part 3) implemented, awaiting live
-  acceptance: the desktop Briefs page and `brief --date`, `briefs list` and
-  `briefs show`. Thread tracking backend (Part 4) implemented, awaiting live acceptance:
-  the threads of open actions are checked after today's sync (`actions list`,
-  `actions seen`). See ADR 0015. Thread activity in the desktop and "Add to" an existing
-  action (Part 5) implemented, awaiting live acceptance: continuations and Add to in the
-  brief, Mark seen in the actions pane, and `actions accept N --into`. Follow-up proposals
-  backend (Part 6) implemented, awaiting live acceptance: analysis schema 7's follow-up
-  signal, proposals the owner applies or dismisses (`actions proposals`,
-  `apply-proposal`, `dismiss-proposal`) and a ranking bonus for replies in tracked threads.
-  See ADR 0016. Follow-up proposals in the desktop and replies outside today's Inbox
-  (Part 7) implemented, awaiting live acceptance: proposals in the brief, the actions pane
-  and a Proposals dialog with Undo, and up to 3 tracked replies that aren't in today's
-  Inbox joining the review and the brief. Daily operation (Part 8) implemented, awaiting
-  live acceptance: refresh on launch and every 1, 2 or 4 hours while the desktop is open,
-  automatic analysis only with an explicit permission of 1–10 messages on the consent, and
-  remembered declines. See ADR 0017. Closeout (Part 9): runs through a day are cumulative,
-  with one brief per day. The consolidated live acceptance and known limits are in
-  `docs/m8-daily-operation.md`.
+  | Area | Docs | ADRs |
+  | --- | --- | --- |
+  | Gmail sign-in, sync, bodies | `gmail-setup.md`, `google-signin-inbox.md`, `gmail-bodies.md`, `inbox-loading.md` | 0007, 0019 |
+  | AI analysis and the brief (M4) | `ai-analysis.md` | 0009, 0010 |
+  | Desktop workflow and packages (M5) | `m5-desktop.md`, `m5-acceptance.md`, `windows-executable.md` | 0006, 0008 |
+  | Actions and suggestions (M6) | `m6-actions.md` | 0011 |
+  | Drafts, notes, AI drafting (M7) | `m7-drafts.md` | 0012, 0013 |
+  | Daily operation (M8: preferences, history, threads, proposals, automatic runs) | `m8-daily-operation.md` | 0014–0017 |
+  | Data and recovery (M9) | `m9-durability.md`, `m9-live-validation.md` | |
+  | Ranking signals | `ranking.md` | 0020 |
+  | Calendar, Google Calendar, AI planning | `calendar.md` | 0018 |
+  | Local email AI (P0-B, experimental) | `p0-b2-local-analysis-plan.md`, `p0-b2-local-analysis.md`, `local-ai-benchmark.md` | 0023 |
+  | Planner foundation (P0, P1 tasks, projects, estimates, priorities/tags, repeats, deadlines, waiting, checklists) | `p0-planner-foundation.md`, `p1-foundation-audit.md`, `p1-*.md` | 0021, 0022, 0024 |
+  | Today, search and the palette | `today.md`, `search.md` | |
+  | P2 navigation, capture, focus, notes, workspace | `p2-navigation.md`, `p2-capture.md`, `p2-focus.md`, `p2-notes.md`, `p2-workspace.md` | 0025–0027 |
+  | Desktop UI look | `ui/studio.md`, `ui/liquid-glass.md`, `.claude/skills/mailbrief-ui/` | |
 
-- M9 implemented (merged in PR #19, review fixes in PR #20), awaiting owner live acceptance:
-  Data and recovery provides consistent backup, archive verification, restore after
-  shutdown, portable action/draft/note exports, previewed manual retention, safe
-  diagnostics and bundled help. Offline backup/verify/restore is also available through
-  `python -m mailbrief.diagnostics.backup`. Restore retains a pre-restore snapshot,
-  clears automatic AI permission and never touches credentials. Gmail diagnostic
-  database commands hold `desktop.lock` for their whole run: they exit 5 while the desktop
-  is open, and the desktop reports that Forewit is busy while one runs. CI enforces the
-  service coverage target and checks native packages at 100%/200% scale with synthetic
-  backup/recovery/export/cleanup.
-  See `docs/m9-durability.md` and `docs/m9-live-validation.md`. Do not claim M9 accepted
-  until the owner completes real-record recovery and the 7–14-day release scenario.
-- P1 first slice implemented, awaiting owner desktop acceptance: manual tasks on Actions
-  (New task / Ctrl+N, Cmd+N on macOS) use the shared action editor and lifecycle without Gmail.
-  Revisioned activity is transactional and survives reopen, restart, backup/recovery and
-  writing export. Undo reopen restores the original completion timestamp. See
-  `docs/p1-manual-tasks.md`; the organization slice below builds on this foundation.
-- P1 implementation/platform verification complete (PR #98; owner acceptance open):
-  Windows CI passed 4,938 tests; macOS passed 3,310 non-UI plus 1,625 native Cocoa
-  UI/app tests. Both passed coverage gates and native offline package checks, including
-  Windows copied-executable lifecycle/recovery. Agent-operated Windows capture and
-  lifecycle checks passed; further hands-on checks stopped when the desktop helper
-  became unavailable. Do not represent these as owner usability or M9 live acceptance.
-  `ActionService.history()` reads uncapped effective per-task
-  activity, including soft-deleted records. `domain/task_history.py` resolves correction
-  chains and marks legacy/gapped history partial; it never treats a capped UI list as
-  lifetime history. See `docs/p1-foundation-audit.md` for the scope/evidence matrix and
-  outstanding owner acceptance, and `docs/p0-planner-foundation.md` for P0 closeout.
-- P1 retry-safe manual capture implemented: `ActionService.create(..., command_id=UUID)`
-  commits `task_commands` receipts atomically with owner records (migration 0026). The
-  editor retains its ID across failures; a retry returns the current canonical task.
-  Different input and deleted/purged results are refused. Receipts contain no owner text,
-  have no task FK, survive backup/restore and remain after purge; writing exports omit
-  this control metadata. See ADR 0024. Old callers without IDs retain independent creates.
-- P1 organization slice implemented, awaiting owner desktop acceptance: projects and
-  optional life areas in Actions (Projects & areas), task assignment and grouped filters.
-  Archived projects retain tasks; removing an area detaches projects and keeps work.
-  New activity snapshots retain project/area IDs. Migration 0016 follows task history 0015.
-  See `docs/p1-projects-life-areas.md`.
-- P1 estimates implemented, awaiting owner desktop acceptance: an optional owner estimate
-  (`estimate_minutes`, 1–6,000) in the task editor and detail, migration 0019. It is never
-  derived from the AI's coarse effort, and AI runs and proposals never write it. See
-  `docs/p1-manual-tasks.md#estimates`.
-- P1 priorities, tags and filters (B03) implemented, awaiting owner desktop acceptance: an
-  optional owner priority (high/medium/low) that orders tasks with the same dates, and up
-  to 10 tags per task in `action_tags`, matched by `tag_key`, offered by the Actions filter.
-  Migration 0020 follows 0019. See `docs/p1-priorities-tags.md`.
-- P1 repeating tasks (B05) implemented, awaiting owner desktop acceptance: a task can repeat
-  daily, weekly on chosen weekdays, monthly on a day or on the last day, until an optional
-  end date. A series (`action_series`, the rule and a template) has one open occurrence at a
-  time, an ordinary task; completing or skipping it makes the next (`services/recurrence.py`).
-  Migration 0021 follows 0020. See `docs/p1-recurring-tasks.md`.
-- P1 deadlines the owner sets (B06) implemented, awaiting owner desktop acceptance: the task
-  editor's Due by sets, changes or clears a deadline (a day, or a time in the owner's zone);
-  `actions.deadline_origin` says whether an email or the owner set it, and
-  `stated_deadline_*` keeps the email's deadline the owner replaced, for Use the email's.
-  Migration 0023 follows 0022. See `docs/p1-deadlines.md` and ADR 0021.
-- P1 waiting and commitments (B08) implemented, awaiting owner desktop acceptance: a task
-  names who it waits on (**Waiting on**) or, for the owner's own, who it is for (**For**),
-  the owner's text in `actions.person` with its `person_key`; a waiting task keeps
-  `waiting_since_utc` and its target date is its follow-up date. The Waiting page shows the
-  person and the wait and prompts a follow-up only when one is due; New task works there, and
-  the Actions filter offers each person. Migration 0024 follows 0023. See
-  `docs/p1-waiting.md` and ADR 0022.
-- P1 checklists in place (B04) implemented, awaiting owner desktop acceptance: an open task's
-  steps are check boxes in the Actions detail pane, with an **Add a step** field
-  (`ActionService.set_step_done` and `add_step`, one revision each, recorded as `edited`). No
-  migration. See `docs/p1-checklists.md`.
-- Unified Today, first slice, implemented, awaiting owner desktop acceptance: **Your day**
-  above the brief on Today (what needs attention, today's agenda, new replies), a read
-  model over local actions and calendar data only (`services/today.py`,
-  `ui/today_view.py`). See `docs/today.md`.
-- P2 navigation foundation implemented locally on `feat/p2-navigation`: validated routes
-  and a shared dispatcher adapt legacy pages/commands, search, Today links and saved
-  briefs. Pending opens are guarded by navigation/account context; task reveal reads
-  canonical records beyond list filters/limits. Dedicated workspace pages remain later
-  P2 increments; daily plans are covered by P2-03 below. Windows source verification
-  passed 4,972 tests,
-  coverage gates, win32/darwin typing and 1x/2x gallery/theme checks. Native packages,
-  native macOS and owner acceptance remain open. See `docs/p2-navigation.md`.
-- P2-02 global capture implemented locally: Capture on every page, palette and
-  Ctrl+Shift+N/Cmd+Shift+N saves ordinary Task/Note records without Gmail/AI. Owner
-  saves have an independent local lifecycle and shutdown waits for them. Notes save
-  initial text/version plus retry receipts atomically (migration 0027, ADR 0025);
-  receipts survive purge/recovery and stay out of writing exports. Windows verification
-  passed 5,022 tests, coverage gates, strict win32/darwin typing, 1x/2x UI checks and a
-  fresh single-file package/lifecycle/recovery check. Native macOS/owner acceptance
-  remains open; see `docs/p2-capture.md`. Capture review/processed state remains
-  later P2 work.
-- P2-03 daily focus implemented locally: revisioned per-profile/date plans and stable
-  ordered task selections (migration 0028, ADR 0026). My focus leads Today, with
-  select/remove/keyboard reorder, existing completion/reopen/Undo and separate known,
-  unknown and waiting workload. Capture can add its saved task to today. Selections
-  survive restart/recovery/export; soft delete is unavailable/restore, purge removes
-  references and bumps each plan once. No task dates or lifecycle facts are copied.
-  Windows checks passed 5,057 tests after review repairs, coverage/service gates, win32/darwin typing,
-  1x/2x gallery/theme checks and a fresh single-file package/lifecycle/recovery check.
-  Review repairs bound the agenda, exclude selections before search limits, and
-  refresh the focus date during busy email work. Native macOS and owner
-  acceptance remain open; see `docs/p2-focus.md`. Full P2 remains incomplete.
-- P2-04a Notes and note links merged in PR #101, awaiting owner desktop
-  acceptance: a Notes sidebar row (Ctrl+8) shows the writing page's Notes view, as
-  Waiting shares Actions, with a project filter; Drafts lists replies, emails and
-  messages. A note links to at most one project (`drafts.project_public_id`, migration
-  0029) and one task (the existing `action_id` and title snapshot), both editable in the
-  editor (`DraftService.set_project` / `set_task`, `ui/task_picker.py`). See ADR 0027
-  and `docs/p2-notes.md`. P2-04b (the Projects page and project context) follows.
-- Search and commands implemented, awaiting owner desktop acceptance: the command palette
-  now also finds projects and saved briefs (P2-09). P2-04 through P2-09 are implemented
-  locally: Notes/project context, the Tasks/Projects/Notes/Mail workspace, explicit capture
-  review state, upcoming known commitments, and revision-bound dated-plan copy/move.
-  PR #102 builds on #101's independent note setters and project/task editor. Migration
-  0031 converges the published 0029 forks without editing existing revisions; the online
-  migration adapter adopts only their identical column operation after validation.
-  See `docs/p2-workspace.md` for behavior, migrations 0029–0031 and the verification
-  register. Full native macOS and owner acceptance remain separate open checks.
-  The command palette (Ctrl+K, `ui/palette.py`) uses `services/search.py` for bounded local search of tasks,
-  drafts and notes, events, cached Google event titles and the connected account's cached
-  mail metadata. See `docs/search.md`.
-- P0-B1 (local-first email AI, D09) benchmark done; nothing ships: `scripts/local_ai/` runs
-  the Groq adapter's prompt and schema against a model on the owner's computer (llama.cpp's
-  `llama-server` on loopback) and a rule-based baseline, over synthetic fixtures, through the
-  app's own `validate_candidate`. Results and the recommendation for P0-B2 are in
-  `docs/local-ai-benchmark.md`.
-- P0-B2 (local email analysis), Parts 1–3 implemented; Parts 4–5 are connected and in
-  final verification. Part 3 adds the cloud/local preference, a separate local
-  message limit, and per-account local consent (`ai-consent local grant | revoke`). Grant
-  needs a typed yes; revoke needs no credentials and clears every local disclosure.
-  Restore revokes local grants while preserving the selected mode. CLI/desktop local
-  briefs use `providers/analysis.py` and the lazy retained `LocalModelHost`; they never
-  compose Groq. Permission and preference revision checks guard body reads, model calls
-  and publication. Cancellation joins inference; setup cancellation joins disk workers
-  before releasing its lock. Settings > Preferences provides mode/limit/setup controls;
-  Settings can stop work and revoke while analysis runs. Dedicated local prompt,
-  ADR/notices, progressive operation and live/platform acceptance remain pending.
-  Parts 1–2 provide `providers/local/`, the local model behind the `AIProvider` port and `llama-server`
-  as a hardened side process, and `services/local_setup.py`, which downloads and checks the
-  pinned runtime and model (`forewit-gmail-diagnostic local-ai status | setup | remove`).
-  The plan, its parts and the owner's decisions are in
-  `docs/p0-b2-local-analysis-plan.md`; which parts are done and how to continue on another
-  computer is in `docs/p0-b2-handoff.md`. Tick each part there as it lands, and delete that
-  file (and this mention) in the commit that finishes Part 7.
-- The desktop UI is the three-pane workspace (PR #21); see `.claude/skills/mailbrief-ui/`.
-  Its default look is Studio (`docs/ui/studio.md`), after the owner's Apple style
-  reference, in the system's light or dark mode unless Settings > Appearance keeps one.
-  The Actions page follows it: painted action rows beside the selected action's detail.
-  The Inbox page starts as a list across the page, as Gmail's does, and opening a message
-  splits it into the list and a reading pane, as Outlook's does (the reading pane alone on
-  a narrow window); a sync that stops early shows once, as the header's alert.
-- Ranking signals (ADR 0020) implemented, awaiting live acceptance: Gmail's category tabs,
-  stars and bulk-mail headers, important senders (Settings > Preferences, `preferences
-  show`), and what the owner's own choices of the last 90 days say about each sender;
-  **Should have been in my brief** on the Inbox page. Migration 0018 follows 0017. See
-  `docs/ranking.md`.
-
-- Calendar views implemented, awaiting owner desktop acceptance: Week (a week of hours),
-  Month (six weeks of days) and List (the week's rows), chosen by tabs and remembered in
-  appearance.json (`ui/calendar_grid.py`, `ui/calendar_layout.py`). See `docs/calendar.md`.
-- Calendar (ADR 0018), phase 1 implemented: a local Calendar page (sidebar, Ctrl+6) with
-  the owner's events, revisioned with Undo, and open actions' deadlines and target dates
-  as markers. Phase 2 (2a sign-in, sync and cache; 2b the page) implemented, awaiting
-  live acceptance: Google Calendar read-only beside the owner's events. Phase 3a: the
-  AI planning service, the Groq call and all-or-nothing apply with Undo; 3b, the Plan
-  with AI dialog on the Calendar page. Forewit's own calendar in Google is phase 4. See
-  `docs/calendar.md`.
+- The diagnostic CLI is `forewit-gmail-diagnostic` (subcommands such as `sync`,
+  `bodies`, `brief`, `actions`, `drafts`, `preferences show`, `ai-consent`,
+  `local-ai`); offline backup, verify and restore is `python -m
+  mailbrief.diagnostics.backup`. Gmail diagnostic database commands hold `desktop.lock`
+  for their whole run: they exit 5 while the desktop is open, and the desktop reports
+  that Forewit is busy while one runs.
+- The desktop's sidebar is Today, Tasks, Projects, Calendar, Notes and Mail. Ctrl/Cmd+1–8
+  keep their earlier meanings: 1 Today, 2 Inbox, 3 Tasks, 4 Waiting, 5 Mail drafts,
+  6 brief history, 7 Calendar, 8 Notes. New task is Ctrl/Cmd+N, Capture
+  Ctrl/Cmd+Shift+N and the palette Ctrl/Cmd+K. The default look is Studio (`docs/ui/studio.md`), in the system's light or
+  dark mode unless Settings > Appearance keeps one.
+- Restore retains a pre-restore snapshot, clears automatic AI permission, revokes local
+  AI grants and never touches credentials.
+- Retry receipts (`task_commands`, ADR 0024; `note_commands`, ADR 0025) commit
+  atomically with the record they create. They contain no owner text, have no foreign
+  key to it, survive backup, restore and purge, and are left out of writing exports. A
+  retry with the same command ID returns the current record; different input, or a
+  removed result, is refused.
+- `ActionService.history()` reads a task's uncapped effective activity, including
+  soft-deleted records; `domain/task_history.py` resolves correction chains and marks
+  legacy or gapped history partial. Never treat a capped UI list as lifetime history.
 
 ## Layout (ports and adapters)
 
@@ -358,8 +201,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   the Fusion palette and stylesheet (`style.py`, `apply_theme`; `follow_theme` re-colours
   what a widget keeps, such as a tinted icon, when the scheme changes; `ThemeStyle` draws
   push buttons as glass pills, fields, chevrons, check boxes and radio buttons, with
-  `indicators.py`, and installs `DialogSheet` on every dialog), bundled Inter
-  Regular, Medium and SemiBold under the SIL OFL (`fonts/`) and Tabler icons under MIT
+  `indicators.py`, and installs `DialogSheet` on every dialog), bundled DM Sans for
+  text and Inter Regular, Medium and SemiBold for tabular figures, under the SIL OFL
+  (`fonts/`), and Tabler icons under MIT
   (`icons/`). `ui/labels.py` holds
   `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace
   (`workspace.py`, with `hairline.py`, `brief_list.py` and `brief_detail.py`): the header

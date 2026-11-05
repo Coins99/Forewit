@@ -41,17 +41,18 @@ blue with white text.
 
 Metrics (logical px): RADIUS 10 (rows, selections), CARD_RADIUS 18, SHEET_RADIUS 12 (the
 pages' sheet and a dialog's), DIALOG_GUTTER 8, DIALOG_MARGIN 22 (see Dialogs), PILL_RADIUS
-14 (the command palette's search field), TAB_RADIUS 12, FIELD_RADIUS 8, SIDEBAR_WIDTH 128, TEXT_PX 13,
+14 (the command palette's search field), TAB_RADIUS 12, FIELD_RADIUS 8, SIDEBAR_WIDTH 214, TEXT_PX 13,
 READING_PX 14 (an email's summary), SMALL_PX 12, CAPTION_PX 11, HEADING_PX 17 (the brief's
 day, Semibold), TITLE_PX 20 (page and email titles, Semibold); list items pad
 ITEM_PAD_X 10 by ITEM_PAD_Y 5 with no selection mark (ITEM_MARK_PX 0).
 
-Fonts: bundled Inter 4.001 Regular, Medium and SemiBold (`ui_font(px, medium=...,
+Fonts: text is the bundled DM Sans (`FONT_FAMILY`; `ui_font(px, medium=...,
 semibold=...)`, never both). From 15 px up, `ui_font` tracks letters tighter by Inter's
 dynamic metrics (`tracking(px)`: −0.13 px at 15, −0.33 at 20), as Apple sets display
-type; text sizes keep Inter's own spacing. `tabular=True` (in `ui_font` and `ui_metrics`)
-turns on Inter's tabular figures (`tnum`), so times and counts in a column line up: the
-Inbox's dates, its count and its "1–100 of 342".
+type; text sizes keep their own spacing. `tabular=True` (in `ui_font` and `ui_metrics`)
+uses the bundled Inter 4.001 (Regular, Medium and SemiBold) with its tabular figures
+(`tnum`), so times and counts in a column line up: the Inbox's dates, its count and its
+"1–100 of 342".
 
 ### Glass tokens
 
