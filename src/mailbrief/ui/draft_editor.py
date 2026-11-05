@@ -2,7 +2,8 @@
 
 The editor never writes anything itself. It asks the window, which runs every draft write
 through one serialized queue, and answers through the methods below. Source subjects and
-senders come from email, so they are shown only in plain-text labels.
+senders come from email, so they are shown only in plain-text labels. A note also shows
+its project and task (ADR 0027), which the owner changes here.
 """
 
 from datetime import date
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.domain.actions import Action
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingPreview
 from mailbrief.domain.drafts import (
     DRAFT_BODY_MAX_CHARS,
@@ -36,6 +39,7 @@ from mailbrief.domain.drafts import (
     KIND_NAMES,
     Draft,
     DraftEdit,
+    DraftKind,
     DraftSource,
     DraftVersion,
     DraftVersionInfo,
@@ -47,11 +51,13 @@ from mailbrief.domain.drafts import (
     recipient_warnings,
     still_to_fill,
 )
+from mailbrief.domain.projects import Project
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
 from mailbrief.ui.labels import outline_button, plain_label
 from mailbrief.ui.lists import SafeList, clear_list
+from mailbrief.ui.task_picker import TaskPickerDialog
 from mailbrief.ui.theme import ui_font
 
 DEBOUNCE_MS = 1_500
@@ -101,7 +107,10 @@ class DraftEditor(QDialog):
     - ``ai_parts_requested()``: offer_ai(), or ai_failed();
     - ``ai_prepare_requested(options)``: show_ai_preview(), or ai_failed();
     - ``ai_generate_requested(agreed)``: ai_generated(), or ai_failed();
-    - ``ai_cancel_requested()``: stops a generation, which then answers ai_failed().
+    - ``ai_cancel_requested()``: stops a generation, which then answers ai_failed();
+    - ``project_requested(public_id or None)`` and ``task_requested(public_id or None)``,
+      a note's links: links_saved() or links_failed() or show_conflict();
+    - ``task_search_requested(text)``: show_task_choices() or task_choices_failed().
     """
 
     autosave_requested = Signal(object)
@@ -116,6 +125,9 @@ class DraftEditor(QDialog):
     ai_prepare_requested = Signal(object)
     ai_generate_requested = Signal(bool)
     ai_cancel_requested = Signal()
+    project_requested = Signal(object)
+    task_requested = Signal(object)
+    task_search_requested = Signal(str)
 
     def __init__(
         self,
@@ -148,6 +160,8 @@ class DraftEditor(QDialog):
         self._discard_armed = False
         self._versions: tuple[DraftVersionInfo, ...] = ()
         self._picker: QFileDialog | None = None
+        self._projects: tuple[Project, ...] = ()
+        self._links_busy = False  # A project or task change is waiting for the window.
         root = QVBoxLayout(self)
         self._root = root
         root.setContentsMargins(0, 0, 0, 0)
@@ -208,6 +222,42 @@ class DraftEditor(QDialog):
         self.placeholder_line = _plain()
         self.missing_line = _plain()
         layout.addWidget(self._fields)
+        self.links = QWidget()
+        self.links.setObjectName("noteLinks")
+        self.links.setAccessibleName("Note project and task")
+        # Two rows, their labels in one column: the project, then the task and its buttons.
+        links = QGridLayout(self.links)
+        links.setContentsMargins(0, 8, 0, 8)
+        links.setHorizontalSpacing(10)
+        links.setVerticalSpacing(6)
+        self.project_label = QLabel("Pro&ject")
+        self.project_choice = QComboBox()
+        self.project_choice.setObjectName("noteProject")
+        self.project_choice.setAccessibleName("Note project")
+        self.project_choice.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.project_choice.setMinimumContentsLength(10)
+        self.project_choice.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.project_label.setBuddy(self.project_choice)
+        self.task_label = QLabel("Task")
+        self.task_line = _plain("None")
+        self.task_line.setObjectName("noteTask")
+        self.task_line.setAccessibleName("Linked task")
+        self.link_task_button = outline_button("Link to tas&k…", "noteLinkTask", mnemonic=True)
+        self.link_task_button.setAccessibleName("Link to a task")
+        self.unlink_task_button = outline_button("Unlink", "noteUnlinkTask")
+        self.unlink_task_button.setAccessibleName("Unlink the task")
+        links.addWidget(self.project_label, 0, 0)
+        links.addWidget(self.project_choice, 0, 1, 1, 3, Qt.AlignmentFlag.AlignLeft)
+        links.addWidget(self.task_label, 1, 0)
+        links.addWidget(self.task_line, 1, 1)
+        links.addWidget(self.link_task_button, 1, 2)
+        links.addWidget(self.unlink_task_button, 1, 3)
+        links.setColumnStretch(1, 1)
+        layout.addWidget(self.links)
+        self.links.hide()
+        self.task_picker = TaskPickerDialog(self)
         self.reply_recipient = plain_label("", px=13)
         self.reply_recipient.setObjectName("replyRecipient")
         self.reply_recipient.hide()
@@ -334,6 +384,11 @@ class DraftEditor(QDialog):
         self.ai_panel.prepare_requested.connect(self._prepare_ai)
         self.ai_panel.send_requested.connect(self._send_ai)
         self.ai_panel.cancel_requested.connect(self._cancel_ai)
+        self.project_choice.activated.connect(self._project_chosen)
+        self.link_task_button.clicked.connect(self._pick_task)
+        self.unlink_task_button.clicked.connect(lambda: self._request_task(None))
+        self.task_picker.search_requested.connect(self.task_search_requested)
+        self.task_picker.chosen.connect(self._request_task)
 
     def set_embedded(self, parent: QWidget | None, *, window: QWidget) -> None:
         """Use the same autosave/version editor in the Drafts pane or a guarded dialog."""
@@ -505,9 +560,15 @@ class DraftEditor(QDialog):
         self.gmail_button.setVisible(not self.embedded and bool(draft.sources))
         if self.embedded:
             self._form.setRowVisible(self.cc_edit, email and bool(draft.cc_text))
+            note = draft.kind is DraftKind.NOTE
             self.heading.setText(
-                "REPLY DRAFT · NOT SENT" if self.reply_mode else "DRAFT · NOT SENT"
+                "REPLY DRAFT · NOT SENT"
+                if self.reply_mode
+                else "LOCAL NOTE"
+                if note
+                else "DRAFT · NOT SENT"
             )
+            self.checkpoint_button.setText("Save note" if note else "Save draft")
         self._set_text(draft.content())
         self.reply_recipient.setText("To " + draft.to_text)
         self.save_as_new_button.hide()
@@ -518,6 +579,9 @@ class DraftEditor(QDialog):
         self.ai_panel.hide()
         self.missing_line.clear()
         self.missing_line.hide()
+        self._links_busy = False
+        self.task_picker.reject()
+        self._show_links(draft)
         self._update_buttons()
         self.status.setText(f"Saved {self._time(draft)}")
         if not self.embedded or self.reply_mode or not draft.title:
@@ -537,6 +601,100 @@ class DraftEditor(QDialog):
         self.context.setText(" · ".join(parts) or "Not linked to an email or action.")
         self.gmail_button.setVisible(source is not None and gmail_link(source) is not None)
         self.gmail_button.setEnabled(source is not None and gmail_link(source) is not None)
+
+    # A note's project and task (ADR 0027).
+
+    def show_projects(self, projects: tuple[Project, ...]) -> None:
+        """The owner's projects, for a note's Project list; archived ones only as its own."""
+        self._projects = projects
+        if self.draft is not None:
+            self._show_links(self.draft)
+
+    def _show_links(self, draft: Draft) -> None:
+        note = draft.kind is DraftKind.NOTE
+        self.links.setVisible(note and not self.reply_mode)
+        if not note:
+            return
+        self._fill_projects(draft)
+        title = draft.action_title
+        if title is None:
+            self.task_line.setText("None")
+        elif draft.action_public_id is None:
+            self.task_line.setText(f"{title} (no longer available)")
+        else:
+            self.task_line.setText(title)
+        self.link_task_button.setText("Change tas&k…" if title is not None else "Link to tas&k…")
+        self.unlink_task_button.setVisible(title is not None)
+        self._update_links()
+
+    def _fill_projects(self, draft: Draft) -> None:
+        chosen = draft.project_public_id
+        self.project_choice.blockSignals(True)
+        self.project_choice.clear()
+        self.project_choice.addItem("No project", None)
+        for project in self._projects:
+            if project.archived_at_utc is None or project.public_id == chosen:
+                suffix = " (archived)" if project.archived_at_utc else ""
+                self.project_choice.addItem(project.name + suffix, project.public_id)
+        # Keep the note's project when the list has not loaded it yet.
+        if chosen is not None and self.project_choice.findData(chosen) < 0:
+            self.project_choice.addItem(draft.project_name or "Its project", chosen)
+        self.project_choice.setCurrentIndex(max(0, self.project_choice.findData(chosen)))
+        self.project_choice.blockSignals(False)
+
+    def _update_links(self) -> None:
+        live = not self._conflict and not self._frozen and not self._links_busy
+        for widget in (self.project_choice, self.link_task_button, self.unlink_task_button):
+            widget.setEnabled(live)
+
+    def _project_chosen(self, index: int) -> None:
+        draft = self.draft
+        if draft is None:
+            return
+        value = self.project_choice.itemData(index)
+        if value == draft.project_public_id:
+            return
+        self._links_busy = True
+        self._update_links()
+        self.status.setText(_SAVING)
+        self.project_requested.emit(value)
+
+    def _pick_task(self) -> None:
+        if self.draft is not None and self.draft.kind is DraftKind.NOTE:
+            self.dialog_guard.show_dialog(self.task_picker)
+            self.task_picker.open_fresh()
+
+    def _request_task(self, public_id: str | None) -> None:
+        draft = self.draft
+        if draft is None or self._links_busy:
+            return
+        self._links_busy = True
+        self._update_links()
+        self.status.setText(_SAVING)
+        self.task_requested.emit(public_id)
+
+    def show_task_choices(self, actions: tuple[Action, ...]) -> None:
+        if self.task_picker.isVisible():
+            self.task_picker.show_choices(actions)
+
+    def task_choices_failed(self) -> None:
+        self.task_picker.show_failed()
+
+    def links_saved(self, draft: Draft) -> None:
+        """A project or task change was saved. The typed text stays as it is, and autosave
+        sends it at the new revision."""
+        self.draft = draft
+        self._links_busy = False
+        self._show_links(draft)
+        if not self._dirty:
+            self.status.setText(f"Saved {self._time(draft)}")
+
+    def links_failed(self, message: str) -> None:
+        """A project or task change was refused or failed; the note's links are as before."""
+        self._links_busy = False
+        if self.draft is not None:
+            self._show_links(self.draft)
+        self.status.setText(message)
 
     def _set_text(self, content: DraftEdit) -> None:
         self._loading = True
@@ -625,6 +783,7 @@ class DraftEditor(QDialog):
     def show_conflict(self) -> None:
         """The draft changed elsewhere: stop autosaving and offer to save as a new draft."""
         self._conflict = True
+        self._links_busy = False
         self._stop_timers()
         self.status.setText(CONFLICT)
         self.save_as_new_button.show()
@@ -658,6 +817,7 @@ class DraftEditor(QDialog):
             button.setEnabled(live)
         self.confirm_button.setEnabled(live)
         self.ai_button.setEnabled(live and self._ai_ready)
+        self._update_links()
 
     @property
     def _frozen(self) -> bool:
@@ -975,6 +1135,7 @@ class DraftEditor(QDialog):
 
     def _close_now(self) -> None:
         self._stop_timers()
+        self.task_picker.reject()
         self._closing = False
         self._set_locked(False)
         super().reject()

@@ -1,5 +1,14 @@
 # P0–P2 implementation progress
 
+## P2-04a notes and note links (2026-11-04)
+
+The owner approved P2-04 as two stacked pull requests. This first one adds the Notes
+sidebar row (Ctrl+8), the writing page's Notes view with a project filter, and a note's
+editable project and task links. Migration 0029 adds `drafts.project_public_id`
+(ADR 0027). Backup, recovery, export and purge keep the links, and AI drafting never
+sends them. See [scope, verification and acceptance](p2-notes.md). Native macOS and owner
+acceptance remain open. P2-04b, the Projects page and project context, follows.
+
 ## P2-03 durable daily focus (2026-11-03)
 
 Implemented ordered, revisioned daily selection with focus-first Today, workload,

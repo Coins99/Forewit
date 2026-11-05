@@ -46,6 +46,7 @@ from mailbrief.domain.analysis import (
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
+from mailbrief.domain.search import query_terms
 from mailbrief.domain.task_history import TaskHistory, resolve_task_history
 from mailbrief.services.deadlines import (
     ResolvedDeadline,
@@ -1109,6 +1110,16 @@ class ActionService:
         sorted (B08); the Actions filter offers them, and ``group="person"`` lists one's
         actions."""
         return await self._repository.people(view)
+
+    async def title_matches(self, text: str = "") -> tuple[Action, ...]:
+        """Live tasks, open ones first, whose titles contain every word of ``text``, at most
+        TITLE_MATCH_LIMIT; a note's Link to task offers them. Text too short to search
+        (query_terms() keeps no word) matches nothing, and empty text matches every task."""
+        terms = query_terms(text)
+        if text.strip() and not terms:
+            return ()
+        rows = await self._repository.title_matches(terms, open_only=False)
+        return tuple(await self._repository.load(rows))
 
     async def count_actions(
         self, view: ActionFilter, *, group: str = "all", group_id: str | None = None

@@ -1007,9 +1007,26 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await DraftService(session).get(public_id)
 
-    async def create_draft(self, kind: DraftKind) -> Draft:
+    async def create_draft(self, kind: DraftKind, project_public_id: str | None = None) -> Draft:
         async with self._storage().session() as session:
-            return await DraftService(session).create(kind)
+            return await DraftService(session).create(kind, project_public_id=project_public_id)
+
+    async def set_note_project(
+        self, public_id: str, revision: int, project_public_id: str | None
+    ) -> Draft:
+        async with self._storage().session() as session:
+            return await DraftService(session).set_project(public_id, revision, project_public_id)
+
+    async def set_note_task(
+        self, public_id: str, revision: int, action_public_id: str | None
+    ) -> Draft:
+        async with self._storage().session() as session:
+            return await DraftService(session).set_task(public_id, revision, action_public_id)
+
+    async def task_choices(self, text: str = "") -> tuple[Action, ...]:
+        """Tasks a note can link to: live, open first, matching every word of ``text``."""
+        async with self._storage().session() as session:
+            return await ActionService(session).title_matches(text)
 
     async def create_reply_draft(self, account_email: str, provider_message_id: str) -> Draft:
         async with self._storage().session() as session:

@@ -571,7 +571,7 @@ def save_shot(image: QPixmap, name: str) -> None:
 
 @pytest.mark.parametrize(
     ("panel_type", "title"),
-    [(ActionsPanel, "Your actions"), (DraftsPanel, "Your drafts and notes")],
+    [(ActionsPanel, "Your actions"), (DraftsPanel, "Your drafts")],
 )
 def test_page_headings_use_the_title_size(
     qtbot: QtBot,

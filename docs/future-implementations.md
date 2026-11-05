@@ -854,6 +854,10 @@ and recovery/export/purge integration. See [the focus checkpoint](p2-focus.md).
 Historical planning commands, capacity and later workspace migration remain planned;
 native macOS and owner acceptance remain open.
 
+P2-04a update (2026-11-04): the Notes page and a note's project and task links (E01)
+are implemented; see [the notes checkpoint](p2-notes.md) and ADR 0027. P2-04b adds the
+Projects page with project context (E03's first slice).
+
 P2 implementation update (2026-11-03): the first canonical-navigation slice is
 implemented locally and verified on Windows, on the P1 code. Existing screens remain adapters; see
 [P2 navigation scope and verification](p2-navigation.md). Persistent daily

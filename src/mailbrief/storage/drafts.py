@@ -1,11 +1,13 @@
 """The owner's drafts, their saved versions and their source snapshots (ADR 0012).
 
 Drafts and versions change through ORM objects only, never bulk statements, so rows
-already loaded in the session always show what was last written.
+already loaded in the session always show what was last written. A note's project name is
+read with it (ADR 0027), never copied into the draft.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime
+from typing import Literal
 
 from pydantic import HttpUrl
 from sqlalchemy import func, select
@@ -35,7 +37,11 @@ from mailbrief.storage.tables import (
     DraftTable,
     DraftVersionTable,
     MessageTable,
+    ProjectTable,
 )
+
+# How list_summaries() narrows by project: every draft, those without one, or one project's.
+ProjectGroup = Literal["all", "unassigned", "project"]
 
 
 def content_of(row: DraftTable | DraftVersionTable) -> DraftEdit:
@@ -62,7 +68,10 @@ def _source(row: DraftSourceTable) -> DraftSource:
 
 
 def draft_from_rows(
-    row: DraftTable, action_public_id: str | None, sources: Sequence[DraftSourceTable]
+    row: DraftTable,
+    action_public_id: str | None,
+    sources: Sequence[DraftSourceTable],
+    project_name: str | None = None,
 ) -> Draft:
     """Rebuild a draft; ``action_public_id`` is None once its action is gone."""
     return Draft(
@@ -74,6 +83,8 @@ def draft_from_rows(
         body=row.body,
         action_public_id=action_public_id,
         action_title=row.action_title,
+        project_public_id=row.project_public_id,
+        project_name=project_name,
         sources=tuple(_source(source) for source in sources),
         created_at_utc=row.created_at_utc,
         updated_at_utc=row.updated_at_utc,
@@ -307,8 +318,20 @@ class DraftRepository:
             found.update(result.tuples().all())
         return found
 
+    async def project_names(self, public_ids: Iterable[str | None]) -> dict[str, str]:
+        """Projects' names by public ID, archived ones included; a missing one is absent."""
+        found: dict[str, str] = {}
+        for chunk in sorted_batches(public_id for public_id in public_ids if public_id):
+            result = await self._session.execute(
+                select(ProjectTable.public_id, ProjectTable.name).where(
+                    ProjectTable.public_id.in_(chunk)
+                )
+            )
+            found.update(result.tuples().all())
+        return found
+
     async def load(self, rows: Sequence[DraftTable]) -> list[Draft]:
-        """Domain drafts for rows, reading sources and action links in chunked queries."""
+        """Domain drafts for rows, reading sources, action and project links in chunks."""
         ids = [row.id for row in rows]
         sources: dict[int, list[DraftSourceTable]] = {}
         for chunk in sorted_batches(ids):
@@ -322,26 +345,43 @@ class DraftRepository:
         actions = await self.action_public_ids(
             row.action_id for row in rows if row.action_id is not None
         )
+        projects = await self.project_names(row.project_public_id for row in rows)
         return [
             draft_from_rows(
                 row,
                 None if row.action_id is None else actions.get(row.action_id),
                 sources.get(row.id, ()),
+                None if row.project_public_id is None else projects.get(row.project_public_id),
             )
             for row in rows
         ]
 
-    async def list_summaries(self) -> list[DraftSummary]:
-        """Every live draft, most recently updated first; versions are never read."""
+    async def list_summaries(
+        self,
+        kinds: Collection[DraftKind] | None = None,
+        *,
+        group: ProjectGroup = "all",
+        group_id: str | None = None,
+    ) -> list[DraftSummary]:
+        """Live drafts of ``kinds`` (every kind when None) in a project group, most recently
+        updated first; the list is never capped and versions are never read."""
+        stmt = select(DraftTable).where(DraftTable.deleted_at_utc.is_(None))
+        if kinds is not None:
+            stmt = stmt.where(DraftTable.kind.in_(sorted(kind.value for kind in kinds)))
+        if group == "unassigned":
+            stmt = stmt.where(DraftTable.project_public_id.is_(None))
+        elif group == "project":
+            if group_id is None:
+                raise ValueError("a project group needs a project")
+            stmt = stmt.where(DraftTable.project_public_id == group_id)
         rows = list(
             (
                 await self._session.scalars(
-                    select(DraftTable)
-                    .where(DraftTable.deleted_at_utc.is_(None))
-                    .order_by(DraftTable.updated_at_utc.desc(), DraftTable.id.desc())
+                    stmt.order_by(DraftTable.updated_at_utc.desc(), DraftTable.id.desc())
                 )
             ).all()
         )
+        projects = await self.project_names(row.project_public_id for row in rows)
         subjects: dict[int, str] = {}
         for chunk in sorted_batches(row.id for row in rows):
             result = await self._session.execute(
@@ -363,6 +403,12 @@ class DraftRepository:
                     placeholder_count=len(draft.placeholders),
                     action_title=draft.action_title,
                     source_subject=subjects.get(row.id),
+                    project_public_id=draft.project_public_id,
+                    project_name=(
+                        None
+                        if draft.project_public_id is None
+                        else projects.get(draft.project_public_id)
+                    ),
                     revision=draft.revision,
                 )
             )

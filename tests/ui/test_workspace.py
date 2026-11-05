@@ -1129,11 +1129,20 @@ def test_owner_deadline_renders(
 
 def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
     """The daily home, the mailbox, flagged and deferred work, drafts and history, then
-    Calendar set apart below a divider; Ctrl+1 to Ctrl+7 follow the same order."""
+    Calendar and Notes set apart below a divider; Ctrl+1 to Ctrl+8 follow the same order."""
     workspace = build(qtbot)
     sidebar = workspace.sidebar
     keys = [str(sidebar.pages.item(row).data(KEY_ROLE)) for row in range(sidebar.pages.rowCount())]
-    assert keys == ["today", "inbox", "actions", "waiting", "drafts", "briefs", "calendar"]
+    assert keys == [
+        "today",
+        "inbox",
+        "actions",
+        "waiting",
+        "drafts",
+        "briefs",
+        "calendar",
+        "notes",
+    ]
     assert list(PAGE_SHORTCUTS) == keys
     rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
     assert rows[-1].height() == rows[0].height()

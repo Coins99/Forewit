@@ -8,12 +8,16 @@ from pathlib import Path
 import pytest
 from alembic import command
 
-from mailbrief.domain.drafts import DraftKind
 from mailbrief.services.actions import ActionService
 from mailbrief.services.drafts import DraftService
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config
 from tests.unit.services.test_manual_tasks import EDIT
+from tests.unit.storage.test_note_project_migration import (
+    OLD_NOTE_ID,
+    assert_old_note,
+    insert_old_note,
+)
 
 
 async def test_upgrade_and_downgrade_preserve_prior_owner_records(tmp_path: Path) -> None:
@@ -23,8 +27,8 @@ async def test_upgrade_and_downgrade_preserve_prior_owner_records(tmp_path: Path
     database = Database.from_path(path)
     async with database.session() as session:
         task = await ActionService(session).create(EDIT)
-        note = await DraftService(session).create(DraftKind.NOTE)
     await database.dispose()
+    insert_old_note(path)  # Today's ORM writes columns this revision doesn't have yet.
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     with closing(sqlite3.connect(path)) as connection:
@@ -33,7 +37,7 @@ async def test_upgrade_and_downgrade_preserve_prior_owner_records(tmp_path: Path
     database = Database.from_path(path)
     async with database.session() as session:
         assert await ActionService(session).get(task.public_id) == task
-        assert await DraftService(session).get(note.public_id) == note
+        assert_old_note(await DraftService(session).get(OLD_NOTE_ID))
     await database.dispose()
     await asyncio.to_thread(command.downgrade, config, "20261103_0027")
     with closing(sqlite3.connect(path)) as connection:

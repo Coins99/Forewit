@@ -22,7 +22,7 @@ Two or more letters search your own records on this computer, once typing pauses
 | Section | What is searched | What opening does |
 | --- | --- | --- |
 | Actions | title, notes and steps | the Actions page (Waiting or Completed when that is where it is), with it selected; a project or area filter that hides it goes back to All tasks |
-| Drafts and notes | title and text | the editor |
+| Drafts and notes | title and text | the editor, a note in the Notes view and any other draft in Drafts |
 | Your events | title and notes | its week on the Calendar page, with it selected |
 | Google Calendar | event title (the only text Forewit keeps) | its week on the Calendar page, with it selected |
 | Mail | the connected account's saved subject, sender and Gmail's short preview | the Inbox page with that email open; an email no longer in the Inbox opens in Gmail |

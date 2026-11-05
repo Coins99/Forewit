@@ -6,6 +6,12 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- P2-04a Notes and note links is implemented on `feat/p2-notes`: a Notes sidebar row
+  (Ctrl+8) with a project filter, and a note's editable project and task links
+  (migration 0029, [ADR 0027](adr/0027-note-links.md)). See
+  [scope and verification](p2-notes.md). Native macOS and owner acceptance remain open,
+  and P2-04b (the Projects page) follows.
+
 - P2-03 durable daily focus is implemented locally: ordered daily selections,
   conflict checks, focus-first Today, known/unknown/waiting workload, keyboard
   ordering and ordinary task completion/reopen/Undo. Migration 0028 includes

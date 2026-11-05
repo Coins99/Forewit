@@ -7,9 +7,10 @@ import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Final
 
 from pydantic import HttpUrl
-from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy import ColumnElement, Select, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -69,6 +70,8 @@ logger = logging.getLogger(__name__)
 # Activity rows read per action for the detail pane, which shows its 20 latest lines. Edits
 # in a row share a line (B04), so a run of ticks leaves room for what came before it.
 DISPLAY_ACTIVITY_LIMIT = 200
+# The most tasks a chooser lists (the focus chooser and Link to task); narrow the words for more.
+TITLE_MATCH_LIMIT: Final = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -700,6 +703,34 @@ class ActionRepository:
             select(ActionTable)
             .where(ActionTable.follows_action_id == action_id)
             .order_by(ActionTable.id)
+        )
+        return list(result)
+
+    async def title_matches(
+        self,
+        terms: Sequence[str],
+        *,
+        open_only: bool,
+        excluded: Select[tuple[str]] | None = None,
+        limit: int = TITLE_MATCH_LIMIT,
+    ) -> list[ActionTable]:
+        """Live tasks whose titles contain every term, for the choosers that pick a task.
+
+        Open tasks come first, then the most recently changed; ``excluded`` selects public
+        IDs to leave out before the limit applies. The terms come from query_terms().
+        """
+        statement = select(ActionTable).where(ActionTable.deleted_at_utc.is_(None))
+        if open_only:
+            statement = statement.where(ActionTable.status == ActionStatus.OPEN.value)
+        if excluded is not None:
+            statement = statement.where(ActionTable.public_id.not_in(excluded))
+        for term in terms:
+            statement = statement.where(ActionTable.title.contains(term, autoescape=True))
+        opened = case((ActionTable.status == ActionStatus.OPEN.value, 0), else_=1)
+        result = await self._session.scalars(
+            statement.order_by(opened, ActionTable.updated_at_utc.desc(), ActionTable.public_id)
+            .limit(limit)
+            .execution_options(populate_existing=True)
         )
         return list(result)
 
