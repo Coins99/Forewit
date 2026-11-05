@@ -30,7 +30,10 @@ async def test_capture_available_from_every_page_without_an_account(
     window.capture_button.click()
     assert window.capture_dialog.isVisible()
     window.capture_dialog.reject()
-    assert window.workspace.current_page() == ("actions" if page == "waiting" else page)
+    # Waiting shares the Actions page, and Notes the writing page.
+    assert window.workspace.current_page() == {"waiting": "actions", "notes": "drafts"}.get(
+        page, page
+    )
 
 
 @pytest.mark.parametrize("kind", ["task", "note"])

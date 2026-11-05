@@ -26,7 +26,7 @@ async def draft_window(qtbot: QtBot) -> tuple[MainWindow, FakeBackend]:
     qtbot.addWidget(window)
     await window.initialize()
     show(qtbot, window)
-    window._show_page("drafts")
+    window._show_page("notes")
     await window.draft_writes.drain()
     return window, backend
 

@@ -1,8 +1,8 @@
-"""The owner's drafts and notes: kinds, limits, versions, placeholders and exports.
+"""The owner's drafts and notes: kinds, limits, versions, placeholders, links and exports.
 
 Drafts are the owner's own writing (ADR 0012). Their text is kept exactly as entered, so
-these models turn off the whitespace stripping other domain models use. Nothing here reads
-mail, and nothing here does I/O.
+these models turn off the whitespace stripping other domain models use. A note may belong to
+one project and one task (ADR 0027). Nothing here reads mail, and nothing here does I/O.
 """
 
 import re
@@ -70,12 +70,31 @@ class DraftLength(StrEnum):
 
 
 EMAIL_KINDS: Final = frozenset({DraftKind.REPLY, DraftKind.EMAIL})
+NOTE_KINDS: Final = frozenset({DraftKind.NOTE})
 KIND_NAMES: Final[dict[DraftKind, str]] = {
     DraftKind.REPLY: "Reply",
     DraftKind.EMAIL: "Email",
     DraftKind.NOTE: "Note",
     DraftKind.MESSAGE: "Message",
 }
+
+
+class WritingView(StrEnum):
+    """The writing page's two views: the owner's notes, and drafts of messages to send."""
+
+    NOTES = "notes"
+    DRAFTS = "drafts"
+
+    @property
+    def kinds(self) -> frozenset[DraftKind]:
+        """The draft kinds the view lists."""
+        return NOTE_KINDS if self is WritingView.NOTES else frozenset(DraftKind) - NOTE_KINDS
+
+    @classmethod
+    def of(cls, kind: DraftKind) -> "WritingView":
+        """The view that lists drafts of ``kind``."""
+        return cls.NOTES if kind in NOTE_KINDS else cls.DRAFTS
+
 
 # Drafts keep the owner's text exactly as typed, including leading and trailing spaces.
 _OWNER_TEXT = ConfigDict(hide_input_in_errors=True, str_strip_whitespace=False)
@@ -160,7 +179,12 @@ class DraftEdit(DomainModel):
 
 
 class Draft(DraftEdit):
-    """A draft the owner is writing, with its links and the revision it was read at."""
+    """A draft the owner is writing, with its links and the revision it was read at.
+
+    ``project_name`` is read with the draft, never stored: renaming a project renames it
+    on every note. ``action_title`` is the snapshot taken when the task was linked, kept
+    after the task is deleted, when ``action_public_id`` becomes None.
+    """
 
     public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
     kind: DraftKind
@@ -170,6 +194,10 @@ class Draft(DraftEdit):
     action_title: str | None = Field(
         default=None, min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False
     )
+    project_public_id: str | None = Field(
+        default=None, min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS
+    )
+    project_name: str | None = Field(default=None, repr=False)
     sources: tuple[DraftSource, ...] = ()
     created_at_utc: datetime
     updated_at_utc: datetime
@@ -184,6 +212,8 @@ class Draft(DraftEdit):
     def validate_recipients(self) -> Self:
         if self.kind not in EMAIL_KINDS and self.has_recipients():
             raise ValueError("only replies and emails can have recipients")
+        if self.kind not in NOTE_KINDS and self.project_public_id is not None:
+            raise ValueError("only notes can belong to a project")
         return self
 
     @property
@@ -209,6 +239,10 @@ class DraftSummary(DomainModel):
     placeholder_count: int = Field(ge=0)
     action_title: str | None = Field(default=None, repr=False)
     source_subject: str | None = Field(default=None, repr=False)
+    project_public_id: str | None = Field(
+        default=None, min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS
+    )
+    project_name: str | None = Field(default=None, repr=False)
     revision: int = Field(ge=1)  # So deleting from the list names the revision it showed.
 
     @field_validator("updated_at_utc")

@@ -81,5 +81,5 @@ Native macOS and owner usability acceptance remain open. Safe logs live under ig
 Daily focus/day plans come next (P2-03); Add to today will use that service once it
 exists. Optional capture review/processed state belongs to P2-06. Current captures
 are usable ordinary records with no mandatory processing step or inferred dates.
-Notes/Projects pages, Mail/sidebar migration and broader search retain their later
-P2 scope. No P1/M4–M9 owner acceptance or experimental AI acceptance is implied.
+A captured note is organized later on the Notes page ([P2-04a](p2-notes.md)); the
+Projects page, Mail/sidebar migration and broader search retain their later P2 scope. No P1/M4–M9 owner acceptance or experimental AI acceptance is implied.

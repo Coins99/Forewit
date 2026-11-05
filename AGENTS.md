@@ -170,6 +170,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   Review repairs bound the agenda, exclude selections before search limits, and
   refresh the focus date during busy email work. Native macOS and owner
   acceptance remain open; see `docs/p2-focus.md`. Full P2 remains incomplete.
+- P2-04a Notes and note links implemented on `feat/p2-notes`, awaiting owner desktop
+  acceptance: a Notes sidebar row (Ctrl+8) shows the writing page's Notes view, as
+  Waiting shares Actions, with a project filter; Drafts lists replies, emails and
+  messages. A note links to at most one project (`drafts.project_public_id`, migration
+  0029) and one task (the existing `action_id` and title snapshot), both editable in the
+  editor (`DraftService.set_project` / `set_task`, `ui/task_picker.py`). See ADR 0027
+  and `docs/p2-notes.md`. P2-04b (the Projects page and project context) follows.
 - Search and commands implemented, awaiting owner desktop acceptance: the command palette
   (Ctrl+K, `ui/palette.py`) and `services/search.py`, a bounded local search of actions,
   drafts and notes, events, cached Google event titles and the connected account's cached
@@ -450,6 +457,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   mailbox, has no "sent" state and never changes an action. Every change needs the
   revision the caller saw, except restoring a deleted draft; drafts and versions change
   only through ORM objects.
+- A note's links (ADR 0027) are the owner's: one project and one task at most, changed
+  only by `DraftService.set_project` and `set_task` on a live note, with the revision the
+  caller saw, one revision each and no version; a no-op makes none. Other draft kinds
+  take no project. A new project link needs a project that isn't archived; a note keeps
+  an archived one it has. A task link needs a live task and snapshots its title; linking
+  never changes the task. A note's project is never inferred from its task; AI runs,
+  proposals and capture never set it, and AI drafting never sends it. Only a note has a
+  project (`ck_drafts_project_only_for_notes`).
 - Owner preferences are one revisioned SQLite row (ADR 0014); every save needs the revision
   the caller saw, and the row changes only through ORM objects. Sender exclusions are
   enforced by services, never only the UI: a message from an excluded sender is never

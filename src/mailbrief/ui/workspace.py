@@ -111,8 +111,8 @@ SHEET_GUTTER: Final = 8
 
 # Ordered as Gmail and Outlook order theirs: the daily home first (their Inbox), the
 # mailbox, flagged and deferred work (Starred, Snoozed), Drafts, then history (All Mail,
-# Archive). Calendar comes last, set apart, as Outlook keeps it apart from mail. Ctrl+1 to
-# Ctrl+7 follow this order.
+# Archive). Calendar comes after them, set apart, as Outlook keeps it apart from mail, with
+# the owner's Notes (P2-04), which share the Drafts page. Ctrl+1 to Ctrl+8 follow this order.
 PAGES: Final = (
     ("today", "Today", "clock"),
     ("inbox", "Inbox", "mail"),
@@ -121,6 +121,7 @@ PAGES: Final = (
     ("drafts", "Drafts", "pencil"),
     ("briefs", "Briefs", "calendar"),
     ("calendar", "Calendar", "calendar-week"),
+    ("notes", "Notes", "notes"),
 )
 PAGE_SHORTCUTS: Final = tuple(key for key, _label, _icon in PAGES)
 # Pages that start a group: a gap with a hairline divider above them.
@@ -1117,6 +1118,16 @@ class ThreePaneWorkspace(QWidget):
             "Keep track of commitments you’re waiting on from other people."
             if waiting
             else "Turn important email into clear, trackable next steps."
+        )
+
+    def show_writing_heading(self, *, notes: bool) -> None:
+        """Head the writing page for the view it shows: Notes has its own sidebar row, so its
+        own title and line."""
+        self.header.title.setText("Notes" if notes else "Drafts")
+        self.header.date.setText(
+            "Your own notes, kept on this computer and organized by project and task."
+            if notes
+            else "Replies and private notes stay here until you explicitly send or remove them."
         )
 
     def current_page(self) -> str:

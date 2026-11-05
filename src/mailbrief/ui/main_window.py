@@ -38,6 +38,7 @@ from mailbrief.domain.actions import (
     ActionStatus,
     DeadlineChange,
     StepEdit,
+    TaskChoice,
     ThreadLink,
 )
 from mailbrief.domain.analysis import ActionOwnership
@@ -83,6 +84,7 @@ from mailbrief.domain.drafts import (
     DraftSummary,
     DraftVersion,
     DraftVersionInfo,
+    WritingView,
     placeholders,
     still_to_fill,
 )
@@ -153,6 +155,7 @@ from mailbrief.services.drafts import (
     DraftConflictError,
     DraftNotFoundError,
     NoteCreateConflictError,
+    NoteLinkError,
     SourceNotFoundError,
 )
 from mailbrief.services.events import EventConflictError, EventNotFoundError
@@ -414,7 +417,16 @@ class DesktopBackend(Protocol):
     async def count_actions(self, view: ActionFilter) -> int: ...
     async def list_drafts(self) -> tuple[DraftSummary, ...]: ...
     async def get_draft(self, public_id: str) -> Draft: ...
-    async def create_draft(self, kind: DraftKind) -> Draft: ...
+    async def create_draft(
+        self, kind: DraftKind, project_public_id: str | None = None
+    ) -> Draft: ...
+    async def set_note_project(
+        self, public_id: str, revision: int, project_public_id: str | None
+    ) -> Draft: ...
+    async def set_note_task(
+        self, public_id: str, revision: int, action_public_id: str | None
+    ) -> Draft: ...
+    async def task_choices(self, text: str = "") -> tuple[TaskChoice, ...]: ...
     async def create_reply_draft(self, account_email: str, provider_message_id: str) -> Draft: ...
     async def create_draft_for_action(self, public_id: str, kind: DraftKind) -> Draft: ...
     async def autosave_draft(self, public_id: str, revision: int, edit: DraftEdit) -> Draft: ...
@@ -809,6 +821,7 @@ class MainWindow(QMainWindow):
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)
         self._projects: tuple[Project, ...] = ()
+        self._task_choice_read = 0  # The newest Link to task search; older answers are dropped.
         self._areas: tuple[LifeArea, ...] = ()
         self.projects_dialog = ProjectsDialog(self)
         self.projects_dialog.save_requested.connect(self._request_save_organization)
@@ -1342,10 +1355,16 @@ class MainWindow(QMainWindow):
                 ActionFilter.WAITING if key == "waiting" else ActionFilter.OPEN
             )
             self._actions_tab_changed(self.actions_panel.tabs.currentIndex())
+        elif key in ("drafts", "notes"):
+            # Notes and Drafts share one page and editor, as Waiting shares Actions.
+            notes = key == "notes"
+            self.workspace.show_page("drafts")
+            self.drafts_panel.show_view(WritingView.NOTES if notes else WritingView.DRAFTS)
+            self.workspace.show_writing_heading(notes=notes)
         else:
             self.workspace.show_page(key)
         self.workspace.sidebar.set_current(self._sidebar_key())
-        if key == "drafts" and (selected := self.drafts_panel.selected()) is not None:
+        if key in ("drafts", "notes") and (selected := self.drafts_panel.selected()) is not None:
             self._request_draft_preview(selected)
         if key == "calendar":
             self.calendar_panel.refresh_button.setVisible(self._google_mode() == GOOGLE_ON)
@@ -1359,6 +1378,8 @@ class MainWindow(QMainWindow):
             return "today"
         if page == "actions":
             return "waiting" if self.actions_panel.view() is ActionFilter.WAITING else "actions"
+        if page == "drafts":
+            return "notes" if self.drafts_panel.view() is WritingView.NOTES else "drafts"
         return page
 
     def _actions_tab_changed(self, _index: int) -> None:
@@ -1391,9 +1412,7 @@ class MainWindow(QMainWindow):
                 self._open_organization()
             else:
                 self._request_legacy_page(
-                    {"tasks": "actions", "notes": "drafts", "mail": "inbox"}.get(
-                        route.page, route.page
-                    )
+                    {"tasks": "actions", "mail": "inbox"}.get(route.page, route.page)
                 )
         elif isinstance(route, TaskRoute):
             if route.public_id is None:
@@ -1403,7 +1422,7 @@ class MainWindow(QMainWindow):
             else:
                 self._show_action_route(route.public_id, route.view)
         elif isinstance(route, WritingRoute):
-            self._show_page("drafts")
+            self._show_page("notes" if route.draft_kind is DraftKind.NOTE else "drafts")
             stamp = self._navigation_stamp()
             self._start_or_busy(lambda: self._open_draft_by_id(route.public_id, stamp))
         elif isinstance(route, CalendarRoute):
@@ -1691,6 +1710,8 @@ class MainWindow(QMainWindow):
             projects, areas, tags, people = await self.backend.list_organization()
             self._projects, self._areas = projects, areas
             self.action_editor.set_projects(self._projects)
+            self.drafts_panel.show_projects(self._projects)
+            self.draft_editor.show_projects(self._projects)
             self.action_editor.set_tags(tags)
             self.actions_panel.show_groups(self._projects, self._areas, tags, people)
             group, group_id = self.actions_panel.grouping()
@@ -1729,7 +1750,7 @@ class MainWindow(QMainWindow):
         try:
             drafts = await self.backend.list_drafts()
             self.drafts_panel.show_drafts(drafts, self.zone, self._local_today())
-            self._set_counts(drafts=len(drafts))
+            self._set_counts(drafts=self.drafts_panel.totals()[WritingView.DRAFTS])
         except Exception as exc:
             self._note_not_refreshed(exc)
 
@@ -2702,7 +2723,7 @@ class MainWindow(QMainWindow):
             self._show_page("calendar")
             self._request_event(NEW_EVENT, self._local_today())
         elif key == "new:note":
-            self._show_page("drafts")
+            self._show_page("notes")
             self._request_draft(NEW_DRAFT, DraftKind.NOTE)
         else:
             button = {
@@ -3175,10 +3196,20 @@ class MainWindow(QMainWindow):
     def _request_draft(self, kind: str, value: object) -> None:
         if kind == NEW_DRAFT and isinstance(value, DraftKind):
             new_kind = value
-            self.start(
-                lambda: self._open_new_draft(lambda: self.backend.create_draft(new_kind)),
-                cancellable=False,
+            project = (
+                self.drafts_panel.project_for_new_note()
+                if new_kind is DraftKind.NOTE
+                and self.workspace.current_page() == "drafts"
+                and self.drafts_panel.view() is WritingView.NOTES
+                else None
             )
+
+            def create() -> Awaitable[Draft]:
+                if project is None:
+                    return self.backend.create_draft(new_kind)
+                return self.backend.create_draft(new_kind, project)
+
+            self.start(lambda: self._open_new_draft(create), cancellable=False)
         elif isinstance(value, DraftSummary):
             summary = value
             if kind == OPEN_DRAFT:
@@ -3274,6 +3305,12 @@ class MainWindow(QMainWindow):
             else None,
             window=self,
         )
+        if inline:
+            # A draft shows in its own view: a note in Notes, any other kind in Drafts.
+            view = WritingView.of(draft.kind)
+            if self.drafts_panel.view() is not view:
+                self._show_page(view.value)
+            self.drafts_panel.keep_shown(draft)
         self.draft_editor.load(draft, self.zone)
         if inline:
             self.drafts_panel.open_button.hide()
@@ -3489,6 +3526,106 @@ class MainWindow(QMainWindow):
             lambda agreed: writes.run(lambda: self._generate_draft(agreed))
         )
         editor.ai_cancel_requested.connect(self._cancel_drafting)
+        editor.project_requested.connect(self._queue_note_project)
+        editor.task_requested.connect(self._queue_note_task)
+        editor.task_search_requested.connect(self._search_note_tasks)
+
+    # A note's links (ADR 0027). Each change names its note when the owner makes it, as an
+    # autosave does: a draft switch queued ahead of it must not send it to another note.
+
+    def _queue_note_project(self, project: object) -> None:
+        draft = self.draft_editor.draft
+        if draft is None:
+            return
+        public_id, chosen = draft.public_id, project if isinstance(project, str) else None
+
+        def change(revision: int) -> Awaitable[Draft]:
+            return self.backend.set_note_project(public_id, revision, chosen)
+
+        self.draft_writes.run(lambda: self._save_note_link(public_id, change))
+
+    def _queue_note_task(self, task: object) -> None:
+        draft = self.draft_editor.draft
+        if draft is None:
+            return
+        public_id, chosen = draft.public_id, task if isinstance(task, str) else None
+
+        def change(revision: int) -> Awaitable[Draft]:
+            return self.backend.set_note_task(public_id, revision, chosen)
+
+        self.draft_writes.run(lambda: self._save_note_link(public_id, change))
+
+    def _holds(self, public_id: str) -> bool:
+        draft = self.draft_editor.draft
+        return draft is not None and draft.public_id == public_id
+
+    async def _save_note_link(
+        self, public_id: str, change: Callable[[int], Awaitable[Draft]]
+    ) -> None:
+        """Save one change to note ``public_id``'s links at its latest revision; typing
+        waiting to be saved goes first (DraftWrites). When the editor has since moved to
+        another draft, the change still goes to the note it was made for, at that note's
+        current revision, and the editor's draft is left alone."""
+        editor = self.draft_editor
+        current = editor.draft
+        held = current is not None and current.public_id == public_id
+        if held and editor.in_conflict:
+            editor.links_failed("Finish editing this note before changing its links.")
+            return
+        try:
+            if current is not None and held:
+                revision = current.revision
+            else:
+                revision = (await self.backend.get_draft(public_id)).revision
+            saved = await change(revision)
+        except _DRAFT_STALE as exc:
+            log_failure(exc)
+            if self._holds(public_id):
+                editor.show_conflict()
+            return
+        except NoteLinkError as exc:
+            log_failure(exc)
+            if self._holds(public_id):
+                editor.links_failed(str(exc))  # Fixed messages, never owner text.
+            # Archived or deleted elsewhere: reload the projects, so it isn't offered again.
+            await self._refresh_actions()
+            await self._refresh_drafts()
+            return
+        except Exception as exc:
+            log_failure(exc)
+            if self._holds(public_id):
+                editor.links_failed("The note's links weren't saved. Try again.")
+            return
+        if self._holds(public_id):
+            editor.links_saved(saved)
+            self.drafts_panel.keep_shown(saved)
+        await self._refresh_drafts()
+
+    def _search_note_tasks(self, text: str) -> None:
+        if self._closing:
+            return
+        self._task_choice_read += 1
+        read_id = self._task_choice_read
+        editor = self.draft_editor
+
+        async def read() -> None:
+            try:
+                actions = await self.backend.task_choices(text)
+            except Exception as exc:
+                log_failure(exc)
+                if read_id == self._task_choice_read and not self._closing:
+                    editor.task_choices_failed()
+                return
+            if (
+                not self._closing
+                and read_id == self._task_choice_read
+                and text == editor.task_picker.query.text()
+            ):
+                editor.show_task_choices(actions)
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
 
     def _queue_autosave(self, edit: DraftEdit) -> None:
         draft = self.draft_editor.draft

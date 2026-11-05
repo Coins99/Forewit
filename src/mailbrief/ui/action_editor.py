@@ -77,7 +77,7 @@ from mailbrief.ui.deadline_text import (
 )
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.event_editor import DateBox, TimeBox, parse_clock
-from mailbrief.ui.fields import takes_wheel
+from mailbrief.ui.fields import fill_project_choice, takes_wheel
 from mailbrief.ui.labels import outline_button, plain_label, primary_action, wrap_label
 from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.theme import ui_font
@@ -1040,18 +1040,15 @@ class ActionEditor(QDialog):
         self._tag_completer.set_tags(tags)
 
     def _fill_projects(self, chosen: str | None) -> None:
-        self.project.clear()
-        self.project.addItem("Unassigned", None)
-        for project in self._projects:
-            if project.archived_at_utc is None or project.public_id == chosen:
-                suffix = " (archived)" if project.archived_at_utc else ""
-                self.project.addItem(project.name + suffix, project.public_id)
         # Retain a link if an editor was opened directly before the organization list loaded.
-        if chosen is not None and self.project.findData(chosen) < 0 and self._action is not None:
-            linked_project = self._action.project
-            if linked_project is not None:
-                self.project.addItem(linked_project.name, chosen)
-        self.project.setCurrentIndex(max(0, self.project.findData(chosen)))
+        linked = None if self._action is None else self._action.project
+        fill_project_choice(
+            self.project,
+            self._projects,
+            chosen,
+            none_label="Unassigned",
+            fallback_name=None if linked is None else linked.name,
+        )
 
     def set_busy(self, busy: bool) -> None:
         """Another operation is running: Save waits for it, but Cancel still works."""
