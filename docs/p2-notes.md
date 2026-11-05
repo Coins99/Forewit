@@ -88,7 +88,45 @@ Implementation:
 
 ## Verification
 
-Filled in when the checks complete.
+Windows, 2026-11-04, on commit `b071d6e`:
+
+- **Focused checks.**
+  - 14 note-link service tests (`tests/unit/services/test_note_links.py`) and 2 migration
+    tests (`tests/unit/storage/test_note_project_migration.py`).
+  - Regression tests for a repeating task's next occurrence and for drafting never sending
+    a note's project.
+  - 14 writing-page panel tests and 11 Notes window tests (`tests/ui/test_notes.py`: rows,
+    Ctrl+8, routes by kind, project changes after waiting typing, refused and stale links,
+    the task chooser with the keyboard, New note in a project, and the filter keeping the
+    edited note shown).
+- **Full suite:** 5,092 passed and 9 expected platform skips. 95.69% combined coverage, and
+  `scripts/check_coverage.py` confirms every service clears the 90% gate. Four
+  `tests/unit/test_branding.py` command tests failed only because this machine's `.venv`
+  predates the Forewit command names (`forewit.exe` not found). CI's `uv sync` installs
+  them.
+- **Lint and types:** Ruff lint and format passed. Strict mypy passed native, win32 and
+  darwin (486 source and test files each).
+- **Gallery:** the Notes page and the task chooser were rendered in light and dark at 1x
+  and 2x and inspected against the Studio pages. The editor shows a note as LOCAL NOTE
+  with Save note.
+- **Package:** a fresh Windows x64 single-file build passed `check_package.py --layout
+  onefile`:
+  - offscreen full and verify at 1x and 2x;
+  - a native Windows launch;
+  - profile try-lock;
+  - the upgrade scenario.
+
+  The package smoke's upgrade check now writes its revision-0009 note in raw SQL, since
+  today's ORM has a column that revision lacks. Without that change, the package check
+  would have failed.
+
+Executable SHA-256:
+`e1f08450b06656f3f6970e691d5b7ebf059ba8b5dc902dff246929d7d111ea17`. This is an
+engineering build from the branch, not a release.
+
+The checks used disposable synthetic records only: no owner profile, real mailbox or paid
+AI. Logs are in the ignored `out/p2-notes-*`, and renders in `scratch/p2-notes-shots/`.
+Native macOS and the owner's hands-on acceptance remain open.
 
 ## Owner acceptance
 

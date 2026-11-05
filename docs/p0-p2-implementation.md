@@ -6,7 +6,10 @@ The owner approved P2-04 as two stacked pull requests. This first one adds the N
 sidebar row (Ctrl+8), the writing page's Notes view with a project filter, and a note's
 editable project and task links. Migration 0029 adds `drafts.project_public_id`
 (ADR 0027). Backup, recovery, export and purge keep the links, and AI drafting never
-sends them. See [scope, verification and acceptance](p2-notes.md). Native macOS and owner
+sends them. Windows checks passed 5,092 tests (four branding command tests need the CI
+environment's Forewit commands), 95.69% coverage and every service gate, strict
+win32/darwin typing, 1x/2x renders and a fresh single-file package check.
+See [scope, verification and acceptance](p2-notes.md). Native macOS and owner
 acceptance remain open. P2-04b, the Projects page and project context, follows.
 
 ## P2-03 durable daily focus (2026-11-03)
