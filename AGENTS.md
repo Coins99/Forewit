@@ -462,8 +462,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   caller saw, one revision each and no version; a no-op makes none. Other draft kinds
   take no project. A new project link needs a project that isn't archived; a note keeps
   an archived one it has. A task link needs a live task and snapshots its title; linking
-  never changes the task. A note's project is never inferred from its task, and AI runs,
-  proposals, capture and AI drafting never set, read or send it.
+  never changes the task. A note's project is never inferred from its task; AI runs,
+  proposals and capture never set it, and AI drafting never sends it. Only a note has a
+  project (`ck_drafts_project_only_for_notes`).
 - Owner preferences are one revisioned SQLite row (ADR 0014); every save needs the revision
   the caller saw, and the row changes only through ORM objects. Sender exclusions are
   enforced by services, never only the UI: a message from an excluded sender is never

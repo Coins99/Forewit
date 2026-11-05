@@ -19,7 +19,9 @@ rather than copied notes. General note relationships stay deferred.
 
 - **One project and one task per note.** Migration 0029 adds a nullable
   `drafts.project_public_id`, a foreign key to `projects.public_id` with
-  `ON DELETE SET NULL`, and `ix_drafts_project_public_id`. The task link remains the
+  `ON DELETE SET NULL`, `ix_drafts_project_public_id`, and
+  `ck_drafts_project_only_for_notes` (`kind = 'note' OR project_public_id IS NULL`), so
+  the database also refuses a project on any other kind. The task link remains the
   existing `drafts.action_id` (SET NULL) and its `action_title` snapshot. There is no
   link table and no many-to-many relationship.
 - **There's no project-name snapshot.** Projects are archived, never purged, so the
@@ -37,6 +39,8 @@ rather than copied notes. General note relationships stay deferred.
   - A call that changes nothing makes no revision.
   - The calls are separate, so changing the project never clears a link to a
     soft-deleted task, which could be restored.
+  - The desktop names the note when the owner makes the change, so a change queued
+    behind a switch to another note still goes to the note it was made for.
   - Errors use fixed messages and never contain owner text.
 - **Archived projects keep their notes but take no new ones.**
   - A new project link needs a project that exists and isn't archived.

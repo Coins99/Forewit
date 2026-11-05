@@ -919,6 +919,9 @@ class DraftTable(Base):
         Index("ix_drafts_updated_at_utc", "updated_at_utc"),
         Index("ix_drafts_action_id", "action_id"),
         Index("ix_drafts_project_public_id", "project_public_id"),
+        CheckConstraint(
+            "kind = 'note' OR project_public_id IS NULL", name="project_only_for_notes"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

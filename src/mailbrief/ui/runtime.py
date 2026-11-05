@@ -20,6 +20,7 @@ from mailbrief.domain.actions import (
     ActionProposal,
     DeadlineChange,
     StepEdit,
+    TaskChoice,
     ThreadLink,
 )
 from mailbrief.domain.briefs import (
@@ -1023,7 +1024,7 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await DraftService(session).set_task(public_id, revision, action_public_id)
 
-    async def task_choices(self, text: str = "") -> tuple[Action, ...]:
+    async def task_choices(self, text: str = "") -> tuple[TaskChoice, ...]:
         """Tasks a note can link to: live, open first, matching every word of ``text``."""
         async with self._storage().session() as session:
             return await ActionService(session).title_matches(text)

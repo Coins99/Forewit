@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.actions import Action
+from mailbrief.domain.actions import TaskChoice
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingPreview
 from mailbrief.domain.drafts import (
     DRAFT_BODY_MAX_CHARS,
@@ -55,7 +55,8 @@ from mailbrief.domain.projects import Project
 from mailbrief.ui.deadline_text import moment_text
 from mailbrief.ui.dialog_guard import DialogGuard
 from mailbrief.ui.drafting_panel import DraftingPanel
-from mailbrief.ui.labels import outline_button, plain_label
+from mailbrief.ui.fields import PopupChoice, fill_project_choice
+from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.lists import SafeList, clear_list
 from mailbrief.ui.task_picker import TaskPickerDialog
 from mailbrief.ui.theme import ui_font
@@ -161,7 +162,9 @@ class DraftEditor(QDialog):
         self._versions: tuple[DraftVersionInfo, ...] = ()
         self._picker: QFileDialog | None = None
         self._projects: tuple[Project, ...] = ()
-        self._links_busy = False  # A project or task change is waiting for the window.
+        # Project and task changes sent and not yet answered. They queue in order; while one
+        # waits, the Project list keeps the owner's latest choice rather than the last saved.
+        self._links_pending = 0
         root = QVBoxLayout(self)
         self._root = root
         root.setContentsMargins(0, 0, 0, 0)
@@ -231,7 +234,10 @@ class DraftEditor(QDialog):
         links.setHorizontalSpacing(10)
         links.setVerticalSpacing(6)
         self.project_label = QLabel("Pro&ject")
-        self.project_choice = QComboBox()
+        self.project_label.setObjectName("noteProjectLabel")
+        self.project_label.setAccessibleName("Project")
+        # Saved as soon as it is chosen, so only a choice in its popup changes it.
+        self.project_choice = PopupChoice()
         self.project_choice.setObjectName("noteProject")
         self.project_choice.setAccessibleName("Note project")
         self.project_choice.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -241,7 +247,10 @@ class DraftEditor(QDialog):
         )
         self.project_label.setBuddy(self.project_choice)
         self.task_label = QLabel("Task")
-        self.task_line = _plain("None")
+        self.task_label.setObjectName("noteTaskLabel")
+        self.task_label.setAccessibleName("Task")
+        # A task's title can be an email's words: wrap_label breaks a long unbroken token.
+        self.task_line = wrap_label("None")
         self.task_line.setObjectName("noteTask")
         self.task_line.setAccessibleName("Linked task")
         self.link_task_button = outline_button("Link to tas&k…", "noteLinkTask", mnemonic=True)
@@ -251,7 +260,7 @@ class DraftEditor(QDialog):
         links.addWidget(self.project_label, 0, 0)
         links.addWidget(self.project_choice, 0, 1, 1, 3, Qt.AlignmentFlag.AlignLeft)
         links.addWidget(self.task_label, 1, 0)
-        links.addWidget(self.task_line, 1, 1)
+        links.addWidget(self.task_line, 1, 1, Qt.AlignmentFlag.AlignVCenter)
         links.addWidget(self.link_task_button, 1, 2)
         links.addWidget(self.unlink_task_button, 1, 3)
         links.setColumnStretch(1, 1)
@@ -579,7 +588,7 @@ class DraftEditor(QDialog):
         self.ai_panel.hide()
         self.missing_line.clear()
         self.missing_line.hide()
-        self._links_busy = False
+        self._links_pending = 0
         self.task_picker.reject()
         self._show_links(draft)
         self._update_buttons()
@@ -615,7 +624,17 @@ class DraftEditor(QDialog):
         self.links.setVisible(note and not self.reply_mode)
         if not note:
             return
-        self._fill_projects(draft)
+        if not self._links_pending:
+            self.project_choice.blockSignals(True)
+            fill_project_choice(
+                self.project_choice,
+                self._projects,
+                draft.project_public_id,
+                none_label="No project",
+                # Keep the note's project when the list has not loaded it yet.
+                fallback_name=draft.project_name or "Its project",
+            )
+            self.project_choice.blockSignals(False)
         title = draft.action_title
         if title is None:
             self.task_line.setText("None")
@@ -627,23 +646,10 @@ class DraftEditor(QDialog):
         self.unlink_task_button.setVisible(title is not None)
         self._update_links()
 
-    def _fill_projects(self, draft: Draft) -> None:
-        chosen = draft.project_public_id
-        self.project_choice.blockSignals(True)
-        self.project_choice.clear()
-        self.project_choice.addItem("No project", None)
-        for project in self._projects:
-            if project.archived_at_utc is None or project.public_id == chosen:
-                suffix = " (archived)" if project.archived_at_utc else ""
-                self.project_choice.addItem(project.name + suffix, project.public_id)
-        # Keep the note's project when the list has not loaded it yet.
-        if chosen is not None and self.project_choice.findData(chosen) < 0:
-            self.project_choice.addItem(draft.project_name or "Its project", chosen)
-        self.project_choice.setCurrentIndex(max(0, self.project_choice.findData(chosen)))
-        self.project_choice.blockSignals(False)
-
     def _update_links(self) -> None:
-        live = not self._conflict and not self._frozen and not self._links_busy
+        # Never disabled while a change waits: a disabled field drops the keyboard's focus,
+        # and the window saves changes in the order they were made.
+        live = not self._conflict and not self._frozen
         for widget in (self.project_choice, self.link_task_button, self.unlink_task_button):
             widget.setEnabled(live)
 
@@ -652,12 +658,14 @@ class DraftEditor(QDialog):
         if draft is None:
             return
         value = self.project_choice.itemData(index)
-        if value == draft.project_public_id:
-            return
-        self._links_busy = True
-        self._update_links()
-        self.status.setText(_SAVING)
+        if value == draft.project_public_id and not self._links_pending:
+            return  # Already the note's project; with a change waiting, this one undoes it.
+        self._send_link()
         self.project_requested.emit(value)
+
+    def _send_link(self) -> None:
+        self._links_pending += 1
+        self.status.setText(_SAVING)
 
     def _pick_task(self) -> None:
         if self.draft is not None and self.draft.kind is DraftKind.NOTE:
@@ -665,15 +673,11 @@ class DraftEditor(QDialog):
             self.task_picker.open_fresh()
 
     def _request_task(self, public_id: str | None) -> None:
-        draft = self.draft
-        if draft is None or self._links_busy:
-            return
-        self._links_busy = True
-        self._update_links()
-        self.status.setText(_SAVING)
-        self.task_requested.emit(public_id)
+        if self.draft is not None:
+            self._send_link()
+            self.task_requested.emit(public_id)
 
-    def show_task_choices(self, actions: tuple[Action, ...]) -> None:
+    def show_task_choices(self, actions: tuple[TaskChoice, ...]) -> None:
         if self.task_picker.isVisible():
             self.task_picker.show_choices(actions)
 
@@ -684,14 +688,14 @@ class DraftEditor(QDialog):
         """A project or task change was saved. The typed text stays as it is, and autosave
         sends it at the new revision."""
         self.draft = draft
-        self._links_busy = False
+        self._links_pending = max(0, self._links_pending - 1)
         self._show_links(draft)
-        if not self._dirty:
+        if not self._dirty and not self._links_pending:
             self.status.setText(f"Saved {self._time(draft)}")
 
     def links_failed(self, message: str) -> None:
-        """A project or task change was refused or failed; the note's links are as before."""
-        self._links_busy = False
+        """A project or task change was refused or failed; the note's links are as saved."""
+        self._links_pending = max(0, self._links_pending - 1)
         if self.draft is not None:
             self._show_links(self.draft)
         self.status.setText(message)
@@ -783,7 +787,7 @@ class DraftEditor(QDialog):
     def show_conflict(self) -> None:
         """The draft changed elsewhere: stop autosaving and offer to save as a new draft."""
         self._conflict = True
-        self._links_busy = False
+        self._links_pending = 0
         self._stop_timers()
         self.status.setText(CONFLICT)
         self.save_as_new_button.show()

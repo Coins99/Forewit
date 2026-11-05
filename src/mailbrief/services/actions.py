@@ -32,6 +32,7 @@ from mailbrief.domain.actions import (
     DeadlineOrigin,
     StepEdit,
     SuggestionState,
+    TaskChoice,
     ThreadLink,
     person_key,
     tag_key,
@@ -1111,15 +1112,23 @@ class ActionService:
         actions."""
         return await self._repository.people(view)
 
-    async def title_matches(self, text: str = "") -> tuple[Action, ...]:
+    async def title_matches(self, text: str = "") -> tuple[TaskChoice, ...]:
         """Live tasks, open ones first, whose titles contain every word of ``text``, at most
         TITLE_MATCH_LIMIT; a note's Link to task offers them. Text too short to search
-        (query_terms() keeps no word) matches nothing, and empty text matches every task."""
+        (query_terms() keeps no word) matches nothing, and empty text matches every task.
+        Only each task's row is read, never its steps, sources or tags."""
         terms = query_terms(text)
         if text.strip() and not terms:
             return ()
-        rows = await self._repository.title_matches(terms, open_only=False)
-        return tuple(await self._repository.load(rows))
+        return tuple(
+            TaskChoice(
+                public_id=row.public_id,
+                title=row.title,
+                status=ActionStatus(row.status),
+                ownership=ActionOwnership(row.ownership),
+            )
+            for row in await self._repository.title_matches(terms, open_only=False)
+        )
 
     async def count_actions(
         self, view: ActionFilter, *, group: str = "all", group_id: str | None = None

@@ -608,6 +608,7 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
         "ck_drafts_revision_positive",
         "fk_drafts_action_id_actions",
         "fk_drafts_project_public_id_projects",
+        "ck_drafts_project_only_for_notes",
     }
     assert created_schema["draft_versions"]["constraints"] == {
         "pk_draft_versions",

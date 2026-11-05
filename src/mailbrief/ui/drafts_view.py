@@ -274,12 +274,17 @@ class DraftsPanel(QWidget):
         self.new_button.setMenu(cast(QMenu, None) if notes else self.new_menu)
         self.delete_button.setText("Delete no&te" if notes else "Delete draf&t")
         self.project_filter.setVisible(notes)
-        self._rebuild()
+        self._rebuild(fresh=True)  # The new view opens on its newest item.
 
     # Projects.
 
     def show_projects(self, projects: tuple[Project, ...]) -> None:
-        """The owner's projects, for the Notes view's filter and the rows' project names."""
+        """The owner's projects, for the Notes view's filter and the rows' project names.
+
+        Every refresh of the Actions page passes them; unchanged ones change nothing.
+        """
+        if projects == self._projects:
+            return
         self._projects = projects
         self._fill_project_filter()
         self._rebuild()
@@ -301,18 +306,13 @@ class DraftsPanel(QWidget):
         self.project_filter.setCurrentIndex(max(0, self.project_filter.findData(choice)))
 
     def project_for_new_note(self) -> str | None:
-        """The project a new note starts in: the filter's, when it takes new notes.
-
-        A filter the new note won't match (an archived or unknown project) goes back to All
-        notes first, so the new note shows in the list beside its editor.
-        """
+        """The project a new note starts in: the filter's, when it takes new notes. It
+        changes nothing; when the new note doesn't match the filter (an archived project's),
+        keep_shown() widens the filter once the note opens."""
         choice = self.project_filter.currentData()
-        if choice in (ALL_NOTES, NO_PROJECT):
-            return None
         for project in self._projects:
             if project.public_id == choice and project.archived_at_utc is None:
                 return project.public_id
-        self.filter_project(ALL_NOTES)
         return None
 
     def keep_shown(self, draft: Draft) -> None:
@@ -369,36 +369,55 @@ class DraftsPanel(QWidget):
             rows = [summary for summary in rows if summary.project_public_id == wanted]
         return tuple(rows)
 
-    def _rebuild(self) -> None:
-        """Show the view's rows, keeping the selection on the same draft when it remains."""
-        previous = self.selected()
-        row = self.list.currentRow()
+    def _rebuild(self, *, fresh: bool = False) -> None:
+        """Show the view's rows, keeping the selection on the same draft when it remains;
+        ``fresh`` (a new view) starts on the first row instead.
+
+        The list's signals are held while it refills, so keeping the selection never passes
+        through none, which would hide the inline editor and take the keyboard's focus. The
+        selection is announced once, at the end, when it moved to another draft or to none,
+        or when the editor isn't showing it yet.
+        """
+        previous = None if fresh else self.selected()
+        row = -1 if fresh else self.list.currentRow()
         drafts = self._shown()
         self._drafts = drafts
         self.draft_count.setText(f"{len(drafts)} {_TEXT[self._view].noun}")
-        clear_list(self.list)
-        for summary in drafts:
-            changed = moment_text(summary.updated_at_utc, self._zone, today=self._today)
-            item = QListWidgetItem(describe(summary, self._zone, self._today))
-            item.setData(
-                DISPLAY_ROW_ROLE,
-                DisplayRow(
-                    summary.display_title,
-                    f"{KIND_NAMES[summary.kind]} · {changed}",
-                    _links_line(summary),
-                    glyph="pencil",
-                ),
-            )
-            self.list.addItem(item)
-        ids = [summary.public_id for summary in drafts]
-        if previous is not None and previous.public_id in ids:
-            self.list.setCurrentRow(ids.index(previous.public_id))
-        elif drafts:
-            self.list.setCurrentRow(min(max(row, 0), len(drafts) - 1))
+        self.list.blockSignals(True)
+        try:
+            clear_list(self.list)
+            for summary in drafts:
+                changed = moment_text(summary.updated_at_utc, self._zone, today=self._today)
+                item = QListWidgetItem(describe(summary, self._zone, self._today))
+                item.setData(
+                    DISPLAY_ROW_ROLE,
+                    DisplayRow(
+                        summary.display_title,
+                        f"{KIND_NAMES[summary.kind]} · {changed}",
+                        _links_line(summary),
+                        glyph="pencil",
+                    ),
+                )
+                self.list.addItem(item)
+            ids = [summary.public_id for summary in drafts]
+            if previous is not None and previous.public_id in ids:
+                self.list.setCurrentRow(ids.index(previous.public_id))
+            elif drafts:
+                self.list.setCurrentRow(min(max(row, 0), len(drafts) - 1))
+            self._filter(self.search.text())
+        finally:
+            self.list.blockSignals(False)
         self.list.setVisible(bool(drafts))
         self.empty.setVisible(not drafts)
-        self._update_buttons()
-        self._filter(self.search.text())
+        current = self.selected()
+        kept = (
+            previous is not None and current is not None and current.public_id == previous.public_id
+        )
+        if kept and current is not None and self.editor_host.currentIndex() != 0:
+            self.preview_title.setText(current.display_title)
+            self._update_buttons()
+        else:
+            self._selection_changed(self.list.currentRow())
 
     def _selection_changed(self, row: int) -> None:
         self._update_buttons()

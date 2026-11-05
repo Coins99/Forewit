@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import HttpUrl
 
-from mailbrief.domain.actions import Action
+from mailbrief.domain.actions import TaskChoice
 from mailbrief.domain.drafting import (
     CurrentText,
     DraftContextPart,
@@ -75,7 +75,7 @@ class FakeDrafts:
         # and the tasks Link to task offers.
         self.project_names: dict[str, str] = {}
         self.archived_projects: set[str] = set()
-        self.task_choice_list: tuple[Action, ...] = ()
+        self.task_choice_list: tuple[TaskChoice, ...] = ()
         self.task_choice_queries: list[str] = []
         self._ticks = 0
         # AI drafting: what the fake offers, and how its next generation ends.
@@ -250,7 +250,7 @@ class FakeDrafts:
             raise NoteLinkError("That task was deleted or is no longer available.")
         return self._relink(draft, action_public_id=action_public_id, action_title=title)
 
-    async def task_choices(self, text: str = "") -> tuple[Action, ...]:
+    async def task_choices(self, text: str = "") -> tuple[TaskChoice, ...]:
         self.task_choice_queries.append(text)
         return self.task_choice_list
 

@@ -124,3 +124,23 @@ def test_project_link_is_checked_and_cleared_when_the_project_goes(tmp_path: Pat
         assert connection.execute("SELECT project_public_id, title FROM drafts").fetchall() == [
             (None, "Budget")
         ]
+
+
+def test_only_a_note_can_belong_to_a_project(tmp_path: Path) -> None:
+    path = tmp_path / "notes-only.sqlite3"
+    command.upgrade(migration_config(path), "head")
+    insert_old_note(path)
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT INTO projects(public_id,name,notes,revision,created_at_utc,updated_at_utc)"
+            " VALUES(?,'Home','',1,?,?)",
+            (_PROJECT_ID, _NOW, _NOW),
+        )
+        connection.execute(
+            "UPDATE drafts SET project_public_id = ? WHERE public_id = ?",
+            (_PROJECT_ID, OLD_NOTE_ID),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="project_only_for_notes"):
+            connection.execute(
+                "UPDATE drafts SET kind = 'email' WHERE public_id = ?", (OLD_NOTE_ID,)
+            )

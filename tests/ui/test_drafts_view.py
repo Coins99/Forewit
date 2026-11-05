@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.drafts import Draft, DraftKind, DraftSummary, WritingView
@@ -220,10 +221,93 @@ def test_the_project_filter_narrows_notes(panel: DraftsPanel) -> None:
     assert panel.project_for_new_note() is None
     panel.filter_project(OLD)
     assert ids(panel) == ["Old plan"]
-    # An archived project takes no new notes, so a new one shows under All notes.
+    # An archived project takes no new notes. Asking changes nothing: keep_shown() widens
+    # the filter once the new note opens.
     assert panel.project_for_new_note() is None
-    assert panel.project_filter.currentData() == "all"
-    assert len(ids(panel)) == 3
+    assert panel.project_filter.currentData() == OLD
+    assert ids(panel) == ["Old plan"]
+
+
+def test_switching_views_opens_the_newest_item(panel: DraftsPanel) -> None:
+    opened: list[str] = []
+    panel.preview_requested.connect(lambda summary: opened.append(summary.display_title))
+    panel.show_drafts(
+        (
+            summary(1, display_title="Reply one"),
+            summary(2, kind=DraftKind.NOTE, display_title="Newest note"),
+            summary(3, display_title="Reply two"),
+            summary(4, kind=DraftKind.NOTE, display_title="Older note"),
+            summary(5, display_title="Reply three"),
+        ),
+        TORONTO,
+        TODAY,
+    )
+    panel.list.setCurrentRow(2)  # The third draft, not the first.
+    opened.clear()
+
+    panel.show_view(WritingView.NOTES)
+
+    assert panel.selected() is not None
+    assert panel.selected().display_title == "Newest note"  # type: ignore[union-attr]
+    assert opened == ["Newest note"]  # Announced once.
+    panel.show_view(WritingView.DRAFTS)
+    assert panel.selected().display_title == "Reply one"  # type: ignore[union-attr]
+
+
+def test_switching_to_an_empty_view_shows_the_placeholder(panel: DraftsPanel) -> None:
+    host = panel.editor_host
+    editor = QWidget()
+    host.addWidget(editor)
+    panel.show_drafts((summary(1),), TORONTO, TODAY)
+    host.setCurrentWidget(editor)  # As the window does when it opens the draft inline.
+
+    panel.show_view(WritingView.NOTES)
+
+    assert panel.selected() is None and host.currentIndex() == 0
+
+
+def test_a_refresh_keeping_the_selection_never_hides_the_editor(panel: DraftsPanel) -> None:
+    host = panel.editor_host
+    editor = QWidget()
+    host.addWidget(editor)
+    rows = (summary(1), summary(2, display_title="Renamed elsewhere"))
+    panel.show_drafts(rows, TORONTO, TODAY)
+    panel.list.setCurrentRow(1)
+    host.setCurrentWidget(editor)
+    changes: list[int] = []
+    opened: list[object] = []
+    host.currentChanged.connect(changes.append)
+    panel.preview_requested.connect(opened.append)
+
+    panel.show_drafts((summary(3), *rows), TORONTO, TODAY)  # A refresh with a new draft.
+    panel.show_projects((project(HOME, "Home"),))
+
+    assert changes == [] and opened == []
+    assert host.currentWidget() is editor
+    assert panel.selected() == rows[1]
+    assert panel.preview_title.text() == "Renamed elsewhere"
+
+
+def test_a_refresh_still_opens_a_selection_the_editor_isnt_showing(panel: DraftsPanel) -> None:
+    opened: list[object] = []
+    panel.show_drafts((summary(1),), TORONTO, TODAY)
+    panel.preview_requested.connect(opened.append)
+    assert panel.editor_host.currentIndex() == 0  # Only the placeholder so far.
+
+    panel.show_drafts((summary(1),), TORONTO, TODAY)
+
+    assert opened == [summary(1)]
+
+
+def test_unchanged_projects_rebuild_nothing(panel: DraftsPanel) -> None:
+    projects = (project(HOME, "Home"),)
+    panel.show_projects(projects)
+    panel.show_drafts((summary(1),), TORONTO, TODAY)
+    item = panel.list.item(0)
+
+    panel.show_projects(projects)
+
+    assert panel.list.item(0) is item
 
 
 def test_new_note_and_keeping_the_edited_note_shown(panel: DraftsPanel) -> None:

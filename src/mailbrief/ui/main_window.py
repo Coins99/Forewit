@@ -38,6 +38,7 @@ from mailbrief.domain.actions import (
     ActionStatus,
     DeadlineChange,
     StepEdit,
+    TaskChoice,
     ThreadLink,
 )
 from mailbrief.domain.analysis import ActionOwnership
@@ -425,7 +426,7 @@ class DesktopBackend(Protocol):
     async def set_note_task(
         self, public_id: str, revision: int, action_public_id: str | None
     ) -> Draft: ...
-    async def task_choices(self, text: str = "") -> tuple[Action, ...]: ...
+    async def task_choices(self, text: str = "") -> tuple[TaskChoice, ...]: ...
     async def create_reply_draft(self, account_email: str, provider_message_id: str) -> Draft: ...
     async def create_draft_for_action(self, public_id: str, kind: DraftKind) -> Draft: ...
     async def autosave_draft(self, public_id: str, revision: int, edit: DraftEdit) -> Draft: ...
@@ -3525,54 +3526,79 @@ class MainWindow(QMainWindow):
             lambda agreed: writes.run(lambda: self._generate_draft(agreed))
         )
         editor.ai_cancel_requested.connect(self._cancel_drafting)
-        editor.project_requested.connect(
-            lambda project: writes.run(lambda: self._set_note_link(project=project))
-        )
-        editor.task_requested.connect(
-            lambda task: writes.run(lambda: self._set_note_link(task=task, linking_task=True))
-        )
+        editor.project_requested.connect(self._queue_note_project)
+        editor.task_requested.connect(self._queue_note_task)
         editor.task_search_requested.connect(self._search_note_tasks)
 
-    async def _set_note_link(
-        self,
-        *,
-        project: object = None,
-        task: object = None,
-        linking_task: bool = False,
-    ) -> None:
-        """Save a note's new project, or its new task when ``linking_task``, at the editor's
-        latest revision (ADR 0027). Typing waiting to be saved goes first (DraftWrites)."""
-        editor = self.draft_editor
-        draft = self._writable_draft()
+    # A note's links (ADR 0027). Each change names its note when the owner makes it, as an
+    # autosave does: a draft switch queued ahead of it must not send it to another note.
+
+    def _queue_note_project(self, project: object) -> None:
+        draft = self.draft_editor.draft
         if draft is None:
+            return
+        public_id, chosen = draft.public_id, project if isinstance(project, str) else None
+
+        def change(revision: int) -> Awaitable[Draft]:
+            return self.backend.set_note_project(public_id, revision, chosen)
+
+        self.draft_writes.run(lambda: self._save_note_link(public_id, change))
+
+    def _queue_note_task(self, task: object) -> None:
+        draft = self.draft_editor.draft
+        if draft is None:
+            return
+        public_id, chosen = draft.public_id, task if isinstance(task, str) else None
+
+        def change(revision: int) -> Awaitable[Draft]:
+            return self.backend.set_note_task(public_id, revision, chosen)
+
+        self.draft_writes.run(lambda: self._save_note_link(public_id, change))
+
+    def _holds(self, public_id: str) -> bool:
+        draft = self.draft_editor.draft
+        return draft is not None and draft.public_id == public_id
+
+    async def _save_note_link(
+        self, public_id: str, change: Callable[[int], Awaitable[Draft]]
+    ) -> None:
+        """Save one change to note ``public_id``'s links at its latest revision; typing
+        waiting to be saved goes first (DraftWrites). When the editor has since moved to
+        another draft, the change still goes to the note it was made for, at that note's
+        current revision, and the editor's draft is left alone."""
+        editor = self.draft_editor
+        current = editor.draft
+        held = current is not None and current.public_id == public_id
+        if held and editor.in_conflict:
             editor.links_failed("Finish editing this note before changing its links.")
             return
         try:
-            if linking_task:
-                saved = await self.backend.set_note_task(
-                    draft.public_id, draft.revision, task if isinstance(task, str) else None
-                )
+            if current is not None and held:
+                revision = current.revision
             else:
-                saved = await self.backend.set_note_project(
-                    draft.public_id, draft.revision, project if isinstance(project, str) else None
-                )
+                revision = (await self.backend.get_draft(public_id)).revision
+            saved = await change(revision)
         except _DRAFT_STALE as exc:
             log_failure(exc)
-            editor.show_conflict()
+            if self._holds(public_id):
+                editor.show_conflict()
             return
         except NoteLinkError as exc:
             log_failure(exc)
-            editor.links_failed(str(exc))  # Fixed messages, never owner text.
+            if self._holds(public_id):
+                editor.links_failed(str(exc))  # Fixed messages, never owner text.
+            # Archived or deleted elsewhere: reload the projects, so it isn't offered again.
+            await self._refresh_actions()
             await self._refresh_drafts()
             return
         except Exception as exc:
             log_failure(exc)
-            editor.links_failed("The note's links weren't saved. Try again.")
+            if self._holds(public_id):
+                editor.links_failed("The note's links weren't saved. Try again.")
             return
-        if editor.draft is None or editor.draft.public_id != saved.public_id:
-            return
-        editor.links_saved(saved)
-        self.drafts_panel.keep_shown(saved)
+        if self._holds(public_id):
+            editor.links_saved(saved)
+            self.drafts_panel.keep_shown(saved)
         await self._refresh_drafts()
 
     def _search_note_tasks(self, text: str) -> None:

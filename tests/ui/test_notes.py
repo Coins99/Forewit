@@ -10,14 +10,16 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
+from mailbrief.domain.actions import ActionStatus, TaskChoice
+from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.drafts import DraftEdit, DraftKind, WritingView
 from mailbrief.domain.projects import Project
 from mailbrief.domain.routes import PageRoute, WritingRoute
 from mailbrief.ui.draft_editor import CONFLICT
+from mailbrief.ui.labels import WrapLabel
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
 from mailbrief.ui.workspace import COUNT_ROLE
-from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_palette import window_for
 from tests.ui.test_workflow import FakeBackend, finish
@@ -25,7 +27,13 @@ from tests.ui.window_wait import drain_writes
 
 HOME = "11111111-1111-4111-8111-111111111111"
 OLD = "22222222-2222-4222-8222-222222222222"
-TASK = make_action(public_id="33333333-3333-4333-8333-333333333333", title="Paint the hall")
+WORK = "44444444-4444-4444-8444-444444444444"
+TASK = TaskChoice(
+    public_id="33333333-3333-4333-8333-333333333333",
+    title="Paint the hall",
+    status=ActionStatus.OPEN,
+    ownership=ActionOwnership.MINE,
+)
 
 
 def project(public_id: str, name: str, *, archived: bool = False) -> Project:
@@ -80,6 +88,12 @@ async def test_notes_has_its_own_row_heading_and_shortcut(qtbot: QtBot) -> None:
     assert window.drafts_panel.selected() is not None
     assert window.drafts_panel.selected().display_title == "Ideas"  # type: ignore[union-attr]
     assert window.draft_editor.embedded and not window.draft_editor.links.isHidden()
+    editor = window.draft_editor
+    assert (editor.project_label.objectName(), editor.task_label.objectName()) == (
+        "noteProjectLabel",
+        "noteTaskLabel",
+    )
+    assert isinstance(editor.task_line, WrapLabel)  # A long unbroken title can't widen it.
 
     window.page_shortcuts["drafts"].activated.emit()
     await drain_writes(window)
@@ -140,7 +154,8 @@ async def test_a_refused_project_leaves_the_choice_as_it_was(qtbot: QtBot) -> No
     window, backend = await notes_window(qtbot)
     await open_notes(window)
     editor = window.draft_editor
-    backend.archived_projects.add(HOME)  # Archived since the list loaded.
+    backend.archived_projects.add(HOME)  # Archived elsewhere since the list loaded.
+    backend.projects = (project(HOME, "Home", archived=True), project(OLD, "Old", archived=True))
 
     editor.project_choice.setCurrentIndex(1)
     editor.project_choice.activated.emit(1)
@@ -149,6 +164,9 @@ async def test_a_refused_project_leaves_the_choice_as_it_was(qtbot: QtBot) -> No
     assert editor.status.text() == "That project is archived or no longer available."
     assert editor.project_choice.currentData() is None
     assert editor.project_choice.isEnabled()
+    # The projects were reloaded, so it isn't offered again.
+    choice = editor.project_choice
+    assert [choice.itemText(index) for index in range(choice.count())] == ["No project"]
 
 
 async def test_a_note_changed_elsewhere_shows_the_conflict(qtbot: QtBot) -> None:
@@ -291,3 +309,100 @@ async def test_notes_page_renders(
     QApplication.processEvents()
     save_shot(editor.task_picker.grab(), f"dialog-task-picker-{mode.value}")
     editor.task_picker.reject()
+
+
+async def test_a_link_change_goes_to_the_note_it_was_made_for(qtbot: QtBot) -> None:
+    """A draft switch queued ahead of a project change must not send it to the next note."""
+    window, backend = await notes_window(qtbot)
+    other = await backend.create_draft(DraftKind.NOTE)
+    await backend.autosave_draft(other.public_id, other.revision, DraftEdit(title="Other"))
+    window.start(window._refresh_drafts)
+    await finish(window)
+    await open_notes(window)
+    editor = window.draft_editor
+    assert editor.draft is not None
+    held = editor.draft.public_id
+    # The other note the Notes view lists (the email draft isn't listed there).
+    target = next(row.public_id for row in window.drafts_panel._drafts if row.public_id != held)
+    backend.draft_gate = asyncio.Event()  # An autosave in flight keeps the queue busy.
+    editor.body.setPlainText("Typed first")
+    editor._autosave_now()
+
+    window.drafts_panel.select_draft(target)  # Queues the switch to the other note.
+    editor.project_choice.setCurrentIndex(1)  # Still the first note's editor.
+    editor.project_choice.activated.emit(1)
+    backend.draft_gate.set()
+    await drain_writes(window)
+
+    assert backend.drafts[held].project_public_id == HOME
+    assert backend.drafts[held].body == "Typed first"
+    assert backend.drafts[target].project_public_id is None
+    assert editor.draft is not None and editor.draft.public_id == target
+    assert editor.project_choice.currentData() is None
+
+
+async def test_link_changes_queue_in_order_and_keep_the_field_enabled(qtbot: QtBot) -> None:
+    window, backend = await notes_window(qtbot)
+    await open_notes(window)
+    editor = window.draft_editor
+    choice = editor.project_choice
+    assert editor.draft is not None
+    public_id = editor.draft.public_id
+    backend.draft_gate = asyncio.Event()
+    editor.body.setPlainText("Typed")
+    editor._autosave_now()
+
+    choice.setCurrentIndex(1)
+    choice.activated.emit(1)
+    assert choice.isEnabled() and editor.link_task_button.isEnabled()
+    choice.setCurrentIndex(0)  # Back to No project before the first change is saved.
+    choice.activated.emit(0)
+    editor.task_picker.chosen.emit(TASK.public_id)  # And a task, while both wait.
+    backend.draft_gate.set()
+    await drain_writes(window)
+
+    saved = backend.drafts[public_id]
+    assert (saved.project_public_id, saved.action_public_id) == (None, TASK.public_id)
+    links = [call[0] for call in backend.draft_calls if str(call[0]).startswith("set_note")]
+    assert links == ["set_note_project", "set_note_project", "set_note_task"]
+    assert choice.currentData() is None and editor.task_line.text() == "Paint the hall"
+    assert editor.status.text().startswith("Saved")
+
+
+async def test_refreshes_never_hide_the_note_being_edited(qtbot: QtBot) -> None:
+    window, backend = await notes_window(qtbot)
+    await open_notes(window)
+    editor = window.draft_editor
+    host = window.drafts_panel.editor_host
+    assert host.currentWidget() is editor
+    changes: list[int] = []
+    host.currentChanged.connect(changes.append)
+    backend.projects = (*backend.projects, project(WORK, "Work"))
+
+    window.start(window._refresh_actions)
+    await finish(window)
+    window.start(window._refresh_drafts)
+    await finish(window)
+    await drain_writes(window)
+
+    assert changes == [] and host.currentWidget() is editor
+    choice = editor.project_choice
+    assert "Work" in [choice.itemText(index) for index in range(choice.count())]
+
+
+async def test_new_note_under_an_archived_filter_shows_in_all_notes(qtbot: QtBot) -> None:
+    window, backend = await notes_window(qtbot)
+    await open_notes(window)
+    window.drafts_panel.filter_project(OLD)
+    await drain_writes(window)
+
+    window.drafts_panel.new_button.click()
+    await finish(window)
+    await drain_writes(window)
+
+    assert calls(backend, "create_draft")[-1] == ("create_draft", DraftKind.NOTE)
+    assert window.drafts_panel.project_filter.currentData() == "all"
+    editor = window.draft_editor
+    assert editor.draft is not None and editor.draft.project_public_id is None
+    assert window.drafts_panel.selected() is not None
+    assert window.drafts_panel.selected().public_id == editor.draft.public_id  # type: ignore[union-attr]

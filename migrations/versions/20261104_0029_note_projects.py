@@ -14,6 +14,9 @@ down_revision: str | None = "20261103_0028"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Only a note belongs to a project (ADR 0027); the services keep it so, and so does SQLite.
+_NOTES_ONLY = "kind = 'note' OR project_public_id IS NULL"
+
 
 def upgrade() -> None:
     # Alembic migration connections keep foreign keys off while rebuilding parent tables,
@@ -28,10 +31,12 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
         batch.create_index("ix_drafts_project_public_id", ["project_public_id"])
+        batch.create_check_constraint(op.f("ck_drafts_project_only_for_notes"), _NOTES_ONLY)
 
 
 def downgrade() -> None:
     with op.batch_alter_table("drafts", recreate="always") as batch:
+        batch.drop_constraint(op.f("ck_drafts_project_only_for_notes"), type_="check")
         batch.drop_index("ix_drafts_project_public_id")
         batch.drop_constraint("fk_drafts_project_public_id_projects", type_="foreignkey")
         batch.drop_column("project_public_id")

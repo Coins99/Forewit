@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QHideEvent
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLineEdit, QListWidgetItem, QVBoxLayout, QWidget
 
-from mailbrief.domain.actions import Action, ActionStatus
+from mailbrief.domain.actions import ActionStatus, TaskChoice
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.labels import outline_button, wrap_label
@@ -19,7 +19,7 @@ SEARCH_DELAY_MS: Final = 200
 _TASK_ID: Final = Qt.ItemDataRole.UserRole + 1
 
 
-def choice_text(action: Action) -> str:
+def choice_text(action: TaskChoice) -> str:
     """One plain line: the title, and whether the task is done or waits on someone."""
     if action.status is not ActionStatus.OPEN:
         return f"{action.title} · {action.status.value.capitalize()}"
@@ -60,6 +60,7 @@ class TaskPickerDialog(QDialog):
         layout.addWidget(self.choices, 1)
         self.status = wrap_label("Up to 50 tasks, open ones first.", tone="muted")
         self.status.setObjectName("taskPickerStatus")
+        self.status.setAccessibleName("Task search status")
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
         self.link_button = outline_button("Link", "taskPickerLink", primary=True)
@@ -90,7 +91,7 @@ class TaskPickerDialog(QDialog):
         self.query.setFocus()
         self.search_requested.emit("")
 
-    def show_choices(self, actions: tuple[Action, ...]) -> None:
+    def show_choices(self, actions: tuple[TaskChoice, ...]) -> None:
         clear_list(self.choices)
         for action in actions:
             item = QListWidgetItem(choice_text(action))

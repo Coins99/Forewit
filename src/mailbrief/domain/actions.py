@@ -60,6 +60,18 @@ class ActionStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class TaskChoice(DomainModel):
+    """One task a chooser offers (a note's Link to task, ADR 0027): enough to name it and
+    say whether it is done or waits on someone, read without the task's details."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
+    status: ActionStatus
+    ownership: ActionOwnership
+
+
 class ActionPriority(StrEnum):
     """The owner's own priority for a task; AI runs and proposals never set it."""
 
