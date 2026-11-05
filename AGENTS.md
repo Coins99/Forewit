@@ -171,15 +171,16 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   refresh the focus date during busy email work. Native macOS and owner
   acceptance remain open; see `docs/p2-focus.md`. Full P2 remains incomplete.
 - P2-04a Notes and note links merged in PR #101, awaiting owner desktop
-  acceptance: a Notes sidebar row (Ctrl+8) shows the writing page's Notes view, as
-  Waiting shares Actions, with a project filter; Drafts lists replies, emails and
-  messages. A note links to at most one project (`drafts.project_public_id`, migration
-  0029) and one task (the existing `action_id` and title snapshot), both editable in the
-  editor (`DraftService.set_project` / `set_task`, `ui/task_picker.py`). See ADR 0027
-  and `docs/p2-notes.md`. P2-04b (the Projects page and project context) follows.
+  acceptance: Notes (Ctrl+8) shares the writing panel and editor with Mail's drafts and
+  has a project filter; Mail drafts excludes notes. A note links to at most one project
+  (`drafts.project_public_id`, migration `20261104_0029`, with
+  `ck_drafts_project_only_for_notes`) and one task (the existing `action_id` and title
+  snapshot), both editable in the editor (`DraftService.set_project` / `set_task`,
+  `ui/task_picker.py`). See ADR 0027 and `docs/p2-notes.md`. P2-04b (the Projects page
+  and project context) and P2-05 to P2-09 merged in PR #102, below.
 - Search and commands implemented, awaiting owner desktop acceptance: the command palette
-  now also finds projects and saved briefs (P2-09). P2-04 through P2-09 are implemented
-  locally: Notes/project context, the Tasks/Projects/Notes/Mail workspace, explicit capture
+  now also finds projects and saved briefs (P2-09). P2-04 through P2-09 are merged
+  (PRs #101 and #102): Notes/project context, the Tasks/Projects/Notes/Mail workspace, explicit capture
   review state, upcoming known commitments, and revision-bound dated-plan copy/move.
   PR #102 builds on #101's independent note setters and project/task editor. Migration
   0031 converges the published 0029 forks without editing existing revisions; the online

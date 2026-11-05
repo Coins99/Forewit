@@ -11,11 +11,11 @@ is the first of two P2-04 pull requests. The owner approved the plan on 2026-11-
 
 1. a Notes row beside Drafts, sharing the writing page;
 2. one project and one task per note, both editable;
-3. a Projects page with the project's context (P2-04b);
+3. a Projects page with the project's context (P2-04b, which PR #102 delivered);
 4. two stacked pull requests.
 
-P2-04b adds the Projects page and project search on top of this. Native macOS and owner
-acceptance remain open, and full P2 is not complete.
+PR #102 delivered P2-04b, the Projects page and project search, together with P2-05 to
+P2-09; see `p2-workspace.md`. Native macOS and owner acceptance remain open.
 
 ## Workflow
 
@@ -190,10 +190,16 @@ Native macOS and the owner's hands-on acceptance remain open.
 7. Quit and restart, then check backup, restore and the writing export in a test
    profile: the note keeps its project and task.
 
-## Next
+## After this checkpoint
 
-P2-04b adds the Projects page (Ctrl+9): projects by area, each with its notes, the
-notes of its tasks, its open, waiting and recent completed tasks, and the emails its
-tasks came from. It also makes projects searchable. Dedicated
-Tasks/Waiting/Completed and Mail pages, P2-06 capture review, and P2-07/P2-08
-follow in their own increments.
+PR #102 delivered the rest of P2 on top of this one:
+
+- P2-04b: the Projects page with project context, and project search;
+- the Today/Tasks/Projects/Calendar/Notes/Mail workspace;
+- P2-06 capture review;
+- Upcoming, and dated plans with copy and move;
+- saved-brief search.
+
+Its own migration `20261103_0029` added the same note column. Revision `20261105_0031`
+merges the two forks without editing either one. See `p2-workspace.md` for that
+behaviour, the migration convergence and the remaining open checks.

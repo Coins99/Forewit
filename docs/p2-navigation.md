@@ -75,8 +75,7 @@ note loads, missing tasks, tasks outside completed limits and navigation away/ba
 
 Global Task/Note capture and retry-safe initial note content are implemented in the
 [P2-02 checkpoint](p2-capture.md). Durable My focus/day plans come next.
-The Notes page and note links are in [P2-04a](p2-notes.md); the Projects page
-follows in P2-04b. Mail/sidebar migration,
-optional capture review, upcoming/workload/overview, dated plan management and
-project/brief search remain separate increments. This foundation does not establish
+The Notes page and note links are in [P2-04a](p2-notes.md) (PR #101). The Projects
+page, Mail/sidebar migration, optional capture review, Upcoming, dated plan management
+and project/brief search followed in PR #102 ([the workspace register](p2-workspace.md)). This foundation does not establish
 full P2, P1 owner acceptance or deferred email/local-model acceptance.
