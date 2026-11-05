@@ -60,6 +60,8 @@ def test_native_build_identity(
     )
     assert build_desktop.main() == 0
     command = calls[0]
+    # Alembic's bundled env.py imports this dynamically; source imports don't collect it.
+    assert "mailbrief.storage.migration_forks" in command
     assert command[command.index("--name") + 1] == "Forewit"
     assert Path(command[command.index("--distpath") + 1]) == tmp_path / "out/dist" / layout
     if "--onefile" in options:

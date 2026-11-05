@@ -88,6 +88,16 @@ pre-upgrade database is retained. Existing shipped migrations are unchanged.
 
 ## Verification register
 
+CI repair after `428a58a` (2026-11-05): Windows passed all 5,134 tests and the service
+coverage gate, then its frozen-app check exposed the dynamic Alembic environment's
+missing `mailbrief.storage.migration_forks` import. The build now explicitly includes
+that module for both platforms and Windows layouts. A fresh Windows directory build
+passed the full offline package/recovery checks at 1x and 2x. Cocoa's three mail Tab-order
+failures came from the selector's default Tab-only policy in text/list navigation mode;
+the selector now takes StrongFocus. A regression exercises that mode and combo default
+on every platform. All 33 focused build/keyboard/workspace/app checks, Ruff and strict
+native/win32/darwin mypy passed. Native Cocoa confirmation runs in CI.
+
 Capture-filter review fix (2026-11-05): 42 focused capture/workspace/recovery/source-rule
 checks passed; the capture service has 98.15% combined statement/branch coverage.
 Regressions cover an older pending note behind 101 newer tasks, the reverse case,

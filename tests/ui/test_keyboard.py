@@ -10,14 +10,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary
+from mailbrief.ui import main_window
 from mailbrief.ui.main_window import PAGE_SHORTCUTS, MainWindow
 from mailbrief.ui.theme import apply_theme
 from tests.ui.test_main_window_layout import BUSY, NOW, finish, mockup_backend
@@ -107,6 +108,34 @@ def tab_chain(window: MainWindow, start: QWidget) -> list[str]:
         if QApplication.focusWidget() is start:
             return names
     raise AssertionError(f"Tab never came back to the start: {names}")
+
+
+async def test_mail_selector_takes_tab_with_text_control_navigation(
+    qtbot: QtBot, qapp: QApplication, themed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise Cocoa's combo default and text/list navigation on every platform."""
+    apply_theme(qapp)
+
+    def combo() -> QComboBox:
+        result = QComboBox()
+        result.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        return result
+
+    monkeypatch.setattr(main_window, "QComboBox", combo)
+    hints = qapp.styleHints()
+    previous = hints.tabFocusBehavior()
+    hints.setTabFocusBehavior(Qt.TabFocusBehavior.TabFocusTextControls)
+    try:
+        window = MainWindow(mockup_backend())
+        window.now = lambda: NOW
+        qtbot.addWidget(window)
+        window.start(window.initialize)
+        await finish(window)
+        activate(qtbot, window)
+        window._show_page("mail_current")
+        assert "mailSubview" in tab_chain(window, window.generate_button)
+    finally:
+        hints.setTabFocusBehavior(previous)
 
 
 def detail_buttons(window: MainWindow) -> list[QPushButton]:

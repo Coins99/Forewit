@@ -1089,6 +1089,8 @@ class MainWindow(QMainWindow):
         self.mail_view = QComboBox()
         self.mail_view.setObjectName("mailSubview")
         self.mail_view.setAccessibleName("Mail view")
+        # Include this navigation control in Cocoa's default text/list Tab mode.
+        self.mail_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         for label, view in (
             ("Inbox", "inbox"),
             ("Current brief", "current"),
