@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 import pytest
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter
@@ -11,12 +11,44 @@ from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.drafts import DraftEdit, DraftKind
 from mailbrief.domain.projects import ProjectEdit
 from mailbrief.domain.routes import PageRoute, WritingRoute
+from mailbrief.ui.capture_inbox import CaptureInbox
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
 from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend, finish
 from tests.ui.window_wait import show
+
+
+@pytest.mark.parametrize("tasks_first", [True, False])
+def test_capture_type_changes_apply_the_limit_after_filtering(
+    qtbot: QtBot, tasks_first: bool
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    inbox = CaptureInbox(parent)
+    backend = FakeBackend()
+    tasks = tuple(make_action(public_id=f"{index:036d}") for index in range(100))
+    notes = tuple(
+        backend._add(DraftKind.NOTE, DraftEdit(title=f"Older note {index}")) for index in range(100)
+    )
+    # Either kind can be newer in the service's merged recency order.
+    inbox.show_records((*tasks, *notes) if tasks_first else (*notes, *tasks))
+    assert inbox.list.count() == 100
+    assert inbox._shown == (tasks if tasks_first else notes)
+    inbox.kind.setCurrentIndex(2)
+    assert inbox.list.count() == 100
+    assert inbox.list.item(0).text() == "Note · Older note 0"
+    opened: list[object] = []
+    inbox.open_requested.connect(opened.append)
+    inbox._request(True)
+    assert opened == [notes[0]]
+    inbox.kind.setCurrentIndex(1)
+    assert inbox.list.count() == 100
+    inbox._request(True)
+    assert opened == [notes[0], tasks[0]]
+    inbox.kind.setCurrentIndex(0)
+    assert inbox.list.count() == 100
 
 
 async def test_notes_and_mail_drafts_partition_the_same_canonical_writing(qtbot: QtBot) -> None:

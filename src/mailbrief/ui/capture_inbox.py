@@ -63,7 +63,7 @@ class CaptureInbox(QDialog):
             record
             for record in self._records
             if kind == 0 or isinstance(record, Action) == (kind == 1)
-        )
+        )[:100]
         self.list.clear()
         for record in self._shown:
             self.list.addItem(

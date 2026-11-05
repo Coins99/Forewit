@@ -25,6 +25,9 @@ separates implementation from platform and owner acceptance.
   open type-filtered review views, with a combined view available. Keep as is requires
   no project, date or estimate and changes processing state transactionally. Unassigned
   records are not implicitly inbox records. Older captures remain legacy/non-inbox.
+  Review retains up to 100 pending tasks and 100 pending notes; each selected view
+  applies its 100-row display limit after filtering, so newer tasks cannot hide
+  pending notes (or the reverse).
 - Upcoming reads seven local dates, expandable to thirty. Task target/deadline reasons
   share one canonical task row; local and Google events retain separate identities.
   Meeting occupancy is the union of clipped timed intervals in UTC; all-day events,
@@ -84,6 +87,12 @@ it does not use the current ORM to write columns absent from that schema. The or
 pre-upgrade database is retained. Existing shipped migrations are unchanged.
 
 ## Verification register
+
+Capture-filter review fix (2026-11-05): 42 focused capture/workspace/recovery/source-rule
+checks passed; the capture service has 98.15% combined statement/branch coverage.
+Regressions cover an older pending note behind 101 newer tasks, the reverse case,
+switching all three views and opening the correct canonical record. Light/dark
+inbox renders were inspected at 1x and 2x (four checks passed at each scale).
 
 Integration after merged PR #101 (`main` at `50d0a22`, 2026-11-05):
 

@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection, ExecutionContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import Action
-from mailbrief.domain.drafts import DraftEdit
+from mailbrief.domain.drafts import Draft, DraftEdit
 from mailbrief.domain.events import ActionMarker, CalendarRange, MarkerKind
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 from mailbrief.services.actions import ActionService
@@ -111,6 +111,36 @@ async def test_capture_retry_checks_the_processing_payload(session: AsyncSession
         DraftEdit(body="Text"), command_id=command, capture_pending=True
     )
     assert replay.revision == 2 and replay.capture_processed_at_utc
+
+
+@pytest.mark.parametrize("newer_kind", ["task", "note"])
+async def test_capture_inbox_keeps_each_type_before_the_display_limit(
+    session: AsyncSession, newer_kind: str
+) -> None:
+    actions = ActionService(session, clock=lambda: NOW)
+    notes = DraftService(session, clock=lambda: NOW)
+    older: Action | Draft
+    if newer_kind == "task":
+        older = await notes.create_note(
+            DraftEdit(body="Older pending note"), command_id=str(uuid4()), capture_pending=True
+        )
+    else:
+        older = await actions.create(EDIT, capture_pending=True)
+    later = NOW + timedelta(minutes=1)
+    actions = ActionService(session, clock=lambda: later)
+    notes = DraftService(session, clock=lambda: later)
+    for _ in range(101):
+        if newer_kind == "task":
+            await actions.create(EDIT, capture_pending=True)
+        else:
+            await notes.create_note(
+                DraftEdit(body="Newer pending note"), command_id=str(uuid4()), capture_pending=True
+            )
+
+    records = await CaptureService(session).inbox()
+    assert len(records) == 101  # At most 100 of the newer type, plus the older other type.
+    assert records[-1].public_id == older.public_id
+    assert all(record.updated_at_utc == later for record in records[:-1])
 
 
 async def test_carry_and_move_deduplicate_and_preserve_task_dates(session: AsyncSession) -> None:

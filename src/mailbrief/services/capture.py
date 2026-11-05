@@ -28,6 +28,11 @@ class CaptureService:
         self.session, self.clock = session, clock
 
     async def inbox(self) -> tuple[Action | Draft, ...]:
+        """Newest 100 pending records per type, merged in recency order.
+
+        Retain both bounded sets so a UI type change can reveal older notes or
+        tasks. The displayed 100-row limit belongs after that type filter.
+        """
         tasks = list(
             await self.session.scalars(
                 select(ActionTable)
@@ -58,9 +63,7 @@ class CaptureService:
             *await DraftRepository(self.session).load(notes),
         ]
         return tuple(
-            sorted(records, key=lambda item: (item.updated_at_utc, item.public_id), reverse=True)[
-                :100
-            ]
+            sorted(records, key=lambda item: (item.updated_at_utc, item.public_id), reverse=True)
         )
 
     async def keep(
