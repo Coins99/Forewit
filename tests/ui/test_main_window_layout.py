@@ -137,13 +137,13 @@ async def test_the_sidebar_opens_the_actions_tabs(window: MainWindow, key: str, 
     window.workspace.sidebar.page_requested.emit(key)
     assert window.workspace.current_page() == "actions"
     assert window.actions_panel.view() is ActionFilter(view)
-    assert window.workspace.sidebar.current_key() == key
+    assert window.workspace.sidebar.current_key() == "actions"
 
 
 async def test_changing_the_actions_tab_moves_the_sidebar(window: MainWindow) -> None:
     window.workspace.sidebar.page_requested.emit("actions")
     window.actions_panel.show_view(ActionFilter.WAITING)
-    assert window.workspace.sidebar.current_key() == "waiting"
+    assert window.workspace.sidebar.current_key() == "actions"
     window.actions_panel.show_view(ActionFilter.COMPLETED)
     assert window.workspace.sidebar.current_key() == "actions"
 
@@ -160,11 +160,11 @@ async def test_briefs_loads_then_shows_its_page(window: MainWindow, backend: Fak
     window.workspace.sidebar.page_requested.emit("drafts")
     window.workspace.sidebar.page_requested.emit("briefs")
     # Until it has loaded, the sidebar stays on the page shown.
-    assert window.workspace.sidebar.current_key() == "drafts"
+    assert window.workspace.sidebar.current_key() == "inbox"
     assert window.task is not None
     await finish(window)
     assert window.workspace.current_page() == "briefs"
-    assert window.workspace.sidebar.current_key() == "briefs"
+    assert window.workspace.sidebar.current_key() == "inbox"
     assert window.history_panel.saved.count() == len(await backend.list_briefs())
     assert window.status.text() == "Open a saved brief, or brief a missed day."
 
@@ -197,8 +197,8 @@ async def test_opening_a_saved_brief_lands_on_today_with_the_banner(
     backend.briefs[(past.account_id, past.local_date)] = past
     window.history_panel.open_requested.emit(past.account_id, past.local_date)
     await finish(window)
-    assert window.workspace.current_page() == "today"
-    assert window.workspace.sidebar.current_key() == "today"
+    assert window.workspace.current_page() == "mail_current"
+    assert window.workspace.sidebar.current_key() == "inbox"
     assert window.viewing.isVisible()
 
 
@@ -237,7 +237,7 @@ async def test_review_and_consent_use_the_run_page_then_return_to_today(
     window.start(window._generate)
     await settle()
     assert window.workspace.current_page() == "run"
-    assert window.workspace.sidebar.current_key() == "today"
+    assert window.workspace.sidebar.current_key() == "inbox"
     assert window.review_panel.isVisible()
     window.review_button.click()
     await settle()
@@ -258,7 +258,7 @@ async def test_a_past_brief_shows_the_banner_on_today(
     window.workspace.sidebar.page_requested.emit("drafts")
     window.start(lambda: window._show_brief(past.account_id, past.local_date))
     await finish(window)
-    assert window.workspace.current_page() == "today"
+    assert window.workspace.current_page() == "mail_current"
     assert window.viewing.isVisible()
     assert window.viewing_label.text() == "Viewing the brief for Mon Oct 5."
 

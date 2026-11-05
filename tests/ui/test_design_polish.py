@@ -103,7 +103,7 @@ async def test_leaving_inline_editor_for_a_reply_keeps_its_controls(qtbot: QtBot
         assert window.draft_editor.draft is not None
         original = window.draft_editor.draft.public_id
         window.draft_editor.body.setPlainText("Save before opening the reply.")
-        window._show_page("today")
+        window._show_page("mail_current")
         await window._open_new_draft(
             lambda: backend.create_reply_draft("owner@example.com", "local-1")
         )
@@ -165,7 +165,7 @@ async def test_reply_survives_brief_refresh_and_saves_after_leaving(qtbot: QtBot
     window, backend = await draft_window(qtbot)
     try:
         backend.saved = mockup_digest().digest
-        window._show_page("today")
+        window._show_page("mail_current")
         await window._show_digest(backend.saved)
         await window._open_new_draft(
             lambda: backend.create_reply_draft("owner@example.com", "local-1")
@@ -213,7 +213,7 @@ async def test_revisiting_waiting_keeps_its_header_and_controls(qtbot: QtBot) ->
         for page in ("waiting", "today", "waiting", "waiting"):
             window._show_page(page)
         assert window.workspace.header.title.text() == "Waiting"
-        assert window.workspace.sidebar.current_key() == "waiting"
+        assert window.workspace.sidebar.current_key() == "actions"
         # B08: a task can start on Waiting, as one someone else does.
         assert window.actions_panel.new_task_button.isVisible()
         assert window.actions_panel.search.isVisible()

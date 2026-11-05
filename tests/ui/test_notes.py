@@ -19,7 +19,6 @@ from mailbrief.ui.draft_editor import CONFLICT
 from mailbrief.ui.labels import WrapLabel
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import ThemeMode, apply_theme
-from mailbrief.ui.workspace import COUNT_ROLE
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_palette import window_for
 from tests.ui.test_workflow import FakeBackend, finish
@@ -75,13 +74,12 @@ def calls(backend: FakeBackend, name: str) -> list[tuple[object, ...]]:
 async def test_notes_has_its_own_row_heading_and_shortcut(qtbot: QtBot) -> None:
     window, _backend = await notes_window(qtbot)
     sidebar = window.workspace.sidebar
-    drafts_row = sidebar.pages.item(sidebar._row("drafts"))
-    assert drafts_row.data(COUNT_ROLE) == 1  # The email; notes aren't drafts to send.
+    assert window._counts["drafts"] == 1  # The email; notes aren't drafts to send.
 
     window.page_shortcuts["notes"].activated.emit()
     await drain_writes(window)
 
-    assert window.workspace.current_page() == "drafts"
+    assert window.workspace.current_page() == "notes"
     assert window.drafts_panel.view() is WritingView.NOTES
     assert sidebar.current_key() == "notes"
     assert window.workspace.header.title.text() == "Notes"
@@ -98,7 +96,7 @@ async def test_notes_has_its_own_row_heading_and_shortcut(qtbot: QtBot) -> None:
     window.page_shortcuts["drafts"].activated.emit()
     await drain_writes(window)
     assert window.drafts_panel.view() is WritingView.DRAFTS
-    assert sidebar.current_key() == "drafts"
+    assert sidebar.current_key() == "inbox"
     assert window.workspace.header.title.text() == "Drafts"
     assert window.draft_editor.draft is not None
     assert window.draft_editor.draft.kind is DraftKind.EMAIL
@@ -116,7 +114,7 @@ async def test_routes_open_a_note_in_notes_and_a_draft_in_drafts(qtbot: QtBot) -
     await finish(window)
     await drain_writes(window)
     assert window.drafts_panel.view() is WritingView.DRAFTS
-    assert window.workspace.sidebar.current_key() == "drafts"
+    assert window.workspace.sidebar.current_key() == "inbox"
     assert window.draft_editor.draft is not None
     assert window.draft_editor.draft.public_id == email_id
 

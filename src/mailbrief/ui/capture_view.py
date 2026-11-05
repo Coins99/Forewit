@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -64,6 +65,11 @@ class CaptureDialog(QDialog):
         self.status.setObjectName("captureStatus")
         self.status.setAccessibleName("Capture save status")
         layout.addWidget(self.status)
+        self.review = QCheckBox("Review later in Capture inbox")
+        self.review.setObjectName("captureReviewLater")
+        self.review.setAccessibleName("Save to optional capture inbox; uncheck to save and keep")
+        self.review.setChecked(True)
+        layout.addWidget(self.review)
         row = QHBoxLayout()
         self.save_button = outline_button("Save", "captureSave", primary=True)
         self.open_button = outline_button("Open", "captureOpen")
@@ -131,6 +137,7 @@ class CaptureDialog(QDialog):
             request = CaptureRequest(
                 command_id=self._command,
                 kind="task" if self.kind.currentIndex() == 0 else "note",
+                review=self.review.isChecked(),
                 title=self.title.text(),
                 body=self.body.toPlainText(),
             )
@@ -148,6 +155,7 @@ class CaptureDialog(QDialog):
     def _controls(self) -> None:
         saved = self._saved is not None
         self.kind.setEnabled(not (self._saving or self._attempted or saved))
+        self.review.setEnabled(not (self._saving or self._attempted or saved))
         self.title.setEnabled(not (self._saving or saved))
         self.body.setEnabled(not (self._saving or saved))
         self.save_button.setEnabled(not self._saving)

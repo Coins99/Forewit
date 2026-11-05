@@ -22,6 +22,7 @@ from mailbrief.domain.analysis import (
     TargetReason,
     deadline_due_at,
 )
+from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import RepeatRule
@@ -452,6 +453,8 @@ class Action(DeadlineFields):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    capture_origin: CaptureOrigin = CaptureOrigin.LEGACY
+    capture_processed_at_utc: datetime | None = None
     project: Project | None = None
     title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     ownership: ActionOwnership

@@ -34,11 +34,15 @@ from mailbrief.storage.tables import (
     AccountTable,
     ActionStepTable,
     ActionTable,
+    AnalysisTable,
     CalendarEventTable,
+    DigestItemTable,
+    DigestTable,
     DraftTable,
     GoogleCalendarTable,
     GoogleEventTable,
     MessageTable,
+    ProjectTable,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +94,10 @@ class SearchService:
             SearchKind.MAIL: (
                 await self._mail(terms, account_email, limit + 1) if account_email else []
             ),
+            SearchKind.PROJECT: await self._projects(terms, limit + 1),
+            SearchKind.BRIEF: await self._briefs(terms, account_email, limit + 1)
+            if account_email
+            else [],
         }
         for kind, kind_hits in found.items():
             if len(kind_hits) > limit:
@@ -97,6 +105,82 @@ class SearchService:
             hits.extend(kind_hits[:limit])
         logger.info("Search of %d words found %d records", len(terms), len(hits))
         return SearchResults(hits=tuple(hits), more=frozenset(more))
+
+    async def _projects(self, terms: Sequence[str], limit: int) -> list[SearchHit]:
+        rows = await self._session.scalars(
+            select(ProjectTable)
+            .where(_every_term(terms, (ProjectTable.name, ProjectTable.notes)))
+            .order_by(ProjectTable.updated_at_utc.desc(), ProjectTable.public_id)
+            .limit(limit)
+        )
+        return [
+            SearchHit(
+                kind=SearchKind.PROJECT,
+                title=row.name,
+                public_id=row.public_id,
+                detail="Archived project" if row.archived_at_utc else "Project",
+                when=row.updated_at_utc,
+            )
+            for row in rows
+        ]
+
+    async def _briefs(self, terms: Sequence[str], email: str, limit: int) -> list[SearchHit]:
+        # Each term can occur in a different saved item of the same daily brief.
+        matches = and_(
+            *(
+                select(DigestItemTable.digest_id)
+                .outerjoin(AnalysisTable, DigestItemTable.analysis_id == AnalysisTable.id)
+                .join(MessageTable, DigestItemTable.message_id == MessageTable.id)
+                .where(
+                    DigestItemTable.digest_id == DigestTable.id,
+                    or_(
+                        *(
+                            _contains(column, term)
+                            for column in (
+                                AnalysisTable.summary,
+                                AnalysisTable.action_text,
+                                MessageTable.subject,
+                                MessageTable.sender_address,
+                                MessageTable.body_preview,
+                            )
+                        )
+                    ),
+                )
+                .exists()
+                for term in terms
+            )
+        )
+        rows = await self._session.scalars(
+            select(DigestTable)
+            .join(AccountTable, DigestTable.account_id == AccountTable.id)
+            .where(
+                AccountTable.email_address == email,
+                AccountTable.provider == ProviderKind.GMAIL.value,
+                matches,
+            )
+            .order_by(DigestTable.local_date.desc(), DigestTable.id.desc())
+            .limit(limit)
+        )
+        hits = []
+        for row in rows:
+            excerpt = await self._session.scalar(
+                select(AnalysisTable.summary)
+                .join(DigestItemTable, DigestItemTable.analysis_id == AnalysisTable.id)
+                .where(DigestItemTable.digest_id == row.id)
+                .order_by(DigestItemTable.position)
+                .limit(1)
+            )
+            hits.append(
+                SearchHit(
+                    kind=SearchKind.BRIEF,
+                    title=f"Saved brief · {row.local_date.isoformat()}",
+                    day=row.local_date,
+                    account_email=email,
+                    when=row.generated_at_utc,
+                    detail=(excerpt or "Saved mail metadata")[:240],
+                )
+            )
+        return hits
 
     async def _actions(self, terms: Sequence[str], limit: int) -> list[SearchHit]:
         """Live actions, open ones first, then the most recently changed. A skipped occurrence

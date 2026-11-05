@@ -1,16 +1,20 @@
 """My focus: explicit daily selection, current task state and keyboard ordering."""
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QDate, Qt, QTimer, Signal
 from PySide6.QtGui import QHideEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QDateEdit,
     QDialog,
     QFrame,
     QHBoxLayout,
+    QLayout,
     QLineEdit,
     QListWidgetItem,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -275,6 +279,10 @@ class FocusPanel(HairlineFrame):
 class FocusDialog(QDialog):
     search_requested = Signal(str)
     select_requested = Signal(object)
+    date_requested = Signal(object)
+    today_requested = Signal()
+    transfer_requested = Signal(bool, object)
+    apply_transfer_requested = Signal()
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -282,12 +290,87 @@ class FocusDialog(QDialog):
         self.setObjectName("focusDialog")
         self.setAccessibleName("Plan today's focus")
         self.resize(560, 580)
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setObjectName("dayPlanScroll")
+        scroll.setAccessibleName("Day plan controls")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(content)
+        root.addWidget(scroll)
         dialog_heading(
             self, layout, "Plan today", "Selection changes no task dates. Task state is current."
         )
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+        dates = QHBoxLayout()
+        self.day = QDateEdit()
+        self.day.setCalendarPopup(True)
+        self.day.setObjectName("focusDate")
+        self.day.setAccessibleName("Day plan date")
+        self.day.setDisplayFormat("yyyy-MM-dd")
+        dates.addWidget(self.day)
+        self.go_today = outline_button("Go to today", "focusGoToday")
+        self.go_today.setAccessibleName("Return to today's day plan")
+        self.go_today.clicked.connect(self.today_requested)
+        dates.addWidget(self.go_today)
+        layout.addLayout(dates)
+        self.day.dateChanged.connect(lambda value: self.date_requested.emit(value.toPython()))
         self.panel = FocusPanel(compact=False)
-        layout.addWidget(self.panel, 2)
+        self.panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.panel.list.setMaximumHeight(160)
+        layout.addWidget(self.panel)
+        self.history_note = wrap_label(
+            "Selected tasks with current state. This is not a historical completion report."
+        )
+        self.history_note.setObjectName("pastPlanExplanation")
+        layout.addWidget(self.history_note)
+        self.transfer_toggle = outline_button("Carry or move selections", "dayPlanTransferOptions")
+        self.transfer_toggle.setAccessibleName("Show carry-forward and move options")
+        self.transfer_toggle.setCheckable(True)
+        layout.addWidget(self.transfer_toggle)
+        self.transfer_area = QWidget()
+        self.transfer_area.setObjectName("dayPlanTransferControls")
+        self.transfer_area.setAccessibleName("Day plan transfer controls")
+        transfer = QVBoxLayout(self.transfer_area)
+        transfer.setContentsMargins(0, 0, 0, 0)
+        self.destination = QDateEdit()
+        self.destination.setCalendarPopup(True)
+        self.destination.setDisplayFormat("yyyy-MM-dd")
+        self.destination.setObjectName("focusDestination")
+        self.destination.setAccessibleName("Destination plan date")
+        transfer.addWidget(self.destination)
+        self.carry = outline_button("Bring unfinished work forward", "focusCarry")
+        self.carry.setAccessibleName("Preview copying unfinished selections to the destination")
+        self.move_button = outline_button("Move selection to date", "focusMove")
+        self.move_button.setAccessibleName(
+            "Preview moving unfinished selections to the destination"
+        )
+        transfer.addWidget(self.carry)
+        transfer.addWidget(self.move_button)
+        layout.addWidget(self.transfer_area)
+        self.transfer_area.hide()
+        self.transfer_toggle.toggled.connect(self.transfer_area.setVisible)
+        self.carry.clicked.connect(
+            lambda: self.transfer_requested.emit(False, self.destination.date().toPython())
+        )
+        self.move_button.clicked.connect(
+            lambda: self.transfer_requested.emit(True, self.destination.date().toPython())
+        )
+        self.transfer_preview = wrap_label("")
+        self.transfer_preview.setObjectName("planTransferPreview")
+        self.transfer_preview.setAccessibleName("Plan transfer preview")
+        transfer.addWidget(self.transfer_preview)
+        self.apply_transfer = outline_button("Apply preview", "applyPlanTransfer")
+        self.apply_transfer.setAccessibleName("Apply the plan transfer preview")
+        self.apply_transfer.setEnabled(False)
+        self.apply_transfer.clicked.connect(self.apply_transfer_requested)
+        transfer.addWidget(self.apply_transfer)
         self.query = QLineEdit()
         self.query.setObjectName("focusTaskSearch")
         self.query.setAccessibleName("Search open task titles")
@@ -316,6 +399,15 @@ class FocusDialog(QDialog):
         self.candidates.itemActivated.connect(lambda _item: self._add())
         self.add_button.clicked.connect(self._add)
         self.close_button.clicked.connect(self.reject)
+
+    def show_date(self, day: date, today: date) -> None:
+        self.day.blockSignals(True)
+        self.day.setDate(QDate(day.year, day.month, day.day))
+        self.day.blockSignals(False)
+        self.history_note.setVisible(day < today)
+        self.add_button.setText("Add to selected day")
+        self.destination.setDate(QDate(today.year, today.month, today.day))
+        self.setWindowTitle(f"Day plan · {day.isoformat()}")
 
     def show_candidates(self, actions: tuple[Action, ...]) -> None:
         clear_list(self.candidates)

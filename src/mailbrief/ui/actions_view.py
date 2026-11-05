@@ -362,6 +362,7 @@ class ActionsPanel(QWidget):
     new_task_requested = Signal()
     action_requested = Signal(str, object)
     draft_requested = Signal(object, object)
+    notes_requested = Signal(object)
     step_toggled = Signal(object, object, bool)
     step_added = Signal(object, str)
 
@@ -511,6 +512,8 @@ class ActionsPanel(QWidget):
                 lambda _checked=False, chosen=kind: self._request_draft(chosen)
             )
         self.draft_button.setMenu(self.draft_menu)
+        self.linked_notes = self.draft_menu.addAction("Open linked notes")
+        self.linked_notes.triggered.connect(lambda: self.notes_requested.emit(self.selected()))
         self.edit_button.clicked.connect(lambda: self._request(EDIT))
         self.complete_button.clicked.connect(self._complete_or_reopen)
         self.delete_button.clicked.connect(lambda: self._request(DELETE))

@@ -16,6 +16,7 @@ class CaptureRequest(DomainModel):
 
     command_id: str
     kind: Literal["task", "note"]
+    review: bool = False
     title: str = Field(default="", max_length=DRAFT_TITLE_MAX_CHARS, repr=False)
     body: str = Field(default="", max_length=DRAFT_BODY_MAX_CHARS, repr=False)
 

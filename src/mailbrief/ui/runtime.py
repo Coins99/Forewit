@@ -37,7 +37,7 @@ from mailbrief.domain.cached_mail import (
 )
 from mailbrief.domain.calendar_planning import PlanningOptions, PlanningOutcome
 from mailbrief.domain.capture import CaptureRequest
-from mailbrief.domain.day_plans import DayPlan
+from mailbrief.domain.day_plans import DayPlan, PlanTransfer
 from mailbrief.domain.digests import DailyDigest, SavedBriefSummary, SyncProgress, SyncResult
 from mailbrief.domain.drafting import DraftContextPart, DraftingOptions, DraftingOutcome
 from mailbrief.domain.drafts import (
@@ -92,6 +92,7 @@ from mailbrief.services.calendar_planning import (
     PlanningGate,
     PreparedPlan,
 )
+from mailbrief.services.capture import CaptureService
 from mailbrief.services.consent import auto_send_permission, set_auto_send
 from mailbrief.services.day_plans import DayPlanService
 from mailbrief.services.drafting import (
@@ -775,15 +776,37 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             if request.kind == "task":
                 return await ActionService(session).create(
-                    request.task_edit(), command_id=request.command_id
+                    request.task_edit(),
+                    command_id=request.command_id,
+                    capture_pending=request.review,
                 )
             return await DraftService(session).create_note(
-                request.note_edit(), command_id=request.command_id
+                request.note_edit(), command_id=request.command_id, capture_pending=request.review
             )
 
     async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]:
         async with self._storage().session() as session:
             return await DayPlanService(session).candidates(text, day=day)
+
+    async def capture_inbox(self) -> tuple[Action | Draft, ...]:
+        async with self._storage().session() as session:
+            return await CaptureService(session).inbox()
+
+    async def keep_capture(self, record: Action | Draft) -> Action | Draft:
+        async with self._storage().session() as session:
+            return await CaptureService(session).keep(
+                "task" if isinstance(record, Action) else "note", record.public_id, record.revision
+            )
+
+    async def preview_plan_transfer(
+        self, source: date, destination: date, move: bool
+    ) -> PlanTransfer:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).preview_transfer(source, destination, move=move)
+
+    async def apply_plan_transfer(self, preview: PlanTransfer, zone: ZoneInfo) -> DayPlan:
+        async with self._storage().session() as session:
+            return await DayPlanService(session).transfer(preview, zone)
 
     async def select_day_task(
         self, day: date, zone: ZoneInfo, task_id: str, revision: int

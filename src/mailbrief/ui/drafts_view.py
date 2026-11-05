@@ -130,7 +130,14 @@ class DraftsPanel(QWidget):
         self._zone = ZoneInfo("UTC")
         self._today = date(2000, 1, 1)
         self._busy = False
+        self.task_context: str | None = None
+        self._zone = ZoneInfo("UTC")
         layout = QVBoxLayout(self)
+        self.clear_context = outline_button("All notes", "clearNoteContext")
+        self.clear_context.setAccessibleName("Clear linked-task note filter")
+        self.clear_context.clicked.connect(lambda: self.set_task_context(None))
+        layout.addWidget(self.clear_context)
+        self.clear_context.hide()
         layout.setContentsMargins(0, 0, 0, 0)
         self.splitter = HairlineSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -262,6 +269,7 @@ class DraftsPanel(QWidget):
         self._view = view
         text = _TEXT[view]
         notes = view is WritingView.NOTES
+        self.clear_context.setVisible(notes and self.task_context is not None)
         self.heading.setText(text.heading)
         self.search.setPlaceholderText(text.search)
         self.search.setAccessibleName(text.search)
@@ -321,6 +329,8 @@ class DraftsPanel(QWidget):
         choice = self.project_filter.currentData()
         if self._view is not WritingView.NOTES or draft.kind is not DraftKind.NOTE:
             return
+        if self.task_context is not None and draft.action_public_id != self.task_context:
+            self.set_task_context(None)
         if choice == ALL_NOTES:
             return
         wanted = None if choice == NO_PROJECT else choice
@@ -367,6 +377,8 @@ class DraftsPanel(QWidget):
         if self._view is WritingView.NOTES and choice != ALL_NOTES:
             wanted = None if choice == NO_PROJECT else choice
             rows = [summary for summary in rows if summary.project_public_id == wanted]
+        if self._view is WritingView.NOTES and self.task_context is not None:
+            rows = [summary for summary in rows if summary.action_public_id == self.task_context]
         return tuple(rows)
 
     def _rebuild(self, *, fresh: bool = False) -> None:
@@ -431,6 +443,11 @@ class DraftsPanel(QWidget):
             self.editor_host.setCurrentIndex(0)
         if selected is not None:
             self.preview_requested.emit(selected)
+
+    def set_task_context(self, public_id: str | None) -> None:
+        self.task_context = public_id
+        self.clear_context.setVisible(public_id is not None and self._view is WritingView.NOTES)
+        self._rebuild()
 
     def show_preview(self, draft: Draft) -> None:
         selected = self.selected()

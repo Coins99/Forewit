@@ -179,6 +179,9 @@ class FakeDrafts:
         return tuple(
             DraftSummary(
                 public_id=d.public_id,
+                action_public_id=d.action_public_id,
+                capture_origin=d.capture_origin,
+                capture_processed_at_utc=d.capture_processed_at_utc,
                 kind=d.kind,
                 display_title=d.display_title,
                 updated_at_utc=d.updated_at_utc,

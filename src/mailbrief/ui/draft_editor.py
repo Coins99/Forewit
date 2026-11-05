@@ -559,6 +559,10 @@ class DraftEditor(QDialog):
         self._set_locked(False)
         email = draft.kind in EMAIL_KINDS
         name = KIND_NAMES[draft.kind]
+        if self.embedded:
+            self.checkpoint_button.setText(
+                "Save note" if draft.kind is DraftKind.NOTE else "Save draft"
+            )
         self.setWindowTitle(f"{name} draft")
         for field in (self.to_edit, self.cc_edit, self.recipient_warning):
             self._form.setRowVisible(field, email)

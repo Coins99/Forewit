@@ -368,7 +368,7 @@ async def test_writing_opens_in_its_editor(qtbot: QtBot, backend: FakeBackend) -
     window._open_hit(NOTE_HIT.model_copy(update={"public_id": draft.public_id}))
     await finish(window)
 
-    assert window.workspace.current_page() == "drafts"
+    assert window.workspace.current_page() == "notes"
     assert window.draft_editor.isVisible()
     assert window.draft_editor.draft is not None
     assert window.draft_editor.draft.public_id == draft.public_id

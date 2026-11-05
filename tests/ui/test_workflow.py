@@ -45,7 +45,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningStatus,
 )
 from mailbrief.domain.capture import CaptureRequest
-from mailbrief.domain.day_plans import DayPlan, DayPlanItem
+from mailbrief.domain.day_plans import DayPlan, DayPlanItem, PlanTransfer
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -299,6 +299,60 @@ class FakeBackend(FakeDrafts):
             self.actions[ActionFilter.OPEN] = (*self.actions.get(ActionFilter.OPEN, ()), saved)
             return saved
         return self._add(DraftKind.NOTE, request.note_edit())
+
+    async def capture_inbox(self) -> tuple[Action | Draft, ...]:
+        records: tuple[Action | Draft, ...] = (
+            *(task for group in self.actions.values() for task in group),
+            *self.drafts.values(),
+        )
+        return tuple(
+            record
+            for record in records
+            if record.capture_origin == "quick_capture" and record.capture_processed_at_utc is None
+        )
+
+    async def keep_capture(self, record: Action | Draft) -> Action | Draft:
+        saved = record.model_copy(
+            update={"capture_processed_at_utc": datetime.now(UTC), "revision": record.revision + 1}
+        )
+        if isinstance(saved, Draft):
+            self.drafts[saved.public_id] = saved
+        else:
+            for view, group in self.actions.items():
+                self.actions[view] = tuple(
+                    saved if task.public_id == saved.public_id else task for task in group
+                )
+        return saved
+
+    async def preview_plan_transfer(
+        self, source: date, destination: date, move: bool
+    ) -> PlanTransfer:
+        before, after = (
+            self.focus_plans.get(source, DayPlan(day=source)),
+            self.focus_plans.get(destination, DayPlan(day=destination)),
+        )
+        return PlanTransfer(
+            source=before,
+            destination=after,
+            move=move,
+            task_ids=tuple(
+                item.task_public_id
+                for item in before.items
+                if item.action is not None and item.action.status.value == "open"
+            ),
+        )
+
+    async def apply_plan_transfer(self, preview: PlanTransfer, zone: ZoneInfo) -> DayPlan:
+        result = preview.destination
+        for key in preview.task_ids:
+            result = await self.select_day_task(result.day, zone, key, result.revision)
+        if preview.move:
+            for item in preview.source.items:
+                if item.task_public_id in preview.task_ids:
+                    await self.deselect_day_task(
+                        preview.source.day, item.public_id, preview.source.revision
+                    )
+        return result
 
     async def count_actions(self, view: ActionFilter) -> int:
         self.count_calls.append(view)

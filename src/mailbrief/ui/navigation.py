@@ -4,10 +4,12 @@ from zoneinfo import ZoneInfo
 
 from mailbrief.domain.actions import ActionFilter
 from mailbrief.domain.routes import (
+    BriefRoute,
     CalendarRoute,
     MailRoute,
     MessageRoute,
     PageRoute,
+    ProjectRoute,
     Route,
     TaskRoute,
     WritingRoute,
@@ -42,6 +44,15 @@ def legacy_page_route(key: str) -> Route | None:
 
 def search_route(hit: SearchHit, zone: ZoneInfo, account_email: str | None) -> Route | None:
     """Bind account-sensitive results to the context in which they were searched."""
+    if hit.kind is SearchKind.PROJECT and hit.public_id:
+        return ProjectRoute(public_id=hit.public_id)
+    if (
+        hit.kind is SearchKind.BRIEF
+        and hit.day
+        and hit.account_email == account_email
+        and account_email
+    ):
+        return BriefRoute(account_email=account_email, day=hit.day)
     if hit.kind is SearchKind.ACTION and hit.public_id is not None:
         return TaskRoute(
             public_id=hit.public_id,

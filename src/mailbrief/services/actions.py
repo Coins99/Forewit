@@ -416,6 +416,7 @@ class ActionService:
         deadline: DeadlineChange | None = None,
         *,
         command_id: str | None = None,
+        capture_pending: bool | None = None,
     ) -> Action:
         """Create a task with no account or email source, using the same plan and workflow.
         With ``repeat`` it is the first occurrence of a new series (see Repeats.apply), and
@@ -436,6 +437,7 @@ class ActionService:
                     "steps": [step.model_dump(mode="json") for step in steps],
                     "repeat": None if repeat is None else repeat.model_dump(mode="json"),
                     "deadline": None if deadline is None else deadline.model_dump(mode="json"),
+                    **({"capture_pending": capture_pending} if capture_pending is not None else {}),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -461,6 +463,8 @@ class ActionService:
                 created_at_utc=now,
                 updated_at_utc=now,
                 revision=1,
+                capture_origin="legacy" if capture_pending is None else "quick_capture",
+                capture_processed_at_utc=now if capture_pending is False else None,
             )
             _apply_edit(row, edit, now)
             if deadline is not None:

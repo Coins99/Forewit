@@ -29,6 +29,8 @@ class SearchKind(StrEnum):
     EVENT = "event"  # One of the owner's calendar events.
     GOOGLE_EVENT = "google_event"
     MAIL = "mail"  # Cached Gmail metadata: never a body.
+    PROJECT = "project"
+    BRIEF = "brief"
 
 
 class SearchHit(DomainModel):
@@ -55,6 +57,7 @@ class SearchHit(DomainModel):
     open: bool = True  # An action still open; an email still in the Inbox.
     waiting: bool = False  # An action someone else does.
     draft_kind: DraftKind | None = None
+    account_email: str | None = Field(default=None, repr=False)
 
     @field_validator("when")
     @classmethod

@@ -30,10 +30,7 @@ async def test_capture_available_from_every_page_without_an_account(
     window.capture_button.click()
     assert window.capture_dialog.isVisible()
     window.capture_dialog.reject()
-    # Waiting shares the Actions page, and Notes the writing page.
-    assert window.workspace.current_page() == {"waiting": "actions", "notes": "drafts"}.get(
-        page, page
-    )
+    assert window.workspace.current_page() == page
 
 
 @pytest.mark.parametrize("kind", ["task", "note"])
@@ -143,7 +140,7 @@ async def test_capture_does_not_replace_current_owner_writing(qtbot: QtBot) -> N
     backend = FakeBackend()
     original = backend._add(DraftKind.NOTE, DraftEdit(body="Original writing"))
     window = await window_for(qtbot, backend)
-    window._show_page("drafts")
+    window._show_page("notes")
     window._edit_draft(original)
     window.draft_editor.body.setPlainText("Current owner edits")
     window._request_capture()

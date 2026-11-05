@@ -9,9 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from mailbrief.domain.actions import Action
+from mailbrief.domain.actions import Action, ActionStatus
 from mailbrief.domain.common import new_public_id, utc_now
-from mailbrief.domain.day_plans import MAX_DAY_ITEMS, DayPlan, DayPlanItem
+from mailbrief.domain.day_plans import MAX_DAY_ITEMS, DayPlan, DayPlanItem, PlanTransfer
 from mailbrief.domain.search import query_terms
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository
@@ -89,6 +89,113 @@ class DayPlanService:
         )
         rows = await self.actions.title_matches(terms, open_only=True, excluded=selected)
         return tuple(await self.actions.load(rows))
+
+    async def preview_transfer(
+        self, source: date, destination: date, *, move: bool = False
+    ) -> PlanTransfer:
+        if source == destination:
+            raise DayPlanConflictError("Choose two different plan dates.")
+        before, after = await self.load(source), await self.load(destination)
+        eligible = tuple(
+            item.task_public_id
+            for item in before.items
+            if item.action is not None and item.action.status is ActionStatus.OPEN
+        )
+        return PlanTransfer(
+            source=before,
+            destination=after,
+            move=move,
+            task_ids=eligible,
+            skipped_ids=tuple(
+                item.task_public_id for item in before.items if item.task_public_id not in eligible
+            ),
+        )
+
+    async def transfer(self, preview: PlanTransfer, zone: ZoneInfo) -> DayPlan:
+        """Apply a whole preview or nothing, preserving task dates and destination order."""
+
+        async def run(now: datetime) -> DayPlan:
+            if preview.source.day == preview.destination.day:
+                raise DayPlanConflictError("Choose two different plan dates.")
+            source = await self._checked(preview.source.day, preview.source.revision)
+            destination = await self._checked(preview.destination.day, preview.destination.revision)
+            current = await self.load(preview.source.day)
+            if current != preview.source:
+                raise DayPlanConflictError("The preview changed. Review it again.")
+            eligible = tuple(
+                item.task_public_id
+                for item in current.items
+                if item.action is not None and item.action.status is ActionStatus.OPEN
+            )
+            if preview.task_ids != eligible:
+                raise DayPlanConflictError("The preview changed. Review it again.")
+            source_items = [] if source is None else await item_rows(self.session, source.id)
+            destination_items = (
+                [] if destination is None else await item_rows(self.session, destination.id)
+            )
+            existing = {item.task_public_id for item in destination_items}
+            additions = [key for key in eligible if key not in existing]
+            if len(destination_items) + len(additions) > MAX_DAY_ITEMS:
+                raise DayPlanConflictError("Choose at most 100 tasks for one day.")
+            if additions:
+                if destination is None:
+                    destination = DayPlanTable(
+                        public_id=self.ids(),
+                        local_date=preview.destination.day,
+                        creation_zone=zone.key,
+                        revision=1,
+                        created_at_utc=now,
+                        updated_at_utc=now,
+                    )
+                    self.session.add(destination)
+                    await self.session.flush()
+                else:
+                    await self._touch(destination, now)
+                for position, key in enumerate(additions, len(destination_items)):
+                    self.session.add(
+                        DayPlanItemTable(
+                            public_id=self.ids(),
+                            plan_id=destination.id,
+                            task_public_id=key,
+                            position=position,
+                            created_at_utc=now,
+                            updated_at_utc=now,
+                        )
+                    )
+            if preview.move and eligible:
+                assert source is not None
+                await self._touch(source, now)
+            # After the first plan write holds SQLite's writer lock, recheck each
+            # eligible occurrence; task edits while the preview was open invalidate it.
+            for selected_item in current.items:
+                if selected_item.task_public_id not in eligible:
+                    continue
+                task = await self.session.scalar(
+                    select(ActionTable)
+                    .where(ActionTable.public_id == selected_item.task_public_id)
+                    .execution_options(populate_existing=True)
+                )
+                if (
+                    task is None
+                    or task.deleted_at_utc is not None
+                    or task.status != "open"
+                    or selected_item.action is None
+                    or task.revision != selected_item.action.revision
+                ):
+                    raise DayPlanConflictError("The tasks changed. Review the preview again.")
+            if preview.move and eligible:
+                kept = []
+                for item in source_items:
+                    if item.task_public_id in eligible:
+                        await self.session.delete(item)
+                    else:
+                        kept.append(item)
+                await self.session.flush()
+                await order_items(self.session, kept, now)
+            await self.session.flush()
+            return await self.load(preview.destination.day)
+
+        return await self._write(run)
 
     async def _write(self, operation: Callable[[datetime], Awaitable[DayPlan]]) -> DayPlan:
         try:

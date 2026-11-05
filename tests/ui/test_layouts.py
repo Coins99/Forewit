@@ -104,7 +104,7 @@ def test_the_drafts_delete_button_moves_into_the_editor_and_back(qtbot: QtBot) -
     window = MainWindow(FakeBackend())
     qtbot.addWidget(window)
     panel = window.drafts_panel
-    window._show_page("drafts")
+    window._show_page("notes")
     listed = held_item(panel._list_buttons, panel.delete_button)
     window._edit_draft(make_draft())  # On the Drafts page, so inline.
     assert not Shiboken.isValid(listed)

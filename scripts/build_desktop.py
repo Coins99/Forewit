@@ -94,6 +94,8 @@ def main() -> int:
         "--hidden-import",
         "logging.config",
         "--hidden-import",
+        "mailbrief.storage.migration_forks",
+        "--hidden-import",
         "PySide6.QtSvg",
         "--exclude-module",
         "mypy",

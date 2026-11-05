@@ -17,6 +17,7 @@ from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -60,7 +61,7 @@ from mailbrief.domain.calendar_planning import (
 )
 from mailbrief.domain.capture import CaptureRequest
 from mailbrief.domain.common import utc_now
-from mailbrief.domain.day_plans import DayPlan
+from mailbrief.domain.day_plans import DayPlan, PlanTransfer
 from mailbrief.domain.digests import (
     DailyDigest,
     DigestStatus,
@@ -107,11 +108,12 @@ from mailbrief.domain.routes import (
     MessageRoute,
     NavigationStamp,
     PageRoute,
+    ProjectRoute,
     Route,
     TaskRoute,
     WritingRoute,
 )
-from mailbrief.domain.search import SearchHit, SearchResults
+from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
@@ -143,6 +145,7 @@ from mailbrief.services.brief import (
 )
 from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan, overlaps_for
+from mailbrief.services.capture import CaptureConflictError
 from mailbrief.services.consent import NO_CONSENT
 from mailbrief.services.day_plans import DayPlanConflictError
 from mailbrief.services.drafting import (
@@ -160,7 +163,7 @@ from mailbrief.services.drafts import (
 )
 from mailbrief.services.events import EventConflictError, EventNotFoundError
 from mailbrief.services.google_calendar import needs_sync
-from mailbrief.services.history import BriefDateError
+from mailbrief.services.history import BriefDateError, coverage_line
 from mailbrief.services.local_setup import (
     LocalSetupError,
     SetupProgress,
@@ -181,6 +184,7 @@ from mailbrief.services.ranking import (
     OUTSIDE_REPLY_TEXT,
     reason_text,
 )
+from mailbrief.services.upcoming import overview
 from mailbrief.ui.action_editor import ActionEditor
 from mailbrief.ui.action_text import steps_status
 from mailbrief.ui.actions_view import (
@@ -218,6 +222,7 @@ from mailbrief.ui.calendar_view import (
 from mailbrief.ui.calendar_view import NEW as NEW_EVENT
 from mailbrief.ui.calendar_view import OPEN as OPEN_EVENT
 from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
+from mailbrief.ui.capture_inbox import CaptureInbox
 from mailbrief.ui.capture_view import CaptureDialog
 from mailbrief.ui.data_view import DataDialog
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
@@ -249,6 +254,7 @@ from mailbrief.ui.palette import CommandPalette
 from mailbrief.ui.planning_dialog import PlanningDialog
 from mailbrief.ui.preferences import DesktopPreferences
 from mailbrief.ui.preferences_view import AUTO_DISCONNECTED, region_zones
+from mailbrief.ui.project_page import ProjectPage
 from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
@@ -266,8 +272,10 @@ from mailbrief.ui.theme import (
     system_mode,
 )
 from mailbrief.ui.today_view import DayOverview, DayPanel
+from mailbrief.ui.upcoming_view import UpcomingDialog
 from mailbrief.ui.weak import weak_method
-from mailbrief.ui.workspace import PAGES, ThreePaneWorkspace
+from mailbrief.ui.workspace import PAGE_SHORTCUTS as PAGE_SHORTCUTS
+from mailbrief.ui.workspace import ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
@@ -338,6 +346,12 @@ class DesktopBackend(Protocol):
     async def get_action(self, public_id: str) -> Action: ...
     async def capture(self, request: CaptureRequest) -> Action | Draft: ...
     async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]: ...
+    async def capture_inbox(self) -> tuple[Action | Draft, ...]: ...
+    async def keep_capture(self, record: Action | Draft) -> Action | Draft: ...
+    async def preview_plan_transfer(
+        self, source: date, destination: date, move: bool
+    ) -> PlanTransfer: ...
+    async def apply_plan_transfer(self, preview: PlanTransfer, zone: ZoneInfo) -> DayPlan: ...
     async def select_day_task(
         self, day: date, zone: ZoneInfo, task_id: str, revision: int
     ) -> DayPlan: ...
@@ -600,7 +614,6 @@ def _ready_text(ready: int) -> str:
 _RUN_WIDTH = 760
 # Ctrl+1 to Ctrl+7 (Cmd on macOS) show the sidebar's pages, in its order.
 # Ctrl+1 to Ctrl+7 follow the sidebar's order.
-PAGE_SHORTCUTS = tuple(key for key, _label, _icon in PAGES)
 
 
 def _step_heading(layout: QVBoxLayout, step: str, title: str) -> tuple[QLabel, QLabel]:
@@ -1007,6 +1020,14 @@ class MainWindow(QMainWindow):
         self.focus_panel.agenda_requested.connect(self._open_focus_agenda)
         self.focus_dialog.search_requested.connect(self._search_focus)
         self.focus_dialog.select_requested.connect(self._add_captured_today)
+        self._focus_day: date | None = None
+        self._focus_plan_read = 0
+        self._plan_transfer: PlanTransfer | None = None
+        self.focus_dialog.date_requested.connect(self._browse_focus_date)
+        self.focus_dialog.today_requested.connect(lambda: self._browse_focus_date(None))
+        self.focus_dialog.transfer_requested.connect(self._preview_plan_transfer)
+        self.focus_dialog.apply_transfer_requested.connect(self._apply_plan_transfer)
+        self.focus_dialog.destination.dateChanged.connect(self._invalidate_plan_transfer)
         workspace.today_top.addWidget(self.focus_panel)
         # The focus preview replaces the older equal-weight mail metric strip.
         if (overview := workspace.findChild(QWidget, "todayOverview")) is not None:
@@ -1023,6 +1044,66 @@ class MainWindow(QMainWindow):
         self.day_toggle.toggled.connect(self.day_area.setVisible)
         self.focus_panel.attention_requested.connect(lambda: self.day_toggle.setChecked(True))
         workspace.add_header_action("today", self.day_toggle)
+        # Retain the existing brief widgets/attributes in Mail; Today is owner work.
+        brief_page = workspace._pages.pop("today")
+        workspace._pages["mail_current"] = brief_page
+        owner_today = QWidget()
+        owner_today.setObjectName("ownerTodayPage")
+        owner_today.setAccessibleName("Today")
+        owner_layout = QVBoxLayout(owner_today)
+        owner_layout.setContentsMargins(0, 0, 0, 0)
+        owner_layout.setSpacing(0)
+        for widget in (self.focus_panel, self.day_area):
+            take_widget(widget)
+            owner_layout.addWidget(widget)
+        mail_preview = QWidget()
+        mail_preview.setObjectName("todayMailPreview")
+        mail_preview.setAccessibleName("Saved mail preview and explicit review commands")
+        mail_preview_layout = QVBoxLayout(mail_preview)
+        mail_preview_layout.setContentsMargins(16, 12, 16, 12)
+        owner_layout.addWidget(mail_preview)
+        self.mail_status = wrap_label("Mail is optional. Your tasks and notes work offline.")
+        self.mail_status.setObjectName("todaySavedMailStatus")
+        self.mail_status.setAccessibleName("Saved mail overview")
+        mail_preview_layout.addWidget(self.mail_status)
+        self.open_mail_button = outline_button("Open Mail", "todayOpenMail")
+        self.open_mail_button.setAccessibleName("Open Mail current brief")
+        self.open_mail_button.clicked.connect(lambda: self._navigate(MailRoute(view="current")))
+        mail_preview_layout.addWidget(self.open_mail_button)
+        self.yesterday_button = outline_button("Review yesterday", "reviewYesterday")
+        self.yesterday_button.setAccessibleName("Explicitly review yesterday's mail")
+        self.yesterday_button.clicked.connect(
+            lambda: self._request_brief_day(self._local_today() - timedelta(days=1))
+        )
+        mail_preview_layout.addWidget(self.yesterday_button)
+        owner_layout.addStretch(1)
+        today_scroll = QScrollArea()
+        today_scroll.setObjectName("todayScroll")
+        today_scroll.setAccessibleName("Today's saved workspace")
+        today_scroll.setWidgetResizable(True)
+        today_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        today_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        today_scroll.setWidget(owner_today)
+        workspace.add_page("today", today_scroll)
+        workspace.show_page("today")
+        self.mail_view = QComboBox()
+        self.mail_view.setObjectName("mailSubview")
+        self.mail_view.setAccessibleName("Mail view")
+        # Include this navigation control in Cocoa's default text/list Tab mode.
+        self.mail_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for label, view in (
+            ("Inbox", "inbox"),
+            ("Current brief", "current"),
+            ("Brief history", "history"),
+            ("Saved metadata", "saved"),
+            ("Drafts", "drafts"),
+        ):
+            self.mail_view.addItem(label, view)
+        self.mail_view.activated.connect(
+            lambda _index: self._navigate(MailRoute(view=self.mail_view.currentData()))
+        )
+        workspace.header.add_widget(self.mail_view)
+        self.mail_view.hide()
         # The run page: step 1 reviews the shortlist, step 2 approves sending.
         self.review_panel = QWidget()
         self.review_panel.setObjectName("reviewPanel")
@@ -1121,6 +1202,7 @@ class MainWindow(QMainWindow):
         self.new_task_shortcut.activated.connect(self._request_new_task)
         self.actions_panel.action_requested.connect(self._request_action)
         self.actions_panel.draft_requested.connect(self._request_action_draft)
+        self.actions_panel.notes_requested.connect(self._open_task_notes)
         self.actions_panel.step_toggled.connect(self._request_step_done)
         self.actions_panel.step_added.connect(self._request_add_step)
         self.actions_panel.tabs.currentChanged.connect(self._actions_tab_changed)
@@ -1134,10 +1216,48 @@ class MainWindow(QMainWindow):
         self.focus_button.clicked.connect(self._open_focus)
         workspace.add_header_action("actions", self.focus_button)
         self.drafts_panel = DraftsPanel()
+        self.capture_inbox = CaptureInbox(self)
+        self.capture_inbox.open_requested.connect(self._open_inbox_capture)
+        self.capture_inbox.keep_requested.connect(self._keep_capture)
+        self.capture_inbox_button = outline_button("Capture inbox", "openCaptureInbox")
+        self.capture_inbox_button.setAccessibleName("Review unprocessed quick captures")
+        self.capture_inbox_button.clicked.connect(self._open_capture_inbox)
+        workspace.header.add_widget(self.capture_inbox_button)
+        self.capture_inbox_button.hide()
+        self.upcoming = UpcomingDialog(self)
+        self._upcoming_read = 0
+        self.upcoming.range_requested.connect(self._read_upcoming)
+        self.upcoming.open_requested.connect(self._navigate)
+        self.upcoming_button = outline_button("Upcoming", "openUpcoming")
+        self.upcoming_button.setAccessibleName("Open seven or thirty days of known commitments")
+        self.upcoming_button.clicked.connect(self._open_upcoming)
+        workspace.add_header_action("today", self.upcoming_button)
         self.drafts_panel.draft_requested.connect(self._request_draft)
         self.drafts_panel.preview_requested.connect(self._request_draft_preview)
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts", margins=0))
         workspace.add_header_action("drafts", self.drafts_panel.new_button)
+        self.notes_page = QWidget()
+        self.notes_page.setObjectName("notesPage")
+        self.notes_page.setAccessibleName("Notes")
+        notes_layout = QVBoxLayout(self.notes_page)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        workspace.add_page("notes", self.notes_page)
+        self.project_page = ProjectPage()
+        self.project_page.manage_requested.connect(self._open_organization)
+        self.project_page.task_requested.connect(
+            lambda task: self._open_action(
+                task.public_id,
+                ActionFilter.COMPLETED
+                if task.status is ActionStatus.COMPLETED
+                else ActionFilter.OPEN,
+            )
+        )
+        self.project_page.note_requested.connect(
+            lambda note: self._navigate(
+                WritingRoute(public_id=note.public_id, draft_kind=DraftKind.NOTE)
+            )
+        )
+        workspace.add_page("projects", self.project_page)
         workspace.add_page("briefs", _page(self.history_panel, "briefsPage", "Briefs", margins=0))
         self.calendar_panel = CalendarPanel()
         self.inbox_panel = InboxPanel(clock=weak_method(self._now))
@@ -1258,6 +1378,9 @@ class MainWindow(QMainWindow):
             self.day_toggle,
             self.cancel_button,
             self.capture_button,
+            self.upcoming_button,
+            self.capture_inbox_button,
+            self.mail_view,
             workspace.sidebar.nav,
             self.cached_button,
             self.data_button,
@@ -1272,6 +1395,8 @@ class MainWindow(QMainWindow):
             self.focus_panel.remove_button,
             self.focus_panel.agenda_button,
             self.focus_panel.attention_button,
+            self.open_mail_button,
+            self.yesterday_button,
             *workspace.metrics.values(),
             self.day_panel.attention.list,
             self.day_panel.agenda.list,
@@ -1347,6 +1472,23 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, key: str) -> None:
         self._navigation_generation += 1
+        self.capture_inbox_button.setVisible(key in ("actions", "notes"))
+        mail_views = {
+            "inbox": "inbox",
+            "mail_current": "current",
+            "briefs": "history",
+            "drafts": "drafts",
+            "run": "current",
+        }
+        self.mail_view.setVisible(key in mail_views)
+        if key in mail_views:
+            self.mail_view.setCurrentIndex(self.mail_view.findData(mail_views[key]))
+        if key in ("notes", "drafts"):
+            take_widget(self.drafts_panel)
+            host = self.notes_page if key == "notes" else self.workspace._pages["drafts"]
+            if (layout := host.layout()) is not None:
+                layout.addWidget(self.drafts_panel)
+            self.drafts_panel.show()
         if key == "today":
             self.workspace.show_page("run" if self._gate_pending() else "today")
         elif key in ("actions", "waiting"):
@@ -1358,27 +1500,34 @@ class MainWindow(QMainWindow):
         elif key in ("drafts", "notes"):
             # Notes and Drafts share one page and editor, as Waiting shares Actions.
             notes = key == "notes"
-            self.workspace.show_page("drafts")
+            self.workspace.show_page(key)
             self.drafts_panel.show_view(WritingView.NOTES if notes else WritingView.DRAFTS)
             self.workspace.show_writing_heading(notes=notes)
         else:
             self.workspace.show_page(key)
         self.workspace.sidebar.set_current(self._sidebar_key())
+        self.generate_button.setVisible(key in ("today", "mail_current", "run"))
         if key in ("drafts", "notes") and (selected := self.drafts_panel.selected()) is not None:
             self._request_draft_preview(selected)
+        if key == "notes":
+            self.drafts_panel.new_button.show()
         if key == "calendar":
             self.calendar_panel.refresh_button.setVisible(self._google_mode() == GOOGLE_ON)
             self.workspace.header.title.setText(self.calendar_panel.heading.text())
             self.calendar_panel.heading.hide()
+        if key == "mail_current" and self.workspace._digest is not None:
+            self.workspace.header.date.setText(
+                day_text(self.workspace._digest.local_date, today=self._local_today())
+            )
 
     def _sidebar_key(self) -> str:
         """The sidebar row for the page shown."""
         page = self.workspace.current_page()
         if page == "run":
-            return "today"
+            return "inbox"
         if page == "actions":
             return "waiting" if self.actions_panel.view() is ActionFilter.WAITING else "actions"
-        if page == "drafts":
+        if page in ("drafts", "notes"):
             return "notes" if self.drafts_panel.view() is WritingView.NOTES else "drafts"
         return page
 
@@ -1409,7 +1558,8 @@ class MainWindow(QMainWindow):
         self._navigation_generation += 1
         if isinstance(route, PageRoute):
             if route.page == "projects":
-                self._open_organization()
+                self._show_page("projects")
+                self._start_or_busy(self._refresh_project_page)
             else:
                 self._request_legacy_page(
                     {"tasks": "actions", "mail": "inbox"}.get(route.page, route.page)
@@ -1432,11 +1582,17 @@ class MainWindow(QMainWindow):
         elif isinstance(route, MailRoute):
             if route.view == "saved":
                 self.cached_button.click()
+            elif route.view == "current":
+                self._show_page("mail_current")
+                self.start(self._back_to_latest, cancellable=False)
             else:
                 self._request_legacy_page(
-                    {"inbox": "inbox", "current": "today", "history": "briefs", "drafts": "drafts"}[
-                        route.view
-                    ]
+                    {
+                        "inbox": "inbox",
+                        "current": "mail_current",
+                        "history": "briefs",
+                        "drafts": "drafts",
+                    }[route.view]
                 )
         elif isinstance(route, MessageRoute):
             if route.account_email != self._account_email:
@@ -1453,6 +1609,18 @@ class MainWindow(QMainWindow):
             # Saved briefs remain readable for disconnected accounts, as before.
             stamp = self._navigation_stamp()
             self._start_or_busy(lambda: self._show_brief(route.account_email, route.day, stamp))
+        elif isinstance(route, ProjectRoute):
+            self._show_page("projects")
+            stamp = self._navigation_stamp()
+
+            async def open_project() -> None:
+                await self._refresh_project_page()
+                if self._navigation_current(stamp) and not self.project_page.select_project(
+                    route.public_id
+                ):
+                    self.status.setText("That project is no longer available.")
+
+            self._start_or_busy(open_project)
         else:
             assert_never(route)
 
@@ -1697,6 +1865,8 @@ class MainWindow(QMainWindow):
             owner_zone=self.zone,
             today=self._local_today(),
         )
+        if digest.local_date == self._local_today():
+            self.mail_status.setText(coverage_line(digest))
 
     async def _apply_pending_brief(self) -> None:
         digest, self._pending_brief = self._pending_brief, None
@@ -1745,14 +1915,99 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._note_not_refreshed(exc)
         await self._refresh_day()
+        if self.workspace.current_page() == "projects":
+            await self._refresh_project_page()
 
     async def _refresh_drafts(self) -> None:
         try:
             drafts = await self.backend.list_drafts()
             self.drafts_panel.show_drafts(drafts, self.zone, self._local_today())
             self._set_counts(drafts=self.drafts_panel.totals()[WritingView.DRAFTS])
+            if self.workspace.current_page() == "projects":
+                self.project_page.show_records(self._projects, self.project_page._tasks, drafts)
         except Exception as exc:
             self._note_not_refreshed(exc)
+
+    async def _refresh_project_page(self) -> None:
+        stamp = self._navigation_stamp()
+        projects = await self.backend.list_projects()
+        tasks = tuple(
+            task
+            for group in [await self.backend.list_actions(view) for view in ActionFilter]
+            for task in group
+        )
+        notes = await self.backend.list_drafts()
+        if self._navigation_current(stamp):
+            self.project_page.show_records(projects, tasks, notes)
+
+    def _open_upcoming(self) -> None:
+        self.dialog_guard.show_dialog(self.upcoming)
+        self._read_upcoming(self.upcoming.range.currentData())
+
+    def _read_upcoming(self, days: int) -> None:
+        self._upcoming_read += 1
+        generation, day, zone = self._upcoming_read, self._local_today(), self.zone
+
+        async def read() -> None:
+            try:
+                shown = await self.backend.calendar_range(day, day + timedelta(days=days - 1), zone)
+            except Exception as exc:
+                log_failure(exc)
+                if generation == self._upcoming_read and not self._closing:
+                    self.upcoming.status.setText(
+                        "Could not read saved commitments. Reopen to retry."
+                    )
+                return
+            if (
+                generation == self._upcoming_read
+                and day == self._local_today()
+                and zone == self.zone
+                and not self._closing
+            ):
+                self.upcoming.show_upcoming(overview(shown, zone))
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _open_capture_inbox(self) -> None:
+        self.capture_inbox.kind.setCurrentIndex(
+            2 if self.workspace.current_page() == "notes" else 1
+        )
+        self.dialog_guard.show_dialog(self.capture_inbox)
+        self.draft_writes.run(self._refresh_capture_inbox)
+
+    async def _refresh_capture_inbox(self) -> None:
+        self.capture_inbox.show_records(await self.backend.capture_inbox())
+
+    def _open_inbox_capture(self, record: object) -> None:
+        self.capture_inbox.reject()
+        self._open_captured(record)
+
+    def _keep_capture(self, record: object) -> None:
+        if not isinstance(record, (Action, Draft)):
+            return
+
+        async def keep() -> None:
+            if isinstance(record, Draft) and not await self._save_inline_draft():
+                return
+            try:
+                saved = await self.backend.keep_capture(record)
+            except CaptureConflictError as exc:
+                self.capture_inbox.status.setText(str(exc))
+            else:
+                self.capture_inbox.status.setText("Kept as is. No organization or date required.")
+                if (
+                    isinstance(saved, Draft)
+                    and self.draft_editor.draft is not None
+                    and self.draft_editor.draft.public_id == saved.public_id
+                ):
+                    self.draft_editor.saved(saved, saved.content())
+            await self._refresh_capture_inbox()
+            await self._refresh_actions()
+            await self._refresh_drafts()
+
+        self.draft_writes.run(keep)
 
     def _refresh_proposals_dialog(self) -> None:
         """An open Proposals dialog follows the action's latest state."""
@@ -2305,7 +2560,7 @@ class MainWindow(QMainWindow):
         if self.focus_panel.plan is not None and self.focus_panel.plan.day != day:
             # Midnight changes the view, never yesterday's durable selection.
             self.focus_panel.show_plan(DayPlan(day=day), zone, now)
-            if self.focus_dialog.isVisible():
+            if self.focus_dialog.isVisible() and self._focus_day is None:
                 self.focus_dialog.panel.show_plan(DayPlan(day=day), zone, now)
         try:
             summary = await self.backend.today_summary(day, zone, now)
@@ -2323,8 +2578,10 @@ class MainWindow(QMainWindow):
             plan = summary.focus or DayPlan(day=summary.day)
             self.focus_panel.show_plan(plan, zone, now)
             self.focus_panel.show_overview(summary, zone)
-            if self.focus_dialog.isVisible():
+            if self.focus_dialog.isVisible() and self._focus_day is None:
                 self.focus_dialog.panel.show_plan(plan, zone, now)
+            if self.upcoming.isVisible():
+                self._read_upcoming(self.upcoming.range.currentData())
 
     def _open_focus(self) -> None:
         if self._closing or self._dialog_open():
@@ -2334,12 +2591,92 @@ class MainWindow(QMainWindow):
         self.focus_dialog.panel.status.hide()
         self._read_focus()
 
+    def _invalidate_plan_transfer(self) -> None:
+        self._plan_transfer = None
+        self.focus_dialog.apply_transfer.setEnabled(False)
+        self.focus_dialog.transfer_preview.clear()
+
+    def _browse_focus_date(self, day: date | None) -> None:
+        self._focus_day = day
+        self._invalidate_plan_transfer()
+        self._read_focus()
+
+    def _preview_plan_transfer(self, move: bool, destination: date) -> None:
+        source = self._focus_day or self._local_today()
+        self._invalidate_plan_transfer()
+
+        async def preview() -> None:
+            try:
+                shown = await self.backend.preview_plan_transfer(source, destination, move)
+            except DayPlanConflictError as exc:
+                self.focus_dialog.transfer_preview.setText(str(exc))
+                return
+            if (
+                source != (self._focus_day or self._local_today())
+                or destination != self.focus_dialog.destination.date().toPython()
+            ):
+                return
+            self._plan_transfer = shown
+            existing = {item.task_public_id for item in shown.destination.items}
+            titles = [
+                item.action.title
+                for item in shown.source.items
+                if item.action and item.task_public_id in shown.task_ids
+            ]
+            self.focus_dialog.transfer_preview.setText(
+                f"{'Move' if move else 'Copy'} {len(shown.task_ids)} unfinished selections "
+                f"from {source} to {destination}. "
+                f"{len(shown.skipped_ids)} unavailable/completed skipped; "
+                f"{sum(key in existing for key in shown.task_ids)} already selected. "
+                "Task dates stay unchanged.\n" + "\n".join(titles)
+            )
+            self.focus_dialog.apply_transfer.setEnabled(True)
+
+        self.draft_writes.run(preview)
+
+    def _apply_plan_transfer(self) -> None:
+        preview, self._plan_transfer = self._plan_transfer, None
+        self.focus_dialog.apply_transfer.setEnabled(False)
+        if preview is None:
+            return
+
+        async def apply() -> None:
+            try:
+                await self.backend.apply_plan_transfer(preview, self.zone)
+            except DayPlanConflictError as exc:
+                self.focus_dialog.transfer_preview.setText(str(exc))
+            else:
+                self.focus_dialog.transfer_preview.setText(
+                    "Selection saved. Task dates stayed unchanged."
+                )
+            self._read_focus()
+
+        self.draft_writes.run(apply)
+
     def _read_focus(self) -> None:
         if self._closing:
             return
+        self._focus_plan_read += 1
+        generation = self._focus_plan_read
+        zone = self.zone
 
         async def read() -> None:
             await self._refresh_day()
+            if generation != self._focus_plan_read or self._closing or zone != self.zone:
+                return
+            day = self._focus_day or self._local_today()
+            self.focus_dialog.show_date(day, self._local_today())
+            if self._focus_day is not None:
+                shown = await self.backend.today_summary(day, self.zone, self.now())
+                if (
+                    day == self._focus_day
+                    and not self._closing
+                    and generation == self._focus_plan_read
+                    and zone == self.zone
+                ):
+                    self.focus_dialog.panel.show_plan(
+                        shown.focus or DayPlan(day=day), self.zone, self.now()
+                    )
             if self.focus_dialog.isVisible() and not self._closing:
                 self._search_focus(self.focus_dialog.query.text())
 
@@ -2355,7 +2692,7 @@ class MainWindow(QMainWindow):
             return
         self._focus_search_read += 1
         read_id = self._focus_search_read
-        day, zone = self._local_today(), self.zone
+        day, zone = self._focus_day or self._local_today(), self.zone
 
         async def read() -> None:
             try:
@@ -2365,7 +2702,7 @@ class MainWindow(QMainWindow):
                     and self.focus_dialog.isVisible()
                     and read_id == self._focus_search_read
                     and text == self.focus_dialog.query.text()
-                    and day == self._local_today()
+                    and day == (self._focus_day or self._local_today())
                     and zone == self.zone
                 ):
                     self.focus_dialog.show_candidates(actions)
@@ -2405,12 +2742,13 @@ class MainWindow(QMainWindow):
     def _request_focus_change(self, operation: str, value: object, plan: object) -> None:
         if self._closing or not isinstance(plan, DayPlan):
             return
-        if plan.day != self._local_today():
+        if plan.day != (self._focus_day or self._local_today()) and plan.day != self._local_today():
             self._read_focus()
             self.status.setText("Today changed. Review the current plan and try again.")
             return
         if self._focus_task is not None and not self._focus_task.done():
             return
+        self._invalidate_plan_transfer()
         for panel in (self.focus_panel, self.focus_dialog.panel):
             panel.set_busy(True)
         self.focus_dialog.add_button.setEnabled(False)
@@ -2472,6 +2810,8 @@ class MainWindow(QMainWindow):
                     panel.set_busy(False)
                 self.focus_dialog.add_button.setEnabled(bool(self.focus_dialog.candidates.count()))
                 if self.focus_dialog.isVisible():
+                    if self._focus_day is not None:
+                        self._read_focus()
                     self._search_focus(self.focus_dialog.query.text())
             self._focus_task = None
 
@@ -2717,6 +3057,8 @@ class MainWindow(QMainWindow):
             self._request_capture()
         elif kind == "page":
             self._request_page(page)
+        elif kind == "mail" and page == "current":
+            self._navigate(MailRoute(view="current"))
         elif key == "new:task":
             self._request_new_task()
         elif key == "new:event":
@@ -2741,13 +3083,29 @@ class MainWindow(QMainWindow):
         it has left the Inbox)."""
         if not isinstance(hit, SearchHit):
             return
+        if hit.kind is SearchKind.BRIEF and hit.account_email != self._account_email:
+            self.status.setText("The mail account changed. Search again to open this brief.")
+            return
         route = search_route(hit, self.zone, self._search_account)
         if route is not None:
             self._navigate(route)
 
     def _start_or_busy(self, operation: Callable[[], Awaitable[None]]) -> None:
-        if not self.start(operation, cancellable=False) and not self._closing:
-            self.status.setText(_BUSY)
+        if self._closing or self.start(operation, cancellable=False):
+            return
+
+        # Canonical local opens have their own lifecycle while mail owns the foreground.
+        async def read() -> None:
+            try:
+                await operation()
+            except Exception as exc:
+                log_failure(exc)
+                if not self._closing:
+                    self.status.setText("Could not open that saved record. Try again.")
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._draft_reads.add(task)
+        task.add_done_callback(self._draft_reads.discard)
 
     def _open_action(self, public_id: str, view: ActionFilter) -> None:
         self._navigate(TaskRoute(public_id=public_id, view=view))
@@ -2812,6 +3170,8 @@ class MainWindow(QMainWindow):
             draft = await self._unless_stale(self.backend.get_draft(public_id))
             if draft is _GONE or not self._navigation_current(stamp):
                 return
+            self.drafts_panel.set_task_context(None)
+            self._show_page("notes" if draft.kind is DraftKind.NOTE else "drafts")
             self._edit_draft(draft)
         finally:
             editor.set_switching(False)
@@ -3193,13 +3553,27 @@ class MainWindow(QMainWindow):
             cancellable=False,
         )
 
+    def _open_task_notes(self, value: object) -> None:
+        if not isinstance(value, Action):
+            return
+
+        async def open_notes() -> None:
+            await self.draft_writes.drain()
+            if not await self._save_inline_draft():
+                return
+            self._show_page("notes")
+            self.drafts_panel.set_task_context(value.public_id)
+            await self._refresh_drafts()
+
+        self._start_or_busy(open_notes)
+
     def _request_draft(self, kind: str, value: object) -> None:
         if kind == NEW_DRAFT and isinstance(value, DraftKind):
             new_kind = value
             project = (
                 self.drafts_panel.project_for_new_note()
                 if new_kind is DraftKind.NOTE
-                and self.workspace.current_page() == "drafts"
+                and self.workspace.current_page() in ("drafts", "notes")
                 and self.drafts_panel.view() is WritingView.NOTES
                 else None
             )
@@ -3220,7 +3594,7 @@ class MainWindow(QMainWindow):
     def _request_draft_preview(self, value: object) -> None:
         if (
             self._closing
-            or self.workspace.current_page() != "drafts"
+            or self.workspace.current_page() not in ("drafts", "notes")
             or (self.draft_editor.isVisible() and not self.draft_editor.embedded)
             or not isinstance(value, DraftSummary)
         ):
@@ -3252,7 +3626,7 @@ class MainWindow(QMainWindow):
             selected = self.drafts_panel.selected()
             if (
                 not self._closing
-                and self.workspace.current_page() == "drafts"
+                and self.workspace.current_page() in ("drafts", "notes")
                 and selected is not None
                 and selected.public_id == draft.public_id
             ):
@@ -3293,8 +3667,8 @@ class MainWindow(QMainWindow):
         await self._open_draft_by_id(summary.public_id)
 
     def _edit_draft(self, draft: Draft) -> None:
-        inline = self.workspace.current_page() == "drafts"
-        reply = self.workspace.current_page() == "today" and draft.kind is DraftKind.REPLY
+        inline = self.workspace.current_page() in ("drafts", "notes")
+        reply = self.workspace.current_page() == "mail_current" and draft.kind is DraftKind.REPLY
         if not inline:
             self.drafts_panel.restore_list_controls()
         self.draft_editor.set_embedded(
@@ -4522,14 +4896,14 @@ class MainWindow(QMainWindow):
         if stamp is not None and not self._navigation_current(stamp):
             return False
         self._set_shown(None if is_latest else identity)
-        self._show_page_unless_moved(origin, "today")
+        self._show_page_unless_moved(origin, "mail_current")
         return True
 
     async def _back_to_latest(self) -> None:
         origin = self.workspace.current_page()
         self._set_shown(None)
         await self._reload_brief()
-        self._show_page_unless_moved(origin, "today")
+        self._show_page_unless_moved(origin, "mail_current")
         self.status.setText("Showing the latest brief.")
 
     def _request_brief_day(self, local_date: date) -> None:
@@ -4566,9 +4940,6 @@ class MainWindow(QMainWindow):
     ) -> None:
         origin = self.workspace.current_page()
         self._offer_undo()  # A new brief replaces the suggestions that Undo would refer to.
-        if local_date is None and self._shown is not None:
-            self._set_shown(None)  # Sync and review returns to the latest brief.
-            await self._reload_brief()
         day = (
             "today's Inbox"
             if local_date is None
@@ -4610,7 +4981,10 @@ class MainWindow(QMainWindow):
                         await self._show_digest(digest, defer_if_writing=True)
                     await self._reload_history()
                 elif local_date is None:
-                    await self._show_digest(digest)
+                    if self._shown is None:
+                        await self._show_digest(digest, defer_if_writing=True)
+                    else:
+                        await self._reload_brief()
                 else:
                     await self._view(digest)
                 self.status.setText(f"Brief saved ({digest.status.value.capitalize()}).")
@@ -4693,6 +5067,8 @@ class MainWindow(QMainWindow):
                 self.command_palette,
                 self.capture_dialog,
                 self.focus_dialog,
+                self.capture_inbox,
+                self.upcoming,
             )
         )
 

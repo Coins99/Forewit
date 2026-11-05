@@ -229,7 +229,7 @@ def test_the_waiting_page_is_headed_as_the_window_heads_it(qtbot: QtBot) -> None
         "Keep track of commitments you’re waiting on from other people."
     )
     waiting.show_actions_heading(waiting=False)
-    assert waiting.header.title.text() == "Actions"
+    assert waiting.header.title.text() == "Tasks"
     assert waiting.header.date.text() == "Turn important email into clear, trackable next steps."
 
 
@@ -312,19 +312,18 @@ def test_sidebar_rows_are_read_with_their_counts(qtbot: QtBot) -> None:
         )
         return str(sidebar.pages.item(row).data(Qt.ItemDataRole.AccessibleTextRole))
 
-    assert [read(key) for key in ("today", "actions", "waiting", "drafts", "briefs")] == [
+    assert [
+        read(key) for key in ("today", "actions", "projects", "calendar", "notes", "inbox")
+    ] == [
         "Today",
-        "Actions, 5",
-        "Waiting, 2",
-        "Drafts, 3",
-        "Briefs",
+        "Tasks, 5",
+        "Projects",
+        "Calendar",
+        "Notes",
+        "Mail",
     ]
-    sidebar.set_counts(None, 0, None)  # No count: the label alone.
-    assert [read(key) for key in ("actions", "waiting", "drafts")] == [
-        "Actions",
-        "Waiting, 0",
-        "Drafts",
-    ]
+    sidebar.set_counts(None, 0, None)
+    assert read("actions") == "Tasks"
 
 
 def test_settings_lines_up_with_the_page_rows(qtbot: QtBot) -> None:
@@ -487,13 +486,13 @@ def test_arrow_keys_reach_briefs_like_any_page(qtbot: QtBot) -> None:
     show(qtbot, workspace)
     sidebar = workspace.sidebar
     pages = QSignalSpy(sidebar.page_requested)
-    sidebar.set_current("drafts")
+    sidebar.set_current("notes")
     sidebar.nav.setFocus()
     QTest.keyClick(sidebar.nav, Qt.Key.Key_Down)
-    assert sidebar.current_key() == "briefs"
-    assert pages.at(pages.count() - 1) == ["briefs"]
+    assert sidebar.current_key() == "inbox"
+    assert pages.at(pages.count() - 1) == ["inbox"]
     QTest.keyClick(sidebar.nav, Qt.Key.Key_Up)
-    assert pages.at(pages.count() - 1) == ["drafts"]
+    assert pages.at(pages.count() - 1) == ["notes"]
 
 
 def brief_with(**updates: object) -> DailyDigest:
@@ -1127,13 +1126,12 @@ def test_owner_deadline_renders(
             assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
 
 
-def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
-    """The daily home, the mailbox, flagged and deferred work, drafts and history, then
-    Calendar and Notes set apart below a divider; Ctrl+1 to Ctrl+8 follow the same order."""
+def test_workspace_pages_preserve_legacy_shortcut_meanings(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     sidebar = workspace.sidebar
     keys = [str(sidebar.pages.item(row).data(KEY_ROLE)) for row in range(sidebar.pages.rowCount())]
-    assert keys == [
+    assert keys == ["today", "actions", "projects", "calendar", "notes", "inbox"]
+    assert list(PAGE_SHORTCUTS) == [
         "today",
         "inbox",
         "actions",
@@ -1143,7 +1141,6 @@ def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
         "calendar",
         "notes",
     ]
-    assert list(PAGE_SHORTCUTS) == keys
     rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
     assert rows[-1].height() == rows[0].height()
     assert sidebar.nav.height() >= rows[-1].bottom()  # Every row fits, none scrolls.

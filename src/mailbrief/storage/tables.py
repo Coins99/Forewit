@@ -575,6 +575,9 @@ class ActionTable(DeadlineColumns, Base):
         CheckConstraint(_PRECISION_CHECK, name="deadline_precision_known"),
         CheckConstraint("revision >= 1", name="revision_positive"),
         CheckConstraint(
+            "capture_origin IN ('legacy','direct','quick_capture')", name="capture_origin_known"
+        ),
+        CheckConstraint(
             f"estimate_minutes IS NULL OR estimate_minutes BETWEEN 1 AND {ESTIMATE_MAX_MINUTES}",
             name="estimate_minutes_range",
         ),
@@ -602,6 +605,10 @@ class ActionTable(DeadlineColumns, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    capture_origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
+    capture_processed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     project_public_id: Mapped[str | None] = mapped_column(
         ForeignKey("projects.public_id", ondelete="SET NULL")
     )
@@ -651,6 +658,8 @@ class ActionTable(DeadlineColumns, Base):
     person: Mapped[str | None] = mapped_column(Text)
     person_key: Mapped[str | None] = mapped_column(Text)
     waiting_since_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
 
 
 class ActionTagTable(Base):
@@ -916,6 +925,9 @@ class DraftTable(Base):
         UniqueConstraint("public_id", name="uq_drafts_public_id"),
         CheckConstraint(_DRAFT_KIND_CHECK, name="kind_known"),
         CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(
+            "capture_origin IN ('legacy','direct','quick_capture')", name="capture_origin_known"
+        ),
         Index("ix_drafts_updated_at_utc", "updated_at_utc"),
         Index("ix_drafts_action_id", "action_id"),
         Index("ix_drafts_project_public_id", "project_public_id"),
@@ -926,6 +938,10 @@ class DraftTable(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    capture_origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
+    capture_processed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     to_text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
@@ -943,6 +959,8 @@ class DraftTable(Base):
     project_public_id: Mapped[str | None] = mapped_column(
         ForeignKey("projects.public_id", ondelete="SET NULL")
     )
+
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
 
 
 class DraftVersionTable(Base):

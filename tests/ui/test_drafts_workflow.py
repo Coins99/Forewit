@@ -141,6 +141,7 @@ async def test_the_actions_panel_drafts_a_reply_note_email_or_message(
         "Email",
         "Note",
         "Message",
+        "Open linked notes",
     ]
     assert menu[0].isEnabled()
 

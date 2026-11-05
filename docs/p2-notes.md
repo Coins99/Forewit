@@ -1,5 +1,11 @@
 # P2-04a: Notes and note links
 
+Merged in PR #101. PR #102 builds on this implementation: Notes and Mail drafts
+share the same writing panel/editor, hosted on their workspace pages. Drafts is in
+Mail's view chooser; Ctrl+5 still opens it and Ctrl+8 opens Notes. Its count excludes
+notes. The project filter and independent project/task editing described below remain.
+See `p2-workspace.md` for the workspace and migration convergence details.
+
 Implemented on `feat/p2-notes`, from `main` at `7f7f9cb` (after P2-01 to P2-03). This
 is the first of two P2-04 pull requests. The owner approved the plan on 2026-11-04:
 

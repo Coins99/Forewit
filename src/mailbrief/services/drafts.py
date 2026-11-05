@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.drafting import DraftGenerationInfo, GeneratedDraft
@@ -125,7 +126,10 @@ class DraftService:
         self._repository = DraftRepository(session)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        return await commit_once(self._session, self._clock, operation)
+        try:
+            return await commit_once(self._session, self._clock, operation)
+        except StaleDataError:
+            raise DraftConflictError(_STALE) from None
 
     async def _live(self, public_id: str, expected_revision: int | None) -> DraftTable:
         row = await self._repository.get_draft(public_id)
@@ -263,7 +267,9 @@ class DraftService:
 
         return await self._write(run)
 
-    async def create_note(self, content: DraftEdit, *, command_id: str) -> Draft:
+    async def create_note(
+        self, content: DraftEdit, *, command_id: str, capture_pending: bool | None = None
+    ) -> Draft:
         """Atomically save initial owner text, its first version and a retry receipt."""
         command = str(UUID(command_id))
         if content.has_recipients() or not (content.title.strip() or content.body.strip()):
@@ -275,6 +281,7 @@ class DraftService:
                     "command": command,
                     "operation": "note.create",
                     "content": content.model_dump(mode="json"),
+                    **({"capture_pending": capture_pending} if capture_pending is not None else {}),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -286,6 +293,9 @@ class DraftService:
             if previous is not None:
                 return previous
             row = await self._new_draft(DraftKind.NOTE, content, now)
+            if capture_pending is not None:
+                row.capture_origin = "quick_capture"
+                row.capture_processed_at_utc = None if capture_pending else now
             self._session.add(
                 NoteCommandTable(
                     command_id=command,

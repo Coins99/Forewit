@@ -23,7 +23,7 @@ from tests.unit.storage.test_note_project_migration import (
 async def test_upgrade_and_downgrade_preserve_prior_owner_records(tmp_path: Path) -> None:
     path = tmp_path / "upgrade.sqlite3"
     config = migration_config(path)
-    await asyncio.to_thread(command.upgrade, config, "20261103_0027")
+    await asyncio.to_thread(command.upgrade, config, "head")
     database = Database.from_path(path)
     async with database.session() as session:
         task = await ActionService(session).create(EDIT)
