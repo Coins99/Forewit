@@ -86,6 +86,7 @@ CI verifies that PR head separately. This is not an owner-accepted release.
 | Project and multi-item brief search, account isolation and detached analyses | Passed |
 | Separate-profile backup/restore, exports, links and receipt replay | Passed |
 | Ruff formatting/lint; strict native, win32 and darwin mypy | Passed |
+| Publication integration with current main (`7f7f9cb`) | Rebased cleanly; preserved main's flush focus-card geometry in the new Today container; 228 focused UI/theme/layout checks passed |
 | Final full functional suite, including the Today optimization | 5,076 passed, 9 platform/environment skips; a subsequently added linked-note route test also passed in the 5-test UI closeout run |
 | Full coverage snapshot before the final Today read optimization | 5,075 passed, 9 skipped; 95.08% overall; every service met the 90% combined statement/branch gate |
 | Final Today optimization and related workflows | 18 focused tests passed; Today service 100% statement/branch coverage; no task-edit timeline SQL in the Today read |
