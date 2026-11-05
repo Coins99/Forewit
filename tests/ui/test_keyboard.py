@@ -30,6 +30,7 @@ HEADER_AND_SIDEBAR = [
     "generateButton",
     "dayOverviewToggle",
     "globalCapture",
+    "openUpcoming",
     "sidebarNav",
     "savedMailButton",
     "dataButton",
@@ -40,6 +41,20 @@ FIRST_EMAIL = [
     "focusPlanToday",
     "focusAgendaOpen",
     "focusAttention",
+    "todayOpenMail",
+    "reviewYesterday",
+]
+MAIL_HEADER = [
+    "generateButton",
+    "globalCapture",
+    "mailSubview",
+    "sidebarNav",
+    "savedMailButton",
+    "dataButton",
+    "settingsButton",
+    "accountControl",
+]
+MAIL_EMAIL = [
     "briefList",
     "viewEmailButton",
     "acceptButton",
@@ -130,7 +145,11 @@ async def test_each_shortcut_shows_its_page(
     if sidebar == "briefs":
         await finish(window)  # Briefs loads, then shows its page.
     assert window.workspace.current_page() == page
-    assert window.workspace.sidebar.current_key() == sidebar
+    assert window.workspace.sidebar.current_key() == {
+        "waiting": "actions",
+        "drafts": "inbox",
+        "briefs": "inbox",
+    }.get(sidebar, sidebar)
     if page == "actions":
         expected = ActionFilter.WAITING if sidebar == "waiting" else ActionFilter.OPEN
         assert window.actions_panel.view() is expected
@@ -141,7 +160,7 @@ async def test_today_shows_the_waiting_review(window: MainWindow) -> None:
     window._review = asyncio.get_running_loop().create_future()
     press(window, 1)
     assert window.workspace.current_page() == "run"
-    assert window.workspace.sidebar.current_key() == "today"
+    assert window.workspace.sidebar.current_key() == "inbox"
     window._review.cancel()
 
 
@@ -189,7 +208,7 @@ async def test_a_page_that_loads_late_never_overrides_where_the_owner_went(
     release.set()
     await finish(window)
     assert window.workspace.current_page() == "drafts"
-    assert window.workspace.sidebar.current_key() == "drafts"
+    assert window.workspace.sidebar.current_key() == "inbox"
 
 
 async def test_a_brief_that_opens_late_leaves_the_owner_where_they_went(
@@ -217,6 +236,7 @@ async def test_a_brief_that_opens_late_leaves_the_owner_where_they_went(
 async def test_midnight_keeps_focus_on_a_detail_button(
     window: MainWindow, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    window._show_page("mail_current")
     """The chips recount in place: the selected email's detail, and the button with focus
     in it, stay."""
     monkeypatch.setenv("TZ", "America/Toronto")  # No zone is saved, so it is the system's.
@@ -245,7 +265,8 @@ async def test_midnight_keeps_focus_on_a_detail_button(
 
 
 async def test_tab_runs_header_sidebar_brief_then_detail(window: MainWindow) -> None:
-    assert tab_chain(window, window.generate_button) == HEADER_AND_SIDEBAR + FIRST_EMAIL
+    window._show_page("mail_current")
+    assert tab_chain(window, window.generate_button) == MAIL_HEADER + MAIL_EMAIL
     # The detail's buttons in display order: top to bottom, then left to right.
     places = [
         (button.mapTo(window, QPoint(0, 0)).y(), button.mapTo(window, QPoint(0, 0)).x())
@@ -255,26 +276,26 @@ async def test_tab_runs_header_sidebar_brief_then_detail(window: MainWindow) -> 
 
 
 async def test_undo_comes_last_then_the_start(window: MainWindow) -> None:
+    window._show_page("mail_current")
+
     async def nothing() -> None:
         pass
 
     window._offer_undo("Undo accept", nothing)
     QApplication.processEvents()
     chain = tab_chain(window, window.generate_button)
-    assert chain == [*HEADER_AND_SIDEBAR, *FIRST_EMAIL, "undoButton"]
+    assert chain == [*MAIL_HEADER, *MAIL_EMAIL, "undoButton"]
 
 
 async def test_another_email_relinks_its_buttons(window: MainWindow) -> None:
+    window._show_page("mail_current")
     brief_list = window.workspace.brief_list
     brief_list.setCurrentIndex(brief_list.model().index(4, 0))
     QApplication.processEvents()  # The new buttons show on the next pass.
     names = [button.objectName() for button in detail_buttons(window)]
     assert names and names[0] == "viewEmailButton"
     assert tab_chain(window, window.generate_button) == [
-        *HEADER_AND_SIDEBAR,
-        "focusPlanToday",
-        "focusAgendaOpen",
-        "focusAttention",
+        *MAIL_HEADER,
         "briefList",
         *names,
     ]
@@ -298,6 +319,7 @@ async def test_cancel_follows_sync_and_review_while_busy(window: MainWindow) -> 
     assert chain == [
         "cancelButton",
         "globalCapture",
+        "openUpcoming",
         "sidebarNav",
         "settingsButton",
         "accountControl",
@@ -335,5 +357,11 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
         *detail,
         "newStepField",
         "planFocusButton",
-        *HEADER_AND_SIDEBAR[2:],
+        "globalCapture",
+        "openCaptureInbox",
+        "sidebarNav",
+        "savedMailButton",
+        "dataButton",
+        "settingsButton",
+        "accountControl",
     ]

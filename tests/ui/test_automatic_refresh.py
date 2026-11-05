@@ -390,7 +390,7 @@ async def test_a_draft_open_on_its_page_holds_the_palette_and_a_refresh_only_whi
 ) -> None:
     await window.initialize()
     window.show()
-    window.page_shortcuts["drafts"].activated.emit()
+    window._request_page("notes")
     window.drafts_panel.new_menu.actions()[1].trigger()  # A note, in the Drafts page.
     assert window.task is not None
     await window.task

@@ -39,6 +39,8 @@ SEARCHING: Final = "Searching…"
 NO_MATCHES: Final = "Nothing matches."
 FAILED: Final = "Search couldn't read your records just now. Try again."
 SECTION_NAMES: Final = {
+    SearchKind.PROJECT: "Projects",
+    SearchKind.BRIEF: "Saved briefs",
     SearchKind.ACTION: "Actions",
     SearchKind.WRITING: "Drafts and notes",
     SearchKind.EVENT: "Your events",
@@ -60,6 +62,10 @@ class Command:
 COMMANDS: Final = (
     *(Command(f"page:{key}", f"Go to {label}") for key, label, _icon in PAGES),
     Command("capture", "Capture task or note"),
+    Command("page:waiting", "Go to Waiting tasks"),
+    Command("page:drafts", "Go to Drafts in Mail"),
+    Command("page:briefs", "Go to Brief history in Mail"),
+    Command("mail:current", "Open current brief in Mail"),
     Command("new:task", "New task"),
     Command("new:event", "New event today"),
     Command("new:note", "New note"),

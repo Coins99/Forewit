@@ -39,6 +39,7 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
+from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule, mask_weekdays
@@ -297,6 +298,8 @@ def action_from_rows(
     ``proposals`` its pending proposals."""
     return Action(
         public_id=row.public_id,
+        capture_origin=CaptureOrigin(row.capture_origin),
+        capture_processed_at_utc=row.capture_processed_at_utc,
         project=project,
         title=row.title,
         ownership=ActionOwnership(row.ownership),
@@ -995,7 +998,9 @@ class ActionRepository:
         )
         return count or 0
 
-    async def load(self, rows: Sequence[ActionTable]) -> list[Action]:
+    async def load(
+        self, rows: Sequence[ActionTable], *, include_activity: bool = True
+    ) -> list[Action]:
         """Domain actions for rows, reading recent activity, tags, steps, sources and pending
         proposals with one chunked query each, and thread activity with a fixed number more."""
         projects = (
@@ -1010,7 +1015,7 @@ class ActionRepository:
         )
         ids = [row.id for row in rows]
         activity: dict[int, list[ActionActivity]] = {}
-        for chunk in sorted_batches(ids):
+        for chunk in sorted_batches(ids if include_activity else ()):
             # The indexed threshold keeps both ORM hydration and returned rows bounded.
             older = aliased(ActionActivityTable)
             threshold = (

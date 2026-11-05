@@ -64,7 +64,17 @@ class DraftsPanel(QWidget):
         self.setAccessibleName("Drafts and notes")
         self._drafts: tuple[DraftSummary, ...] = ()
         self._busy = False
+        self.notes_only: bool | None = None
+        self.task_context: str | None = None
+        self._all_drafts: tuple[DraftSummary, ...] = ()
+        self._zone = ZoneInfo("UTC")
+        self._today = date.today()
         layout = QVBoxLayout(self)
+        self.clear_context = outline_button("All notes", "clearNoteContext")
+        self.clear_context.setAccessibleName("Clear linked-task note filter")
+        self.clear_context.clicked.connect(lambda: self.set_task_context(None))
+        layout.addWidget(self.clear_context)
+        self.clear_context.hide()
         layout.setContentsMargins(0, 0, 0, 0)
         self.splitter = HairlineSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -187,10 +197,19 @@ class DraftsPanel(QWidget):
 
     def show_drafts(self, drafts: tuple[DraftSummary, ...], zone: ZoneInfo, today: date) -> None:
         """Replace the list, keeping the selection on the same draft when it remains."""
+        self._all_drafts, self._zone, self._today = drafts, zone, today
+        drafts = tuple(
+            d
+            for d in drafts
+            if self.notes_only is None or (d.kind is DraftKind.NOTE) == self.notes_only
+        )
         previous = self.selected()
+        if self.notes_only and self.task_context is not None:
+            drafts = tuple(d for d in drafts if d.action_public_id == self.task_context)
         row = self.list.currentRow()
         self._drafts = drafts
-        self.draft_count.setText(f"{len(drafts)} drafts")
+        noun = "notes" if self.notes_only else "drafts"
+        self.draft_count.setText(f"{len(drafts)} {noun}")
         clear_list(self.list)
         for summary in drafts:
             changed = moment_text(summary.updated_at_utc, zone, today=today)
@@ -215,6 +234,19 @@ class DraftsPanel(QWidget):
         self._update_buttons()
         self._filter(self.search.text())
 
+    def show_notes(self, notes: bool) -> None:
+        self.notes_only = notes
+        self.clear_context.setVisible(notes and self.task_context is not None)
+        self.delete_button.setText("Delete note" if notes else "Delete draft")
+        self.new_button.setText("New note" if notes else "New draft")
+        for action, kind in zip(self.new_menu.actions(), NEW_KINDS, strict=True):
+            action.setVisible((kind is DraftKind.NOTE) == notes)
+        self.search.setPlaceholderText("Search notes" if notes else "Search drafts")
+        self.empty.setText(
+            "No notes yet. Use Capture or New." if notes else "No drafts yet. Use New."
+        )
+        self.show_drafts(self._all_drafts, self._zone, self._today)
+
     def _selection_changed(self, row: int) -> None:
         self._update_buttons()
         selected = self.selected()
@@ -225,6 +257,11 @@ class DraftsPanel(QWidget):
             self.editor_host.setCurrentIndex(0)
         if selected is not None:
             self.preview_requested.emit(selected)
+
+    def set_task_context(self, public_id: str | None) -> None:
+        self.task_context = public_id
+        self.clear_context.setVisible(public_id is not None and bool(self.notes_only))
+        self.show_drafts(self._all_drafts, self._zone, self._today)
 
     def show_preview(self, draft: Draft) -> None:
         selected = self.selected()
@@ -261,7 +298,7 @@ class DraftsPanel(QWidget):
 
     def _request_new(self, kind: DraftKind) -> None:
         if not self._busy:
-            self.draft_requested.emit(NEW, kind)
+            self.draft_requested.emit(NEW, DraftKind.NOTE if self.notes_only else kind)
 
     def _request(self, kind: str) -> None:
         summary = self.selected()

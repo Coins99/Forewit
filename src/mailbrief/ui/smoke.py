@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QApplication
 
 from mailbrief.domain.actions import Action
 from mailbrief.domain.capture import CaptureRequest
-from mailbrief.domain.drafts import Draft, DraftEdit, DraftKind
+from mailbrief.domain.drafts import Draft
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.infra.data_lock import create_data_lock
@@ -119,18 +119,7 @@ async def check_upgrade(directory: Path) -> None:
     if path.exists():
         raise RuntimeError("Upgrade scenario requires a new test profile.")
     await asyncio.to_thread(command.upgrade, migration_config(path), "20260929_0009")
-    database = Database.from_path(path)
-    try:
-        async with database.session() as session:
-            service = DraftService(session)
-            note = await service.create(DraftKind.NOTE)
-            note = await service.autosave(
-                note.public_id,
-                note.revision,
-                DraftEdit(title="Before upgrade", body="Synthetic upgrade writing."),
-            )
-    finally:
-        await database.dispose()
+    note_id = await asyncio.to_thread(_seed_legacy_note, path)
     await asyncio.to_thread(upgrade_database, path)
     backups = await asyncio.to_thread(
         lambda: list(directory.glob("upgrade.sqlite3.pre-upgrade-*.sqlite3"))
@@ -140,12 +129,31 @@ async def check_upgrade(directory: Path) -> None:
     database = Database.from_path(path)
     try:
         async with database.session() as session:
-            restored = await DraftService(session).get(note.public_id)
+            restored = await DraftService(session).get(note_id)
             if restored.body != "Synthetic upgrade writing.":
                 raise RuntimeError("Upgrade lost writing.")
     finally:
         await database.dispose()
     await asyncio.to_thread(check_unknown_schema, directory / "unknown.sqlite3")
+
+
+def _seed_legacy_note(path: Path) -> str:
+    """Seed the shipped M8 schema without asking today's ORM to write old columns."""
+    key = "99999999-9999-4999-8999-999999999999"
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT INTO drafts(public_id,kind,title,body,created_at_utc,updated_at_utc,revision) "
+            "VALUES(?,'note','Before upgrade','Synthetic upgrade writing.',"
+            "'2026-11-03 12:00:00','2026-11-03 12:00:00',1)",
+            (key,),
+        )
+        connection.execute(
+            "INSERT INTO draft_versions(draft_id,number,origin,title,body,created_at_utc) "
+            "SELECT id,1,'created',title,body,created_at_utc FROM drafts WHERE public_id=?",
+            (key,),
+        )
+        connection.commit()
+    return key
 
 
 def check_unknown_schema(unknown: Path) -> None:

@@ -56,6 +56,22 @@ class FakeDrafts:
     autosave until it is set, so tests can queue several while one is running.
     """
 
+    async def link_note(
+        self, public_id: str, revision: int, project_id: str | None, task_id: str | None
+    ) -> Draft:
+        note = await self.get_draft(public_id)
+        if note.revision != revision:
+            raise DraftConflictError("Note changed.")
+        saved = note.model_copy(
+            update={
+                "project_public_id": project_id,
+                "action_public_id": task_id,
+                "revision": revision + 1,
+            }
+        )
+        self.drafts[public_id] = saved
+        return saved
+
     def __init__(self) -> None:
         self.drafts: dict[str, Draft] = {}
         self.deleted: set[str] = set()
@@ -171,6 +187,10 @@ class FakeDrafts:
         return tuple(
             DraftSummary(
                 public_id=d.public_id,
+                action_public_id=d.action_public_id,
+                project_public_id=d.project_public_id,
+                capture_origin=d.capture_origin,
+                capture_processed_at_utc=d.capture_processed_at_utc,
                 kind=d.kind,
                 display_title=d.display_title,
                 updated_at_utc=d.updated_at_utc,

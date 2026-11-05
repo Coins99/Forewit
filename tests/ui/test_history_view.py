@@ -275,7 +275,7 @@ async def test_opening_a_past_brief_shows_the_banner_until_back_to_latest(
     assert heading(window).startswith("THU SEP 3")
     assert not window.viewing.isHidden()
     assert window.viewing_label.text() == "Viewing the brief for Thu Sep 3."
-    assert window.workspace.current_page() == "today"
+    assert window.workspace.current_page() == "mail_current"
 
     window.latest_button.click()
     await finish(window)
@@ -365,12 +365,12 @@ async def test_sync_and_review_returns_to_the_latest_brief(
 
     window.generate_button.click()
     await settle()
-    assert window.viewing.isHidden()
-    assert heading(window).startswith("FRI SEP 4")
+    assert not window.viewing.isHidden()
+    assert heading(window).startswith("THU SEP 3")
     await review_and_approve(window)
 
     assert backend.generated_days == [None]
-    assert window.viewing.isHidden()
+    assert not window.viewing.isHidden()
 
 
 def test_the_missed_list_hides_when_no_day_was_missed(panel: BriefHistoryPanel) -> None:

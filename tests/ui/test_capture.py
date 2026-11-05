@@ -140,7 +140,7 @@ async def test_capture_does_not_replace_current_owner_writing(qtbot: QtBot) -> N
     backend = FakeBackend()
     original = backend._add(DraftKind.NOTE, DraftEdit(body="Original writing"))
     window = await window_for(qtbot, backend)
-    window._show_page("drafts")
+    window._show_page("notes")
     window._edit_draft(original)
     window.draft_editor.body.setPlainText("Current owner edits")
     window._request_capture()

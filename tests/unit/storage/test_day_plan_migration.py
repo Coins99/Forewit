@@ -19,12 +19,13 @@ from tests.unit.services.test_manual_tasks import EDIT
 async def test_upgrade_and_downgrade_preserve_prior_owner_records(tmp_path: Path) -> None:
     path = tmp_path / "upgrade.sqlite3"
     config = migration_config(path)
-    await asyncio.to_thread(command.upgrade, config, "20261103_0027")
+    await asyncio.to_thread(command.upgrade, config, "head")
     database = Database.from_path(path)
     async with database.session() as session:
         task = await ActionService(session).create(EDIT)
         note = await DraftService(session).create(DraftKind.NOTE)
     await database.dispose()
+    await asyncio.to_thread(command.downgrade, config, "20261103_0027")
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     with closing(sqlite3.connect(path)) as connection:

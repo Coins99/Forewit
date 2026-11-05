@@ -171,7 +171,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   refresh the focus date during busy email work. Native macOS and owner
   acceptance remain open; see `docs/p2-focus.md`. Full P2 remains incomplete.
 - Search and commands implemented, awaiting owner desktop acceptance: the command palette
-  (Ctrl+K, `ui/palette.py`) and `services/search.py`, a bounded local search of actions,
+  now also finds projects and saved briefs (P2-09). P2-04 through P2-09 are implemented
+  locally: Notes/project context, the Tasks/Projects/Notes/Mail workspace, explicit capture
+  review state, upcoming known commitments, and revision-bound dated-plan copy/move.
+  See `docs/p2-workspace.md` for behavior, migrations 0029/0030 and the verification
+  register. Full native macOS and owner acceptance remain separate open checks.
+  The command palette (Ctrl+K, `ui/palette.py`) uses `services/search.py` for bounded local search of tasks,
   drafts and notes, events, cached Google event titles and the connected account's cached
   mail metadata. See `docs/search.md`.
 - P0-B1 (local-first email AI, D09) benchmark done; nothing ships: `scripts/local_ai/` runs

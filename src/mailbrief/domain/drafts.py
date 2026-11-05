@@ -13,6 +13,7 @@ from typing import Final, Self
 from pydantic import ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from mailbrief.domain.actions import ACTION_TITLE_MAX_CHARS, PUBLIC_ID_CHARS
+from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.common import DomainModel, normalize_utc
 
 DRAFT_TITLE_MAX_CHARS: Final = 200
@@ -164,6 +165,9 @@ class Draft(DraftEdit):
 
     public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
     kind: DraftKind
+    capture_origin: CaptureOrigin = CaptureOrigin.LEGACY
+    capture_processed_at_utc: datetime | None = None
+    project_public_id: str | None = Field(default=None, min_length=36, max_length=36)
     action_public_id: str | None = Field(
         default=None, min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS
     )
@@ -201,6 +205,10 @@ class DraftSummary(DomainModel):
     """One row of the drafts list; building it never reads versions."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
+    capture_origin: CaptureOrigin = CaptureOrigin.LEGACY
+    capture_processed_at_utc: datetime | None = None
+    project_public_id: str | None = None
+    action_public_id: str | None = None
 
     public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
     kind: DraftKind

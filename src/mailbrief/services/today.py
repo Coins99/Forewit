@@ -14,9 +14,10 @@ from mailbrief.domain.actions import Action, ActionFilter, ActionStatus
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.common import normalize_utc
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
-from mailbrief.services.actions import ActionService, action_order
+from mailbrief.services.actions import action_order
 from mailbrief.services.day_plans import DayPlanService
 from mailbrief.services.events import EventService
+from mailbrief.storage.actions import ActionRepository
 
 _ORDER = {reason: number for number, reason in enumerate(AttentionReason)}
 _EARLIEST = datetime.min.replace(tzinfo=UTC)
@@ -87,16 +88,21 @@ class TodayService:
     """Reads the owner's day; never writes."""
 
     def __init__(self, session: AsyncSession) -> None:
-        self._actions = ActionService(session)
+        self._actions = ActionRepository(session)
         self._events = EventService(session)
         self._plans = DayPlanService(session)
 
     async def summary(self, today: date, zone: ZoneInfo, now: datetime) -> DaySummary:
         """``today`` in ``zone``, as of ``now``: see DaySummary."""
-        actions = [
-            *await self._actions.list_actions(ActionFilter.OPEN),
-            *await self._actions.list_actions(ActionFilter.WAITING),
-        ]
+        # Today needs current state and thread activity, never per-task edit timelines.
+        # Hydrating those histories dominated large-profile reads (100,000 activity rows).
+        actions = await self._actions.load(
+            [
+                *await self._actions.list_rows(ActionFilter.OPEN, limit=None),
+                *await self._actions.list_rows(ActionFilter.WAITING, limit=None),
+            ],
+            include_activity=False,
+        )
         focus = await self._plans.load(today)
         selected = {item.task_public_id for item in focus.items}
         return DaySummary(

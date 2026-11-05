@@ -58,3 +58,13 @@ class DayPlan(DomainModel):
             and item.action.ownership is ActionOwnership.WAITING_FOR
             for item in self.items
         )
+
+
+class PlanTransfer(DomainModel):
+    """An explicit, revision-bound preview; exact occurrence IDs never become successors."""
+
+    source: DayPlan
+    destination: DayPlan
+    move: bool = False
+    task_ids: tuple[str, ...]
+    skipped_ids: tuple[str, ...] = ()

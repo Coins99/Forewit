@@ -14,8 +14,10 @@ from datetime import datetime
 from typing import Final
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.drafting import DraftGenerationInfo, GeneratedDraft
@@ -42,7 +44,7 @@ from mailbrief.storage.drafts import (
     version_info,
 )
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
-from mailbrief.storage.tables import ActionSourceTable, DraftTable, NoteCommandTable
+from mailbrief.storage.tables import ActionSourceTable, DraftTable, NoteCommandTable, ProjectTable
 from mailbrief.text.prepare import clean_generated_text
 
 UNKNOWN_SENDER: Final = "unknown@invalid"  # What the Gmail adapter stores without a From.
@@ -114,7 +116,10 @@ class DraftService:
         self._repository = DraftRepository(session)
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
-        return await commit_once(self._session, self._clock, operation)
+        try:
+            return await commit_once(self._session, self._clock, operation)
+        except StaleDataError:
+            raise DraftConflictError(_STALE) from None
 
     async def _live(self, public_id: str, expected_revision: int | None) -> DraftTable:
         row = await self._repository.get_draft(public_id)
@@ -177,7 +182,48 @@ class DraftService:
 
         return await self._write(run)
 
-    async def create_note(self, content: DraftEdit, *, command_id: str) -> Draft:
+    async def link_note(
+        self,
+        public_id: str,
+        expected_revision: int,
+        *,
+        project_public_id: str | None,
+        action_public_id: str | None,
+    ) -> Draft:
+        """Change canonical note links without creating a writing version or fetching mail."""
+
+        async def run(now: datetime) -> Draft:
+            row = await self._live(public_id, expected_revision)
+            if row.kind != DraftKind.NOTE.value:
+                raise DraftConflictError("Only notes have owner-selected workspace links.")
+            if project_public_id is not None:
+                project = await self._session.scalar(
+                    select(ProjectTable).where(ProjectTable.public_id == project_public_id)
+                )
+                if project is None or (
+                    project.archived_at_utc is not None
+                    and row.project_public_id != project_public_id
+                ):
+                    raise DraftConflictError("Choose an available, active project.")
+            action = None
+            if action_public_id is not None:
+                action = await ActionRepository(self._session).get_action(action_public_id)
+                if action is None:
+                    raise ActionNotFoundError(_ACTION_NOT_FOUND)
+            action_id = None if action is None else action.id
+            if (row.project_public_id, row.action_id) != (project_public_id, action_id):
+                row.project_public_id = project_public_id
+                row.action_id = action_id
+                row.action_title = None if action is None else action.title
+                row.revision += 1
+                row.updated_at_utc = now
+            return await self._load(row)
+
+        return await self._write(run)
+
+    async def create_note(
+        self, content: DraftEdit, *, command_id: str, capture_pending: bool | None = None
+    ) -> Draft:
         """Atomically save initial owner text, its first version and a retry receipt."""
         command = str(UUID(command_id))
         if content.has_recipients() or not (content.title.strip() or content.body.strip()):
@@ -189,6 +235,7 @@ class DraftService:
                     "command": command,
                     "operation": "note.create",
                     "content": content.model_dump(mode="json"),
+                    **({"capture_pending": capture_pending} if capture_pending is not None else {}),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -200,6 +247,9 @@ class DraftService:
             if previous is not None:
                 return previous
             row = await self._new_draft(DraftKind.NOTE, content, now)
+            if capture_pending is not None:
+                row.capture_origin = "quick_capture"
+                row.capture_processed_at_utc = None if capture_pending else now
             self._session.add(
                 NoteCommandTable(
                     command_id=command,
@@ -435,6 +485,7 @@ class DraftService:
                 action_id=original.action_id,
                 action_title=original.action_title,
             )
+            row.project_public_id = original.project_public_id
             for source in await self._repository.source_rows(original.id):
                 self._repository.copy_source(row.id, source)
             await self._session.flush()

@@ -55,8 +55,20 @@ class BriefRoute(DomainModel):
     day: date
 
 
+class ProjectRoute(DomainModel):
+    kind: Literal["project"] = "project"
+    public_id: PublicId
+
+
 Route = Annotated[
-    PageRoute | TaskRoute | WritingRoute | CalendarRoute | MailRoute | MessageRoute | BriefRoute,
+    PageRoute
+    | TaskRoute
+    | WritingRoute
+    | CalendarRoute
+    | MailRoute
+    | MessageRoute
+    | BriefRoute
+    | ProjectRoute,
     Field(discriminator="kind"),
 ]
 

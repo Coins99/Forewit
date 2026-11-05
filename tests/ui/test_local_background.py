@@ -58,7 +58,7 @@ async def test_local_missed_day_opens_unless_owner_moves_away(
             assert window.workspace.current_page() == "actions"
             assert digest == backend.saved
         else:
-            assert window.workspace.current_page() == "today"
+            assert window.workspace.current_page() == "mail_current"
             assert digest.local_date == day
             assert window._shown == (digest.account_id, day)
     finally:
@@ -72,7 +72,7 @@ async def test_explicit_brief_view_supersedes_deferred_background_update(qtbot: 
     qtbot.addWidget(window)
     window.show()
     await window.initialize()
-    window._show_page("today")
+    window._show_page("mail_current")
     reply = await backend.create_reply_draft("owner@example.com", "local-1")
     window._edit_draft(reply)
     updated = backend.saved.model_copy(
@@ -207,7 +207,7 @@ async def test_completed_brief_defers_refresh_until_an_inline_reply_is_saved(qtb
     qtbot.addWidget(window)
     window.show()
     await window.initialize()
-    window._show_page("today")
+    window._show_page("mail_current")
     reply = await backend.create_reply_draft("owner@example.com", "local-1")
     window._edit_draft(reply)
     editor = window.draft_editor

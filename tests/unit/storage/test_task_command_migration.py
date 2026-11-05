@@ -17,11 +17,12 @@ from tests.unit.services.test_manual_tasks import EDIT
 async def test_upgrade_downgrade_preserves_existing_tasks(tmp_path: Path) -> None:
     path = tmp_path / "old.sqlite3"
     config = migration_config(path)
-    await asyncio.to_thread(command.upgrade, config, "20261101_0025")
+    await asyncio.to_thread(command.upgrade, config, "head")
     db = Database.from_path(path)
     async with db.session() as session:
         original = await ActionService(session).create(EDIT)
     await db.dispose()
+    await asyncio.to_thread(command.downgrade, config, "20261101_0025")
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     with closing(sqlite3.connect(path)) as connection:

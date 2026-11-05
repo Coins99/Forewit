@@ -11,6 +11,7 @@ from pydantic import HttpUrl
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.drafting import DraftContextPart, DraftGenerationInfo
 from mailbrief.domain.drafts import (
     Draft,
@@ -67,6 +68,8 @@ def draft_from_rows(
     """Rebuild a draft; ``action_public_id`` is None once its action is gone."""
     return Draft(
         public_id=row.public_id,
+        capture_origin=CaptureOrigin(row.capture_origin),
+        capture_processed_at_utc=row.capture_processed_at_utc,
         kind=DraftKind(row.kind),
         title=row.title,
         to_text=row.to_text,
@@ -74,6 +77,7 @@ def draft_from_rows(
         body=row.body,
         action_public_id=action_public_id,
         action_title=row.action_title,
+        project_public_id=row.project_public_id,
         sources=tuple(_source(source) for source in sources),
         created_at_utc=row.created_at_utc,
         updated_at_utc=row.updated_at_utc,
@@ -153,7 +157,11 @@ class DraftRepository:
     async def get_draft(
         self, public_id: str, *, include_deleted: bool = False
     ) -> DraftTable | None:
-        stmt = select(DraftTable).where(DraftTable.public_id == public_id)
+        stmt = (
+            select(DraftTable)
+            .where(DraftTable.public_id == public_id)
+            .execution_options(populate_existing=True)
+        )
         if not include_deleted:
             stmt = stmt.where(DraftTable.deleted_at_utc.is_(None))
         return (await self._session.scalars(stmt)).first()
@@ -352,11 +360,20 @@ class DraftRepository:
             for draft_id, subject in result.tuples():
                 subjects.setdefault(draft_id, subject)
         summaries: list[DraftSummary] = []
+        actions = await self.action_public_ids(
+            row.action_id for row in rows if row.action_id is not None
+        )
         for row in rows:
             draft = draft_from_rows(row, None, ())
             summaries.append(
                 DraftSummary(
                     public_id=draft.public_id,
+                    capture_origin=draft.capture_origin,
+                    capture_processed_at_utc=draft.capture_processed_at_utc,
+                    project_public_id=draft.project_public_id,
+                    action_public_id=actions.get(row.action_id)
+                    if row.action_id is not None
+                    else None,
                     kind=draft.kind,
                     display_title=draft.display_title,
                     updated_at_utc=draft.updated_at_utc,

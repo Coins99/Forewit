@@ -115,14 +115,13 @@ SHEET_GUTTER: Final = 8
 # Ctrl+7 follow this order.
 PAGES: Final = (
     ("today", "Today", "clock"),
-    ("inbox", "Inbox", "mail"),
-    ("actions", "Actions", "checkbox"),
-    ("waiting", "Waiting", "clock"),
-    ("drafts", "Drafts", "pencil"),
-    ("briefs", "Briefs", "calendar"),
+    ("actions", "Tasks", "checkbox"),
+    ("projects", "Projects", "bookmark"),
     ("calendar", "Calendar", "calendar-week"),
+    ("notes", "Notes", "pencil"),
+    ("inbox", "Mail", "mail"),
 )
-PAGE_SHORTCUTS: Final = tuple(key for key, _label, _icon in PAGES)
+PAGE_SHORTCUTS: Final = ("today", "inbox", "actions", "waiting", "drafts", "briefs", "calendar")
 # Pages that start a group: a gap with a hairline divider above them.
 GROUP_STARTS: Final = frozenset({"calendar"})
 EMPTY_BRIEF: Final = "No analyzed messages in this brief."
@@ -847,6 +846,13 @@ class SidebarNav(GlassChrome):
 
     def set_current(self, key: str) -> None:
         """Show ``key`` as the current page without requesting it."""
+        key = {
+            "waiting": "actions",
+            "drafts": "inbox",
+            "briefs": "inbox",
+            "mail_current": "inbox",
+            "run": "inbox",
+        }.get(key, key)
         self._quiet = True
         try:
             self.nav.setCurrentIndex(self.pages.index(self._row(key), 0))
@@ -858,7 +864,10 @@ class SidebarNav(GlassChrome):
 
     def set_counts(self, actions: int | None, waiting: int | None, drafts: int | None) -> None:
         """Show each count (None hides it); a screen reader reads "Actions, 5"."""
+        self._legacy_counts = {"actions": actions, "waiting": waiting, "drafts": drafts}
         for key, count in (("actions", actions), ("waiting", waiting), ("drafts", drafts)):
+            if key not in {page[0] for page in PAGES}:
+                continue
             item = self.pages.item(self._row(key))
             item.setData(count, COUNT_ROLE)
             label = item.text()
@@ -871,6 +880,9 @@ class SidebarNav(GlassChrome):
         self.note.setVisible(bool(text))
 
     def count_text(self, key: str) -> str | None:
+        if key not in {page[0] for page in PAGES}:
+            count = getattr(self, "_legacy_counts", {}).get(key)
+            return None if count is None else str(count)
         count = self.pages.item(self._row(key)).data(COUNT_ROLE)
         return None if count is None else str(count)
 
@@ -1072,7 +1084,10 @@ class ThreePaneWorkspace(QWidget):
         self.pages.setCurrentWidget(self._pages[key])
         titles = {
             "today": "Today",
-            "actions": "Actions",
+            "actions": "Tasks",
+            "mail_current": "Mail · Current brief",
+            "notes": "Notes",
+            "projects": "Projects",
             "drafts": "Drafts",
             "briefs": "Briefs",
             "calendar": "Calendar",
@@ -1112,7 +1127,7 @@ class ThreePaneWorkspace(QWidget):
     def show_actions_heading(self, *, waiting: bool) -> None:
         """Head the Actions page for the view it shows: Waiting has its own sidebar row, so
         its own title and line."""
-        self.header.title.setText("Waiting" if waiting else "Actions")
+        self.header.title.setText("Waiting" if waiting else "Tasks")
         self.header.date.setText(
             "Keep track of commitments you’re waiting on from other people."
             if waiting
