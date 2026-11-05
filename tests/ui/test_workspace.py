@@ -1126,9 +1126,7 @@ def test_owner_deadline_renders(
             assert image.save(str(Path(folder) / f"{name}-{mode.value}-{dpr:g}x.png"))
 
 
-def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
-    """The daily home, the mailbox, flagged and deferred work, drafts and history, then
-    Calendar set apart below a divider; Ctrl+1 to Ctrl+7 follow the same order."""
+def test_workspace_pages_preserve_legacy_shortcut_meanings(qtbot: QtBot) -> None:
     workspace = build(qtbot)
     sidebar = workspace.sidebar
     keys = [str(sidebar.pages.item(row).data(KEY_ROLE)) for row in range(sidebar.pages.rowCount())]
@@ -1141,6 +1139,7 @@ def test_pages_follow_gmail_and_outlook_order(qtbot: QtBot) -> None:
         "drafts",
         "briefs",
         "calendar",
+        "notes",
     ]
     rows = [sidebar.nav.visualRect(sidebar.pages.index(row, 0)) for row in range(len(keys))]
     assert rows[-1].height() == rows[0].height()

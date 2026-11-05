@@ -3,7 +3,8 @@
 Nothing here reads or sends email. A reply is built from the cached message row alone
 (subject and sender); no body is ever downloaded or quoted. Drafting has no "sent" state
 and never changes an action. Errors carry static messages, and nothing logs draft text.
-AI drafting (services/drafting.py) changes drafts only through apply_generated().
+AI drafting (services/drafting.py) changes drafts only through apply_generated(). A note's
+project and task links (ADR 0027) change only through set_project() and set_task().
 """
 
 import hashlib
@@ -14,7 +15,6 @@ from datetime import datetime
 from typing import Final
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
@@ -32,19 +32,22 @@ from mailbrief.domain.drafts import (
     DraftVersion,
     DraftVersionInfo,
     DraftVersionOrigin,
+    WritingView,
 )
 from mailbrief.services.actions import ActionNotFoundError
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.drafts import (
     DraftRepository,
+    ProjectGroup,
     apply_content,
     content_of,
     version_from_row,
     version_info,
 )
+from mailbrief.storage.projects import ProjectRepository
 from mailbrief.storage.repositories import AccountRepository, MessageRepository
-from mailbrief.storage.tables import ActionSourceTable, DraftTable, NoteCommandTable, ProjectTable
+from mailbrief.storage.tables import ActionSourceTable, DraftTable, NoteCommandTable
 from mailbrief.text.prepare import clean_generated_text
 
 UNKNOWN_SENDER: Final = "unknown@invalid"  # What the Gmail adapter stores without a From.
@@ -54,6 +57,9 @@ _SOURCE_NOT_FOUND: Final = "That email is no longer in local mail."
 _ACTION_NOT_FOUND: Final = "That action was not found."
 _STALE: Final = "The draft changed since it was loaded; save your text as a new draft."
 _NO_RECIPIENTS: Final = "Only replies and emails have recipients."
+_NOT_A_NOTE: Final = "Only notes can be linked to a project or a task."
+_PROJECT_UNAVAILABLE: Final = "That project is archived or no longer available."
+_TASK_UNAVAILABLE: Final = "That task was deleted or is no longer available."
 _REPLY_PREFIX = re.compile(r"re\s*[:：]", re.IGNORECASE)
 
 
@@ -67,6 +73,10 @@ class DraftConflictError(ValueError):
 
 class NoteCreateConflictError(ValueError):
     """A note-create command already committed different input or a removed result."""
+
+
+class NoteLinkError(ValueError):
+    """The draft isn't a note, or the project or task to link is archived, deleted or gone."""
 
 
 class SourceNotFoundError(LookupError):
@@ -140,10 +150,13 @@ class DraftService:
         *,
         action_id: int | None = None,
         action_title: str | None = None,
+        project_public_id: str | None = None,
     ) -> DraftTable:
         """Add a draft holding ``content`` and its first version, origin "created"."""
         if kind not in EMAIL_KINDS and content.has_recipients():
             raise DraftConflictError(_NO_RECIPIENTS)
+        if project_public_id is not None and kind is not DraftKind.NOTE:
+            raise NoteLinkError(_NOT_A_NOTE)
         row = await self._repository.add_draft(
             DraftTable(
                 public_id=self._id_factory(),
@@ -154,6 +167,7 @@ class DraftService:
                 body=content.body,
                 action_id=action_id,
                 action_title=action_title,
+                project_public_id=project_public_id,
                 created_at_utc=now,
                 updated_at_utc=now,
                 revision=1,
@@ -174,49 +188,81 @@ class DraftService:
         await self._repository.prune_versions(row.id, MAX_DRAFT_VERSIONS)
         return version_info(saved)
 
-    async def create(self, kind: DraftKind) -> Draft:
-        """A blank draft of ``kind``."""
+    async def _linkable_project(self, public_id: str) -> bool:
+        """Whether a project takes new notes: it exists and isn't archived."""
+        row = await ProjectRepository(self._session).project(public_id)
+        return row is not None and row.archived_at_utc is None
+
+    async def create(self, kind: DraftKind, *, project_public_id: str | None = None) -> Draft:
+        """A blank draft of ``kind``; a note may start in a project that isn't archived."""
 
         async def run(now: datetime) -> Draft:
-            return await self._load(await self._new_draft(kind, DraftEdit(), now))
+            if (
+                project_public_id is not None
+                and kind is DraftKind.NOTE
+                and not await self._linkable_project(project_public_id)
+            ):
+                raise NoteLinkError(_PROJECT_UNAVAILABLE)
+            row = await self._new_draft(kind, DraftEdit(), now, project_public_id=project_public_id)
+            return await self._load(row)
 
         return await self._write(run)
 
-    async def link_note(
-        self,
-        public_id: str,
-        expected_revision: int,
-        *,
-        project_public_id: str | None,
-        action_public_id: str | None,
+    async def _live_note(self, public_id: str, expected_revision: int) -> DraftTable:
+        row = await self._live(public_id, expected_revision)
+        if DraftKind(row.kind) is not DraftKind.NOTE:
+            raise NoteLinkError(_NOT_A_NOTE)
+        return row
+
+    async def set_project(
+        self, public_id: str, expected_revision: int, project_public_id: str | None
     ) -> Draft:
-        """Change canonical note links without creating a writing version or fetching mail."""
+        """Put a live note in a project, or take it out of its project (ADR 0027).
+
+        A new project must exist and not be archived; a note keeps an archived project it
+        already has. Choosing the project the note has changes nothing and makes no
+        revision; any other change is one revision, with no version, and sources stay.
+        """
 
         async def run(now: datetime) -> Draft:
-            row = await self._live(public_id, expected_revision)
-            if row.kind != DraftKind.NOTE.value:
-                raise DraftConflictError("Only notes have owner-selected workspace links.")
-            if project_public_id is not None:
-                project = await self._session.scalar(
-                    select(ProjectTable).where(ProjectTable.public_id == project_public_id)
-                )
-                if project is None or (
-                    project.archived_at_utc is not None
-                    and row.project_public_id != project_public_id
-                ):
-                    raise DraftConflictError("Choose an available, active project.")
-            action = None
-            if action_public_id is not None:
+            row = await self._live_note(public_id, expected_revision)
+            if row.project_public_id == project_public_id:
+                return await self._load(row)
+            if project_public_id is not None and not await self._linkable_project(
+                project_public_id
+            ):
+                raise NoteLinkError(_PROJECT_UNAVAILABLE)
+            row.project_public_id = project_public_id
+            _touch(row, now)
+            return await self._load(row)
+
+        return await self._write(run)
+
+    async def set_task(
+        self, public_id: str, expected_revision: int, action_public_id: str | None
+    ) -> Draft:
+        """Link a live note to a live task, or unlink it (ADR 0027).
+
+        Linking keeps a snapshot of the task's title, as creating a note from a task does;
+        unlinking clears the link and the snapshot. A call that changes nothing makes no
+        revision; any other change is one revision, with no version, and sources stay.
+        The task itself never changes.
+        """
+
+        async def run(now: datetime) -> Draft:
+            row = await self._live_note(public_id, expected_revision)
+            if action_public_id is None:
+                if row.action_id is None and row.action_title is None:
+                    return await self._load(row)
+                row.action_id, row.action_title = None, None
+            else:
                 action = await ActionRepository(self._session).get_action(action_public_id)
                 if action is None:
-                    raise ActionNotFoundError(_ACTION_NOT_FOUND)
-            action_id = None if action is None else action.id
-            if (row.project_public_id, row.action_id) != (project_public_id, action_id):
-                row.project_public_id = project_public_id
-                row.action_id = action_id
-                row.action_title = None if action is None else action.title
-                row.revision += 1
-                row.updated_at_utc = now
+                    raise NoteLinkError(_TASK_UNAVAILABLE)
+                if (row.action_id, row.action_title) == (action.id, action.title):
+                    return await self._load(row)
+                row.action_id, row.action_title = action.id, action.title
+            _touch(row, now)
             return await self._load(row)
 
         return await self._write(run)
@@ -471,21 +517,25 @@ class DraftService:
         """A new draft of the same kind, action link and sources, holding ``edit``.
 
         The editor uses it when an autosave conflicts, so the original may since have been
-        deleted; it is still copied from.
+        deleted; it is still copied from. A note's project comes too unless it has since
+        been archived, since an archived project takes no new notes.
         """
 
         async def run(now: datetime) -> Draft:
             original = await self._repository.get_draft(from_public_id, include_deleted=True)
             if original is None:
                 raise DraftNotFoundError(_NOT_FOUND)
+            project = original.project_public_id
+            if project is not None and not await self._linkable_project(project):
+                project = None
             row = await self._new_draft(
                 DraftKind(original.kind),
                 edit,
                 now,
                 action_id=original.action_id,
                 action_title=original.action_title,
+                project_public_id=project,
             )
-            row.project_public_id = original.project_public_id
             for source in await self._repository.source_rows(original.id):
                 self._repository.copy_source(row.id, source)
             await self._session.flush()
@@ -521,9 +571,17 @@ class DraftService:
         """A live draft; deleted drafts are not found."""
         return await self._load(await self._live(public_id, None))
 
-    async def list_summaries(self) -> tuple[DraftSummary, ...]:
-        """Every live draft, most recently updated first; the list is never capped."""
-        return tuple(await self._repository.list_summaries())
+    async def list_summaries(
+        self,
+        view: WritingView | None = None,
+        *,
+        group: ProjectGroup = "all",
+        group_id: str | None = None,
+    ) -> tuple[DraftSummary, ...]:
+        """Live drafts in ``view`` (every kind when None), optionally only those without a
+        project or in one project, most recently updated first; never capped."""
+        kinds = None if view is None else view.kinds
+        return tuple(await self._repository.list_summaries(kinds, group=group, group_id=group_id))
 
 
 def _first_available(sources: list[ActionSourceTable]) -> ActionSourceTable | None:

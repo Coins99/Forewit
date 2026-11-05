@@ -36,7 +36,8 @@ owner is exported exactly as stored.
 The envelope contains `format`, `version`, `created_at_utc` and `records`. Each
 `records` key is a table name: `actions`, `action_steps`, `action_sources`,
 `action_proposals`, `drafts`, `draft_versions`, `draft_sources`, `draft_generations`.
-Rows contain their named columns, preserving IDs and foreign-key relationships;
+Rows contain their named columns, preserving IDs and foreign-key relationships
+(a note's `project_public_id` and `action_id`, ADR 0027, among them);
 timestamps/dates are ISO 8601 and nulls remain JSON null. Rows are ordered by primary
 key. This is a readable, portable writing export, not an import or database restore.
 Use a backup for restoration. Individual drafts still export as plain text or Markdown.

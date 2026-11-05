@@ -80,26 +80,14 @@ class DayPlanService:
         terms = query_terms(text)
         if text.strip() and not terms:
             return ()
-        statement = select(ActionTable).where(
-            ActionTable.deleted_at_utc.is_(None),
-            ActionTable.status == ActionStatus.OPEN.value,
+        selected = (
+            None
+            if day is None
+            else select(DayPlanItemTable.task_public_id)
+            .join(DayPlanTable, DayPlanItemTable.plan_id == DayPlanTable.id)
+            .where(DayPlanTable.local_date == day)
         )
-        if day is not None:
-            selected = (
-                select(DayPlanItemTable.task_public_id)
-                .join(DayPlanTable, DayPlanItemTable.plan_id == DayPlanTable.id)
-                .where(DayPlanTable.local_date == day)
-            )
-            statement = statement.where(ActionTable.public_id.not_in(selected))
-        for term in terms:
-            statement = statement.where(ActionTable.title.contains(term, autoescape=True))
-        rows = list(
-            await self.session.scalars(
-                statement.order_by(ActionTable.updated_at_utc.desc(), ActionTable.public_id)
-                .limit(50)
-                .execution_options(populate_existing=True)
-            )
-        )
+        rows = await self.actions.title_matches(terms, open_only=True, excluded=selected)
         return tuple(await self.actions.load(rows))
 
     async def preview_transfer(

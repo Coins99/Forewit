@@ -1,6 +1,6 @@
 # ADR 0012: Owner-owned drafts and notes in local storage
 
-Date: 2026-09-28. Status: accepted.
+Date: 2026-09-28. Status: accepted. Amended by ADR 0027 (a note's project link).
 
 Amends ADR 0005's local storage rule and builds on ADR 0011's owner-owned actions.
 

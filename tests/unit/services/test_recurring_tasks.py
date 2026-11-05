@@ -497,6 +497,25 @@ async def test_a_next_occurrence_with_a_draft_is_kept(session: AsyncSession) -> 
     assert kept_draft.action_public_id == following.public_id
 
 
+async def test_a_next_occurrence_a_note_was_linked_to_later_is_kept(
+    session: AsyncSession,
+) -> None:
+    """Linking an existing note (ADR 0027) makes the occurrence the owner's, as drafting does."""
+    clock = Clock(START)
+    actions = service(session, clock)
+    drafts = DraftService(session, clock=clock)
+    first = await actions.create(task(), (), DAILY)
+    done = await actions.complete(first.public_id, first.revision)
+    following = await only_open(actions)
+    note = await drafts.create(DraftKind.NOTE)
+    await drafts.set_task(note.public_id, note.revision, following.public_id)
+
+    await actions.undo_status(first.public_id, done.revision)
+
+    assert following.public_id in {a.public_id for a in await open_tasks(actions)}
+    assert (await drafts.get(note.public_id)).action_public_id == following.public_id
+
+
 async def test_a_tag_respelt_elsewhere_leaves_the_next_untouched(session: AsyncSession) -> None:
     actions = service(session, Clock(START))
     first = await actions.create(task(), (), DAILY)

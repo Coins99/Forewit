@@ -8,28 +8,28 @@ from pathlib import Path
 import pytest
 from alembic import command
 
-from mailbrief.domain.drafts import DraftKind
 from mailbrief.services.drafts import DraftService
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config
+from tests.unit.storage.test_note_project_migration import (
+    OLD_NOTE_ID,
+    assert_old_note,
+    insert_old_note,
+)
 
 
 async def test_upgrade_preserves_notes_and_downgrade_preserves_writing(tmp_path: Path) -> None:
     path = tmp_path / "old.sqlite3"
     config = migration_config(path)
-    await asyncio.to_thread(command.upgrade, config, "head")
-    database = Database.from_path(path)
-    async with database.session() as session:
-        original = await DraftService(session).create(DraftKind.NOTE)
-    await database.dispose()
-    await asyncio.to_thread(command.downgrade, config, "20261101_0026")
+    await asyncio.to_thread(command.upgrade, config, "20261101_0026")
+    insert_old_note(path)  # Today's ORM writes columns this revision doesn't have yet.
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     with closing(sqlite3.connect(path)) as connection:
         assert connection.execute("SELECT count(*) FROM note_commands").fetchone() == (0,)
     upgraded = Database.from_path(path)
     async with upgraded.session() as session:
-        assert await DraftService(session).get(original.public_id) == original
+        assert_old_note(await DraftService(session).get(OLD_NOTE_ID))
     await upgraded.dispose()
     await asyncio.to_thread(command.downgrade, config, "20261101_0026")
     with closing(sqlite3.connect(path)) as connection:

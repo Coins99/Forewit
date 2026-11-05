@@ -606,10 +606,11 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
         "pk_drafts",
         "uq_drafts_public_id",
         "ck_drafts_kind_known",
+        "ck_drafts_capture_origin_known",
         "ck_drafts_revision_positive",
         "fk_drafts_action_id_actions",
         "fk_drafts_project_public_id_projects",
-        "ck_drafts_capture_origin_known",
+        "ck_drafts_project_only_for_notes",
     }
     assert created_schema["draft_versions"]["constraints"] == {
         "pk_draft_versions",
@@ -638,6 +639,7 @@ def test_head_schema_matches_the_orm(tmp_path: Path) -> None:
     assert created_schema["drafts"]["indexes"] == {
         ("ix_drafts_updated_at_utc", ("updated_at_utc",)),
         ("ix_drafts_action_id", ("action_id",)),
+        ("ix_drafts_project_public_id", ("project_public_id",)),
     }
 
 
@@ -1261,8 +1263,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261103_0030"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261103_0030",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261105_0031"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0031",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1429,7 +1431,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261103_0030",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0031",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")

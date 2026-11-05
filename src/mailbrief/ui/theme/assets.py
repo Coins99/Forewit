@@ -17,6 +17,7 @@ ICON_NAMES: Final = frozenset(
         "checkbox",
         "hourglass",
         "pencil",
+        "notes",
         "calendar",
         "calendar-week",
         "settings",

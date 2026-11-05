@@ -36,11 +36,11 @@ async def test_linked_note_capture_and_selection_restore_without_network(tmp_pat
         note = await DraftService(session).create_note(
             DraftEdit(body=" Owner writing\n"), command_id=command, capture_pending=True
         )
-        linked = await DraftService(session).link_note(
-            note.public_id,
-            note.revision,
-            project_public_id=project.public_id,
-            action_public_id=task.public_id,
+        linked = await DraftService(session).set_project(
+            note.public_id, note.revision, project.public_id
+        )
+        linked = await DraftService(session).set_task(
+            linked.public_id, linked.revision, task.public_id
         )
         await CaptureService(session).keep("note", linked.public_id, linked.revision)
         plan = await DayPlanService(session).select(day, ZoneInfo("UTC"), task.public_id, 0)

@@ -12,7 +12,7 @@ separates implementation from platform and owner acceptance.
   Review yesterday are explicit; displaying saved owner records does not run AI.
 - The sidebar is Today, Tasks, Projects, Calendar, Notes, Mail. Existing Ctrl/Cmd
   shortcuts retain their meanings: 1 Today, 2 Inbox, 3 Tasks, 4 Waiting, 5 Mail
-  drafts, 6 brief history, 7 Calendar. Ctrl/Cmd+K includes these routes; capture
+  drafts, 6 brief history, 7 Calendar, 8 Notes. Ctrl/Cmd+K includes these routes; capture
   remains Ctrl/Cmd+Shift+N. Mail's view chooser includes saved metadata.
 - Notes uses the existing writing records, versions, editor and export commands.
   Mail drafts excludes notes. A note can have one optional project and its existing
@@ -45,12 +45,25 @@ separates implementation from platform and owner acceptance.
 
 ## Persistence and recovery
 
+PR #101 supplies the Notes editor, project filter, searchable task picker and separate
+revisioned project/task setters. This branch extends that foundation with Projects and
+task context; the earlier combined link dialog and mutation have been removed.
+
 Migration 0029 adds the nullable note-to-project foreign key. Migration 0030 adds a
 bounded capture origin and optional processed UTC timestamp to tasks and writing.
 Existing rows backfill to `legacy`, outside the inbox. Neither migration changes
 writing text, versions, task links or deadlines. Project deletion detaches its foreign
 key without deleting writing. Task soft deletion hides its live link while retaining
 the writing and title snapshot.
+
+Revision `20261105_0031` converges the two published histories: #101's
+`20261104_0029` and #102's `20261103_0029` / `20261103_0030`. Their original files
+remain unchanged. The online migration environment wraps only the two duplicate
+note-column steps: it validates and adopts an existing matching foreign key, adds
+#101's index and notes-only constraint when needed, and records both ancestors.
+Downgrades keep the shared column until neither branch owns it. Fresh databases and
+profiles from all three published branch revisions are tested through repeated
+upgrade/downgrade cycles with note text, versions, sources and project links retained.
 
 Quick-create receipts include an explicitly supplied capture processing payload in
 their fingerprint. Omitted payloads retain the earlier command fingerprint; uncertain
@@ -59,7 +72,7 @@ input is refused. Processing does not create a writing version. Task processing 
 an edit, never a completion. Optimistic revision checks also protect independent-session
 task/writing changes.
 
-The existing strict backup schema verification includes both migrations. Owner JSON
+The existing strict backup schema verification includes the converged schema. Owner JSON
 exports retain the new fields in existing `mailbrief-writing` version 1 record objects;
 this is an additive export, not an import/replay protocol. Cleanup fingerprints include
 these fields automatically. Owner relationships and capture state survive account/cache
@@ -71,6 +84,19 @@ it does not use the current ORM to write columns absent from that schema. The or
 pre-upgrade database is retained. Existing shipped migrations are unchanged.
 
 ## Verification register
+
+Integration after merged PR #101 (`main` at `50d0a22`, 2026-11-05):
+
+- Full suite: 5,126 passed, 9 platform/environment skips. Three stale schema/sidebar/
+  Notes-page expectations were corrected; all eight targeted reruns passed.
+- Coverage: 95.34% combined statements/branches; every service passed its 90% gate.
+- Ruff formatting/lint and strict native, win32 and darwin mypy passed.
+- Migration/recovery closeout: five checks passed, including backup/restore and repeated
+  upgrades/downgrades from both 0029 revisions and capture revision 0030. Original
+  migration files are unchanged. Note text, versions, sources and project links survive.
+- Light/dark galleries rendered and inspected at 1x and 2x; the final 2x run passed
+  132 checks (one duplicate-render skip). The task-context/global-note navigation
+  regression passed separately, retaining pending writing and revealing the opened note.
 
 Closeout record: 2026-11-05. Synthetic records only; no real credentials, mailbox,
 cloud AI or owner writing were used. The recorded local checks and packaged artifact

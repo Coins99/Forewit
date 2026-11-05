@@ -30,6 +30,7 @@ from mailbrief.domain.drafts import (
     DraftVersionOrigin,
 )
 from mailbrief.domain.messages import AccountIdentity, EmailContact, ProviderKind
+from mailbrief.domain.projects import ProjectEdit
 from mailbrief.ports.errors import (
     AIAuthenticationError,
     ProviderError,
@@ -48,6 +49,7 @@ from mailbrief.services.drafting import (
     validate_generated,
 )
 from mailbrief.services.drafts import DraftService
+from mailbrief.services.projects import ProjectService
 from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.database import Database
 from mailbrief.storage.repositories import (
@@ -299,6 +301,27 @@ async def test_prepare_caps_action_notes_and_current_text(
         True,
     ]
     assert bodies.fetched == []  # The email wasn't chosen, so nothing was downloaded.
+
+
+async def test_a_notes_project_is_never_sent(session: AsyncSession, bodies: FakeBodies) -> None:
+    """ADR 0027: linking a note to a project adds nothing to what drafting may send."""
+    public_id = await seed_action_note(session)
+    secret = await ProjectService(session).create_project(
+        ProjectEdit(name="Project Zircon", notes="Quarterly plan for Zircon")
+    )
+    note = await DraftService(session).set_project(public_id, 1, secret.public_id)
+    await DraftService(session).autosave(
+        public_id, note.revision, DraftEdit(title="Plan", body="Draft text")
+    )
+    options = DraftingOptions(
+        parts=frozenset({DraftContextPart.ACTION, DraftContextPart.CURRENT_TEXT})
+    )
+
+    plan = await service(session, FakeDraftingProvider(), bodies).prepare(public_id, options)
+
+    sent = plan.request.model_dump_json() + " ".join(line.label for line in plan.preview.lines)
+    assert "Zircon" not in sent
+    assert secret.public_id not in sent
 
 
 @pytest.mark.parametrize(("stored", "sent"), [(4, 4), (30, 4)])

@@ -8,6 +8,7 @@ from alembic import context
 from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from mailbrief.storage.migration_forks import compatible_plan
 from mailbrief.storage.tables import Base
 
 config = context.config
@@ -55,6 +56,15 @@ def run_sync_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         render_as_batch=True,
+    )
+    # Keep the command's planner (upgrade, downgrade or schema check); adapt only
+    # the two published revisions that independently added the same note column.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        render_as_batch=True,
+        fn=compatible_plan(context.get_context().opts["fn"]),
     )
 
     with context.begin_transaction():

@@ -73,7 +73,7 @@ async def test_task_notes_reveal_the_same_note_and_preserve_pending_text(qtbot: 
     backend.actions = {ActionFilter.OPEN: (task,)}
     note = backend._add(DraftKind.NOTE, DraftEdit(title="Linked note", body="Owner text"))
     backend.drafts[note.public_id] = note.model_copy(update={"action_public_id": task.public_id})
-    backend._add(DraftKind.NOTE, DraftEdit(title="Unrelated", body="Other text"))
+    other = backend._add(DraftKind.NOTE, DraftEdit(title="Unrelated", body="Other text"))
     window = MainWindow(backend)
     qtbot.addWidget(window)
     await window.initialize()
@@ -93,6 +93,15 @@ async def test_task_notes_reveal_the_same_note_and_preserve_pending_text(qtbot: 
         window._navigate(WritingRoute(public_id=note.public_id))
         await finish(window)
         assert window.draft_editor.body.toPlainText() == "Pending edits belong to this note"
+        window._open_task_notes(task)
+        await finish(window)
+        window._navigate(WritingRoute(public_id=other.public_id, draft_kind=DraftKind.NOTE))
+        await finish(window)
+        await window.draft_writes.drain()
+        assert window.drafts_panel.task_context is None
+        assert window.drafts_panel.list.count() == 2
+        assert window.draft_editor.draft is not None
+        assert window.draft_editor.draft.public_id == other.public_id
     finally:
         window.close()
         await window.shutdown()
@@ -165,14 +174,6 @@ async def test_new_workspace_gallery(
             QApplication.processEvents()
         save_shot(window.capture_inbox.grab(), f"p2-capture-inbox-{mode.value}")
         window.capture_inbox.reject()
-        window.note_links.configure(note, backend.projects, (task,))
-        window.note_links.project.setCurrentIndex(1)
-        window.note_links.task.setCurrentIndex(1)
-        window.dialog_guard.show_dialog(window.note_links)
-        for _ in range(3):
-            QApplication.processEvents()
-        save_shot(window.note_links.grab(), f"p2-note-links-{mode.value}")
-        window.note_links.reject()
     finally:
         window.upcoming.reject()
         window.close()

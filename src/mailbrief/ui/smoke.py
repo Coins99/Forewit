@@ -119,7 +119,9 @@ async def check_upgrade(directory: Path) -> None:
     if path.exists():
         raise RuntimeError("Upgrade scenario requires a new test profile.")
     await asyncio.to_thread(command.upgrade, migration_config(path), "20260929_0009")
-    note_id = await asyncio.to_thread(_seed_legacy_note, path)
+    # Written as that revision holds a note: today's ORM has columns it lacks.
+    note_id = str(uuid4())
+    await asyncio.to_thread(_old_note, path, note_id)
     await asyncio.to_thread(upgrade_database, path)
     backups = await asyncio.to_thread(
         lambda: list(directory.glob("upgrade.sqlite3.pre-upgrade-*.sqlite3"))
@@ -137,23 +139,23 @@ async def check_upgrade(directory: Path) -> None:
     await asyncio.to_thread(check_unknown_schema, directory / "unknown.sqlite3")
 
 
-def _seed_legacy_note(path: Path) -> str:
-    """Seed the shipped M8 schema without asking today's ORM to write old columns."""
-    key = "99999999-9999-4999-8999-999999999999"
+def _old_note(path: Path, public_id: str) -> None:
+    """A synthetic note and its first version, in the columns revision 0009 has."""
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     with closing(sqlite3.connect(path)) as connection:
+        draft_id = connection.execute(
+            "INSERT INTO drafts(public_id,kind,title,to_text,cc_text,body,created_at_utc,"
+            "updated_at_utc,revision) VALUES(?,'note','Before upgrade','','',"
+            "'Synthetic upgrade writing.',?,?,1)",
+            (public_id, now, now),
+        ).lastrowid
         connection.execute(
-            "INSERT INTO drafts(public_id,kind,title,body,created_at_utc,updated_at_utc,revision) "
-            "VALUES(?,'note','Before upgrade','Synthetic upgrade writing.',"
-            "'2026-11-03 12:00:00','2026-11-03 12:00:00',1)",
-            (key,),
-        )
-        connection.execute(
-            "INSERT INTO draft_versions(draft_id,number,origin,title,body,created_at_utc) "
-            "SELECT id,1,'created',title,body,created_at_utc FROM drafts WHERE public_id=?",
-            (key,),
+            "INSERT INTO draft_versions(draft_id,number,origin,title,to_text,cc_text,body,"
+            "created_at_utc) VALUES(?,1,'created','Before upgrade','','',"
+            "'Synthetic upgrade writing.',?)",
+            (draft_id, now),
         )
         connection.commit()
-    return key
 
 
 def check_unknown_schema(unknown: Path) -> None:

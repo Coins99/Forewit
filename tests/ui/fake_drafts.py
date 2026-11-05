@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import HttpUrl
 
+from mailbrief.domain.actions import TaskChoice
 from mailbrief.domain.drafting import (
     CurrentText,
     DraftContextPart,
@@ -33,6 +34,7 @@ from mailbrief.services.drafting import DraftingGate, DraftingPlan
 from mailbrief.services.drafts import (
     DraftConflictError,
     DraftNotFoundError,
+    NoteLinkError,
     SourceNotFoundError,
     reply_recipient,
     reply_title,
@@ -56,22 +58,6 @@ class FakeDrafts:
     autosave until it is set, so tests can queue several while one is running.
     """
 
-    async def link_note(
-        self, public_id: str, revision: int, project_id: str | None, task_id: str | None
-    ) -> Draft:
-        note = await self.get_draft(public_id)
-        if note.revision != revision:
-            raise DraftConflictError("Note changed.")
-        saved = note.model_copy(
-            update={
-                "project_public_id": project_id,
-                "action_public_id": task_id,
-                "revision": revision + 1,
-            }
-        )
-        self.drafts[public_id] = saved
-        return saved
-
     def __init__(self) -> None:
         self.drafts: dict[str, Draft] = {}
         self.deleted: set[str] = set()
@@ -85,6 +71,12 @@ class FakeDrafts:
             ("owner@example.com", "local-1"): REPLY_SOURCE
         }
         self.action_titles: dict[str, str] = {}
+        # A note's links (ADR 0027): project names by public ID, those that take new notes,
+        # and the tasks Link to task offers.
+        self.project_names: dict[str, str] = {}
+        self.archived_projects: set[str] = set()
+        self.task_choice_list: tuple[TaskChoice, ...] = ()
+        self.task_choice_queries: list[str] = []
         self._ticks = 0
         # AI drafting: what the fake offers, and how its next generation ends.
         self.ai_ready = True
@@ -188,7 +180,6 @@ class FakeDrafts:
             DraftSummary(
                 public_id=d.public_id,
                 action_public_id=d.action_public_id,
-                project_public_id=d.project_public_id,
                 capture_origin=d.capture_origin,
                 capture_processed_at_utc=d.capture_processed_at_utc,
                 kind=d.kind,
@@ -197,6 +188,8 @@ class FakeDrafts:
                 placeholder_count=len(d.placeholders),
                 action_title=d.action_title,
                 source_subject=d.sources[0].subject if d.sources else None,
+                project_public_id=d.project_public_id,
+                project_name=self.project_names.get(d.project_public_id or ""),
                 revision=d.revision,
             )
             for d in live
@@ -206,9 +199,63 @@ class FakeDrafts:
         await self._draft_call("get_draft", public_id)
         return self._live(public_id)
 
-    async def create_draft(self, kind: DraftKind) -> Draft:
-        await self._draft_call("create_draft", kind)
-        return self._add(kind, DraftEdit())
+    async def create_draft(self, kind: DraftKind, project_public_id: str | None = None) -> Draft:
+        if project_public_id is None:
+            await self._draft_call("create_draft", kind)
+            return self._add(kind, DraftEdit())
+        await self._draft_call("create_draft", kind, project_public_id)
+        self._linkable(project_public_id)
+        return self._add(
+            kind,
+            DraftEdit(),
+            project_public_id=project_public_id,
+            project_name=self.project_names[project_public_id],
+        )
+
+    def _linkable(self, project_public_id: str) -> None:
+        if (
+            project_public_id not in self.project_names
+            or project_public_id in self.archived_projects
+        ):
+            raise NoteLinkError("That project is archived or no longer available.")
+
+    def _relink(self, draft: Draft, **links: object) -> Draft:
+        changed = draft.model_copy(
+            update={**links, "revision": draft.revision + 1, "updated_at_utc": self._now()}
+        )
+        self.drafts[draft.public_id] = changed
+        return changed
+
+    async def set_note_project(
+        self, public_id: str, revision: int, project_public_id: str | None
+    ) -> Draft:
+        await self._draft_call("set_note_project", public_id, revision, project_public_id)
+        draft = self._live(public_id, revision)
+        if draft.project_public_id == project_public_id:
+            return draft
+        if project_public_id is not None:
+            self._linkable(project_public_id)
+        return self._relink(
+            draft,
+            project_public_id=project_public_id,
+            project_name=self.project_names.get(project_public_id or ""),
+        )
+
+    async def set_note_task(
+        self, public_id: str, revision: int, action_public_id: str | None
+    ) -> Draft:
+        await self._draft_call("set_note_task", public_id, revision, action_public_id)
+        draft = self._live(public_id, revision)
+        if action_public_id is None:
+            return self._relink(draft, action_public_id=None, action_title=None)
+        title = self.action_titles.get(action_public_id)
+        if title is None:
+            raise NoteLinkError("That task was deleted or is no longer available.")
+        return self._relink(draft, action_public_id=action_public_id, action_title=title)
+
+    async def task_choices(self, text: str = "") -> tuple[TaskChoice, ...]:
+        self.task_choice_queries.append(text)
+        return self.task_choice_list
 
     async def create_reply_draft(self, account_email: str, provider_message_id: str) -> Draft:
         await self._draft_call("create_reply_draft", account_email, provider_message_id)

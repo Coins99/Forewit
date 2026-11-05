@@ -916,7 +916,8 @@ class DraftTable(Base):
     """A draft or note the owner is writing (ADR 0012).
 
     Drafts have no account foreign key: they belong to the owner. Their action link is
-    SET NULL, and the action's title is kept as a snapshot, so they outlive the action.
+    SET NULL, and the action's title is kept as a snapshot, so they outlive the action. A
+    note may also belong to one project (ADR 0027); projects are archived, never purged.
     """
 
     __tablename__ = "drafts"
@@ -929,6 +930,10 @@ class DraftTable(Base):
         ),
         Index("ix_drafts_updated_at_utc", "updated_at_utc"),
         Index("ix_drafts_action_id", "action_id"),
+        Index("ix_drafts_project_public_id", "project_public_id"),
+        CheckConstraint(
+            "kind = 'note' OR project_public_id IS NULL", name="project_only_for_notes"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -944,14 +949,15 @@ class DraftTable(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     action_id: Mapped[int | None] = mapped_column(ForeignKey("actions.id", ondelete="SET NULL"))
     action_title: Mapped[str | None] = mapped_column(Text)
-    project_public_id: Mapped[str | None] = mapped_column(
-        ForeignKey("projects.public_id", ondelete="SET NULL")
-    )
     created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     revision: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
+    )
+    # The note's project (ADR 0027): only notes take one, and only the owner sets it.
+    project_public_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.public_id", ondelete="SET NULL")
     )
 
     __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}

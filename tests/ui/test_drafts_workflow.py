@@ -13,10 +13,10 @@ from pydantic import HttpUrl
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionFilter, ActionSource
-from mailbrief.domain.drafts import DraftEdit, DraftKind, DraftVersionOrigin
+from mailbrief.domain.drafts import DraftEdit, DraftKind, DraftVersionOrigin, WritingView
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.ui.draft_editor import CONFLICT, NOT_SAVED
-from mailbrief.ui.drafts_view import OPEN
+from mailbrief.ui.drafts_view import NEW_KINDS, OPEN
 from mailbrief.ui.main_window import DraftWrites, MainWindow
 from tests.factories import make_action
 from tests.ui.brief_view import detail, shown_text
@@ -64,9 +64,14 @@ async def finish(window: MainWindow) -> None:
 
 
 async def open_new(window: MainWindow, kind: DraftKind = DraftKind.NOTE) -> None:
-    window.drafts_panel.new_menu.actions()[
-        [DraftKind.EMAIL, DraftKind.NOTE, DraftKind.MESSAGE].index(kind)
-    ].trigger()
+    """New note from the Notes view; other kinds from the Drafts view's New menu."""
+    panel = window.drafts_panel
+    if kind is DraftKind.NOTE:
+        panel.show_view(WritingView.NOTES)
+        panel.new_button.click()
+    else:
+        panel.show_view(WritingView.DRAFTS)
+        panel.new_menu.actions()[NEW_KINDS.index(kind)].trigger()
     await finish(window)
 
 
@@ -87,6 +92,8 @@ async def test_startup_lists_drafts(window: MainWindow, backend: FakeBackend) ->
 
     await window.initialize()
 
+    assert window.drafts_panel.list.count() == 0  # The Drafts view lists no notes.
+    window.drafts_panel.show_view(WritingView.NOTES)
     assert window.drafts_panel.list.count() == 1
     assert window.drafts_panel.list.item(0).text().startswith("Note · Untitled note")
 
