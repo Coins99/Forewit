@@ -71,8 +71,9 @@ def register_fonts() -> bool:
 
 
 def tracking(px: int) -> float:
-    """The letter spacing for Inter at ``px``, in pixels: none at text sizes, tighter as
-    display sizes grow (-0.1 at 15 px, -0.33 at 20 px)."""
+    """The letter spacing at ``px``, in pixels, from Inter's dynamic metrics (applied to
+    both bundled fonts): none at text sizes, tighter as display sizes grow (-0.1 at 15 px,
+    -0.33 at 20 px)."""
     if px < _TRACK_FROM_PX:
         return 0.0
     return round(px * (_TRACK_A + _TRACK_B * math.exp(_TRACK_C * px)), 2)
@@ -106,10 +107,10 @@ def _font(px: int, weight: QFont.Weight, tabular: bool = False) -> QFont:
 def ui_font(
     px: int, *, medium: bool = False, semibold: bool = False, tabular: bool = False
 ) -> QFont:
-    """Inter at a pixel size; point sizes would scale differently on each platform. Medium
-    is for emphasis in text, SemiBold for titles, and ``tabular`` gives equal-width digits
-    for times and counts in columns. A copy, so a caller that changes it never changes the
-    cached font."""
+    """DM Sans at a pixel size; point sizes would scale differently on each platform.
+    Medium is for emphasis in text, SemiBold for titles, and ``tabular`` gives Inter's
+    equal-width digits for times and counts in columns. A copy, so a caller that changes
+    it never changes the cached font."""
     return QFont(_font(px, _weight(medium, semibold), tabular))
 
 
