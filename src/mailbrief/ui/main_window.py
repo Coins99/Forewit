@@ -985,7 +985,7 @@ class MainWindow(QMainWindow):
         retry.addWidget(self.retry_button)
         retry.addStretch(1)
         workspace.today_top.addWidget(self.retry_row)
-        self.focus_panel = FocusPanel()
+        self.focus_panel = FocusPanel(flush=True)  # Edge to edge at the top of the sheet.
         self.focus_dialog = FocusDialog(self)
         for panel in (self.focus_panel, self.focus_dialog.panel):
             panel.change_requested.connect(self._request_focus_change)

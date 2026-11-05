@@ -6,8 +6,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
@@ -19,7 +19,7 @@ from mailbrief.domain.events import CalendarRange
 from mailbrief.domain.today import DaySummary
 from mailbrief.services.day_plans import DayPlanConflictError
 from mailbrief.ui.runtime import DesktopRuntime
-from mailbrief.ui.theme import ThemeMode, apply_theme
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
 from tests.factories import make_action
 from tests.ui.test_keyboard import activate
 from tests.ui.test_main_window_layout import save_shot
@@ -348,3 +348,30 @@ async def test_focus_gallery(
     QApplication.processEvents()
     save_shot(window.focus_dialog.grab(), f"dialog-focus-{mode}")
     window.focus_dialog.reject()
+
+
+@pytest.mark.parametrize("mode", [ThemeMode.LIGHT, ThemeMode.DARK])
+async def test_today_focus_card_corners_follow_the_sheet(
+    qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
+) -> None:
+    apply_theme(qapp, mode=mode)
+    window = await window_for(qtbot, backend_for_focus())
+    window.resize(1100, 720)
+    QApplication.processEvents()
+    panel = window.focus_panel
+    pages = window.workspace.sheet.pages
+    # Flush with the sheet's top, left and right inside its hairline...
+    assert panel.mapTo(pages, QPoint(0, 0)) == QPoint(0, 0)
+    assert panel.width() == pages.width()
+    # ...so it is a plain band, square down to the straight edge below it, and the
+    # sheet's mask alone rounds its top corners, as it rounds every page's.
+    image = panel.grab().toImage()
+    card = QColor(current_tokens().card)
+    for x, y in ((0, 0), (panel.width() - 1, 0), (0, panel.height() - 1)):
+        assert image.pixelColor(x, y) == card
+    assert not pages.mask().contains(QPoint(0, 0))
+    assert not pages.mask().contains(QPoint(pages.width() - 1, 0))
+    # The chooser's panel stands alone, so it keeps a card's own rounded corners.
+    dialog_panel = window.focus_dialog.panel
+    dialog_panel.resize(400, 200)
+    assert dialog_panel.grab().toImage().pixelColor(0, 0) != card

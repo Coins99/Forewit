@@ -27,7 +27,7 @@ from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import ElidedLabel, outline_button, wrap_label
 from mailbrief.ui.lists import ActivatingList, clear_list
-from mailbrief.ui.theme import CARD_RADIUS, SHEET_RADIUS
+from mailbrief.ui.theme import CARD_RADIUS
 from mailbrief.ui.today_view import DayRow, DayRowDelegate, agenda_row, attention_row
 
 _ITEM = Qt.ItemDataRole.UserRole
@@ -40,10 +40,11 @@ class FocusPanel(HairlineFrame):
     agenda_requested = Signal()
     attention_requested = Signal()
 
-    def __init__(self, *, compact: bool = True) -> None:
-        # On Today the card fills the top of the page sheet edge to edge, so its corners
-        # follow the sheet's inside its hairline (as ContentSheet masks the pages).
-        super().__init__(radius=SHEET_RADIUS - 1 if compact else CARD_RADIUS)
+    def __init__(self, *, compact: bool = True, flush: bool = False) -> None:
+        # A ``flush`` panel fills the top of the page sheet edge to edge (Today), above a
+        # straight edge: it is a plain band, and the sheet's mask rounds its top corners
+        # exactly as it rounds every page's, so they follow the sheet's outer edge.
+        super().__init__(radius=0 if flush else CARD_RADIUS)
         self.setObjectName("focusPreview" if compact else "focusFull")
         self.setAccessibleName("My focus")
         self.compact = compact
