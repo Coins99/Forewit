@@ -142,7 +142,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   above the brief on Today (what needs attention, today's agenda, new replies), a read
   model over local actions and calendar data only (`services/today.py`,
   `ui/today_view.py`). See `docs/today.md`.
-- P2 navigation foundation implemented locally on `feat/p2-navigation`: validated routes
+- P2 navigation foundation merged in PR #99: validated routes
   and a shared dispatcher adapt legacy pages/commands, search, Today links and saved
   briefs. Pending opens are guarded by navigation/account context; task reveal reads
   canonical records beyond list filters/limits. Dedicated workspace pages remain later
@@ -150,7 +150,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passed 4,972 tests,
   coverage gates, win32/darwin typing and 1x/2x gallery/theme checks. Native packages,
   native macOS and owner acceptance remain open. See `docs/p2-navigation.md`.
-- P2-02 global capture implemented locally: Capture on every page, palette and
+- P2-02 global capture merged in PR #99: Capture on every page, palette and
   Ctrl+Shift+N/Cmd+Shift+N saves ordinary Task/Note records without Gmail/AI. Owner
   saves have an independent local lifecycle and shutdown waits for them. Notes save
   initial text/version plus retry receipts atomically (migration 0027, ADR 0025);
@@ -159,7 +159,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   fresh single-file package/lifecycle/recovery check. Native macOS/owner acceptance
   remains open; see `docs/p2-capture.md`. Capture review/processed state remains
   later P2 work.
-- P2-03 daily focus implemented locally: revisioned per-profile/date plans and stable
+- P2-03 daily focus merged in PR #99: revisioned per-profile/date plans and stable
   ordered task selections (migration 0028, ADR 0026). My focus leads Today, with
   select/remove/keyboard reorder, existing completion/reopen/Undo and separate known,
   unknown and waiting workload. Capture can add its saved task to today. Selections
@@ -180,8 +180,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   and project context) and P2-05 to P2-09 merged in PR #102, below.
 - Search and commands implemented, awaiting owner desktop acceptance: the command palette
   now also finds projects and saved briefs (P2-09). P2-04 through P2-09 are merged
-  (PRs #101 and #102): Notes/project context, the Tasks/Projects/Notes/Mail workspace, explicit capture
-  review state, upcoming known commitments, and revision-bound dated-plan copy/move.
+  (PRs #101 and #102): Notes/project context, the Tasks/Projects/Notes/Mail workspace,
+  explicit capture review state, upcoming known commitments, and revision-bound
+  dated-plan copy/move. Capacity planning against available hours is not implemented.
   PR #102 builds on #101's independent note setters and project/task editor. Migration
   0031 converges the published 0029 forks without editing existing revisions; the online
   migration adapter adopts only their identical column operation after validation.

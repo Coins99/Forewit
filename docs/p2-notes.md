@@ -1,28 +1,22 @@
 # P2-04a: Notes and note links
 
-Merged in PR #101. PR #102 builds on this implementation: Notes and Mail drafts
-share the same writing panel/editor, hosted on their workspace pages. Drafts is in
-Mail's view chooser; Ctrl+5 still opens it and Ctrl+8 opens Notes. Its count excludes
-notes. The project filter and independent project/task editing described below remain.
-See `p2-workspace.md` for the workspace and migration convergence details.
+Merged in PR #101. PR #102 then hosted it in the new workspace and delivered the rest
+of P2 (see [After this checkpoint](#after-this-checkpoint)). The Workflow below
+describes the Notes page as it is now. Native macOS and owner acceptance remain open.
 
-Implemented on `feat/p2-notes`, from `main` at `7f7f9cb` (after P2-01 to P2-03). This
-is the first of two P2-04 pull requests. The owner approved the plan on 2026-11-04:
+Implemented on `feat/p2-notes`, from `main` at `7f7f9cb` (after P2-01 to P2-03). The
+owner approved the plan on 2026-11-04:
 
 1. a Notes row beside Drafts, sharing the writing page;
 2. one project and one task per note, both editable;
-3. a Projects page with the project's context (P2-04b, which PR #102 delivered);
+3. a Projects page with the project's context (P2-04b);
 4. two stacked pull requests.
-
-PR #102 delivered P2-04b, the Projects page and project search, together with P2-05 to
-P2-09; see `p2-workspace.md`. Native macOS and owner acceptance remain open.
 
 ## Workflow
 
-- **Notes** is a sidebar row after Calendar (Ctrl+8, or Cmd+8 on macOS). Ctrl+1 to
-  Ctrl+7 are unchanged. It shows the writing page in a Notes view, as Waiting shows the
-  Actions page, with the same inline editor, autosave, versions, copy, export, delete
-  and Undo.
+- **Notes** is a sidebar page after Calendar (Ctrl+8, or Cmd+8 on macOS). It shares the
+  writing panel and inline editor with Mail's drafts: autosave, versions, copy, export,
+  delete and Undo.
 - **Notes view:**
   - It lists only notes, newest first, with a search field and a filter: **All notes**,
     **No project**, or one project (archived ones are labelled).
@@ -31,8 +25,10 @@ P2-09; see `p2-workspace.md`. Native macOS and owner acceptance remain open.
     notes.
   - Choosing an archived project in the filter, then New note, returns the filter to
     All notes, so the new note shows beside its editor.
-- **Drafts** now lists replies, emails and messages, and its New menu offers Email and
-  Message. Its sidebar count excludes notes, and the Notes row has no count.
+  - A task's writing menu opens Notes filtered to that task's linked notes; **All notes**
+    clears that filter.
+- **Mail drafts** (Mail's view chooser, Ctrl+5) lists replies, emails and messages. Its
+  New menu offers Email and Message, and its count excludes notes.
 - **A note's links** sit under its title in the editor, inline or in the dialog:
   - **Project:** No project, or a project that isn't archived. An archived project shows
     only while it is the note's own. The choice saves as soon as it is made, so it changes
@@ -52,7 +48,7 @@ P2-09; see `p2-workspace.md`. Native macOS and owner acceptance remain open.
     returns to All notes, so the note being edited stays in the list.
 - **Routes:** Capture's Open, Ctrl+K note results, the palette's **New note** and
   `PageRoute(page="notes")` open the Notes view. A draft opened inline always shows in
-  its own view: a note in Notes, any other kind in Drafts.
+  its own view: a note in Notes, any other kind in Mail drafts.
 
 No account, network or AI permission is needed.
 
@@ -177,8 +173,8 @@ Native macOS and the owner's hands-on acceptance remain open.
 ## Owner acceptance
 
 1. With Gmail disconnected, create projects Home and Work, and archive Work.
-2. Choose **Notes** (or Ctrl+8). Confirm that Drafts no longer lists notes, and that
-   its count excludes them.
+2. Choose **Notes** (or Ctrl+8). Confirm that Mail's drafts (Ctrl+5) no longer list
+   notes, and that their count excludes them.
 3. Choose New note, type a title and text, and pick Home under Project. Filter Notes
    by Home and No project, and confirm the note moves between them. Confirm Work isn't
    offered.
@@ -195,11 +191,16 @@ Native macOS and the owner's hands-on acceptance remain open.
 PR #102 delivered the rest of P2 on top of this one:
 
 - P2-04b: the Projects page with project context, and project search;
-- the Today/Tasks/Projects/Calendar/Notes/Mail workspace;
+- the Today/Tasks/Projects/Calendar/Notes/Mail workspace, with Mail's drafts beside
+  Notes;
 - P2-06 capture review;
 - Upcoming, and dated plans with copy and move;
 - saved-brief search.
 
-Its own migration `20261103_0029` added the same note column. Revision `20261105_0031`
-merges the two forks without editing either one. See `p2-workspace.md` for that
-behaviour, the migration convergence and the remaining open checks.
+Capacity planning against available hours isn't implemented: Upcoming shows known
+commitments, not available capacity.
+
+PR #102 was built in parallel on its own branch, and its own migration
+`20261103_0029` added the same note column as this one's `20261104_0029`. Revision
+`20261105_0031` merges the two forks without editing either. See `p2-workspace.md`
+for that behaviour, the migration convergence and the remaining open checks.

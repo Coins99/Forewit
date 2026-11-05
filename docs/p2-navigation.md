@@ -73,9 +73,13 @@ note loads, missing tasks, tasks outside completed limits and navigation away/ba
 
 ## Remaining P2 work
 
-Global Task/Note capture and retry-safe initial note content are implemented in the
-[P2-02 checkpoint](p2-capture.md). Durable My focus/day plans come next.
-The Notes page and note links are in [P2-04a](p2-notes.md) (PR #101). The Projects
-page, Mail/sidebar migration, optional capture review, Upcoming, dated plan management
-and project/brief search followed in PR #102 ([the workspace register](p2-workspace.md)). This foundation does not establish
-full P2, P1 owner acceptance or deferred email/local-model acceptance.
+Global Task/Note capture and retry-safe initial note content are in the
+[P2-02 checkpoint](p2-capture.md), and durable day plans in [P2-03](p2-focus.md). The
+Notes page and note links are in [P2-04a](p2-notes.md) (PR #101). The Projects page,
+the Mail/sidebar migration, optional capture review, Upcoming, dated plan management
+and project/brief search followed in PR #102
+([the workspace register](p2-workspace.md)). Of the planned workload overview, Today
+shows known estimates and unknown/waiting counts and Upcoming shows meeting
+occupancy, but no available-capacity or working-hours view exists yet. This foundation
+does not establish full P2, P1 owner acceptance or deferred email/local-model
+acceptance.

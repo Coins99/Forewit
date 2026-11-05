@@ -100,8 +100,10 @@ real mailboxes or paid AI. Logs are under ignored `out/p2-focus-*`; renders unde
 
 P2-04 adds Notes and project context: [P2-04a](p2-notes.md) adds the Notes page and
 note links. PR #102 ([the workspace register](p2-workspace.md)) adds the Projects page,
-the Tasks/Mail workspace, historical date browsing, carry/move and Upcoming (P2-04b to
-P2-09). This checkpoint does not implement them.
+the Tasks/Mail workspace, historical date browsing, carry/move and Upcoming. Capacity
+planning against available hours remains unimplemented: Upcoming shows known
+commitments and meeting occupancy, not available capacity. This checkpoint implements
+none of them.
 
 ## Windows CI time-zone follow-up
 

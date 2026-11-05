@@ -844,9 +844,9 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
-P2-04–P2-09 update (2026-11-03): Notes/project context, workspace/Mail migration,
+P2-04–P2-09 update (2026-11-05): Notes/project context, workspace/Mail migration,
 explicit capture processing, upcoming commitments, dated-plan transfers and
-project/saved-brief search are implemented locally. See [workspace implementation
+project/saved-brief search are merged (PRs #101 and #102). See [workspace implementation
 and verification](p2-workspace.md). Native macOS, the larger performance/AI-isolation
 checks and owner ordinary-use acceptance are not implied by implementation.
 

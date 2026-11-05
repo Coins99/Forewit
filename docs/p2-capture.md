@@ -78,10 +78,10 @@ Native macOS and owner usability acceptance remain open. Safe logs live under ig
 
 ## Later checkpoints
 
-Daily focus/day plans come next (P2-03); Add to today will use that service once it
-exists. Optional capture review/processed state belongs to P2-06. Current captures
-are usable ordinary records with no mandatory processing step or inferred dates.
-A captured note is organized later on the Notes page ([P2-04a](p2-notes.md)). Capture
-review (P2-06), the Projects page, the Mail/sidebar migration and broader search followed in
-PR #102 ([the workspace register](p2-workspace.md)). No P1/M4–M9 owner acceptance or
-experimental AI acceptance is implied.
+Daily focus followed in [P2-03](p2-focus.md), and Capture's **Add to today** uses it.
+A captured note is organized on the Notes page ([P2-04a](p2-notes.md)). Optional
+capture review (P2-06), the Projects page, the Mail/sidebar migration and broader
+search followed in PR #102 ([the workspace register](p2-workspace.md)). Captures stay
+usable ordinary records with no inferred dates; **Review later**, ticked by default,
+also puts one in the review inbox. No P1/M4–M9 owner acceptance or experimental AI
+acceptance is implied.
