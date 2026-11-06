@@ -164,6 +164,21 @@ def test_stored_event_round_trips_its_edit_and_validates() -> None:
         CalendarEvent.model_validate(stored(edit).model_dump() | {"start_date": date.today()})
 
 
+def test_busy_follows_the_shape_unless_chosen() -> None:
+    # ADR 0029: a timed event is busy and an all-day one free, unless the owner chooses.
+    assert timed().busy and not all_day().busy
+    assert not timed(busy=False).busy and all_day(busy=True).busy
+    assert timed(busy=None).busy
+    assert stored(all_day(busy=True)).edit().busy
+    assert not stored(all_day()).busy
+    edit = timed(busy=False)
+    assert EventEdit.model_validate(edit.model_dump()) == edit
+    # all_day is read as the field reads it: 1 is all-day, so the shape's default is Free.
+    loose = all_day().model_dump(exclude={"busy"}) | {"all_day": 1}
+    assert not EventEdit.model_validate(loose).busy
+    assert EventEdit.model_validate(timed().model_dump(exclude={"busy"}) | {"all_day": 0}).busy
+
+
 def test_sort_keys_put_all_day_first_then_start() -> None:
     later = stored(
         timed(starts_at_utc=START + timedelta(hours=2), ends_at_utc=START + timedelta(hours=3))

@@ -30,6 +30,7 @@ from mailbrief.domain.actions import (
     tag_key,
 )
 from mailbrief.domain.analysis import DeadlinePrecision
+from mailbrief.domain.availability import UnscheduledTasks
 from mailbrief.domain.briefs import (
     AutoSendStatus,
     BriefRunResult,
@@ -76,6 +77,7 @@ from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
+from mailbrief.domain.working_hours import HoursEdit, WorkingHours
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -225,6 +227,12 @@ class FakeBackend(FakeDrafts):
         self.block_calls: list[tuple[object, ...]] = []
         self.block_fail: Exception | None = None
         self.open_task_list: tuple[TaskChoice, ...] = ()
+        # Working hours and the tasks to schedule (ADR 0029).
+        self.hours = WorkingHours.unset()
+        self.hours_calls: list[tuple[object, ...]] = []
+        self.hours_fail: Exception | None = None
+        self.unscheduled = UnscheduledTasks()
+        self.free_at: datetime | None = None
         self.markers: list[ActionMarker] = []
         self.event_calls: list[tuple[object, ...]] = []
         self.event_fail: Exception | None = None
@@ -913,6 +921,7 @@ class FakeBackend(FakeDrafts):
                 if event.days(zone)[0] <= last_day and event.days(zone)[1] >= first_day
             ),
             google_coverage=self.google_coverage,
+            hours=self.hours,
             blocks=tuple(
                 sorted(
                     (
@@ -1014,6 +1023,33 @@ class FakeBackend(FakeDrafts):
             block = self._timed(block, block.block.revision + 1, block.block.time)
             self.blocks[public_id] = block
         return self._block_saved(block)
+
+    async def working_hours(self) -> WorkingHours:
+        self.hours_calls.append(("working_hours",))
+        if self.hours_fail is not None:
+            raise self.hours_fail
+        return self.hours
+
+    async def save_working_hours(self, edit: HoursEdit, revision: int) -> WorkingHours:
+        from mailbrief.services.availability import HoursConflictError
+
+        self.hours_calls.append(("save_working_hours", edit, revision))
+        if revision != self.hours.revision:
+            raise HoursConflictError()
+        self.hours = WorkingHours(
+            days=edit.days, buffer_minutes=edit.buffer_minutes, revision=revision + 1
+        )
+        return self.hours
+
+    async def next_free(
+        self, after: datetime, length_minutes: int, zone: ZoneInfo
+    ) -> datetime | None:
+        self.hours_calls.append(("next_free", after, length_minutes))
+        return self.free_at
+
+    async def unscheduled_tasks(self, today: date, zone: ZoneInfo) -> UnscheduledTasks:
+        self.hours_calls.append(("unscheduled_tasks", today))
+        return self.unscheduled
 
     def _stored_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
         return CalendarEvent(

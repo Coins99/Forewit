@@ -24,7 +24,9 @@ from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.events import EventEdit
 from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule
 from mailbrief.domain.work_blocks import MAX_BLOCKS_PER_TASK, BlockTime
+from mailbrief.domain.working_hours import HoursEdit, WorkingWindow
 from mailbrief.services.actions import ActionService
+from mailbrief.services.availability import AvailabilityService
 from mailbrief.services.data import (
     CleanupKind,
     CleanupRequest,
@@ -370,6 +372,79 @@ async def test_overlaps_name_events_google_events_and_other_blocks(
     short = BlockTime(starts_at_utc=at(MONDAY, 11), ends_at_utc=at(MONDAY, 11, 20), time_zone=ZONE)
     crowded = await blocks.schedule(created.public_id, short)
     assert len(crowded.overlaps) == 3 and crowded.more_overlaps == 1
+
+
+async def test_free_events_never_overlap_and_days_off_always_do(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    events = EventService(session)
+    await events.create(
+        EventEdit(
+            title="Lunch maybe",
+            all_day=False,
+            starts_at_utc=at(MONDAY, 10),
+            ends_at_utc=at(MONDAY, 11),
+            time_zone=ZONE,
+            busy=False,
+        )
+    )
+    await events.create(
+        EventEdit(
+            title="Day off",
+            all_day=True,
+            start_date=TUESDAY,
+            last_date=TUESDAY,
+            time_zone=ZONE,
+            busy=True,
+        )
+    )
+    calendar = GoogleCalendarTable(
+        calendar_id="work@example.com", name="Work", is_primary=False, updated_at_utc=NOW
+    )
+    session.add(calendar)
+    await session.flush()
+    for event_id, busy, all_day in (("tentative", False, False), ("trip", True, True)):
+        session.add(
+            GoogleEventTable(
+                calendar_row_id=calendar.id,
+                event_id=event_id,
+                title=event_id.title(),
+                all_day=all_day,
+                starts_at_utc=None if all_day else at(MONDAY, 10),
+                ends_at_utc=None if all_day else at(MONDAY, 11),
+                start_date=MONDAY if all_day else None,
+                last_date=MONDAY if all_day else None,
+                fetched_at_utc=NOW,
+                busy=busy,
+            )
+        )
+    await session.commit()
+    created = await actions.create(task())
+    monday = await blocks.schedule(created.public_id, span(MONDAY, 10, 11))
+    assert monday.overlaps == ("Trip (Work)",)  # Google's busy all-day event: a day off.
+    tuesday = await blocks.schedule(created.public_id, span(TUESDAY, 10, 11))
+    assert tuesday.overlaps == ("Day off",)
+
+
+async def test_a_block_outside_the_working_hours_warns_only_when_hours_are_set(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    created = await actions.create(task())
+    before = await blocks.schedule(created.public_id, span(MONDAY, 7, 8))
+    assert not before.outside_hours  # No working hours yet: nothing to fall outside.
+    windows = (
+        WorkingWindow(start_minute=9 * 60, end_minute=12 * 60),
+        WorkingWindow(start_minute=13 * 60, end_minute=17 * 60),
+    )
+    await AvailabilityService(session).save_hours(HoursEdit(days=(windows,) * 5 + ((), ())), 0)
+    inside = await blocks.move(before.block.public_id, 1, span(MONDAY, 9, 11))
+    assert not inside.outside_hours
+    across_lunch = await blocks.move(before.block.public_id, 2, span(MONDAY, 11, 14))
+    assert across_lunch.outside_hours
+    early = await blocks.move(before.block.public_id, 3, span(MONDAY, 8, 9))
+    assert early.outside_hours
+    saturday = await blocks.move(before.block.public_id, 4, span(date(2026, 11, 7), 10, 11))
+    assert saturday.outside_hours
 
 
 async def test_a_block_after_the_deadline_warns_and_moves_nothing(

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLabel, QVBoxLa
 
 from mailbrief.domain.events import CalendarEvent
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.ui.calendar_layout import show_as
 from mailbrief.ui.calendar_view import event_when
 from mailbrief.ui.deadline_text import full_day_text
 from mailbrief.ui.dialog_chrome import dialog_heading
@@ -94,7 +95,9 @@ class GoogleEventDialog(QDialog):
         if event.all_day and last != first:
             when += " – " + full_day_text(last, today=today)
         self.event_date.setText(when)
-        self.when.setText(event_when(event, first, zone, today))
+        when_text = event_when(event, first, zone, today)
+        shown = show_as(event)  # Free or Busy, when it isn't the shape's own (ADR 0029).
+        self.when.setText(when_text if shown is None else f"{when_text} · {shown}")
         self.calendar.setText(
             event.calendar_name if isinstance(event, GoogleEvent) else "On this device"
         )

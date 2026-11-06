@@ -183,7 +183,7 @@ class PlanningDialog(QDialog):
         column.addWidget(
             plain_label("Your events in these four weeks are always sent.", tone="muted")
         )
-        self.google_times = QCheckBox("Also send Google Calendar times, without titles")
+        self.google_times = QCheckBox("Also send Google Calendar busy times, without titles")
         self.google_titles = QCheckBox("Include their titles too")
         self.open_actions = QCheckBox("Also send open actions' titles, deadlines and target dates")
         for box in (self.google_times, self.google_titles, self.open_actions):

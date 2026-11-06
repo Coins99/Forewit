@@ -733,3 +733,99 @@ async def test_work_blocks_warn_locally_and_are_never_sent(
         plan,
     )
     assert checked.proposals[0].overlaps == ("Task · Write the summary",)
+
+
+class MixedReader(Reader):
+    """A busy and a free Google event on Friday, and a busy all-day one on Thursday."""
+
+    async def list_events(self, calendar: GoogleCalendarInfo, *_: Any) -> tuple[GoogleEvent, ...]:
+        def google(event_id: str, **fields: Any) -> GoogleEvent:
+            return GoogleEvent(
+                calendar_id=calendar.calendar_id,
+                calendar_name="Owner",
+                event_id=event_id,
+                title=event_id.title(),
+                **fields,
+            )
+
+        return (
+            google("sync", all_day=False, starts_at_utc=at(FRIDAY, 13), ends_at_utc=at(FRIDAY, 14)),
+            google(
+                "maybe",
+                all_day=False,
+                starts_at_utc=at(FRIDAY, 14),
+                ends_at_utc=at(FRIDAY, 15),
+                busy=False,
+            ),
+            google(
+                "offsite",
+                all_day=True,
+                start_date=date(2026, 10, 15),
+                last_date=date(2026, 10, 15),
+                busy=True,
+            ),
+        )
+
+
+async def test_only_busy_google_times_are_sent_or_warned_about(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    await CalendarSyncService(session, MixedReader(), clock=lambda: NOW).sync(WEDNESDAY, TORONTO)
+    plan = await seeded(session, service, frozenset(PlanningPart))
+    assert plan.request.busy is not None
+    assert sorted(b.title or "" for b in plan.request.busy) == ["Offsite", "Sync"]
+    assert "Maybe" not in plan.request.model_dump_json()
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(
+                change(event_key="e2", start_date="2026-10-16", start_time="13:30"),
+                change(event_key="e3", start_date="2026-10-15", start_time="09:00"),
+            )
+        ),
+        plan,
+    )
+    # Friday 13:30 to 14:30 meets Sync, which is busy, and Maybe, which is free.
+    assert checked.proposals[0].overlaps == ("Sync (Owner)",)
+    # Thursday is the Offsite day: a day off, which every timed change on it overlaps.
+    assert checked.proposals[1].overlaps == ("Offsite (Owner)",)
+
+
+async def test_a_planned_change_keeps_busy_or_free_unless_the_shape_changes(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    events = EventService(session, clock=lambda: NOW)
+    plan = await seeded(session, service)
+    dentist = next(event for event in plan.events if event.title == "Dentist")
+    free = await events.save(
+        dentist.public_id, dentist.revision, dentist.edit().model_copy(update={"busy": False})
+    )
+    plan = await service.prepare(PlanningOptions(instruction="x"), MONDAY, TORONTO)
+    key = next(key for key, event in plan.keys.items() if event.public_id == free.public_id)
+    moved = validate_plan(
+        PlanningCandidate(changes=(change(event_key=key, start_time="15:00"),)), plan
+    )
+    assert moved.proposals[0].change.edit is not None
+    assert moved.proposals[0].change.edit.busy is False
+    whole_day = validate_plan(
+        PlanningCandidate(changes=(change(event_key=key, all_day=True),)), plan
+    )
+    assert whole_day.proposals[0].change.edit is not None
+    assert whole_day.proposals[0].change.edit.busy is False  # An all-day event's own: free.
+    created = validate_plan(
+        PlanningCandidate(
+            changes=(
+                ChangeCandidate.model_validate(
+                    {
+                        "op": "create",
+                        "title": "Focus",
+                        "all_day": False,
+                        "start_date": "2026-10-15",
+                        "start_time": "09:00",
+                    }
+                ),
+            )
+        ),
+        plan,
+    )
+    assert created.proposals[0].change.edit is not None
+    assert created.proposals[0].change.edit.busy is True

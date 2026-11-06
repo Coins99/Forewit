@@ -32,6 +32,25 @@ def clip(intervals: Iterable[Interval], start: datetime, end: datetime) -> tuple
     return tuple(found)
 
 
+def subtract(intervals: Iterable[Interval], cuts: Iterable[Interval]) -> tuple[Interval, ...]:
+    """The time the intervals cover and the cuts don't, merged and in order: overlapping
+    cuts take their time once."""
+    left: list[Interval] = []
+    removed = union(cuts)
+    for start, end in union(intervals):
+        for cut_start, cut_end in removed:
+            if cut_end <= start or cut_start >= end:
+                continue
+            if cut_start > start:
+                left.append((start, cut_start))
+            start = max(start, cut_end)
+            if start >= end:
+                break
+        if start < end:
+            left.append((start, end))
+    return tuple(left)
+
+
 def minutes(intervals: Iterable[Interval]) -> float:
     """The minutes the intervals cover together, each instant counted once."""
     return sum((end - start).total_seconds() for start, end in union(intervals)) / 60

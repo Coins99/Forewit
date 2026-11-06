@@ -1,8 +1,9 @@
 """Events from the owner's Google calendars, cached only to show them (ADR 0018, phase 2).
 
 They are Google's data, not the owner's: MailBrief never changes them and keeps only what
-the Calendar page shows: titles, times, links and calendar names. Descriptions, locations,
-guests and conference details are never requested.
+the Calendar page shows: titles, times, links, calendar names and whether Google shows each
+event as busy or free ("Show as", ADR 0029). Descriptions, locations, guests and conference
+details are never requested.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
-from mailbrief.domain.common import DomainModel, normalize_utc
+from mailbrief.domain.common import DomainModel, busy_by_shape, normalize_utc
 
 GOOGLE_ID_MAX_CHARS: Final = 1024
 GOOGLE_TITLE_MAX_CHARS: Final = 200
@@ -76,6 +77,14 @@ class GoogleEvent(DomainModel):
     start_date: date | None = None
     last_date: date | None = None
     web_link: HttpUrl | None = None
+    # Google's "Show as" (ADR 0029). The mapper always sets it; left out, it follows the
+    # shape, as the owner's events do.
+    busy: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _busy_default(cls, data: object) -> object:
+        return busy_by_shape(data)
 
     @field_validator("starts_at_utc", "ends_at_utc")
     @classmethod

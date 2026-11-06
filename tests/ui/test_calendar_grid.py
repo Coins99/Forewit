@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
@@ -21,6 +22,7 @@ from mailbrief.domain.events import (
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.work_blocks import WorkBlock
+from mailbrief.domain.working_hours import SUGGESTED_HOURS, WorkingHours
 from mailbrief.ui.appearance import Appearance
 from mailbrief.ui.calendar_grid import HOUR_PX, HOURS_PAD, MonthGrid
 from mailbrief.ui.calendar_layout import (
@@ -38,6 +40,7 @@ from mailbrief.ui.calendar_layout import (
 from mailbrief.ui.calendar_view import (
     EMPTY_MONTH,
     NEW,
+    VIEW_NAMES,
     CalendarPanel,
     month_title,
     week_start,
@@ -48,6 +51,9 @@ from mailbrief.ui.theme import apply_theme
 from mailbrief.ui.theme.tokens import ThemeMode
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend
+
+# The tabs' places: Day, Week, Month and List.
+VIEW_INDEX = {view: index for index, view in enumerate(VIEW_NAMES)}
 
 TORONTO = ZoneInfo("America/Toronto")
 MONDAY = date(2026, 10, 12)
@@ -197,12 +203,39 @@ def fill_blocks(backend: FakeBackend) -> None:
         )
 
 
+def fill_availability(backend: FakeBackend) -> None:
+    """Working hours, a free event and tasks to schedule (ADR 0029)."""
+    backend.hours = WorkingHours(days=SUGGESTED_HOURS.days, buffer_minutes=10, revision=1)
+    tentative = event("Coffee maybe", TODAY, time(10), time(10, 30))
+    backend.events[tentative.public_id] = tentative.model_copy(update={"busy": False})
+    backend.unscheduled = UnscheduledTasks(
+        tasks=(
+            UnscheduledTask(
+                action_public_id=f"00000000-0000-4000-a000-{1:012d}",
+                title="Prepare the board update",
+                estimate_minutes=180,
+                scheduled_minutes=60,
+                deadline_day=TODAY + timedelta(days=2),
+            ),
+            UnscheduledTask(
+                action_public_id=f"00000000-0000-4000-a000-{2:012d}",
+                title="Renew the passport",
+                target_date=TODAY + timedelta(days=1),
+            ),
+        ),
+        total=2,
+    )
+
+
 async def shown_window(qtbot: QtBot, view: CalendarView, *, blocks: bool = False) -> MainWindow:
     backend = FakeBackend()
     fill(backend)
     if blocks:
         fill_blocks(backend)
-    window = MainWindow(backend, saved_appearance=Appearance(calendar_view=view))
+        fill_availability(backend)
+    window = MainWindow(
+        backend, saved_appearance=Appearance(calendar_view=view, calendar_tasks=blocks)
+    )
     window.now = lambda: NOW
     qtbot.addWidget(window)
     await window.initialize()
@@ -378,7 +411,7 @@ def test_the_week_grid_s_keyboard(panel: CalendarPanel) -> None:
 def test_the_month_grid_shows_more_and_moves_months(panel: CalendarPanel, qtbot: QtBot) -> None:
     months: list[object] = []
     panel.month_requested.connect(months.append)
-    panel.views.setCurrentIndex(1)
+    panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.MONTH])
     assert panel.view() is CalendarView.MONTH
     backend = FakeBackend()
     fill(backend)
@@ -396,7 +429,7 @@ def test_the_month_grid_shows_more_and_moves_months(panel: CalendarPanel, qtbot:
         more.rect.center().toPoint(),
     )
     assert panel.view() is CalendarView.LIST and panel.focus_day() == TODAY
-    panel.views.setCurrentIndex(1)
+    panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.MONTH])
     panel.previous_button.click()
     panel.this_week_button.click()
     panel.next_button.click()
@@ -411,7 +444,7 @@ async def test_the_window_reads_the_days_of_the_view_and_keeps_it(qtbot: QtBot) 
     assert isinstance(backend, FakeBackend)
     reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
     assert reads[-1][1:] == (MONDAY, MONDAY + timedelta(days=6))
-    window.calendar_panel.views.setCurrentIndex(1)  # Month.
+    window.calendar_panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.MONTH])
     await window.drain_calendar_reads()
     reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
     assert reads[-1][1:] == month_days(TODAY)
@@ -421,7 +454,7 @@ async def test_the_window_reads_the_days_of_the_view_and_keeps_it(qtbot: QtBot) 
     reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
     assert reads[-1][1:] == month_days(date(2026, 11, 1))
     # Switching back opens the week of the day in focus: the 1st of November.
-    window.calendar_panel.views.setCurrentIndex(0)
+    window.calendar_panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.WEEK])
     await window.drain_calendar_reads()
     reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
     first = date(2026, 10, 26)
@@ -463,7 +496,7 @@ def test_a_month_day_never_hides_an_item_without_more(qtbot: QtBot) -> None:
 
 
 def test_the_month_grid_steps_to_and_opens_an_item_behind_more(panel: CalendarPanel) -> None:
-    panel.views.setCurrentIndex(1)
+    panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.MONTH])
     backend = FakeBackend()
     fill(backend)
     panel.show_range(backend._range(*month_days(TODAY), TORONTO), TORONTO, TODAY)
@@ -545,7 +578,7 @@ async def test_more_opens_the_list_without_keeping_it(qtbot: QtBot) -> None:
     monday = week_start(more.day)
     assert reads[-1][1:] == (monday, monday + timedelta(days=6))
     # Back to Month: until its days are read, its grid shows none of the week's.
-    panel.views.setCurrentIndex(1)
+    panel.views.setCurrentIndex(VIEW_INDEX[CalendarView.MONTH])
     assert grid.first_day() is None and grid.hits() == []
     await window.drain_calendar_reads()
     assert grid.first_day() == month_days(more.day)[0]

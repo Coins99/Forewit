@@ -10,8 +10,12 @@ later use after Microsoft Entra access is resolved.
   `20261105_0032`): set aside time for a task on the Calendar, as many blocks as you like,
   shown in Week, Month, List and Today; drag, resize, keyboard moves and unschedule with
   Undo, and warnings for overlaps and blocks after the deadline. A block never changes its
-  task. P3-2 and P3-3 follow, one at a time. See [the P3 register](p3-calendar.md) and
+  task. See [the P3 register](p3-calendar.md) and
   [Calendar: Time for tasks](calendar.md#time-for-tasks).
+- P3-2 implemented, awaiting owner acceptance (ADR 0029, migration `20261105_0033`):
+  Busy/Free on events (Google's "Show as" too), weekly working hours with a buffer, the
+  free time they leave, a Day view and the tasks to schedule beside the hours (Return for
+  the next free time, or drag onto the hours). P3-3 follows.
 
 - P2-04b to P2-09 merged in PR #102:
   - the Projects page with project context;

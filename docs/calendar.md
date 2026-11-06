@@ -2,13 +2,17 @@
 
 The **Calendar** page (sidebar, Ctrl+7) shows your own events, the time you set aside for
 tasks, your open actions' deadlines and target dates, and, once you connect it, your Google
-Calendar. Decisions and limits are in [ADR 0018](adr/0018-calendar.md) and, for time set
-aside for tasks, [ADR 0028](adr/0028-work-blocks.md).
+Calendar. Decisions and limits are in [ADR 0018](adr/0018-calendar.md), for time set
+aside for tasks [ADR 0028](adr/0028-work-blocks.md), and for working hours, Busy/Free and
+the tasks to schedule [ADR 0029](adr/0029-availability.md).
 
-## Week, Month and List
+## Day, Week, Month and List
 
 Choose how the page shows your days with the tabs under its title; Forewit remembers
 your choice on this computer.
+
+- **Day**: one day of hours, with room for each entry. ‹ and ›, or Left and Right, move a
+  day; **Today** comes back.
 
 - **Week**: a week of hours, as a calendar app shows it. Timed events are blocks in their
   hours, side by side when they overlap; all-day events, events of a day or more and your
@@ -118,6 +122,33 @@ event of at most 12 hours. If your calendar changed while you were
 reviewing, nothing is applied: discard and ask again. Revoking AI consent in Settings covers
 this too.
 
+## Busy or free, and working hours
+
+- An event is **Busy** (it takes its time) or **Free** (it's only shown). Unless you choose
+  in the editor's **Show as**, a timed event is busy and an all-day one free. A free event
+  shows as an outline. An all-day Busy event is a day off.
+- Google events follow Google's own **Show as**; Forewit reads it with the event and
+  nothing else new.
+- **Working hours** (under the calendar) sets your hours for each weekday as text, such as
+  "09:00–12:00, 13:00–17:00", up to three a day on quarter hours, and a buffer kept clear
+  before and after busy events. Until you set them, nothing changes. Once set, the Day and
+  Week views shade the hours outside them, and a line under the hours says how much
+  working time is still free from now on: working hours less busy events and their
+  buffers, less the time set aside for open tasks. Time that has passed is never free.
+- A block outside your working hours says so when you save it. Overlap warnings count busy
+  events only, and a day off overlaps every block on it.
+
+## Tasks to schedule
+
+**Tasks to schedule** (under the calendar, in the Day and Week views) shows your open
+tasks that still need time beside the hours: those with more estimate than time set aside
+from today on, and those with no estimate and no time set aside from today on. Waiting
+tasks aren't listed. They're in the order of the Tasks page, at most 50.
+
+- Select one and press Return: the block editor opens at the next free stretch of working
+  time, for what is left of its estimate (up to 2 hours; 1 hour without one).
+- Or drag it onto the hours: it is scheduled there at once, with **Undo schedule**.
+
 ## Time for tasks
 
 Set aside time on the calendar for a task: a **block**, from a start to an end, as many as
@@ -127,8 +158,9 @@ deadline or target date never moves a block.
 
 - **Schedule task**, beside New event, asks which open task, then when. **Schedule time…**
   in a task's detail does the same for that task. A new block starts at the next whole hour
-  today (09:00 on another day) and lasts what is left of the task's estimate, rounded up to
-  15 minutes and at most 2 hours, or 1 hour without an estimate.
+  today (09:00 on another day) and lasts what is left of the task's estimate after its time
+  from today on (earlier blocks aren't work done), rounded up to 15 minutes and at most 2
+  hours, or 1 hour without an estimate.
 - Blocks show in the Week, Month and List views and in Today's agenda, with "Task" beside
   their time: a white card with a blue rim, or grey once the task is done. The task's
   detail says how much time is scheduled ("1 hr 30 mins in 2 blocks · estimate 2 hrs") and
@@ -145,8 +177,9 @@ deadline or target date never moves a block.
   blocks move: a done task keeps its blocks, greyed, until you unschedule them or reopen
   it, and trying to move one says so. The task editor shows the scheduled time beside the
   estimate; blocks change on the Calendar, not there.
-- Forewit says when a block overlaps an event, a Google event or another block, and when it
-  ends after the task's deadline. These are warnings: the block is still saved.
+- Forewit says when a block overlaps a busy event, a Google event or another block, when it
+  ends after the task's deadline, and when it is outside your working hours. These are
+  warnings: the block is still saved.
 - Deleting a task hides its blocks, and restoring it brings them back. Blocks are kept in
   backups and in **Export all writing**. Plan with AI never sees them; it only warns when a
   change it proposes overlaps one.

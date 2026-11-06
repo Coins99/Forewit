@@ -34,6 +34,7 @@ from mailbrief.storage.events import EventRepository, apply_edit, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import ActionTable, CalendarEventTable
 from mailbrief.storage.work_blocks import WorkBlockRepository, scheduled_from_rows
+from mailbrief.storage.working_hours import WorkingHoursRepository
 
 MAX_RANGE_DAYS: Final = 42
 _NOT_FOUND: Final = "That event was not found."
@@ -193,8 +194,9 @@ class EventService:
     async def list_range(self, first_day: date, last_day: date, zone: ZoneInfo) -> CalendarRange:
         """The live events touching ``first_day`` through ``last_day`` in ``zone``, all-day
         ones first, then by start; the open actions' dates in those days; the cached
-        Google events touching them, with the days the cache covers (ADR 0018); and the live
-        work blocks of live tasks touching them, by start (ADR 0028).
+        Google events touching them, with the days the cache covers (ADR 0018); the live
+        work blocks of live tasks touching them, by start (ADR 0028); and the working hours
+        (ADR 0029).
 
         Raises ValueError, with a static message, for a range of more than MAX_RANGE_DAYS
         days or one that ends before it starts.
@@ -217,6 +219,7 @@ class EventService:
             google_events=tuple(sorted(cached, key=GoogleEvent.sort_key)),
             google_coverage=await google.coverage(),
             blocks=tuple(scheduled_from_rows(block, action) for block, action in blocks),
+            hours=await WorkingHoursRepository(self._session).read(),
         )
 
     async def apply_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:

@@ -54,8 +54,18 @@ class Appearance(BaseModel):
     transparency: Transparency = Transparency.SYSTEM
     motion: Motion = Motion.SYSTEM
     calendar_view: CalendarView = CalendarView.WEEK  # How the Calendar page opens.
+    # Whether the Calendar shows the tasks to schedule beside the hours (ADR 0029).
+    calendar_tasks: bool = False
 
-    @field_validator("color_scheme", "mode", "transparency", "motion", "calendar_view", mode="wrap")
+    @field_validator(
+        "color_scheme",
+        "mode",
+        "transparency",
+        "motion",
+        "calendar_view",
+        "calendar_tasks",
+        mode="wrap",
+    )
     @classmethod
     def _default_when_unknown(
         cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo

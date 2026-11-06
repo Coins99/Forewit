@@ -32,7 +32,8 @@ API_ROOT: Final = "https://www.googleapis.com/calendar/v3"
 CALENDAR_FIELDS: Final = (
     "items(id,summary,summaryOverride,accessRole,primary,selected,hidden,deleted),nextPageToken"
 )
-EVENT_FIELDS: Final = "items(id,status,summary,htmlLink,start,end),nextPageToken"
+# transparency is Google's "Show as", busy or free (ADR 0029).
+EVENT_FIELDS: Final = "items(id,status,summary,htmlLink,start,end,transparency),nextPageToken"
 # Working-location entries are not events; every other kind is shown.
 SHOWN_EVENT_TYPES: Final = ("default", "outOfOffice", "focusTime", "fromGmail", "birthday")
 MAX_PAGES: Final = 20

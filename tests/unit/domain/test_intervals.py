@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from mailbrief.domain.intervals import clip, minutes, overlaps, total_minutes, union
+from mailbrief.domain.intervals import clip, minutes, overlaps, subtract, total_minutes, union
 
 T = datetime(2026, 11, 2, 14, 0, tzinfo=UTC)
 
@@ -33,3 +33,17 @@ def test_touching_ends_do_not_overlap() -> None:
     assert overlaps((at(0), at(60)), (at(59), at(61)))
     assert not overlaps((at(0), at(60)), (at(60), at(61)))
     assert not overlaps((at(60), at(61)), (at(0), at(60)))
+
+
+def test_subtract_takes_the_cuts_out_once_each() -> None:
+    working = [(at(0), at(120)), (at(180), at(240))]
+    cuts = [(at(30), at(60)), (at(50), at(70)), (at(110), at(190)), (at(300), at(400))]
+    assert subtract(working, cuts) == ((at(0), at(30)), (at(70), at(110)), (at(190), at(240)))
+    assert subtract(working, []) == ((at(0), at(120)), (at(180), at(240)))
+    assert subtract(working, [(at(-10), at(500))]) == ()
+    assert subtract([], cuts) == ()
+
+
+def test_subtract_merges_its_spans_and_keeps_edges_that_only_touch() -> None:
+    assert subtract([(at(30), at(60)), (at(0), at(40))], [(at(60), at(90))]) == ((at(0), at(60)),)
+    assert subtract([(at(0), at(60))], [(at(0), at(10)), (at(50), at(60))]) == ((at(10), at(50)),)

@@ -844,6 +844,10 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P3-2 update (2026-11-06): Busy/Free, working hours with a buffer, free time, the Day
+view and the tasks to schedule are implemented, awaiting owner acceptance
+([ADR 0029](adr/0029-availability.md)). C05 workload (P3-3) follows.
+
 P3-1 update (2026-11-05): C03 work blocks are implemented, awaiting owner acceptance
 ([ADR 0028](adr/0028-work-blocks.md), [P3 register](p3-calendar.md)). Unlike §5.4's
 sketch, block changes are not task activity: blocks keep their own revisions (owner

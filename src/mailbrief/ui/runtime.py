@@ -23,6 +23,7 @@ from mailbrief.domain.actions import (
     TaskChoice,
     ThreadLink,
 )
+from mailbrief.domain.availability import UnscheduledTasks
 from mailbrief.domain.briefs import (
     AutoSendPermission,
     AutoSendStatus,
@@ -63,6 +64,7 @@ from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
+from mailbrief.domain.working_hours import HoursEdit, WorkingHours
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderResponseError
 from mailbrief.providers.analysis import analysis_provider
@@ -78,6 +80,7 @@ from mailbrief.providers.groq.provider import PRIVACY_NOTICE, PROVIDER_NAME
 from mailbrief.providers.local.host import LocalModelHost
 from mailbrief.providers.local.manifest import manifest_for
 from mailbrief.services.actions import AcceptedInto, ActionService, DecisionSnapshot
+from mailbrief.services.availability import AvailabilityService
 from mailbrief.services.bodies import BodyService
 from mailbrief.services.brief import (
     CONSENT_DISCLOSURE_VERSION,
@@ -1192,6 +1195,26 @@ class DesktopRuntime:
     async def restore_block(self, public_id: str) -> BlockSaved:
         async with self._storage().session() as session:
             return await WorkBlockService(session).restore(public_id)
+
+    # Working hours and the tasks to schedule (ADR 0029): local only.
+
+    async def working_hours(self) -> WorkingHours:
+        async with self._storage().session() as session:
+            return await AvailabilityService(session).hours()
+
+    async def save_working_hours(self, edit: HoursEdit, revision: int) -> WorkingHours:
+        async with self._storage().session() as session:
+            return await AvailabilityService(session).save_hours(edit, revision)
+
+    async def next_free(
+        self, after: datetime, length_minutes: int, zone: ZoneInfo
+    ) -> datetime | None:
+        async with self._storage().session() as session:
+            return await AvailabilityService(session).next_free(after, length_minutes, zone)
+
+    async def unscheduled_tasks(self, today: date, zone: ZoneInfo) -> UnscheduledTasks:
+        async with self._storage().session() as session:
+            return await AvailabilityService(session).unscheduled(today, zone)
 
     # Plan with AI (ADR 0018, phase 3b): Groq is opened for each call and closed afterwards;
     # applying and undoing are local.

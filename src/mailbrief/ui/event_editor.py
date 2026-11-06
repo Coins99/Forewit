@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.domain.common import shape_busy
 from mailbrief.domain.events import (
     EVENT_MAX_DAYS,
     EVENT_NOTES_MAX_CHARS,
@@ -353,6 +354,15 @@ class EventEditor(QDialog):
         self.all_day.setObjectName("eventAllDay")
         self.all_day.toggled.connect(self._all_day_toggled)
         form.addRow("", self.all_day)
+        # Busy or Free (ADR 0029): it follows All day until the owner chooses.
+        self.show_as = QComboBox()
+        self.show_as.setObjectName("eventShowAs")
+        self.show_as.setAccessibleName("Show as")
+        self.show_as.addItem("Busy", True)
+        self.show_as.addItem("Free", False)
+        self._show_as_chosen = False
+        self.show_as.activated.connect(self._show_as_picked)
+        form.addRow("Show as", self.show_as)
         self.start_date, self.start_time = self._moment(
             "Starts", "eventStartDate", "eventStartTime"
         )
@@ -403,6 +413,7 @@ class EventEditor(QDialog):
             self.title.text(),
             self.notes.toPlainText(),
             self.all_day.isChecked(),
+            self.show_as.currentIndex(),
             self.start_date.text(),
             self.start_time.currentText(),
             self.end_date.text(),
@@ -444,6 +455,7 @@ class EventEditor(QDialog):
         self.title.setText("")
         self.notes.setPlainText("")
         self._load(start, start + _DEFAULT_LENGTH, all_day=False)
+        self._set_show_as(shape_busy(False), chosen=False)
         self._reset()
 
     def edit_event(self, event: CalendarEvent, zone: ZoneInfo) -> None:
@@ -465,6 +477,7 @@ class EventEditor(QDialog):
             start = event.starts_at_utc.astimezone(zone)
             end = event.ends_at_utc.astimezone(zone)
         self._load(start, end, all_day=event.all_day)
+        self._set_show_as(event.busy, chosen=event.busy != shape_busy(event.all_day))
         self._reset()
 
     def _load(self, start: datetime, end: datetime, *, all_day: bool) -> None:
@@ -511,10 +524,19 @@ class EventEditor(QDialog):
         self.start_time.setVisible(not all_day)
         self.end_time.setVisible(not all_day)
 
+    def _set_show_as(self, busy: bool, *, chosen: bool) -> None:
+        self.show_as.setCurrentIndex(self.show_as.findData(busy))
+        self._show_as_chosen = chosen
+
+    def _show_as_picked(self, _index: int) -> None:
+        self._show_as_chosen = True
+
     def _all_day_toggled(self, all_day: bool) -> None:
         self._show_times(all_day)
         if self._syncing:
             return
+        if not self._show_as_chosen:  # Still the shape's own: timed busy, all-day free.
+            self.show_as.setCurrentIndex(self.show_as.findData(shape_busy(all_day)))
         self._refused = False
         if all_day:
             self._end_on_its_last_day()
@@ -668,6 +690,7 @@ class EventEditor(QDialog):
                     start_date=first,
                     last_date=last,
                     time_zone=self._zone.key,
+                    busy=bool(self.show_as.currentData()),
                 )
             start = self._field_instant(first, _clock(self.start_time.time()), self._start)
             end = self._field_instant(last, _clock(self.end_time.time()), self._end)
@@ -682,6 +705,7 @@ class EventEditor(QDialog):
                 starts_at_utc=start,
                 ends_at_utc=end,
                 time_zone=self._zone.key,
+                busy=bool(self.show_as.currentData()),
             )
         except ValidationError:
             return UNUSABLE

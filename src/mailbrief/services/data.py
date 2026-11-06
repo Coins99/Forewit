@@ -48,6 +48,7 @@ EXPORT_TABLES = (
     "draft_generations",
     "calendar_events",
     "work_blocks",
+    "working_hours",
 )
 
 

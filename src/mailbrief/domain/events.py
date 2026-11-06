@@ -5,6 +5,10 @@ all-day, from one local day through another. A timed event keeps UTC instants an
 zone it was entered in; an all-day event keeps plain dates, so it stays on the same days
 whatever zone the owner is in. Action deadlines and target dates are markers, never stored
 as events, so moving an event can never change a deadline.
+
+An event is busy or free (ADR 0029): a busy one takes the time it covers, a free one is
+only shown. Unless the owner chooses, a timed event is busy and an all-day one free, so an
+all-day Busy event is a day off.
 """
 
 import unicodedata
@@ -21,9 +25,16 @@ from mailbrief.domain.actions import (
     PUBLIC_ID_CHARS,
     ActionStatus,
 )
-from mailbrief.domain.common import ZONE_KEY_MAX_CHARS, DomainModel, known_zone, normalize_utc
+from mailbrief.domain.common import (
+    ZONE_KEY_MAX_CHARS,
+    DomainModel,
+    busy_by_shape,
+    known_zone,
+    normalize_utc,
+)
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 from mailbrief.domain.work_blocks import WorkBlock
+from mailbrief.domain.working_hours import WorkingHours
 
 EVENT_TITLE_MAX_CHARS: Final = 200
 EVENT_NOTES_MAX_CHARS: Final = 10_000
@@ -82,6 +93,13 @@ class EventEdit(DomainModel):
     start_date: date | None = None
     last_date: date | None = None
     time_zone: str = Field(min_length=1, max_length=ZONE_KEY_MAX_CHARS)
+    # Whether the event takes its time (ADR 0029); left out, it follows the shape.
+    busy: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _busy_default(cls, data: object) -> object:
+        return busy_by_shape(data)
 
     @field_validator("title")
     @classmethod
@@ -123,6 +141,12 @@ class CalendarEvent(DomainModel):
     revision: int = Field(ge=1)
     created_at_utc: datetime
     updated_at_utc: datetime
+    busy: bool = True  # Left out, it follows the shape (ADR 0029).
+
+    @model_validator(mode="before")
+    @classmethod
+    def _busy_default(cls, data: object) -> object:
+        return busy_by_shape(data)
 
     @field_validator("starts_at_utc", "ends_at_utc", "created_at_utc", "updated_at_utc")
     @classmethod
@@ -160,6 +184,7 @@ class CalendarEvent(DomainModel):
             start_date=self.start_date,
             last_date=self.last_date,
             time_zone=self.time_zone,
+            busy=self.busy,
         )
 
     def sort_key(self) -> tuple[bool, date, datetime, str, str]:
@@ -267,7 +292,8 @@ class CalendarRange(DomainModel):
 
     ``google_events`` are the cached Google events touching those days, read-only, and
     ``google_coverage`` the days the cache holds (None when nothing is cached). ``blocks``
-    are the live work blocks of live tasks touching them (ADR 0028).
+    are the live work blocks of live tasks touching them (ADR 0028), and ``hours`` the
+    owner's working hours as they were read with the days (ADR 0029).
     """
 
     first_day: date
@@ -277,6 +303,7 @@ class CalendarRange(DomainModel):
     google_events: tuple[GoogleEvent, ...] = ()
     google_coverage: GoogleCoverage | None = None
     blocks: tuple[ScheduledBlock, ...] = ()
+    hours: WorkingHours = Field(default_factory=WorkingHours.unset)
 
 
 def wall_clock(day: date, clock: time, zone: ZoneInfo) -> datetime:

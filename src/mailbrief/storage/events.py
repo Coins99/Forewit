@@ -29,6 +29,7 @@ def event_from_row(row: CalendarEventTable) -> CalendarEvent:
         revision=row.revision,
         created_at_utc=row.created_at_utc,
         updated_at_utc=row.updated_at_utc,
+        busy=row.busy,
     )
 
 
@@ -42,6 +43,7 @@ def apply_edit(row: CalendarEventTable, edit: EventEdit) -> None:
     row.start_date = edit.start_date
     row.last_date = edit.last_date
     row.time_zone = edit.time_zone
+    row.busy = edit.busy
 
 
 class EventRepository:

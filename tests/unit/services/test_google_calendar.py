@@ -292,6 +292,33 @@ async def test_zero_length_and_all_day_events_show_on_their_days(
     assert [event.event_id for event in friday.google_events] == ["t"]
 
 
+async def test_the_cache_keeps_googles_show_as(
+    service: CalendarSyncService, reader: FakeReader, session: AsyncSession
+) -> None:
+    busy = google(PRIMARY, "busy", datetime(2026, 10, 14, 14, 0, tzinfo=UTC))
+    free = google(PRIMARY, "free", datetime(2026, 10, 14, 16, 0, tzinfo=UTC)).model_copy(
+        update={"busy": False}
+    )
+    away = GoogleEvent(
+        calendar_id=PRIMARY.calendar_id,
+        calendar_name="Owner",
+        event_id="away",
+        title="Away",
+        all_day=True,
+        start_date=TODAY,
+        last_date=TODAY,
+        busy=True,
+    )
+    reader.events = {PRIMARY.calendar_id: (busy, free, away)}
+    await service.sync(TODAY, TORONTO)
+    shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
+    assert {event.event_id: event.busy for event in shown.google_events} == {
+        "busy": True,
+        "free": False,
+        "away": True,
+    }
+
+
 async def test_default_clock_is_utc_now(session: AsyncSession, reader: FakeReader) -> None:
     result = await CalendarSyncService(session, reader).sync(TODAY, TORONTO)
     assert result.calendars == 2

@@ -18,6 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     text,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -42,6 +43,7 @@ from mailbrief.domain.preferences import (
     SHORTLIST_LIMIT_MAX,
 )
 from mailbrief.domain.recurrence import RepeatFrequency
+from mailbrief.domain.working_hours import BUFFER_CHOICES
 from mailbrief.storage.types import UTCDateTime
 
 NAMING_CONVENTION = {
@@ -1148,7 +1150,8 @@ class CalendarEventTable(Base):
 
     Events have no account foreign key: they belong to the owner. A timed event keeps two
     UTC instants and the zone it was entered in; an all-day event keeps its first and last
-    local days. The CHECK keeps the two shapes apart. Rows change only through ORM objects.
+    local days. The CHECK keeps the two shapes apart. ``busy`` says whether the event takes
+    its time (ADR 0029). Rows change only through ORM objects.
     """
 
     __tablename__ = "calendar_events"
@@ -1176,6 +1179,7 @@ class CalendarEventTable(Base):
     revision: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )
+    busy: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
 
 
 class WorkBlockTable(Base):
@@ -1237,7 +1241,7 @@ class GoogleEventTable(Base):
     """One cached Google event (ADR 0018): what the Calendar page shows, nothing more.
 
     Descriptions, locations, guests and conference details are never requested, so never
-    stored.
+    stored. ``busy`` is Google's "Show as" (ADR 0029).
     """
 
     __tablename__ = "google_events"
@@ -1261,3 +1265,31 @@ class GoogleEventTable(Base):
     last_date: Mapped[date | None] = mapped_column(Date)
     web_link: Mapped[str | None] = mapped_column(Text)
     fetched_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    busy: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
+
+
+_BUFFER_CHECK = f"buffer_minutes IN ({', '.join(str(minutes) for minutes in BUFFER_CHOICES)})"
+
+
+class WorkingHoursTable(Base):
+    """The owner's weekly working hours and buffer (ADR 0029): one revisioned row.
+
+    No row means none were set. ``windows_json`` holds seven lists, Monday first, of
+    ``[start_minute, end_minute]`` pairs. It is the owner's, apart from the preferences row,
+    so a calendar setting can never stop email work, and changes only through ORM objects.
+    """
+
+    __tablename__ = "working_hours"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="single_row"),
+        CheckConstraint(_BUFFER_CHECK, name="buffer_minutes_known"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    windows_json: Mapped[list[list[list[int]]]] = mapped_column(JSON, nullable=False)
+    buffer_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
