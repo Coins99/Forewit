@@ -237,7 +237,12 @@ class ActionMarker(DomainModel):
 
 class ScheduledBlock(DomainModel):
     """A work block (ADR 0028) with its task's live title and state, for the calendar to
-    show; like a marker, it is never an event."""
+    show; like a marker, it is never an event.
+
+    For workload and conflicts (ADR 0030) it also carries the task's estimate, when its
+    deadline falls due, and ``upcoming_minutes``: the length of all its live blocks from
+    the owner's today on, as the tasks to schedule count it (ADR 0029).
+    """
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
@@ -245,6 +250,14 @@ class ScheduledBlock(DomainModel):
     action_title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
     action_status: ActionStatus
     waiting: bool = False  # Someone else is doing the task.
+    estimate_minutes: int | None = Field(default=None, ge=1)
+    due_at_utc: datetime | None = None
+    upcoming_minutes: int = Field(default=0, ge=0)
+
+    @field_validator("due_at_utc")
+    @classmethod
+    def _due_utc(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else normalize_utc(value)
 
     @property
     def public_id(self) -> str:
@@ -287,13 +300,28 @@ class ScheduledBlock(DomainModel):
         )
 
 
+class FocusTask(DomainModel):
+    """A live, open task of the owner's chosen for a day's focus, and its estimate."""
+
+    action_public_id: str = Field(min_length=PUBLIC_ID_CHARS, max_length=PUBLIC_ID_CHARS)
+    estimate_minutes: int | None = Field(default=None, ge=1)
+
+
+class FocusDay(DomainModel):
+    """The tasks chosen for one local day's focus, in their order (ADR 0030)."""
+
+    day: date
+    tasks: tuple[FocusTask, ...] = ()
+
+
 class CalendarRange(DomainModel):
     """The events touching a run of local days, and the open actions' dates in them.
 
     ``google_events`` are the cached Google events touching those days, read-only, and
     ``google_coverage`` the days the cache holds (None when nothing is cached). ``blocks``
-    are the live work blocks of live tasks touching them (ADR 0028), and ``hours`` the
-    owner's working hours as they were read with the days (ADR 0029).
+    are the live work blocks of live tasks touching them (ADR 0028), ``hours`` the
+    owner's working hours as they were read with the days (ADR 0029), and ``focus`` the
+    days among them with focus tasks the owner does (ADR 0030).
     """
 
     first_day: date
@@ -304,6 +332,11 @@ class CalendarRange(DomainModel):
     google_coverage: GoogleCoverage | None = None
     blocks: tuple[ScheduledBlock, ...] = ()
     hours: WorkingHours = Field(default_factory=WorkingHours.unset)
+    focus: tuple[FocusDay, ...] = ()
+
+    def focus_on(self, day: date) -> tuple[FocusTask, ...]:
+        """The focus tasks chosen for ``day``; none when it has no plan."""
+        return next((found.tasks for found in self.focus if found.day == day), ())
 
 
 def wall_clock(day: date, clock: time, zone: ZoneInfo) -> datetime:

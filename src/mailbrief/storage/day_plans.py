@@ -6,7 +6,10 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.storage.tables import DayPlanItemTable, DayPlanTable
+from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.events import FocusDay, FocusTask
+from mailbrief.storage.tables import ActionTable, DayPlanItemTable, DayPlanTable
 
 
 async def plan_row(session: AsyncSession, day: date) -> DayPlanTable | None:
@@ -72,3 +75,30 @@ async def remove_task_references(
                 await session.delete(item)
         await session.flush()
         await order_items(session, await item_rows(session, plan_id), now)
+
+
+async def focus_days(
+    session: AsyncSession, first_day: date, last_day: date
+) -> tuple[FocusDay, ...]:
+    """The days from ``first_day`` through ``last_day`` with focus tasks the owner does, each
+    with its live, open ones in their order and their estimates (ADR 0030). A day plan holds
+    at most MAX_DAY_ITEMS, so the read is bounded by the range."""
+    rows = await session.execute(
+        select(DayPlanTable.local_date, ActionTable.public_id, ActionTable.estimate_minutes)
+        .join(DayPlanItemTable, DayPlanItemTable.plan_id == DayPlanTable.id)
+        .join(ActionTable, ActionTable.public_id == DayPlanItemTable.task_public_id)
+        .where(
+            DayPlanTable.local_date >= first_day,
+            DayPlanTable.local_date <= last_day,
+            ActionTable.deleted_at_utc.is_(None),
+            ActionTable.status == ActionStatus.OPEN.value,
+            ActionTable.ownership == ActionOwnership.MINE.value,
+        )
+        .order_by(DayPlanTable.local_date, DayPlanItemTable.position)
+    )
+    days: dict[date, list[FocusTask]] = {}
+    for day, public_id, estimate in rows.tuples():
+        days.setdefault(day, []).append(
+            FocusTask(action_public_id=public_id, estimate_minutes=estimate)
+        )
+    return tuple(FocusDay(day=day, tasks=tuple(tasks)) for day, tasks in days.items())

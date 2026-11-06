@@ -9,11 +9,11 @@ brings them back.
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import Subquery, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionStatus
-from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision, deadline_due_at
 from mailbrief.domain.events import ScheduledBlock
 from mailbrief.domain.work_blocks import BLOCK_MAX_MINUTES, BlockTime, WorkBlock
 from mailbrief.storage.database import sorted_batches
@@ -34,13 +34,44 @@ def block_from_row(row: WorkBlockTable, action_public_id: str) -> WorkBlock:
     )
 
 
-def scheduled_from_rows(row: WorkBlockTable, action: ActionTable) -> ScheduledBlock:
-    """A block with its task's live title and state."""
+def task_due_at(action: ActionTable) -> datetime | None:
+    """When the task's deadline falls due; None without a dated one."""
+    return deadline_due_at(
+        DeadlinePrecision(action.deadline_precision),
+        action.deadline_date,
+        action.deadline_at_utc,
+        action.deadline_timezone,
+    )
+
+
+def scheduled_from_rows(
+    row: WorkBlockTable, action: ActionTable, *, upcoming_minutes: int = 0
+) -> ScheduledBlock:
+    """A block with its task's live title, state, estimate and deadline, and the task's
+    time set aside from today on (``upcoming_minutes``, when the caller read it)."""
     return ScheduledBlock(
         block=block_from_row(row, action.public_id),
         action_title=action.title,
         action_status=ActionStatus(action.status),
         waiting=action.ownership == ActionOwnership.WAITING_FOR.value,
+        estimate_minutes=action.estimate_minutes,
+        due_at_utc=task_due_at(action),
+        upcoming_minutes=upcoming_minutes,
+    )
+
+
+def upcoming_minutes(since: datetime) -> Subquery:
+    """Each task's live blocks ending after ``since``, their lengths summed in minutes
+    (``action_id``, ``minutes``): its time set aside from then on. julianday() arithmetic is
+    accurate to far less than a minute."""
+    length = (
+        func.julianday(WorkBlockTable.ends_at_utc) - func.julianday(WorkBlockTable.starts_at_utc)
+    ) * (24 * 60)
+    return (
+        select(WorkBlockTable.action_id.label("action_id"), func.sum(length).label("minutes"))
+        .where(WorkBlockTable.deleted_at_utc.is_(None), WorkBlockTable.ends_at_utc > since)
+        .group_by(WorkBlockTable.action_id)
+        .subquery()
     )
 
 
@@ -105,6 +136,18 @@ class WorkBlockRepository:
             )
             for row in rows:
                 found.setdefault(row.action_id, []).append(row)
+        return found
+
+    async def upcoming(self, action_ids: Iterable[int], since: datetime) -> dict[int, int]:
+        """These tasks' time set aside from ``since`` on, in whole minutes; a task with
+        none is left out."""
+        found: dict[int, int] = {}
+        sums = upcoming_minutes(since)
+        for chunk in sorted_batches(action_ids):
+            rows = await self._session.execute(
+                select(sums.c.action_id, sums.c.minutes).where(sums.c.action_id.in_(chunk))
+            )
+            found.update((action_id, round(minutes)) for action_id, minutes in rows.tuples())
         return found
 
     async def touching(

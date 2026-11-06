@@ -41,7 +41,7 @@ class UpcomingDialog(QDialog):
         layout.addWidget(
             wrap_label(
                 "Timed occupancy is the union of known meetings. All-day events are separate. "
-                "This does not estimate available capacity."
+                "Free time and workload are on the Calendar page."
             )
         )
 

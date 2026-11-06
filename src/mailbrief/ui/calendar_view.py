@@ -10,6 +10,10 @@ events; changing one never changes its task.
 Beside the hours, the tasks to schedule (ADR 0029) list the owner's open tasks that still
 need time: dragged onto the hours, or with Return for the next free time, they ask for a
 block. A line under the hours says how much working time is free.
+
+Each day's head in the Day and Week views carries its load, and a block in conflict is
+marked (ADR 0030); a line under the hours explains the day or block chosen. All of it is
+worked out here, from the days the window read: nothing more is read or sent.
 """
 
 from collections.abc import Callable
@@ -43,6 +47,7 @@ from mailbrief.domain.events import (
 )
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.working_hours import WorkingHours
+from mailbrief.domain.workload import Conflict, DayWorkload, block_conflicts, workload
 from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
 from mailbrief.ui.calendar_layout import (
     WEEK_DAYS,
@@ -69,11 +74,12 @@ from mailbrief.ui.deadline_text import (
     month_day,
 )
 from mailbrief.ui.hours_editor import windows_text
-from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label
+from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label, wrap_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, AgendaRowDelegate, DisplayRow
 from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import TEXT_PX, TITLE_PX, ui_font
 from mailbrief.ui.unscheduled_view import UnscheduledPanel
+from mailbrief.ui.workload_text import block_reasons, day_reasons
 
 __all__ = [
     "CalendarPanel",
@@ -291,6 +297,9 @@ class CalendarPanel(QWidget):
         self._shown_kind: RangeKind = "week"
         self._zone = ZoneInfo("UTC")
         self._clock: Callable[[], datetime] = utc_now  # For the free line.
+        # Workload and conflicts of the days shown (ADR 0030).
+        self._loads: dict[date, DayWorkload] = {}
+        self._conflicts: dict[str, tuple[Conflict, ...]] = {}
         self._tasks_shown = tasks  # The tasks to schedule beside the hours.
         self._tasks_total = 0
         self._today: date | None = None
@@ -369,6 +378,13 @@ class CalendarPanel(QWidget):
         body.addWidget(self.stack, 1)
         body.addWidget(self.unscheduled)
         layout.addLayout(body, 1)
+        # Why the day or block chosen holds what it does (ADR 0030); Day and Week only.
+        self.reasons = wrap_label("", tone="muted")
+        self.reasons.setObjectName("calendarReasons")
+        self.reasons.setAccessibleName("Workload and conflicts")
+        self.reasons.setContentsMargins(24, 4, 24, 0)
+        self.reasons.hide()
+        layout.addWidget(self.reasons)
         self.empty = plain_label(EMPTY, tone="muted")  # Under every view.
         self.empty.setObjectName("calendarEmpty")
         layout.addWidget(self.empty)
@@ -524,7 +540,10 @@ class CalendarPanel(QWidget):
     def set_google(self, mode: str, note: str) -> None:
         """What the one Google sign-in allows, and what the cache holds, in one line:
         GOOGLE_OFF shows no button, GOOGLE_ASK offers Allow and GOOGLE_ON offers Refresh."""
+        changed = mode != self._google_mode
         self._google_mode = mode
+        if changed:  # Whether Google's cache can make a day provisional.
+            self._show_workload()
         self.google_status.setText(note)
         self.allow_button.setVisible(mode == GOOGLE_ASK)
         self.refresh_button.setVisible(mode == GOOGLE_ON)
@@ -541,6 +560,10 @@ class CalendarPanel(QWidget):
         self._shown_kind = range_kind(self.view())
         self._zone = zone
         self._today = today
+        # The Month view shows neither loads nor conflicts; the List view marks conflicts.
+        self._conflicts = (
+            {} if self._shown_kind == "month" else block_conflicts(shown, zone, self._clock())
+        )
         self._rows = []
         self.list.blockSignals(True)
         try:
@@ -580,6 +603,10 @@ class CalendarPanel(QWidget):
                             if isinstance(entry, ScheduledBlock)
                             else "Your calendar"
                         )
+                        if isinstance(entry, ScheduledBlock) and self._conflicts.get(
+                            entry.public_id
+                        ):
+                            preview = f"{preview} · conflict"
                         if not isinstance(entry, ScheduledBlock) and (note := show_as(entry)):
                             preview = f"{preview} · {note}"
                         first, last = entry.days(zone)
@@ -610,6 +637,7 @@ class CalendarPanel(QWidget):
             self.list.blockSignals(False)
         for grid in (self.week_grid, self.day_grid, self.month_grid):
             grid.show_range(shown, zone, today)
+        self._show_workload()
         if previous is not None:
             if previous[1] is not None:
                 self._select(entry_key(previous[1]), previous[0])
@@ -661,6 +689,7 @@ class CalendarPanel(QWidget):
         for grid in (self.week_grid, self.day_grid, self.month_grid):
             grid.set_selection(day, key)
         self._update_buttons()
+        self._show_reasons()
 
     def _choose(self, day: object, entry: object) -> None:
         """A grid chose a day, or an entry on it."""
@@ -769,6 +798,54 @@ class CalendarPanel(QWidget):
         )
         self.free_line.setText(text)
         self.free_line.setVisible(bool(text))
+        self._show_reasons()
+
+    # Workload and conflicts (ADR 0030).
+
+    def _show_workload(self) -> None:
+        """Each day's load and the blocks in conflict, for the grids of hours and the line
+        under them. Google's cache makes a day provisional only while Google Calendar is
+        on."""
+        shown = self._shown
+        if shown is None:
+            return
+        if self._shown_kind == "month":  # A month's grid shows no load.
+            self._loads = {}
+            for grid in (self.week_grid, self.day_grid):
+                grid.show_workload({}, frozenset())
+            self._show_reasons()
+            return
+        google_on = self._google_mode == GOOGLE_ON
+        loads = workload(
+            shown, self._zone, self._clock(), google_on=google_on, conflicts=self._conflicts
+        )
+        self._loads = {load.day: load for load in loads}
+        conflicted = frozenset(found for found, conflicts in self._conflicts.items() if conflicts)
+        for grid in (self.week_grid, self.day_grid):
+            grid.show_workload(self._loads, conflicted)
+        self._show_reasons()
+
+    def _show_reasons(self) -> None:
+        """Why the block or day chosen holds what it does, in the Day and Week views: a block
+        in conflict says what it clashes with, anything else explains its day's load."""
+        text = ""
+        row = self.list.currentRow()
+        view, today = self.view(), self._today
+        fits = has_hours(view) and range_kind(view) == self._shown_kind
+        if fits and today is not None and 0 <= row < len(self._rows):
+            day, entry = self._rows[row]
+            conflicts: tuple[Conflict, ...] = ()
+            if isinstance(entry, ScheduledBlock):
+                conflicts = self._conflicts.get(entry.public_id, ())
+            load = self._loads.get(day)
+            if isinstance(entry, ScheduledBlock) and conflicts:
+                text = block_reasons(entry.title, conflicts, entry.estimate_minutes)
+            elif load is not None and (
+                load.available_minutes or load.planned_minutes or load.availability.day_off
+            ):
+                text = day_reasons(load, day_text(day, today=today))
+        self.reasons.setText(text)
+        self.reasons.setVisible(bool(text))
 
     # The tasks to schedule (ADR 0029).
 

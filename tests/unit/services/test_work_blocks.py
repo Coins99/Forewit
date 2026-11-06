@@ -34,6 +34,7 @@ from mailbrief.services.data import (
     export_writing,
     preview_cleanup,
 )
+from mailbrief.services.day_plans import DayPlanService
 from mailbrief.services.events import EventService
 from mailbrief.services.work_blocks import (
     BlockConflictError,
@@ -47,6 +48,7 @@ from mailbrief.storage.recovery import restore_backup
 from mailbrief.storage.tables import (
     ActionActivityTable,
     ActionTable,
+    CalendarEventTable,
     GoogleCalendarTable,
     GoogleEventTable,
     WorkBlockTable,
@@ -445,6 +447,97 @@ async def test_a_block_outside_the_working_hours_warns_only_when_hours_are_set(
     assert early.outside_hours
     saturday = await blocks.move(before.block.public_id, 4, span(date(2026, 11, 7), 10, 11))
     assert saturday.outside_hours
+
+
+async def test_a_block_in_a_busy_event_s_buffer_warns_once_a_buffer_is_set(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    # ADR 0030: the gap P3-2 left; the calendar's conflicts and a save's warning agree.
+    events = EventService(session)
+    standup = EventEdit(
+        title="Standup",
+        all_day=False,
+        starts_at_utc=at(MONDAY, 9),
+        ends_at_utc=at(MONDAY, 9, 30),
+        time_zone=ZONE,
+    )
+    await events.create(standup)
+    await events.create(standup.model_copy(update={"title": "Maybe", "busy": False}))
+    created = await actions.create(task())
+    near = BlockTime(starts_at_utc=at(MONDAY, 9, 35), ends_at_utc=at(MONDAY, 10), time_zone=ZONE)
+    before = await blocks.schedule(created.public_id, near)
+    assert before.buffered == () and before.overlaps == ()
+    nine_to_five = (WorkingWindow(start_minute=9 * 60, end_minute=17 * 60),)
+    await AvailabilityService(session).save_hours(
+        HoursEdit(days=(nine_to_five,) * 5 + ((), ()), buffer_minutes=10), 0
+    )
+    after = await blocks.move(before.block.public_id, 1, near)
+    assert after.buffered == ("Standup",) and after.overlaps == ()  # The free one never.
+    clear = BlockTime(starts_at_utc=at(MONDAY, 9, 40), ends_at_utc=at(MONDAY, 10), time_zone=ZONE)
+    assert (await blocks.move(before.block.public_id, 2, clear)).buffered == ()
+
+
+async def test_an_event_row_that_no_longer_validates_never_stops_a_save(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    created = await actions.create(task())
+    session.add(
+        CalendarEventTable(
+            public_id="00000000-0000-4000-8000-00000000bad1",
+            title="x" * 500,  # Longer than an event title may be.
+            notes="",
+            all_day=False,
+            starts_at_utc=at(MONDAY, 10),
+            ends_at_utc=at(MONDAY, 11),
+            time_zone=ZONE,
+            created_at_utc=NOW,
+            updated_at_utc=NOW,
+            revision=1,
+            busy=True,
+        )
+    )
+    await session.commit()
+    saved = await blocks.schedule(created.public_id, span(MONDAY, 10, 11))
+    assert saved.block.revision == 1 and saved.overlaps == ()
+
+
+async def test_the_range_carries_each_block_s_task_time_and_the_days_focus(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    # ADR 0030: what the calendar needs for workload, read with the days.
+    estimated = await actions.create(
+        task("Estimated", estimate_minutes=90),
+        deadline=DeadlineChange(kind=DeadlineChangeKind.SET, due_date=TUESDAY),
+    )
+    loose = await actions.create(task("Loose", estimate_minutes=None))
+    waiting = await actions.create(
+        task("Waiting", ownership=ActionOwnership.WAITING_FOR, person="Sam")
+    )
+    done = await actions.create(task("Done"))
+    await blocks.schedule(estimated.public_id, span(MONDAY, 9, 10))
+    await blocks.schedule(estimated.public_id, span(TUESDAY, 9, 10))
+    await blocks.schedule(estimated.public_id, span(date(2026, 11, 1), 9, 10))  # Yesterday.
+    plans = DayPlanService(session, clock=Clock(NOW))
+    for public_id in (loose.public_id, waiting.public_id, estimated.public_id, done.public_id):
+        plan = await plans.load(MONDAY)
+        await plans.select(MONDAY, TORONTO, public_id, plan.revision)
+    await actions.complete(done.public_id, done.revision)
+    events = EventService(session, clock=Clock(NOW))
+    plain = await events.list_range(MONDAY, TUESDAY, TORONTO)
+    assert plain.focus == () and {item.upcoming_minutes for item in plain.blocks} == {0}
+    shown = await events.list_range(MONDAY, TUESDAY, TORONTO, with_workload=True)
+    monday_block = next(item for item in shown.blocks if item.days(TORONTO)[0] == MONDAY)
+    assert monday_block.estimate_minutes == 90
+    assert monday_block.due_at_utc == at(date(2026, 11, 4), 0)  # The next local midnight.
+    assert monday_block.upcoming_minutes == 120  # Monday's and Tuesday's, not Sunday's.
+    (focus,) = shown.focus
+    assert focus.day == MONDAY
+    assert [item.action_public_id for item in focus.tasks] == [
+        loose.public_id,
+        estimated.public_id,
+    ]  # Live, open and the owner's own, in their order.
+    assert [item.estimate_minutes for item in focus.tasks] == [None, 90]
+    assert shown.focus_on(TUESDAY) == ()
 
 
 async def test_a_block_after_the_deadline_warns_and_moves_nothing(

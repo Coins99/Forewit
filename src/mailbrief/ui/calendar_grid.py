@@ -50,6 +50,7 @@ from mailbrief.domain.common import utc_now
 from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.work_blocks import BLOCK_STEP_MINUTES
+from mailbrief.domain.workload import DayWorkload
 from mailbrief.ui.calendar_layout import (
     DAY_MINUTES,
     MIN_BLOCK_MINUTES,
@@ -79,6 +80,7 @@ from mailbrief.ui.theme import (
     ui_font,
     ui_metrics,
 )
+from mailbrief.ui.workload_text import SPARE, header_text
 
 Key = tuple[str, ...]
 
@@ -86,7 +88,9 @@ Key = tuple[str, ...]
 GUTTER: Final = 52  # The hours' labels.
 HOUR_PX: Final = 48
 HOURS_PAD: Final = 8  # Above 00:00 and below 24:00, so their labels show whole.
-HEADER_H: Final = 52
+HEADER_H: Final = 66  # The weekday, the date and the day's load (ADR 0030).
+LOAD_TOP: Final = 52  # Where the load line starts in the head.
+CONFLICT_DOT: Final = 3.0  # The radius of a block's conflict mark.
 TODAY_DIAMETER: Final = 26
 LANE_H: Final = 20
 LANE_GAP: Final = 2
@@ -439,6 +443,9 @@ class WeekGrid(_Grid):
         # Where a task dragged in from the unscheduled panel would go: its day, start and
         # length in wall-clock minutes, and its title.
         self._placement: tuple[date, int, int, str] | None = None
+        # Workload and conflicts (ADR 0030): each day's load, and the blocks in conflict.
+        self._loads: dict[date, DayWorkload] = {}
+        self._conflicted: frozenset[str] = frozenset()
 
     # Geometry. The heads and the strip line their columns up with the hours, whose
     # scroll bar takes room at the right.
@@ -747,6 +754,29 @@ class WeekGrid(_Grid):
             painter.setFont(ui_font(SMALL_PX + 2, semibold=True, tabular=True))
             painter.setPen(QColor(color))
             painter.drawText(circle, _ALIGN_CENTER, str(day.day))
+            self._paint_load(painter, tokens, day, QRectF(left + 2, LOAD_TOP, width - 4, 13))
+
+    def _paint_load(self, painter: QPainter, tokens: Tokens, day: date, rect: QRectF) -> None:
+        """The day's load under its date: warning text when it is overfilled."""
+        load = self._loads.get(day)
+        if load is None:
+            return
+        text, warns = header_text(load, wide=self._count == 1)
+        if not text:
+            return
+        metrics = ui_metrics(CAPTION_PX, tabular=True)
+        if text.endswith(SPARE) and metrics.horizontalAdvance(text) > rect.width():
+            text = text.removesuffix(SPARE)  # A narrow column keeps the figure.
+        painter.setFont(ui_font(CAPTION_PX, tabular=True))
+        painter.setPen(QColor(tokens.warning_fg if warns else tokens.text_secondary))
+        painter.drawText(rect, _ALIGN_CENTER, _elided(text, metrics, rect.width()))
+
+    def show_workload(self, loads: dict[date, DayWorkload], conflicted: frozenset[str]) -> None:
+        """Each day's load for its head, and the blocks to mark as in conflict (ADR 0030)."""
+        if (loads, conflicted) != (self._loads, self._conflicted):
+            self._loads, self._conflicted = loads, conflicted
+            self.header.update()
+            self.hours.update()
 
     def _paint_strip(self, painter: QPainter, tokens: Tokens) -> None:
         painter.setFont(ui_font(CAPTION_PX))
@@ -893,7 +923,9 @@ class WeekGrid(_Grid):
         painter.setClipPath(path)
         if not is_free(event):  # A free event has no edge: it takes no time.
             painter.fillRect(QRectF(rect.left(), rect.top(), EDGE_W, rect.height()), QColor(edge))
-        area = rect.adjusted(EDGE_W + 4, 2, -3, -2)
+        marked = isinstance(event, ScheduledBlock) and event.public_id in self._conflicted
+        right = 3 + (2 * CONFLICT_DOT + 4 if marked else 0)  # Room for the conflict mark.
+        area = rect.adjusted(EDGE_W + 4, 2, -right, -2)
         title = ui_metrics(SMALL_PX, semibold=True)
         painter.setFont(ui_font(SMALL_PX, semibold=True))
         painter.setPen(QColor(text))
@@ -918,6 +950,13 @@ class WeekGrid(_Grid):
             painter.drawText(below, _ALIGN_LEFT, _elided(when, when_metrics, area.width()))
         painter.restore()
         paint_outline(painter, rect, BLOCK_RADIUS, event, tokens)
+        if marked:  # A mark in the top right corner: the line under the hours says why.
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.warning_fg))
+            mark = QPointF(rect.right() - 4 - CONFLICT_DOT, rect.top() + 4 + CONFLICT_DOT)
+            painter.drawEllipse(mark, CONFLICT_DOT, CONFLICT_DOT)
+            painter.restore()
         if entry_key(event) == self._key and part.day == self._day:
             paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
 

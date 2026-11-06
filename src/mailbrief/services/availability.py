@@ -30,7 +30,8 @@ from mailbrief.services.actions import urgency
 from mailbrief.services.calendar import day_window
 from mailbrief.services.events import EventService
 from mailbrief.services.writes import commit_once
-from mailbrief.storage.tables import ActionTable, WorkBlockTable, WorkingHoursTable
+from mailbrief.storage.tables import ActionTable, WorkingHoursTable
+from mailbrief.storage.work_blocks import upcoming_minutes
 from mailbrief.storage.working_hours import (
     HOURS_ROW_ID,
     WorkingHoursRepository,
@@ -107,18 +108,7 @@ class AvailabilityService:
         from ``today`` on. Earlier blocks don't count: a block is planned time, never work
         done.
         """
-        since = day_window(today, zone).start_utc
-        ends, starts = WorkBlockTable.ends_at_utc, WorkBlockTable.starts_at_utc
-        length = (func.julianday(ends) - func.julianday(starts)) * (24 * 60)
-        upcoming = (
-            select(
-                WorkBlockTable.action_id.label("action_id"),
-                func.sum(length).label("minutes"),
-            )
-            .where(WorkBlockTable.deleted_at_utc.is_(None), WorkBlockTable.ends_at_utc > since)
-            .group_by(WorkBlockTable.action_id)
-            .subquery()
-        )
+        upcoming = upcoming_minutes(day_window(today, zone).start_utc)
         scheduled = func.coalesce(upcoming.c.minutes, 0.0)
         rows = (
             await self._session.execute(

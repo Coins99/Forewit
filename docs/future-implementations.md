@@ -844,6 +844,12 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P3-3 update (2026-11-06): C05 workload and conflicts are implemented, awaiting owner
+acceptance ([ADR 0030](adr/0030-workload.md)): §5.2's selected workload, scheduled task time
+(total and unique) and available time per local day, overfilled and provisional days, and
+explained block conflicts, as a read model with no new storage. With it, all of P3 is
+implemented; its gate awaits the owner's acceptance.
+
 P3-2 update (2026-11-06): Busy/Free, working hours with a buffer, free time, the Day
 view and the tasks to schedule are implemented, awaiting owner acceptance
 ([ADR 0029](adr/0029-availability.md)). C05 workload (P3-3) follows.

@@ -6,13 +6,14 @@ calls a provider, and AI never sees blocks. Every mutating method reads the cloc
 commits once and rolls back on failure. Errors carry static messages, and nothing logs a
 task's title.
 
-Overlaps, a block ending after its task's deadline and a block outside the working hours
-are warnings that never stop a save. Only busy events overlap a block, and an all-day busy
-event, a day off, overlaps every block on its days (ADR 0029).
+Overlaps, a block in a busy event's buffer, a block ending after its task's deadline and a
+block outside the working hours are warnings that never stop a save. Only busy events overlap
+a block, and an all-day busy event, a day off, overlaps every block on its days (ADR 0029).
+They are the calendar's conflicts, from one definition (``domain.workload``, ADR 0030).
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -20,11 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionStatus
-from mailbrief.domain.analysis import DeadlinePrecision, deadline_due_at
-from mailbrief.domain.availability import local_moment, working_spans
 from mailbrief.domain.common import new_public_id, utc_now
-from mailbrief.domain.events import ScheduledBlock
-from mailbrief.domain.intervals import Interval, overlaps, subtract
+from mailbrief.domain.events import CalendarEvent, ScheduledBlock
+from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.work_blocks import (
     MAX_BLOCKS_PER_TASK,
     MAX_OVERLAP_LABELS,
@@ -32,8 +31,9 @@ from mailbrief.domain.work_blocks import (
     BlockTime,
     WorkBlock,
 )
+from mailbrief.domain.workload import ConflictKind, conflicts_for
 from mailbrief.services.writes import commit_once
-from mailbrief.storage.events import EventRepository
+from mailbrief.storage.events import EventRepository, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import ActionTable, WorkBlockTable
 from mailbrief.storage.work_blocks import (
@@ -63,15 +63,6 @@ class BlockConflictError(ValueError):
 def _touch(row: WorkBlockTable, now: datetime) -> None:
     row.revision += 1
     row.updated_at_utc = now
-
-
-def _due(action: ActionTable) -> datetime | None:
-    return deadline_due_at(
-        DeadlinePrecision(action.deadline_precision),
-        action.deadline_date,
-        action.deadline_at_utc,
-        action.deadline_timezone,
-    )
 
 
 class WorkBlockService:
@@ -127,73 +118,55 @@ class WorkBlockService:
     async def _saved(
         self, row: WorkBlockTable, action: ActionTable, previous: BlockTime | None = None
     ) -> BlockSaved:
-        """The block as written, with the busy entries it overlaps, whether it ends after its
-        task's deadline and whether it falls outside the working hours."""
+        """The block as written, with its conflicts as the calendar shows them (ADR 0030):
+        the busy entries and blocks it overlaps, the busy events whose buffer it sits in,
+        whether it ends after its task's deadline and whether it falls outside the working
+        hours."""
         await self._session.flush()
-        block = block_from_row(row, action.public_id)
-        start, end = block.interval
-        labels: list[tuple[datetime, str]] = []
+        scheduled = scheduled_from_rows(row, action)
+        block = scheduled.block
         zone = ZoneInfo(block.time_zone)
-        days = block.days(zone)
-
-        def busy_overlap(span: Interval | None, first_day: date | None, label: str) -> None:
-            """A timed busy entry's ``span`` overlapping the block, or an all-day one's first
-            day: a day off, which the touching() reads put on one of the block's days."""
-            if first_day is not None:
-                labels.append((local_moment(max(first_day, days[0]), 0, zone), label))
-            elif span is not None and overlaps(block.interval, span):
-                labels.append((span[0], label))
-
-        events = await EventRepository(self._session).touching(start, end, days[0], days[1])
-        for event in events:
-            if not event.busy:
-                continue
-            timed = (
-                None
-                if event.starts_at_utc is None or event.ends_at_utc is None
-                else (event.starts_at_utc, event.ends_at_utc)
-            )
-            busy_overlap(timed, event.start_date if event.all_day else None, event.title)
-        cached = await GoogleCalendarRepository(self._session).touching(
-            start, end, days[0], days[1]
+        first_day, last_day = block.days(zone)
+        hours = await WorkingHoursRepository(self._session).read()
+        # Read around the block by the buffer, so an event whose buffer it sits in is seen.
+        reach = timedelta(minutes=hours.buffer_minutes)
+        start, end = block.starts_at_utc - reach, block.ends_at_utc + reach
+        events: list[CalendarEvent | GoogleEvent] = []
+        for stored in await EventRepository(self._session).touching(
+            start, end, first_day, last_day
+        ):
+            try:
+                events.append(event_from_row(stored))
+            except ValueError:  # A row that no longer validates is a warning lost, never a
+                continue  # save refused: warnings never stop a save.
+        events += await GoogleCalendarRepository(self._session).touching(
+            start, end, first_day, last_day
         )
-        for google in cached:
-            if not google.busy:
-                continue
-            timed = (
-                None
-                if google.starts_at_utc is None or google.ends_at_utc is None
-                else (google.starts_at_utc, google.ends_at_utc)
-            )
-            label = f"{google.title} ({google.calendar_name})"
-            busy_overlap(timed, google.start_date if google.all_day else None, label)
-        for other, task in await self._repository.touching(start, end):
-            if other.id != row.id:
-                labels.append((other.starts_at_utc, f"Task · {task.title}"))
-        labels.sort(key=lambda found: found[0])
-        due = _due(action)
+        others = [
+            scheduled_from_rows(other, task)
+            for other, task in await self._repository.touching(*block.interval)
+        ]
+        conflicts = conflicts_for(scheduled, zone, events=events, blocks=others, hours=hours)
+        kinds = {conflict.kind for conflict in conflicts}
+        named = [
+            conflict.label
+            for conflict in conflicts
+            if conflict.label is not None and conflict.kind is not ConflictKind.BUFFER
+        ]
+        buffered = [
+            conflict.label
+            for conflict in conflicts
+            if conflict.label is not None and conflict.kind is ConflictKind.BUFFER
+        ]
         return BlockSaved(
             block=block,
             previous=previous,
-            overlaps=tuple(label for _, label in labels[:MAX_OVERLAP_LABELS]),
-            more_overlaps=max(0, len(labels) - MAX_OVERLAP_LABELS),
-            after_deadline=due is not None and block.ends_at_utc > due,
-            outside_hours=await self._outside_hours(block.interval, days, zone),
+            overlaps=tuple(named[:MAX_OVERLAP_LABELS]),
+            more_overlaps=max(0, len(named) - MAX_OVERLAP_LABELS),
+            after_deadline=ConflictKind.AFTER_DEADLINE in kinds,
+            outside_hours=ConflictKind.OUTSIDE_HOURS in kinds,
+            buffered=tuple(buffered[:MAX_OVERLAP_LABELS]),
         )
-
-    async def _outside_hours(
-        self, interval: Interval, days: tuple[date, date], zone: ZoneInfo
-    ) -> bool:
-        """Whether any of the block falls outside the working hours, when there are some."""
-        hours = await WorkingHoursRepository(self._session).read()
-        if not hours.is_set:
-            return False
-        working = [
-            span
-            for offset in range((days[1] - days[0]).days + 1)
-            for span in working_spans(hours, days[0] + timedelta(days=offset), zone)
-        ]
-        return bool(subtract((interval,), working))
 
     async def schedule(self, action_public_id: str, time: BlockTime) -> BlockSaved:
         """Add a block to a live, open task as revision 1."""

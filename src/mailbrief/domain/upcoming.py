@@ -1,4 +1,5 @@
-"""A deterministic view of known commitments; never an availability calculation."""
+"""A deterministic view of known commitments; never an availability calculation. Free
+time and workload are the Calendar's (``domain.availability``, ``domain.workload``)."""
 
 from datetime import date, datetime
 

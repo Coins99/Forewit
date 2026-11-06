@@ -125,6 +125,7 @@ from mailbrief.domain.work_blocks import (
     suggested_minutes,
 )
 from mailbrief.domain.working_hours import DAY_MINUTES, HoursEdit, WorkingHours
+from mailbrief.domain.workload import workload
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -302,6 +303,7 @@ from mailbrief.ui.theme import (
 from mailbrief.ui.today_view import DayOverview, DayPanel
 from mailbrief.ui.upcoming_view import UpcomingDialog
 from mailbrief.ui.weak import weak_method
+from mailbrief.ui.workload_text import today_text
 from mailbrief.ui.workspace import PAGE_SHORTCUTS as PAGE_SHORTCUTS
 from mailbrief.ui.workspace import ThreePaneWorkspace
 
@@ -808,6 +810,8 @@ def block_status(verb: str, title: str, saved: BlockSaved) -> str:
         text += " Ends after the task's deadline."
     if saved.outside_hours:
         text += " Outside your working hours."
+    if saved.buffered:
+        text += f" Within the buffer of {', '.join(saved.buffered)}."
     return text
 
 
@@ -2698,6 +2702,9 @@ class MainWindow(QMainWindow):
             plan = summary.focus or DayPlan(day=summary.day)
             self.focus_panel.show_plan(plan, zone, now)
             self.focus_panel.show_overview(summary, zone)
+            google_on = self._google_mode() == GOOGLE_ON
+            (load,) = workload(summary.calendar, zone, now, google_on=google_on)
+            self.focus_panel.show_capacity(today_text(load, now))
             if self.focus_dialog.isVisible() and self._focus_day is None:
                 self.focus_dialog.panel.show_plan(plan, zone, now)
             if self.upcoming.isVisible():

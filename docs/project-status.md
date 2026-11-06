@@ -15,7 +15,11 @@ later use after Microsoft Entra access is resolved.
 - P3-2 implemented, awaiting owner acceptance (ADR 0029, migration `20261105_0033`):
   Busy/Free on events (Google's "Show as" too), weekly working hours with a buffer, the
   free time they leave, a Day view and the tasks to schedule beside the hours (Return for
-  the next free time, or drag onto the hours). P3-3 follows.
+  the next free time, or drag onto the hours). Merged in PR #106.
+- P3-3 implemented, awaiting owner acceptance (ADR 0030, no migration): each day's load
+  in the Week and Day heads ("3h spare", "Over by 1h"), provisional days, conflict marks
+  on blocks with the reasons under the hours, buffer warnings on save, and Today's free
+  time. See [Calendar: Workload and conflicts](calendar.md#workload-and-conflicts).
 
 - P2-04b to P2-09 merged in PR #102:
   - the Projects page with project context;
