@@ -1,11 +1,15 @@
-"""The Calendar page: the owner's events, with open actions' dates beside them, as a week
-of hours, a month of days or a week of rows (``CalendarView``), as the owner chooses.
+"""The Calendar page: the owner's events, with open actions' dates beside them, as a day or
+a week of hours, a month of days or a week of rows (``CalendarView``), as the owner chooses.
 
 Event titles are the owner's text and action titles may come from email, so rows are plain
 list-item text and the grids draw them with ``drawText``: never tooltips, which Qt may
 render as rich text. Deadlines and target dates are only shown here; they change on the
 action itself (ADR 0018). Work blocks (ADR 0028), time set aside for a task, show beside the
 events; changing one never changes its task.
+
+Beside the hours, the tasks to schedule (ADR 0029) list the owner's open tasks that still
+need time: dragged onto the hours, or with Return for the next free time, they ask for a
+block. A line under the hours says how much working time is free.
 """
 
 from collections.abc import Callable
@@ -13,7 +17,7 @@ from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidgetItem,
@@ -23,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks, day_availability
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
@@ -31,6 +36,7 @@ from mailbrief.domain.events import (
     ScheduledBlock,
 )
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.domain.working_hours import WorkingHours
 from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
 from mailbrief.ui.calendar_layout import (
     WEEK_DAYS,
@@ -41,17 +47,27 @@ from mailbrief.ui.calendar_layout import (
     block_note,
     clock,
     entry_key,
+    has_hours,
     marker_label,
     marker_note,
     marker_text,
     month_start,
+    show_as,
     shown_month,
 )
-from mailbrief.ui.deadline_text import MONTH_NAMES, day_text, full_day_text, month_day
+from mailbrief.ui.deadline_text import (
+    MONTH_NAMES,
+    day_text,
+    full_day_text,
+    length_text,
+    month_day,
+)
+from mailbrief.ui.hours_editor import windows_text
 from mailbrief.ui.labels import ElidedLabel, outline_button, plain_label
 from mailbrief.ui.list_rows import DISPLAY_ROW_ROLE, AgendaRowDelegate, DisplayRow
 from mailbrief.ui.lists import ActivatingList, clear_list
 from mailbrief.ui.theme import TEXT_PX, TITLE_PX, ui_font
+from mailbrief.ui.unscheduled_view import UnscheduledPanel
 
 __all__ = [
     "CalendarPanel",
@@ -80,17 +96,59 @@ GOOGLE_OFF: Final = "off"  # Gmail isn't connected.
 GOOGLE_ASK: Final = "ask"  # Connected; the sign-in lacks the calendar permissions.
 GOOGLE_ON: Final = "on"
 EMPTY: Final = "Nothing this week. Add an event with New event."
+EMPTY_DAY: Final = "Nothing this day. Add an event with New event."
 EMPTY_MONTH: Final = "Nothing in these six weeks. Add an event with New event."
+NO_HOURS: Final = "Set your working hours to see your free time."
 MARKER_NOTE: Final = "Deadlines and targets come from your open actions; change them there."
 # The views, in the switcher's order, and what Previous, This and Next say in each.
 VIEW_NAMES: Final = {
+    CalendarView.DAY: "Day",
     CalendarView.WEEK: "Week",
     CalendarView.MONTH: "Month",
     CalendarView.LIST: "List",
 }
 _VIEWS: Final = tuple(VIEW_NAMES)
+_DAY_STEPS: Final = ("&Previous day", "To&day", "Ne&xt day")
 _WEEK_STEPS: Final = ("&Previous week", "This wee&k", "Ne&xt week")
 _MONTH_STEPS: Final = ("&Previous month", "This mont&h", "Ne&xt month")
+
+
+def range_kind(view: CalendarView) -> str:
+    """The days a view reads: one ("day"), a week ("week": the Week and List views) or a
+    month's six weeks ("month")."""
+    if view is CalendarView.DAY:
+        return "day"
+    return "month" if view is CalendarView.MONTH else "week"
+
+
+def free_text(shown: CalendarRange, zone: ZoneInfo, view: CalendarView) -> str:
+    """The line under the hours: how much working time is free, worked out locally from
+    the days shown (ADR 0029). "" for the Month and List views."""
+    if not has_hours(view):
+        return ""
+    hours: WorkingHours = shown.hours
+    if not hours.is_set:
+        return NO_HOURS
+    if view is CalendarView.DAY:
+        day = shown.first_day
+        found = day_availability(shown, hours, day, zone)
+        if found.day_off:
+            return "Day off"
+        if not found.working_minutes:
+            return "No working hours this day"
+        left = length_text(timedelta(minutes=found.free_minutes))
+        return f"Working {windows_text(hours.windows(day.weekday()))} · {left} free"
+    days = [shown.first_day + timedelta(days=offset) for offset in range(WEEK_DAYS)]
+    found_days = [day_availability(shown, hours, day, zone) for day in days]
+    working = sum(day.working_minutes for day in found_days)
+    free = sum(day.free_minutes for day in found_days)
+    if not working:
+        return "No working hours this week"
+    return (
+        f"{length_text(timedelta(minutes=free))} free of "
+        f"{length_text(timedelta(minutes=working))} this week"
+    )
+
 
 Row = Entry | None  # None is a day's heading.
 
@@ -151,11 +209,14 @@ def list_time(event: Timed, day: date, zone: ZoneInfo) -> str:
 
 def event_text(event: Timed, day: date, zone: ZoneInfo, today: date) -> str:
     """A Google event names its calendar and a work block says it is a task's time, as in
-    "10:00–11:00 · Task · Draft report"; the owner's own events need no label."""
+    "10:00–11:00 · Task · Draft report"; the owner's own events need no label. An event that
+    isn't what its shape makes it says Free or Busy (ADR 0029)."""
     if isinstance(event, ScheduledBlock):
         return f"{event_when(event, day, zone, today)} · {block_note(event)} · {event.title}"
     text = f"{event_when(event, day, zone, today)} · {event.title}"
-    return f"{text} · {event.calendar_name}" if isinstance(event, GoogleEvent) else text
+    if isinstance(event, GoogleEvent):
+        text = f"{text} · {event.calendar_name}"
+    return text if (note := show_as(event)) is None else f"{text} · {note}"
 
 
 def day_rows(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Entry]:
@@ -207,14 +268,23 @@ class CalendarPanel(QWidget):
     plan_requested = Signal()
     google_preview_requested = Signal(object)
     block_requested = Signal(str, object)
+    day_requested = Signal(object)
+    hours_requested = Signal()
+    task_schedule_requested = Signal(object)
+    task_place_requested = Signal(object, object, int)
+    tasks_toggled = Signal(bool)
 
-    def __init__(self, view: CalendarView = CalendarView.WEEK) -> None:
+    def __init__(self, view: CalendarView = CalendarView.WEEK, *, tasks: bool = False) -> None:
         super().__init__()
         self._busy = False
         self._shown: CalendarRange | None = None
         # Whether the days shown are a month's grid: read for the Month view, while the view
         # may already be another, until the window reads that view's days.
         self._shown_month = False
+        self._shown_kind = "week"  # range_kind() of the view the days were read for.
+        self._zone = ZoneInfo("UTC")
+        self._tasks_shown = tasks  # The tasks to schedule beside the hours.
+        self._tasks_total = 0
         self._today: date | None = None
         self._rows: list[tuple[date, Row]] = []
         layout = QVBoxLayout(self)
@@ -260,11 +330,12 @@ class CalendarPanel(QWidget):
         self.heading.hide()
         top.removeWidget(self.heading)
         top.insertLayout(0, bar, 1)
-        self.views.setFixedWidth(176)
+        self.views.setFixedWidth(232)
         self.google_status.setFont(ui_font(9))
         self.stack = QStackedWidget()
         self.stack.setObjectName("calendarStack")
         self.week_grid = WeekGrid()
+        self.day_grid = WeekGrid(days=1)
         self.month_grid = MonthGrid()
         list_page = QWidget()
         list_page.setObjectName("calendarListPage")
@@ -280,9 +351,16 @@ class CalendarPanel(QWidget):
         self.list.itemActivated.connect(lambda _item: self._preview_selected())
         self.list.itemClicked.connect(lambda _item: self._preview_selected())
         list_layout.addWidget(self.list, 1)
-        for page in (self.week_grid, self.month_grid, list_page):
+        for page in (self.week_grid, self.month_grid, list_page, self.day_grid):
             self.stack.addWidget(page)
-        layout.addWidget(self.stack, 1)
+        # The tasks to schedule sit beside the hours, in the Day and Week views.
+        self.unscheduled = UnscheduledPanel()
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self.stack, 1)
+        body.addWidget(self.unscheduled)
+        layout.addLayout(body, 1)
         self.empty = plain_label(EMPTY, tone="muted")  # Under every view.
         self.empty.setObjectName("calendarEmpty")
         layout.addWidget(self.empty)
@@ -315,6 +393,19 @@ class CalendarPanel(QWidget):
         buttons.setContentsMargins(24, 12, 24, 12)
         self.plan_button.setText("Plan with AI")
         self.plan_button.setFont(ui_font(10))
+        self.hours_button = outline_button("Working hours", "workingHoursButton")
+        self.hours_button.setAccessibleName("Set your working hours")
+        self.hours_button.setFont(ui_font(10))
+        self.hours_button.clicked.connect(self.hours_requested.emit)
+        self.tasks_button = outline_button("Tasks to schedule", "unscheduledToggle")
+        self.tasks_button.setFont(ui_font(10))
+        self.tasks_button.clicked.connect(lambda: self.set_tasks_shown(not self._tasks_shown))
+        self.free_line = plain_label("", tone="muted", px=10)
+        self.free_line.setObjectName("calendarFreeTime")
+        # Beside Plan with AI, before the stretch: the buttons, then how much time is free.
+        for place, widget in enumerate((self.hours_button, self.tasks_button, self.free_line)):
+            stretch = 1 if widget is self.free_line else 0
+            buttons.insertWidget(buttons.indexOf(self.plan_button) + 1 + place, widget, stretch)
         for button in (
             self.new_button,
             self.open_button,
@@ -339,19 +430,25 @@ class CalendarPanel(QWidget):
         self.open_google_button.clicked.connect(self._request_open_google)
         self.plan_button.clicked.connect(self._request_plan)
         self.views.currentChanged.connect(self._view_changed)
-        for grid in (self.week_grid, self.month_grid):
+        for grid in (self.week_grid, self.day_grid, self.month_grid):
             grid.chosen.connect(self._choose)
             grid.activated.connect(self._activate)
             grid.more_requested.connect(self._show_more)
-        self.week_grid.block_change_requested.connect(
-            lambda block, days, minutes, resize: self.block_requested.emit(
-                MOVE_BLOCK, (block, days, minutes, resize)
+        for hours in (self.week_grid, self.day_grid):
+            hours.block_change_requested.connect(
+                lambda block, days, minutes, resize: self.block_requested.emit(
+                    MOVE_BLOCK, (block, days, minutes, resize)
+                )
             )
-        )
-        self.week_grid.block_unschedule_requested.connect(
-            lambda block: self.block_requested.emit(UNSCHEDULE_BLOCK, block)
-        )
+            hours.block_unschedule_requested.connect(
+                lambda block: self.block_requested.emit(UNSCHEDULE_BLOCK, block)
+            )
         self.month_grid.period_requested.connect(self._request_period)
+        self.day_grid.period_requested.connect(self._request_period)
+        self.unscheduled.schedule_requested.connect(self.task_schedule_requested.emit)
+        self.unscheduled.dragged.connect(self._task_dragged)
+        self.unscheduled.dropped.connect(self._task_dropped)
+        self.unscheduled.drag_ended.connect(self._task_drag_ended)
         self._google_mode = GOOGLE_OFF
         self.set_google(GOOGLE_OFF, "")
         self.empty.hide()
@@ -390,6 +487,8 @@ class CalendarPanel(QWidget):
         shown, today = self._shown, self._today
         if shown is None or today is None:
             return None
+        if self._shown_kind == "day":
+            return shown.first_day
         if shown.first_day <= today <= shown.last_day:
             return today
         return shown_month(shown.first_day) if self._shown_month else shown.first_day
@@ -429,6 +528,8 @@ class CalendarPanel(QWidget):
         # The window reads the days of the view shown, and a read started before a switch
         # never shows: so these are the Month view's days when it is the view now.
         self._shown_month = self.view() is CalendarView.MONTH
+        self._shown_kind = range_kind(self.view())
+        self._zone = zone
         self._today = today
         self._rows = []
         self.list.blockSignals(True)
@@ -469,6 +570,8 @@ class CalendarPanel(QWidget):
                             if isinstance(entry, ScheduledBlock)
                             else "Your calendar"
                         )
+                        if not isinstance(entry, ScheduledBlock) and (note := show_as(entry)):
+                            preview = f"{preview} · {note}"
                         first, last = entry.days(zone)
                         if not entry.all_day and first != last:  # Its whole span, each day.
                             preview = f"{event_when(entry, day, zone, today)} · {preview}"
@@ -495,19 +598,22 @@ class CalendarPanel(QWidget):
                 day += timedelta(days=1)
         finally:
             self.list.blockSignals(False)
-        for grid in (self.week_grid, self.month_grid):
+        for grid in (self.week_grid, self.day_grid, self.month_grid):
             grid.show_range(shown, zone, today)
         if previous is not None:
             if previous[1] is not None:
                 self._select(entry_key(previous[1]), previous[0])
             else:
                 self._select_day(previous[0])
-        self.empty.setText(EMPTY_MONTH if self._shown_month else EMPTY)
+        self.empty.setText(
+            EMPTY_MONTH if self._shown_month else EMPTY_DAY if self._shown_kind == "day" else EMPTY
+        )
         self.empty.setVisible(
             not shown.events and not shown.markers and not shown.google_events and not shown.blocks
         )
         self.note.hide()
         self._show_heading()
+        self._show_free_line()
         self._selection_moved()
 
     def select_event(self, public_id: str) -> None:
@@ -543,7 +649,7 @@ class CalendarPanel(QWidget):
         row = self.list.currentRow()
         day, entry = self._rows[row] if 0 <= row < len(self._rows) else (None, None)
         key = None if entry is None else entry_key(entry)
-        for grid in (self.week_grid, self.month_grid):
+        for grid in (self.week_grid, self.day_grid, self.month_grid):
             grid.set_selection(day, key)
         self._update_buttons()
 
@@ -589,21 +695,34 @@ class CalendarPanel(QWidget):
 
     def _switched(self) -> None:
         """Show the view now chosen. Until the window reads its days, its grid shows none
-        rather than another view's: a week drawn as a month's grid, or the reverse."""
-        month = self.view() is CalendarView.MONTH
-        if self._shown is not None and month != self._shown_month:
-            (self.month_grid if month else self.week_grid).clear()
+        rather than another view's: a week drawn as a month's grid, a day as a week, or the
+        reverse."""
+        kind = range_kind(self.view())
+        if self._shown is not None and kind != self._shown_kind:
+            grids: dict[str, WeekGrid | MonthGrid] = {
+                "day": self.day_grid,
+                "week": self.week_grid,
+                "month": self.month_grid,
+            }
+            grids[kind].clear()
         self._show_view()
 
     def _show_view(self) -> None:
         view = self.view()
-        pages = {
+        pages: dict[CalendarView, QWidget] = {
+            CalendarView.DAY: self.day_grid,
             CalendarView.WEEK: self.week_grid,
             CalendarView.MONTH: self.month_grid,
         }
         page = pages.get(view)
         self.stack.setCurrentIndex(2 if page is None else self.stack.indexOf(page))
-        steps = _MONTH_STEPS if view is CalendarView.MONTH else _WEEK_STEPS
+        steps = (
+            _MONTH_STEPS
+            if view is CalendarView.MONTH
+            else _DAY_STEPS
+            if view is CalendarView.DAY
+            else _WEEK_STEPS
+        )
         for button, text in zip(
             (self.previous_button, self.this_week_button, self.next_button), steps, strict=True
         ):
@@ -617,6 +736,8 @@ class CalendarPanel(QWidget):
             button.setAccessibleName(text.replace("&", ""))
             button.setFixedWidth(52 if button is self.this_week_button else 30)
         self._show_heading()
+        self._show_tasks()
+        self._show_free_line()
 
     def _show_heading(self) -> None:
         shown, today = self._shown, self._today
@@ -624,8 +745,78 @@ class CalendarPanel(QWidget):
             self.heading.setText("Calendar")
         elif self._shown_month:
             self.heading.setText(f"Calendar · {month_title(shown_month(shown.first_day))}")
+        elif self._shown_kind == "day":
+            self.heading.setText(f"Calendar · {full_day_text(shown.first_day, today=today)}")
         else:
             self.heading.setText(f"Calendar · {week_title(shown.first_day, today)}")
+
+    def _show_free_line(self) -> None:
+        """How much working time the days shown leave free, in the Day and Week views,
+        once the view's own days are read."""
+        view, shown = self.view(), self._shown
+        fits = shown is not None and range_kind(view) == self._shown_kind
+        text = free_text(shown, self._zone, view) if shown is not None and fits else ""
+        self.free_line.setText(text)
+        self.free_line.setVisible(bool(text))
+
+    # The tasks to schedule (ADR 0029).
+
+    def show_unscheduled(self, found: UnscheduledTasks, today: date) -> None:
+        self.unscheduled.show_tasks(found, today)
+        self._tasks_total = found.total
+        self._show_tasks()
+
+    def tasks_shown(self) -> bool:
+        return self._tasks_shown
+
+    def set_tasks_shown(self, shown: bool) -> None:
+        """Show or hide the tasks to schedule; the window keeps the choice."""
+        if shown != self._tasks_shown:
+            self._tasks_shown = shown
+            self._show_tasks()
+            self.tasks_toggled.emit(shown)
+
+    def _show_tasks(self) -> None:
+        hours = has_hours(self.view())
+        self.unscheduled.setVisible(self._tasks_shown and hours)
+        self.tasks_button.setVisible(hours)
+        if self._tasks_shown:
+            text = "Hide tasks to schedule"
+        elif self._tasks_total:
+            text = f"Tasks to schedule · {self._tasks_total}"
+        else:
+            text = "Tasks to schedule"
+        self.tasks_button.setText(text)
+        self.tasks_button.setAccessibleName(text)
+
+    def hours_grid(self) -> WeekGrid | None:
+        """The grid of hours shown, if any: the Day or Week view's."""
+        view = self.view()
+        if view is CalendarView.DAY:
+            return self.day_grid
+        return self.week_grid if view is CalendarView.WEEK else None
+
+    def _task_dragged(self, task: object, screen: object) -> None:
+        grid = self.hours_grid()
+        if grid is None or not isinstance(task, UnscheduledTask):
+            return
+        place = grid.placement_at(screen) if isinstance(screen, QPointF) else None
+        if place is None:
+            grid.clear_placement()
+        else:
+            grid.show_placement(place[0], place[1], task.suggested_minutes, task.title)
+
+    def _task_dropped(self, task: object, screen: object) -> None:
+        grid = self.hours_grid()
+        if grid is None or not isinstance(task, UnscheduledTask):
+            return
+        place = grid.placement_at(screen) if isinstance(screen, QPointF) else None
+        if place is not None:
+            self.task_place_requested.emit(task, place[0], place[1])
+
+    def _task_drag_ended(self) -> None:
+        for grid in (self.week_grid, self.day_grid):
+            grid.clear_placement()
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -647,12 +838,15 @@ class CalendarPanel(QWidget):
             button.setEnabled(not self._busy)
 
     def _request_period(self, step: int) -> None:
-        """The week or month ``step`` before (negative) or after the one shown."""
+        """The day, week or month ``step`` before (negative) or after the one shown."""
         shown = self._shown
         if shown is None:
             return
         if self.view() is CalendarView.MONTH:
             self.month_requested.emit(add_months(shown_month(shown.first_day), step))
+        elif self.view() is CalendarView.DAY:
+            day = self.focus_day() if self._shown_kind == "day" else None
+            self.day_requested.emit((day or shown.first_day) + timedelta(days=step))
         else:
             self.week_requested.emit(shown.first_day + timedelta(days=WEEK_DAYS * step))
 
@@ -661,6 +855,8 @@ class CalendarPanel(QWidget):
             return
         if self.view() is CalendarView.MONTH:
             self.month_requested.emit(month_start(self._today))
+        elif self.view() is CalendarView.DAY:
+            self.day_requested.emit(self._today)
         else:
             self.week_requested.emit(week_start(self._today))
 

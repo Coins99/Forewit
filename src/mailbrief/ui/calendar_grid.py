@@ -1,5 +1,5 @@
-"""The Calendar's grids, as calendar apps show days: ``WeekGrid`` (a week of hours) and
-``MonthGrid`` (six weeks of days around a month).
+"""The Calendar's grids, as calendar apps show days: ``WeekGrid`` (a week of hours, or one
+day of them in the Day view) and ``MonthGrid`` (six weeks of days around a month).
 
 They only show and report: ``chosen(day, entry)`` when a day or an entry is clicked or
 reached by the keyboard, ``activated(day, entry)`` on a double-click or Return (an entry
@@ -12,6 +12,10 @@ selected, Ctrl+arrows (Cmd on macOS) move it 15 minutes or a day, Ctrl+Shift+Up 
 change its length and Delete or Backspace unschedules it. The grid only asks:
 ``block_change_requested(block, days, minutes, resize)`` and
 ``block_unschedule_requested(block)``; the window saves, and the next read shows the result.
+
+The hours shade the time outside the working hours, and a free event (ADR 0029) is drawn as
+an outline on the page's own fill, so what takes time stands out. While a task is dragged in
+from the unscheduled panel, ``show_placement`` draws where it would go.
 
 Titles are the owner's text, Google's or (for the actions' dates) mail-derived, so they are
 drawn with ``drawText`` only: never rich text, a link or a tooltip. Colours are the theme's
@@ -43,7 +47,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QFrame, QScrollArea, QVBoxLayout, QWidget
 
 from mailbrief.domain.common import utc_now
-from mailbrief.domain.events import ActionMarker, CalendarRange, ScheduledBlock
+from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.work_blocks import BLOCK_STEP_MINUTES
 from mailbrief.ui.calendar_layout import (
@@ -61,6 +65,7 @@ from mailbrief.ui.calendar_layout import (
     entry_key,
     is_bar,
     marker_text,
+    off_hours,
     pack_lanes,
     shown_month,
 )
@@ -109,19 +114,27 @@ _ALIGN_RIGHT: Final = int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVC
 _ALIGN_CENTER: Final = int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextSingleLine)
 
 
+def is_free(entry: object) -> bool:
+    """Whether ``entry`` is an event that takes no time (ADR 0029)."""
+    return isinstance(entry, CalendarEvent | GoogleEvent) and not entry.busy
+
+
 def entry_style(entry: Entry, tokens: Tokens) -> tuple[str, str, str]:
     """An entry's fill, text and edge colours: the owner's events in accent on its tint,
     Google's in text on a card, the actions' dates in warning on its tint, and work blocks
     in text on a card with an accent edge, secondary with a strong edge once the task is
-    done or skipped."""
+    done or skipped. A free event keeps its text and edge colours on the page's own fill,
+    and is drawn as an outline in its edge colour."""
     if isinstance(entry, ActionMarker):
         return tokens.warning_bg, tokens.warning_fg, tokens.warning_fg
     if isinstance(entry, GoogleEvent):
-        return tokens.card, tokens.text, tokens.border_strong
+        return (tokens.panel if is_free(entry) else tokens.card), tokens.text, tokens.border_strong
     if isinstance(entry, ScheduledBlock):
         if entry.open:
             return tokens.card, tokens.text, tokens.accent_fg
         return tokens.card, tokens.text_secondary, tokens.border_strong
+    if is_free(entry):
+        return tokens.panel, tokens.accent_fg, tokens.accent_fg
     return tokens.accent_bg, tokens.accent_fg, tokens.accent_fg
 
 
@@ -160,10 +173,11 @@ def paint_outline(
 ) -> None:
     """Google's entries and work blocks share the card fill of the month's own days and of
     today's column, so a hairline keeps their shape there: ``border_strong``, as a strong
-    card has, for Google's, and a block's edge colour for a block."""
+    card has, for Google's, and a block's edge colour for a block. A free event of the
+    owner's is an outline in its edge colour."""
     if isinstance(entry, GoogleEvent):
         color = tokens.border_strong
-    elif isinstance(entry, ScheduledBlock):
+    elif isinstance(entry, ScheduledBlock) or is_free(entry):
         color = entry_style(entry, tokens)[2]
     else:
         return
@@ -186,9 +200,10 @@ def paint_bar(
     radius = min(BLOCK_RADIUS, rect.height() / 2)
     path.addRoundedRect(rect, radius, radius)
     painter.fillPath(path, QColor(fill))
-    painter.setClipPath(path)
-    painter.fillRect(QRectF(rect.left(), rect.top(), EDGE_W, rect.height()), QColor(edge))
-    painter.setClipping(False)
+    if not is_free(entry):  # A free event has no edge: it takes no time.
+        painter.setClipPath(path)
+        painter.fillRect(QRectF(rect.left(), rect.top(), EDGE_W, rect.height()), QColor(edge))
+        painter.setClipping(False)
     metrics = ui_metrics(px, semibold=True)
     painter.setFont(ui_font(px, semibold=True))
     painter.setPen(QColor(text))
@@ -376,14 +391,20 @@ def _wall_minutes(block: ScheduledBlock, day: date, zone: ZoneInfo) -> tuple[int
 
 
 class WeekGrid(_Grid):
-    """A week of hours: the days' heads, a strip of bars (all-day events, events of a day or
-    more and the actions' dates) and the hours, scrolling, with timed events as blocks in
-    them. Today's column is shaded and carries the time now as a line."""
+    """A week of hours, or one day of them (``days=1``, the Day view): the days' heads, a
+    strip of bars (all-day events, events of a day or more and the actions' dates) and the
+    hours, scrolling, with timed events as blocks in them. Today's column is shaded and
+    carries the time now as a line. In the Day view, Left and Right ask for the day before
+    or after (``period_requested``)."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    period_requested = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None, *, days: int = WEEK_DAYS) -> None:
         super().__init__(parent)
-        self.setObjectName("calendarWeekGrid")
-        self.setAccessibleName("Calendar week")
+        self._count = days
+        single = days == 1
+        self.setObjectName("calendarDayGrid" if single else "calendarWeekGrid")
+        self.setAccessibleName("Calendar day" if single else "Calendar week")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -415,6 +436,9 @@ class WeekGrid(_Grid):
         self.hours.setMouseTracking(True)  # A block's bottom edge shows it can be dragged.
         # The hours' hits, made once per layout and column width: hovering asks on each move.
         self._hour_cache: tuple[float, list[Hit]] | None = None
+        # Where a task dragged in from the unscheduled panel would go: its day, start and
+        # length in wall-clock minutes, and its title.
+        self._placement: tuple[date, int, int, str] | None = None
 
     # Geometry. The heads and the strip line their columns up with the hours, whose
     # scroll bar takes room at the right.
@@ -422,13 +446,13 @@ class WeekGrid(_Grid):
     def days(self) -> list[date]:
         if self._shown is None:
             return []
-        return [self._shown.first_day + timedelta(days=offset) for offset in range(WEEK_DAYS)]
+        return [self._shown.first_day + timedelta(days=offset) for offset in range(self._count)]
 
     def content_width(self) -> int:
         return self.hours_area.viewport().width()
 
     def column_width(self) -> float:
-        return max(0.0, (self.content_width() - GUTTER) / WEEK_DAYS)
+        return max(0.0, (self.content_width() - GUTTER) / self._count)
 
     def column_left(self, index: int) -> float:
         return GUTTER + index * self.column_width()
@@ -436,9 +460,9 @@ class WeekGrid(_Grid):
     def day_at(self, x: float) -> date | None:
         days = self.days()
         width = self.column_width()
-        if not days or width <= 0 or x < GUTTER or x >= GUTTER + WEEK_DAYS * width:
+        if not days or width <= 0 or x < GUTTER or x >= GUTTER + self._count * width:
             return None
-        return days[min(WEEK_DAYS - 1, int((x - GUTTER) // width))]
+        return days[min(self._count - 1, int((x - GUTTER) // width))]
 
     def relayout(self) -> None:
         """Lay out the week shown, once per ``show_range``: its bars and each day's blocks."""
@@ -446,7 +470,7 @@ class WeekGrid(_Grid):
         if shown is None:
             self._bars, self._lanes, self._parts = [], 0, []
         else:
-            last = shown.first_day + timedelta(days=WEEK_DAYS - 1)
+            last = shown.first_day + timedelta(days=self._count - 1)
             self._bars = pack_lanes(bars(shown, shown.first_day, last, self._zone))
             self._lanes = 1 + max((bar.lane for bar in self._bars), default=-1)
             self._parts = [day_parts(shown, day, self._zone) for day in self.days()]
@@ -480,12 +504,20 @@ class WeekGrid(_Grid):
         return text if entry is None else f"{text}: {entry_label(entry, self._zone)}"
 
     def _place_hours(self) -> None:
-        """The first time a week shows, open its hours at 07:30, or earlier when something
-        starts earlier; later weeks keep where the owner scrolled."""
+        """The first time a week shows, open its hours at 07:30, or half an hour before the
+        working hours start (ADR 0029), or earlier when something starts earlier; later
+        weeks keep where the owner scrolled."""
         if self._placed or self._shown is None or not self.isVisible():
             return
         starts = [part.start for parts in self._parts for part in parts if part.start > 0]
-        hour = min([SCROLL_TO_HOUR, *(start / 60 - 0.5 for start in starts)])
+        hours = self._shown.hours
+        working = [
+            windows[0].start_minute
+            for day in self.days()
+            if (windows := hours.windows(day.weekday()))
+        ]
+        opening = min(working) / 60 - 0.5 if working else SCROLL_TO_HOUR
+        hour = min([opening, *(start / 60 - 0.5 for start in starts)])
         self.hours_area.verticalScrollBar().setValue(max(0, round(hour * HOUR_PX)))
         self._placed = True
 
@@ -661,7 +693,7 @@ class WeekGrid(_Grid):
             start, end, index = drag.start, drag.end + drag.minutes, drag.index
         else:
             start, end = drag.start + drag.minutes, drag.end + drag.minutes
-            index = min(WEEK_DAYS - 1, max(0, drag.index + drag.days))
+            index = min(self._count - 1, max(0, drag.index + drag.days))
         end = min(DAY_MINUTES, max(end, start + MIN_BLOCK_MINUTES))
         start = min(start, end - MIN_BLOCK_MINUTES)
         moved = replace(
@@ -744,13 +776,14 @@ class WeekGrid(_Grid):
 
     def _paint_hours(self, painter: QPainter, tokens: Tokens) -> None:
         width = self.column_width()
-        right = GUTTER + WEEK_DAYS * width
+        right = GUTTER + self._count * width
         days = self.days()
         if self._today in days:
             index = days.index(self._today)
             painter.fillRect(
                 QRectF(self.column_left(index), 0, width, self.hours.height()), QColor(tokens.card)
             )
+        self._paint_off_hours(painter, tokens)
         painter.setFont(ui_font(CAPTION_PX, tabular=True))
         for hour in range(25):
             y = HOURS_PAD + hour * HOUR_PX
@@ -769,8 +802,86 @@ class WeekGrid(_Grid):
             rect = self.block_rect(part, index)
             self._paint_block(painter, rect, part, tokens)
             paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
+        self._paint_placement(painter, tokens)
         if self._today in days:
             self._paint_now(painter, days.index(self._today), tokens)
+
+    def _paint_off_hours(self, painter: QPainter, tokens: Tokens) -> None:
+        """Shade each day's time outside its working hours, in wall-clock minutes as the
+        hours are laid out; nothing when no working hours are set."""
+        if self._shown is None:
+            return
+        wash = QColor(tokens.off_hours.color)
+        wash.setAlphaF(tokens.off_hours.alpha)
+        width = self.column_width()
+        for index, day in enumerate(self.days()):
+            for start, end in off_hours(self._shown.hours, day.weekday()):
+                top = 0.0 if start == 0 else HOURS_PAD + start * HOUR_PX / 60
+                bottom = (
+                    float(self.hours.height())
+                    if end >= DAY_MINUTES
+                    else HOURS_PAD + end * HOUR_PX / 60
+                )
+                painter.fillRect(QRectF(self.column_left(index), top, width, bottom - top), wash)
+
+    def _paint_placement(self, painter: QPainter, tokens: Tokens) -> None:
+        """Where a task dragged in from the panel would go: its title on the selection's
+        fill, ringed in accent."""
+        placement = self._placement
+        days = self.days()
+        if placement is None or placement[0] not in days:
+            return
+        day, start, length, title = placement
+        index = days.index(day)
+        end = min(DAY_MINUTES, start + max(length, MIN_BLOCK_MINUTES))
+        rect = QRectF(
+            self.column_left(index) + 2,
+            HOURS_PAD + start * HOUR_PX / 60 + 1,
+            max(4.0, self.column_width() - 6),
+            max(8.0, (end - start) * HOUR_PX / 60 - 2),
+        )
+        painter.save()
+        path = QPainterPath()
+        path.addRoundedRect(rect, BLOCK_RADIUS, BLOCK_RADIUS)
+        painter.fillPath(path, QColor(tokens.selection))
+        metrics = ui_metrics(SMALL_PX, semibold=True)
+        painter.setFont(ui_font(SMALL_PX, semibold=True))
+        painter.setPen(QColor(tokens.text))
+        area = rect.adjusted(EDGE_W + 4, 2, -3, -2)
+        line = QRectF(area.left(), area.top(), area.width(), metrics.height())
+        painter.drawText(line, _ALIGN_LEFT, _elided(title, metrics, area.width()))
+        painter.restore()
+        paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
+
+    # A task dragged in from the unscheduled panel (ADR 0029): the panel asks where a
+    # point on the screen falls, and shows or clears the placement as the pointer moves.
+
+    def placement_at(self, screen: QPointF) -> tuple[date, int] | None:
+        """The day and quarter-hour start, in wall-clock minutes, under a point on the
+        screen, when it is over the hours in view; None elsewhere."""
+        viewport = self.hours_area.viewport()
+        seen = viewport.mapFromGlobal(screen)
+        if not self.isVisible() or not QRectF(viewport.rect()).contains(seen):
+            return None
+        point = self.hours.mapFromGlobal(screen)
+        day = self.day_at(point.x())
+        if day is None:
+            return None
+        minute = _snap((point.y() - HOURS_PAD) * 60 / HOUR_PX)
+        return day, min(DAY_MINUTES - BLOCK_STEP_MINUTES, max(0, minute))
+
+    def show_placement(self, day: date, start: int, length: int, title: str) -> None:
+        if self._placement != (day, start, length, title):
+            self._placement = (day, start, length, title)
+            self.hours.update()
+
+    def clear_placement(self) -> None:
+        if self._placement is not None:
+            self._placement = None
+            self.hours.update()
+
+    def placement(self) -> tuple[date, int, int, str] | None:
+        return self._placement
 
     def _paint_block(self, painter: QPainter, rect: QRectF, part: Part, tokens: Tokens) -> None:
         event = part.event
@@ -780,7 +891,8 @@ class WeekGrid(_Grid):
         path.addRoundedRect(rect, BLOCK_RADIUS, BLOCK_RADIUS)
         painter.fillPath(path, QColor(fill))
         painter.setClipPath(path)
-        painter.fillRect(QRectF(rect.left(), rect.top(), EDGE_W, rect.height()), QColor(edge))
+        if not is_free(event):  # A free event has no edge: it takes no time.
+            painter.fillRect(QRectF(rect.left(), rect.top(), EDGE_W, rect.height()), QColor(edge))
         area = rect.adjusted(EDGE_W + 4, 2, -3, -2)
         title = ui_metrics(SMALL_PX, semibold=True)
         painter.setFont(ui_font(SMALL_PX, semibold=True))
@@ -858,8 +970,11 @@ class WeekGrid(_Grid):
             return
         if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
             step = -1 if key == Qt.Key.Key_Left else 1
-            index = min(len(days) - 1, max(0, days.index(day) + step))
-            self.chosen.emit(days[index], None)
+            if self._count == 1:  # The Day view: the day before or after.
+                self.period_requested.emit(step)
+            else:
+                index = min(len(days) - 1, max(0, days.index(day) + step))
+                self.chosen.emit(days[index], None)
         elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self._step_entry(day, -1 if key == Qt.Key.Key_Up else 1)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -1150,9 +1265,15 @@ class MonthGrid(_Grid):
         its title."""
         _fill, _text, edge = entry_style(event, tokens)
         rect = hit.rect
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(edge))
-        painter.drawEllipse(QPointF(rect.left() + 4, rect.center().y()), DOT_PX / 2, DOT_PX / 2)
+        dot = QPointF(rect.left() + 4, rect.center().y())
+        if is_free(event):  # A ring, as a free event is an outline.
+            painter.setPen(QPen(QColor(edge), 1.25))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(dot, DOT_PX / 2 - 0.6, DOT_PX / 2 - 0.6)
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(edge))
+            painter.drawEllipse(dot, DOT_PX / 2, DOT_PX / 2)
         assert event.starts_at_utc is not None
         start = event.starts_at_utc.astimezone(self._zone)
         left = rect.left() + 4 + DOT_PX

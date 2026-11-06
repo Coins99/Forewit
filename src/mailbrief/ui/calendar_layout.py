@@ -11,6 +11,8 @@
 - Work blocks (ADR 0028) are timed entries like events: blocks in the week's hours and a
   line in the month. ``shifted`` and ``stretched`` say where a block goes when it is
   dragged or nudged, along the clock in the owner's zone.
+- An event is busy or free (ADR 0029); ``show_as`` names it when it isn't what its shape
+  makes it, and ``off_hours`` gives the parts of a day outside the working hours, to shade.
 """
 
 from collections.abc import Sequence
@@ -20,6 +22,7 @@ from enum import StrEnum
 from typing import Final
 from zoneinfo import ZoneInfo
 
+from mailbrief.domain.common import shape_busy
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
@@ -29,6 +32,7 @@ from mailbrief.domain.events import (
     wall_clock,
 )
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.domain.working_hours import WorkingHours
 from mailbrief.ui.who_text import in_sentence, who_text
 
 Entry = CalendarEvent | GoogleEvent | ActionMarker | ScheduledBlock
@@ -37,11 +41,18 @@ Timed = CalendarEvent | GoogleEvent | ScheduledBlock  # What can sit in the hour
 
 
 class CalendarView(StrEnum):
-    """How the Calendar page shows its days; the owner's choice is kept on this device."""
+    """How the Calendar page shows its days; the owner's choice is kept on this device. An
+    older build that reads a view it doesn't know opens the Week view."""
 
+    DAY = "day"  # One day of hours, with room for each entry (ADR 0029).
     WEEK = "week"  # A week of hours, as calendar apps show it.
     MONTH = "month"  # Six weeks of days around a month.
     LIST = "list"  # A week, day by day, as rows.
+
+
+def has_hours(view: CalendarView) -> bool:
+    """Whether the view shows hours: the Day and Week views."""
+    return view in (CalendarView.DAY, CalendarView.WEEK)
 
 
 def clock(moment: datetime, zone: ZoneInfo) -> str:
@@ -310,6 +321,30 @@ def shifted(
 def stretched(block: ScheduledBlock, zone: ZoneInfo, minutes: int) -> tuple[datetime, datetime]:
     """Where ``block`` goes when its end moves ``minutes`` along the clock; its start stays."""
     return block.starts_at_utc, _along_clock(block.ends_at_utc, zone, timedelta(minutes=minutes))
+
+
+def show_as(event: Event) -> str | None:
+    """ "Free" for a timed event that takes no time and "Busy" for an all-day one that takes
+    the day (a day off); None when the event is what its shape makes it (ADR 0029)."""
+    if event.busy == shape_busy(event.all_day):
+        return None
+    return "Busy" if event.busy else "Free"
+
+
+def off_hours(hours: WorkingHours, weekday: int) -> list[tuple[int, int]]:
+    """The minutes of a weekday outside its working windows, to shade; none when no working
+    hours are set, so a calendar without them looks as it always did."""
+    if not hours.is_set:
+        return []
+    found: list[tuple[int, int]] = []
+    start = 0
+    for window in hours.windows(weekday):
+        if window.start_minute > start:
+            found.append((start, window.start_minute))
+        start = max(start, window.end_minute)
+    if start < DAY_MINUTES:
+        found.append((start, DAY_MINUTES))
+    return found
 
 
 def block_note(block: ScheduledBlock) -> str:

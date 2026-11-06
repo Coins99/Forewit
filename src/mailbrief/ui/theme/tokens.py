@@ -89,6 +89,16 @@ class Tokens:
     def overlay(self) -> str:
         return "#731a211d"
 
+    @property
+    def off_hours(self) -> "Tint":
+        """The Calendar's wash over the hours outside the working hours (ADR 0029): muted
+        text, faint, so it shows on the panel and on today's card alike and every entry
+        drawn over it keeps its own proven fill."""
+        return Tint(self.text_muted, OFF_HOURS_ALPHA)
+
+
+OFF_HOURS_ALPHA: Final = 0.08
+
 
 @dataclass(frozen=True, slots=True)
 class Tint:

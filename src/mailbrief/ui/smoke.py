@@ -22,9 +22,11 @@ from PySide6.QtWidgets import QApplication
 from mailbrief.domain.actions import Action
 from mailbrief.domain.capture import CaptureRequest
 from mailbrief.domain.drafts import Draft
+from mailbrief.domain.events import EventEdit
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.domain.work_blocks import BlockTime
+from mailbrief.domain.working_hours import SUGGESTED_HOURS
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.services.data import (
     CleanupKind,
@@ -82,6 +84,22 @@ async def seed_focus(runtime: DesktopRuntime) -> None:
     summary = await runtime.today_summary(SMOKE_NOW.astimezone(zone).date(), zone, SMOKE_NOW)
     revision = 0 if summary.focus is None else summary.focus.revision
     await runtime.select_day_task(summary.day, zone, task.public_id, revision)
+    # Working hours and a free event (ADR 0029), each made once, as the block is below.
+    hours = await runtime.working_hours()
+    if hours.revision == 0:
+        await runtime.save_working_hours(SUGGESTED_HOURS, 0)
+    if not summary.calendar.events:
+        morning = datetime.combine(summary.day, clock_time(10), zone)
+        await runtime.create_event(
+            EventEdit(
+                title="Synthetic tentative coffee",
+                all_day=False,
+                starts_at_utc=morning,
+                ends_at_utc=morning + timedelta(minutes=30),
+                time_zone=SMOKE_ZONE,
+                busy=False,
+            )
+        )
     # Time set aside for it that afternoon (ADR 0028), kept apart from the task itself. The
     # package check runs this scenario more than once on one profile, so it is added once.
     if (await runtime.get_action(task.public_id)).blocks:
@@ -108,6 +126,11 @@ async def verify_focus(runtime: DesktopRuntime) -> None:
     blocks = summary.calendar.blocks
     if len(blocks) != 1 or blocks[0].action_public_id != task.public_id:
         raise RuntimeError("Previous scheduled time was not preserved.")
+    if summary.calendar.hours.days != SUGGESTED_HOURS.days:
+        raise RuntimeError("Previous working hours were not preserved.")
+    events = summary.calendar.events
+    if len(events) != 1 or events[0].busy:
+        raise RuntimeError("Previous free event was not preserved.")
 
 
 async def verify_persistence(directory: Path) -> None:
@@ -382,6 +405,8 @@ async def check_package(directory: Path) -> None:
             raise RuntimeError("Portable focus export failed.")
         if len(payload["records"]["work_blocks"]) != 1:
             raise RuntimeError("Portable scheduled-time export failed.")
+        if len(payload["records"]["working_hours"]) != 1:
+            raise RuntimeError("Portable working hours export failed.")
         preview = await preview_cleanup(database, CleanupRequest(CleanupKind.CACHE, 1))
         await apply_cleanup(database, preview)
     finally:

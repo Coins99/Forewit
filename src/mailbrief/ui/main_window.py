@@ -43,6 +43,7 @@ from mailbrief.domain.actions import (
     ThreadLink,
 )
 from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks, local_moment
 from mailbrief.domain.backup import BackupMetadata
 from mailbrief.domain.briefs import (
     AutoSendStatus,
@@ -123,6 +124,7 @@ from mailbrief.domain.work_blocks import (
     scheduled_time,
     suggested_minutes,
 )
+from mailbrief.domain.working_hours import HoursEdit, WorkingHours
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -145,6 +147,7 @@ from mailbrief.services.actions import (
     DecisionSnapshot,
     SuggestionNotFoundError,
 )
+from mailbrief.services.availability import HoursConflictError
 from mailbrief.services.brief import (
     ConsentGate,
     ShortlistGate,
@@ -260,6 +263,7 @@ from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
+from mailbrief.ui.hours_editor import HoursEditor
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
@@ -493,6 +497,13 @@ class DesktopBackend(Protocol):
     ) -> BlockSaved: ...
     async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock: ...
     async def restore_block(self, public_id: str) -> BlockSaved: ...
+    # Working hours and the tasks to schedule (ADR 0029): local only.
+    async def working_hours(self) -> WorkingHours: ...
+    async def save_working_hours(self, edit: HoursEdit, revision: int) -> WorkingHours: ...
+    async def next_free(
+        self, after: datetime, length_minutes: int, zone: ZoneInfo
+    ) -> datetime | None: ...
+    async def unscheduled_tasks(self, today: date, zone: ZoneInfo) -> UnscheduledTasks: ...
     # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
     async def calendar_allowed(self) -> bool | None: ...
     async def allow_calendar(self) -> bool: ...
@@ -571,6 +582,8 @@ _EVENT_STALE = (
 _BLOCK_STALE = "This scheduled time changed since you opened it; Cancel and open it again."
 _BLOCK_DONE = "This task is done, so its time stays put. Reopen the task to move it."
 _TASK_UNREADABLE = "That task couldn't be loaded. Try again."
+_HOURS_UNREADABLE = "Your working hours couldn't be loaded. Try again."
+_NO_FREE_TIME = "No free stretch that long in the next two weeks; choose a time."
 _NO_SOURCE = "That email is no longer in local mail."
 _DRAFT_CLOSE_FAILED = "Couldn't save. Your text is still here; try again."
 _DRAFT_EXPORT_FAILED = "Couldn't export. Check the folder and try again."
@@ -786,6 +799,8 @@ def block_status(verb: str, title: str, saved: BlockSaved) -> str:
         text += f" Overlaps {', '.join(saved.overlaps)}{more}."
     if saved.after_deadline:
         text += " Ends after the task's deadline."
+    if saved.outside_hours:
+        text += " Outside your working hours."
     return text
 
 
@@ -894,6 +909,8 @@ class MainWindow(QMainWindow):
         self.planning_dialog = PlanningDialog(self)
         # Work blocks (ADR 0028): choose a task, then its time; or open a block.
         self.block_editor = BlockEditor(self)
+        self.hours_editor = HoursEditor(self)
+        self.hours_editor.save_requested.connect(self._request_save_hours)
         self.block_editor.save_requested.connect(self._request_save_block)
         self.block_editor.unschedule_requested.connect(self._request_unschedule_from_editor)
         self.block_editor.task_requested.connect(
@@ -921,6 +938,7 @@ class MainWindow(QMainWindow):
             self.google_event_dialog,
             self.planning_dialog,
             self.block_editor,
+            self.hours_editor,
         ):
             drawer.setProperty("presentation", "drawer")
         self.planning_dialog.preview_requested.connect(self._request_planning_preview)
@@ -932,6 +950,7 @@ class MainWindow(QMainWindow):
         self._planning_cancel: asyncio.Event | None = None
         self._planning_task: asyncio.Task[PlanningOutcome] | None = None
         self._calendar_week: date | None = None  # The Monday shown; None follows today.
+        self._calendar_day: date | None = None  # The Day view's day; None follows today.
         # The 1st of the month the Month view shows; None follows today.
         self._calendar_month: date | None = None
         self._calendar_allowed: bool | None = None  # The sign-in allows Calendar; None: unknown.
@@ -1350,6 +1369,7 @@ class MainWindow(QMainWindow):
         )
         workspace.add_page("inbox", self.inbox_panel)
         self.calendar_panel.set_view(self.appearance.calendar_view)  # As the owner last chose.
+        self.calendar_panel.set_tasks_shown(self.appearance.calendar_tasks)
         self.calendar_panel.set_clock(weak_method(self._now))
         self.calendar_panel.month_requested.connect(self._request_calendar_month)
         self.calendar_panel.view_requested.connect(self._request_calendar_view)
@@ -1359,6 +1379,11 @@ class MainWindow(QMainWindow):
         self.calendar_panel.google_requested.connect(self._request_google)
         self.calendar_panel.plan_requested.connect(self._request_planning)
         self.calendar_panel.block_requested.connect(self._request_block)
+        self.calendar_panel.day_requested.connect(self._request_calendar_day)
+        self.calendar_panel.hours_requested.connect(self._request_working_hours)
+        self.calendar_panel.task_schedule_requested.connect(self._schedule_task)
+        self.calendar_panel.task_place_requested.connect(self._place_task)
+        self.calendar_panel.tasks_toggled.connect(self._calendar_tasks_toggled)
         workspace.add_page(
             "calendar", _page(self.calendar_panel, "calendarPage", "Calendar", margins=0)
         )
@@ -1535,6 +1560,7 @@ class MainWindow(QMainWindow):
         self.inbox_panel.refresh.setEnabled(not provider_busy)
         self.event_editor.set_busy(busy)
         self.block_editor.set_busy(busy)
+        self.hours_editor.set_busy(busy)
 
     # Pages. The sidebar shows Today while the review or consent is up on the run page, and
     # Actions or Waiting by the actions page's tab.
@@ -1821,6 +1847,7 @@ class MainWindow(QMainWindow):
             or self.draft_editor.isVisible()
             or self.event_editor.isVisible()
             or self.block_editor.isVisible()
+            or self.hours_editor.isVisible()
             or self.planning_dialog.isVisible()
             or not self.draft_writes.idle
         ):
@@ -2611,6 +2638,9 @@ class MainWindow(QMainWindow):
         if read != self._calendar_read:
             return  # A newer read, perhaps of another week, shows the page.
         self.calendar_panel.show_range(shown, self.zone, self._local_today())
+        await self._refresh_unscheduled(read)
+        if read != self._calendar_read:
+            return
         if self.workspace.current_page() == "calendar":
             self.workspace.header.title.setText(self.calendar_panel.heading.text())
         today = self._local_today()
@@ -2924,6 +2954,9 @@ class MainWindow(QMainWindow):
         today = self._local_today()
         if self.calendar_panel.view() is CalendarView.MONTH:
             return month_days(self._calendar_month or today)
+        if self.calendar_panel.view() is CalendarView.DAY:
+            day = self._calendar_day or today
+            return day, day
         first = self._calendar_week or week_start(today)
         return first, first + timedelta(days=6)
 
@@ -2937,9 +2970,16 @@ class MainWindow(QMainWindow):
         self._calendar_month = None if first == month_start(self._local_today()) else first
 
     def _show_calendar_day(self, day: date) -> None:
-        """Show ``day``: its week in the Week and List views, its month in the Month view."""
+        """Show ``day``: itself in the Day view, its week in the Week and List views and its
+        month in the Month view."""
         self._show_calendar_week(week_start(day))
         self._show_calendar_month(month_start(day))
+        self._calendar_day = None if day == self._local_today() else day
+
+    def _request_calendar_day(self, day: object) -> None:
+        if isinstance(day, date):
+            self._show_calendar_day(day)
+            self._read_calendar(sync=True)
 
     def _request_calendar_week(self, first_day: object) -> None:
         if isinstance(first_day, date):
@@ -3505,6 +3545,155 @@ class MainWindow(QMainWindow):
 
         self._offer_undo(label, undo)
         self._block_move = (public_id, revision, previous)
+
+    # Working hours and the tasks to schedule (ADR 0029): local only, and a block made from
+    # the panel never changes its task.
+
+    async def _refresh_unscheduled(self, read: int) -> None:
+        """The tasks to schedule, read with the calendar; a failure keeps what was shown."""
+        today = self._local_today()
+        try:
+            found = await self.backend.unscheduled_tasks(today, self.zone)
+        except Exception as exc:
+            if read == self._calendar_read:
+                self._note_not_refreshed(exc)
+            return
+        if read == self._calendar_read and not self._closing:
+            self.calendar_panel.show_unscheduled(found, today)
+
+    def _calendar_tasks_toggled(self, shown: bool) -> None:
+        if self.appearance.calendar_tasks is not shown:
+            self._save_appearance(self.appearance.model_copy(update={"calendar_tasks": shown}))
+
+    def _request_working_hours(self) -> None:
+        """Read the hours afresh, then open the editor on them."""
+        if self._closing:
+            return
+
+        async def read() -> None:
+            try:
+                hours = await self.backend.working_hours()
+            except Exception as exc:
+                log_failure(exc)
+                if not self._closing:
+                    self.status.setText(_HOURS_UNREADABLE)
+                return
+            if self._closing:
+                return
+            if self._dialog_open() or self.hours_editor.isVisible():
+                self.status.setText("Close the open panel, then open Working hours again.")
+                return
+            self.hours_editor.edit_hours(hours)
+            self.dialog_guard.show_dialog(self.hours_editor)
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _request_save_hours(self, edit: object) -> None:
+        if not isinstance(edit, HoursEdit):
+            return
+        chosen = edit
+        started = self.start(lambda: self._save_hours(chosen), cancellable=False)
+        if not started and not self._closing:
+            self.hours_editor.keep_open(_BUSY)
+
+    async def _save_hours(self, edit: HoursEdit) -> None:
+        """The editor closes only once the save succeeds; otherwise it keeps the hours."""
+        try:
+            saved = await self.backend.save_working_hours(edit, self.hours_editor.revision())
+        except HoursConflictError as exc:
+            if not self._closing:
+                self.hours_editor.keep_open(str(exc))
+            return
+        except Exception:
+            if not self._closing:
+                self.hours_editor.keep_open(_EDITOR_FAILED)
+            raise
+        self.hours_editor.finish_saved()
+        self.status.setText("Working hours saved." if saved.is_set else "Working hours cleared.")
+        await self._refresh_views()
+
+    def _schedule_task(self, task: object) -> None:
+        """Return on a task to schedule: the block editor, at the next free time from the
+        day in focus (now, on today) for the task's suggested length."""
+        if self._closing or not isinstance(task, UnscheduledTask):
+            return
+        chosen = task
+        self._block_open_read += 1
+        read_id = self._block_open_read
+
+        async def read() -> None:
+            now = self.now()
+            focus = self._calendar_focus()
+            after = max(now, local_moment(focus, 0, self.zone))
+            try:
+                start = await self.backend.next_free(after, chosen.suggested_minutes, self.zone)
+            except Exception as exc:
+                log_failure(exc)
+                start = None
+            if self._closing or read_id != self._block_open_read:
+                return
+            if self._dialog_open() or self.block_editor.isVisible():
+                self.status.setText("Close the open panel, then schedule the task again.")
+                return
+            found = start is not None
+            if start is None:
+                start = suggested_start(focus, now, self.zone)
+            self.block_editor.edit_new(
+                chosen.action_public_id, chosen.title, start, chosen.suggested_minutes, self.zone
+            )
+            self.dialog_guard.show_dialog(self.block_editor)
+            hours = self._calendar_shown.hours if self._calendar_shown is not None else None
+            if not found and hours is not None and hours.is_set:
+                self.block_editor.status.setText(_NO_FREE_TIME)
+
+        task_read = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task_read)
+        task_read.add_done_callback(self._calendar_reads.discard)
+
+    def _place_task(self, task: object, day: object, minute: object) -> None:
+        """A task dropped on the hours: a block of its suggested length from there."""
+        if (
+            self._closing
+            or not isinstance(task, UnscheduledTask)
+            or not isinstance(day, date)
+            or not isinstance(minute, int)
+        ):
+            return
+        start = local_moment(day, minute, self.zone)
+        try:
+            time = BlockTime(
+                starts_at_utc=start,
+                ends_at_utc=start + timedelta(minutes=task.suggested_minutes),
+                time_zone=self.zone.key,
+            )
+        except ValueError:
+            self.status.setText(BLOCK_LENGTH)
+            return
+        chosen = task
+        started = self.start(lambda: self._place_block(chosen, time), cancellable=False)
+        if not started and not self._closing:
+            self.status.setText(_BUSY)
+
+    async def _place_block(self, task: UnscheduledTask, time: BlockTime) -> None:
+        try:
+            saved = await self.backend.schedule_block(task.action_public_id, time)
+        except BlockConflictError as exc:
+            log_failure(exc)
+            self.status.setText(str(exc))  # Static: it names no task.
+            await self._refresh_views()
+            return
+        except BlockNotFoundError as exc:
+            await self._stale(exc)
+            return
+        public_id, revision = saved.block.public_id, saved.block.revision
+
+        async def undo() -> None:
+            await self.backend.unschedule_block(public_id, revision)
+
+        self._offer_undo("Undo schedule", undo)
+        await self._show_saved_block(saved, block_status("Scheduled", task.title, saved))
 
     async def _show_saved_block(self, saved: BlockSaved, status: str) -> None:
         """Say what was saved, show the block's week and select it."""
@@ -5378,6 +5567,7 @@ class MainWindow(QMainWindow):
                 self.google_event_dialog,
                 self.planning_dialog,
                 self.block_editor,
+                self.hours_editor,
                 self.block_picker,
                 self.command_palette,
                 self.capture_dialog,
@@ -5749,6 +5939,7 @@ class MainWindow(QMainWindow):
             (self.action_editor, "this action"),
             (self.event_editor, "this event"),
             (self.block_editor, "this scheduled time"),
+            (self.hours_editor, "your working hours"),
             (self.settings_dialog, "Settings"),
             (self.capture_dialog, "this capture"),
         ):
@@ -5817,6 +6008,7 @@ class MainWindow(QMainWindow):
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
         self.block_editor.force_close()
+        self.hours_editor.force_close()
         self.block_picker.reject()
         self.google_event_dialog.reject()
         self._cancel_planning()

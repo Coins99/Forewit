@@ -59,7 +59,7 @@ def test_calendar_navigation_is_visibly_directional_in_every_view(qtbot: QtBot) 
         panel.set_view(view)
         assert panel.previous_button.text() == "\u2039"
         assert panel.next_button.text() == "\u203a"
-        period = "month" if view is CalendarView.MONTH else "week"
+        period = {CalendarView.MONTH: "month", CalendarView.DAY: "day"}.get(view, "week")
         assert panel.previous_button.accessibleName() == f"Previous {period}"
         assert panel.next_button.accessibleName() == f"Next {period}"
 

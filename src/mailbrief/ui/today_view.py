@@ -43,7 +43,7 @@ from mailbrief.domain.events import ActionMarker, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
 from mailbrief.ui.brief_list import ROW_PAD_H, ROW_ROLE, SINGLE_LINE, elided, paint_selection
-from mailbrief.ui.calendar_layout import Timed, block_note
+from mailbrief.ui.calendar_layout import Timed, block_note, show_as
 from mailbrief.ui.calendar_view import day_rows, entry_key, event_when
 from mailbrief.ui.deadline_text import day_text, deadline_text
 from mailbrief.ui.hairline import HairlineFrame, paint_focus_ring
@@ -132,6 +132,8 @@ def agenda_row(event: Timed, zone: ZoneInfo, today: date) -> DayRow:
         note = block_note(event)
     else:
         note = event.calendar_name if isinstance(event, GoogleEvent) else ""
+        if (shown := show_as(event)) is not None:  # ADR 0029.
+            note = f"{note} · {shown}" if note else shown
     return DayRow(f"{event_when(event, today, zone, today)} · {event.title}", note)
 
 
