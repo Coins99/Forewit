@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QFocusEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
@@ -179,15 +179,30 @@ def test_off_hours_and_the_free_line() -> None:
     assert off_hours(WorkingHours.unset(), 0) == []
     assert off_hours(HOURS, 0) == [(0, 540), (1020, 1440)]
     assert off_hours(HOURS, 6) == [(0, 1440)]
+    before = datetime(2026, 10, 12, tzinfo=TORONTO)  # Monday's midnight: nothing has passed.
     day = shown(TODAY, TODAY, event(time(10), time(11)))
-    assert free_text(day, TORONTO, CalendarView.DAY) == "Working 09:00–17:00 · 7 hrs free"
-    assert free_text(day, TORONTO, CalendarView.MONTH) == ""
+    assert free_text(day, TORONTO, CalendarView.DAY, before) == "Working 09:00–17:00 · 7 hrs free"
+    assert free_text(day, TORONTO, CalendarView.MONTH, before) == ""
     unset = shown(TODAY, TODAY, hours=WorkingHours.unset())
-    assert free_text(unset, TORONTO, CalendarView.DAY) == NO_HOURS
+    assert free_text(unset, TORONTO, CalendarView.DAY, before) == NO_HOURS
     week = shown(MONDAY, MONDAY + timedelta(days=6), event(time(10), time(11)))
-    assert free_text(week, TORONTO, CalendarView.WEEK) == "39 hrs free of 40 hrs this week"
+    assert free_text(week, TORONTO, CalendarView.WEEK, before) == "39 hrs free of 40 hrs this week"
     saturday = shown(date(2026, 10, 17), date(2026, 10, 17))
-    assert free_text(saturday, TORONTO, CalendarView.DAY) == "No working hours this day"
+    assert free_text(saturday, TORONTO, CalendarView.DAY, before) == "No working hours this day"
+
+
+def test_the_free_line_counts_only_time_still_ahead() -> None:
+    # At 14:20 on Wednesday, Monday's, Tuesday's and the morning's hours have passed.
+    day = shown(TODAY, TODAY, event(time(10), time(11)))
+    assert free_text(day, TORONTO, CalendarView.DAY, NOW) == (
+        "Working 09:00–17:00 · 2 hrs 40 mins free"
+    )
+    week = shown(MONDAY, MONDAY + timedelta(days=6), event(time(10), time(11)))
+    assert free_text(week, TORONTO, CalendarView.WEEK, NOW) == (
+        "18 hrs 40 mins free of 40 hrs this week"
+    )
+    evening = datetime(2026, 10, 14, 18, tzinfo=TORONTO)
+    assert free_text(day, TORONTO, CalendarView.DAY, evening) == "Working 09:00–17:00 · 0 mins free"
 
 
 def test_the_status_says_a_block_is_outside_the_working_hours() -> None:
@@ -275,7 +290,7 @@ async def test_the_day_view_reads_one_day_and_steps_by_days(
     assert reads[-1][1:] == (TODAY, TODAY)
     assert panel.stack.currentWidget() is panel.day_grid
     assert panel.heading.text() == "Calendar · Wednesday, October 14"
-    assert panel.free_line.text() == "Working 09:00–17:00 · 8 hrs free"
+    assert panel.free_line.text() == "Working 09:00–17:00 · 2 hrs 40 mins free"  # From 14:20.
     QTest.keyClick(panel.day_grid, Qt.Key.Key_Right)
     await window.drain_calendar_reads()
     reads = [call for call in backend.event_calls if call[0] == "calendar_range"]
@@ -403,3 +418,38 @@ async def test_a_task_dragged_onto_the_hours_is_scheduled_there(
     assert time_sent.minutes == 90
     assert window.status.text() == "Scheduled: Draft the Q3 report."
     assert window.undo_button.text() == "&Undo schedule"
+
+
+async def test_a_drop_late_in_the_day_ends_at_midnight_as_shown(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    window._place_task(task(estimate_minutes=90), TODAY, 23 * 60 + 30)
+    await finish(window)
+    (call,) = [call for call in backend.block_calls if call[0] == "schedule_block"]
+    time_sent = call[2]
+    assert isinstance(time_sent, BlockTime)
+    assert time_sent.starts_at_utc == local_instant(TODAY, time(23, 30), TORONTO)
+    assert time_sent.ends_at_utc == local_instant(TODAY + timedelta(days=1), time(0), TORONTO)
+
+
+async def test_a_drag_whose_release_is_lost_ends(window: MainWindow) -> None:
+    panel = window.calendar_panel
+    panel.set_tasks_shown(True)
+    listed = panel.unscheduled
+    viewport = listed.list.viewport()
+    row = QPointF(listed.list.visualItemRect(listed.list.item(0)).center())
+    origin = viewport.mapToGlobal(row)
+    hours = panel.week_grid.hours_area.viewport()
+    target = QPointF(hours.mapToGlobal(hours.rect().center()))
+    send(viewport, QEvent.Type.MouseButtonPress, row, origin, True)
+    send(viewport, QEvent.Type.MouseMove, row, target, True)
+    assert listed.dragging() and panel.week_grid.placement() is not None
+    # The app loses focus mid-drag, so the release never comes.
+    QApplication.sendEvent(listed.list, QFocusEvent(QEvent.Type.FocusOut))
+    assert not listed.dragging() and panel.week_grid.placement() is None
+    # A new press never carries on a drag whose release went missing.
+    send(viewport, QEvent.Type.MouseButtonPress, row, origin, True)
+    send(viewport, QEvent.Type.MouseMove, row, target, True)
+    send(viewport, QEvent.Type.MouseButtonPress, row, origin, True)
+    assert not listed.dragging() and panel.week_grid.placement() is None
+    send(viewport, QEvent.Type.MouseButtonRelease, row, origin, False)

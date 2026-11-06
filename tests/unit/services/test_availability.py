@@ -11,7 +11,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mailbrief.domain.actions import ActionEdit, ActionPriority, DeadlineChange, DeadlineChangeKind
+from mailbrief.domain.actions import (
+    ActionEdit,
+    ActionFilter,
+    ActionPriority,
+    DeadlineChange,
+    DeadlineChangeKind,
+)
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.events import EventEdit
 from mailbrief.domain.work_blocks import BlockTime
@@ -235,6 +241,18 @@ async def test_unscheduled_tasks_follow_the_actions_order_and_the_limit(
     first_two = await service.unscheduled(MONDAY, TORONTO, limit=2)
     assert [item.title for item in first_two.tasks] == ["Planned Tuesday", "Due Monday"]
     assert first_two.total == 5
+
+
+async def test_unscheduled_ties_keep_the_actions_page_s_order(
+    service: AvailabilityService, actions: ActionService
+) -> None:
+    # Made at one instant, with no dates or priority: equal urgency keeps creation order.
+    titles = [f"Task {number}" for number in range(8)]
+    for title in titles:
+        await actions.create(task(title))
+    listed = await actions.list_actions(ActionFilter.OPEN)
+    found = await service.unscheduled(MONDAY, TORONTO)
+    assert [item.title for item in found.tasks] == [action.title for action in listed] == titles
 
 
 async def test_a_timed_deadline_is_shown_on_its_local_day(

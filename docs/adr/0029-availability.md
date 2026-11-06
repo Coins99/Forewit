@@ -59,7 +59,7 @@ buffer; a day off is an all-day Busy event.
 - **The desktop.** A Day view joins Week, Month and List. Week and Day shade the hours
   outside the working hours with a faint wash of muted text (`Tokens.off_hours`), and draw
   free events as outlines on the page's own fill. A line under the hours says how much
-  working time is free. **Working hours** opens a drawer with one line of text per weekday.
+  working time is still free from now on. **Working hours** opens a drawer with one line of text per weekday.
   **Tasks to schedule** shows the panel beside the hours, remembered in appearance.json.
   Return on a task opens the block editor at the next free stretch of its suggested length
   in the next 14 days; dragging a task onto the hours schedules it there at once, with

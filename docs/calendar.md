@@ -133,8 +133,8 @@ this too.
   "09:00–12:00, 13:00–17:00", up to three a day on quarter hours, and a buffer kept clear
   before and after busy events. Until you set them, nothing changes. Once set, the Day and
   Week views shade the hours outside them, and a line under the hours says how much
-  working time is free: working hours less busy events and their buffers, less the time
-  set aside for open tasks.
+  working time is still free from now on: working hours less busy events and their
+  buffers, less the time set aside for open tasks. Time that has passed is never free.
 - A block outside your working hours says so when you save it. Overlap warnings count busy
   events only, and a day off overlaps every block on it.
 
@@ -158,8 +158,9 @@ deadline or target date never moves a block.
 
 - **Schedule task**, beside New event, asks which open task, then when. **Schedule time…**
   in a task's detail does the same for that task. A new block starts at the next whole hour
-  today (09:00 on another day) and lasts what is left of the task's estimate, rounded up to
-  15 minutes and at most 2 hours, or 1 hour without an estimate.
+  today (09:00 on another day) and lasts what is left of the task's estimate after its time
+  from today on (earlier blocks aren't work done), rounded up to 15 minutes and at most 2
+  hours, or 1 hour without an estimate.
 - Blocks show in the Week, Month and List views and in Today's agenda, with "Task" beside
   their time: a white card with a blue rim, or grey once the task is done. The task's
   detail says how much time is scheduled ("1 hr 30 mins in 2 blocks · estimate 2 hrs") and

@@ -172,9 +172,17 @@ class UnscheduledPanel(QWidget):
                 self._end_drag()
                 return True
             return False
+        if watched is self.list and kind == QEvent.Type.FocusOut:
+            # The app or the list lost focus mid-drag (deactivated, or the list hidden): its
+            # release may never come, so the drag ends here.
+            if self._dragging:
+                self._end_drag()
+            return False
         if watched is not self.list.viewport() or not isinstance(event, QMouseEvent):
             return False
         if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if self._dragging:  # A release went missing: that drag is over.
+                self._end_drag()
             item = self.list.itemAt(event.position().toPoint())
             task = None if item is None else item.data(TASK_ROLE)
             self._pressed = (

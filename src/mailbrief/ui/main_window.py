@@ -124,7 +124,7 @@ from mailbrief.domain.work_blocks import (
     scheduled_time,
     suggested_minutes,
 )
-from mailbrief.domain.working_hours import HoursEdit, WorkingHours
+from mailbrief.domain.working_hours import DAY_MINUTES, HoursEdit, WorkingHours
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -222,7 +222,14 @@ from mailbrief.ui.block_editor import LENGTH as BLOCK_LENGTH
 from mailbrief.ui.block_editor import BlockEditor
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
-from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start, shifted, stretched
+from mailbrief.ui.calendar_layout import (
+    CalendarView,
+    has_hours,
+    month_days,
+    month_start,
+    shifted,
+    stretched,
+)
 from mailbrief.ui.calendar_preview import GoogleEventDialog
 from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
@@ -2638,9 +2645,6 @@ class MainWindow(QMainWindow):
         if read != self._calendar_read:
             return  # A newer read, perhaps of another week, shows the page.
         self.calendar_panel.show_range(shown, self.zone, self._local_today())
-        await self._refresh_unscheduled(read)
-        if read != self._calendar_read:
-            return
         if self.workspace.current_page() == "calendar":
             self.workspace.header.title.setText(self.calendar_panel.heading.text())
         today = self._local_today()
@@ -2662,6 +2666,9 @@ class MainWindow(QMainWindow):
             self.workspace.current_page() == "calendar" and self._google_mode() == GOOGLE_ON
         )
         await self._refresh_day()
+        # Last, so the page and what the window keeps of it move together, and Your day
+        # never waits for it.
+        await self._refresh_unscheduled(read)
 
     async def _refresh_day(self) -> None:
         """The Today page's "Your day", from local data; it keeps what it showed when it
@@ -3435,7 +3442,11 @@ class MainWindow(QMainWindow):
             if action.status is not ActionStatus.OPEN:
                 self.status.setText("Only an open task can be scheduled. Reopen it first.")
                 return
-            scheduled = scheduled_time(action.blocks).total_minutes
+            # As the tasks to schedule count it (ADR 0029): blocks from today on, since an
+            # earlier block is never work done.
+            since = local_moment(self._local_today(), 0, self.zone)
+            upcoming = [block for block in action.blocks if block.ends_at_utc > since]
+            scheduled = scheduled_time(upcoming).total_minutes
             minutes = suggested_minutes(action.estimate_minutes, scheduled)
             start = suggested_start(on, self.now(), self.zone)
             self.block_editor.edit_new(action.public_id, action.title, start, minutes, self.zone)
@@ -3480,17 +3491,10 @@ class MainWindow(QMainWindow):
             raise  # _run logs it and reports the failure.
         self.block_editor.finish_saved()
         if editing is None:
-            public_id, revision = saved.block.public_id, saved.block.revision
-
-            async def undo() -> None:
-                await self.backend.unschedule_block(public_id, revision)
-
-            self._offer_undo("Undo schedule", undo)
-            verb = "Scheduled"
-        else:
-            self._offer_move_undo(saved, "Undo move")
-            verb = "Moved"
-        await self._show_saved_block(saved, block_status(verb, title, saved))
+            await self._show_scheduled(saved, title)
+            return
+        self._offer_move_undo(saved, "Undo move")
+        await self._show_saved_block(saved, block_status("Moved", title, saved))
 
     def _request_block_change(
         self, block: ScheduledBlock, days: int, minutes: int, *, resize: bool
@@ -3550,7 +3554,10 @@ class MainWindow(QMainWindow):
     # the panel never changes its task.
 
     async def _refresh_unscheduled(self, read: int) -> None:
-        """The tasks to schedule, read with the calendar; a failure keeps what was shown."""
+        """The tasks to schedule, read with the calendar in the views that show them (Day
+        and Week); a failure keeps what was shown."""
+        if not has_hours(self.calendar_panel.view()):
+            return
         today = self._local_today()
         try:
             found = await self.backend.unscheduled_tasks(today, self.zone)
@@ -3653,7 +3660,8 @@ class MainWindow(QMainWindow):
         task_read.add_done_callback(self._calendar_reads.discard)
 
     def _place_task(self, task: object, day: object, minute: object) -> None:
-        """A task dropped on the hours: a block of its suggested length from there."""
+        """A task dropped on the hours: a block of its suggested length from there, ending
+        at midnight at the latest, as the grid showed it while it was dragged."""
         if (
             self._closing
             or not isinstance(task, UnscheduledTask)
@@ -3662,12 +3670,12 @@ class MainWindow(QMainWindow):
         ):
             return
         start = local_moment(day, minute, self.zone)
+        end = min(
+            start + timedelta(minutes=task.suggested_minutes),
+            local_moment(day, DAY_MINUTES, self.zone),
+        )
         try:
-            time = BlockTime(
-                starts_at_utc=start,
-                ends_at_utc=start + timedelta(minutes=task.suggested_minutes),
-                time_zone=self.zone.key,
-            )
+            time = BlockTime(starts_at_utc=start, ends_at_utc=end, time_zone=self.zone.key)
         except ValueError:
             self.status.setText(BLOCK_LENGTH)
             return
@@ -3687,13 +3695,17 @@ class MainWindow(QMainWindow):
         except BlockNotFoundError as exc:
             await self._stale(exc)
             return
+        await self._show_scheduled(saved, task.title)
+
+    async def _show_scheduled(self, saved: BlockSaved, title: str) -> None:
+        """A new block: offer to unschedule it, then show it."""
         public_id, revision = saved.block.public_id, saved.block.revision
 
         async def undo() -> None:
             await self.backend.unschedule_block(public_id, revision)
 
         self._offer_undo("Undo schedule", undo)
-        await self._show_saved_block(saved, block_status("Scheduled", task.title, saved))
+        await self._show_saved_block(saved, block_status("Scheduled", title, saved))
 
     async def _show_saved_block(self, saved: BlockSaved, status: str) -> None:
         """Say what was saved, show the block's week and select it."""

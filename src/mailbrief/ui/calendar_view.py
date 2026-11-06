@@ -14,7 +14,7 @@ block. A line under the hours says how much working time is free.
 
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import Final
+from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -27,7 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks, day_availability
+from mailbrief.domain.availability import (
+    UnscheduledTask,
+    UnscheduledTasks,
+    availability,
+    free_after,
+)
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
@@ -113,7 +119,10 @@ _WEEK_STEPS: Final = ("&Previous week", "This wee&k", "Ne&xt week")
 _MONTH_STEPS: Final = ("&Previous month", "This mont&h", "Ne&xt month")
 
 
-def range_kind(view: CalendarView) -> str:
+type RangeKind = Literal["day", "week", "month"]
+
+
+def range_kind(view: CalendarView) -> RangeKind:
     """The days a view reads: one ("day"), a week ("week": the Week and List views) or a
     month's six weeks ("month")."""
     if view is CalendarView.DAY:
@@ -121,27 +130,26 @@ def range_kind(view: CalendarView) -> str:
     return "month" if view is CalendarView.MONTH else "week"
 
 
-def free_text(shown: CalendarRange, zone: ZoneInfo, view: CalendarView) -> str:
-    """The line under the hours: how much working time is free, worked out locally from
-    the days shown (ADR 0029). "" for the Month and List views."""
+def free_text(shown: CalendarRange, zone: ZoneInfo, view: CalendarView, now: datetime) -> str:
+    """The line under the hours: how much working time is still free from ``now`` on,
+    worked out locally from the days shown (ADR 0029); time already past is never free.
+    "" for the Month and List views."""
     if not has_hours(view):
         return ""
     hours: WorkingHours = shown.hours
     if not hours.is_set:
         return NO_HOURS
+    found_days = availability(shown, hours, zone)
     if view is CalendarView.DAY:
-        day = shown.first_day
-        found = day_availability(shown, hours, day, zone)
+        found = found_days[0]
         if found.day_off:
             return "Day off"
         if not found.working_minutes:
             return "No working hours this day"
-        left = length_text(timedelta(minutes=found.free_minutes))
-        return f"Working {windows_text(hours.windows(day.weekday()))} · {left} free"
-    days = [shown.first_day + timedelta(days=offset) for offset in range(WEEK_DAYS)]
-    found_days = [day_availability(shown, hours, day, zone) for day in days]
+        left = length_text(timedelta(minutes=free_after(found, now)))
+        return f"Working {windows_text(hours.windows(found.day.weekday()))} · {left} free"
     working = sum(day.working_minutes for day in found_days)
-    free = sum(day.free_minutes for day in found_days)
+    free = sum(free_after(day, now) for day in found_days)
     if not working:
         return "No working hours this week"
     return (
@@ -278,11 +286,11 @@ class CalendarPanel(QWidget):
         super().__init__()
         self._busy = False
         self._shown: CalendarRange | None = None
-        # Whether the days shown are a month's grid: read for the Month view, while the view
-        # may already be another, until the window reads that view's days.
-        self._shown_month = False
-        self._shown_kind = "week"  # range_kind() of the view the days were read for.
+        # range_kind() of the view the days were read for: "month" for a month's grid, while
+        # the view may already be another, until the window reads that view's days.
+        self._shown_kind: RangeKind = "week"
         self._zone = ZoneInfo("UTC")
+        self._clock: Callable[[], datetime] = utc_now  # For the free line.
         self._tasks_shown = tasks  # The tasks to schedule beside the hours.
         self._tasks_total = 0
         self._today: date | None = None
@@ -474,8 +482,11 @@ class CalendarPanel(QWidget):
         self._switched()
 
     def set_clock(self, clock_now: Callable[[], datetime]) -> None:
-        """Where the week grid reads the time now, for its line across today."""
-        self.week_grid.clock = clock_now
+        """Where the page reads the time now: the hours' line across today and the free
+        line, which counts only time still ahead."""
+        self._clock = clock_now
+        for grid in (self.week_grid, self.day_grid):
+            grid.clock = clock_now
 
     def focus_day(self) -> date | None:
         """The day another view should open on: the selected day, else today when it is
@@ -491,7 +502,7 @@ class CalendarPanel(QWidget):
             return shown.first_day
         if shown.first_day <= today <= shown.last_day:
             return today
-        return shown_month(shown.first_day) if self._shown_month else shown.first_day
+        return shown_month(shown.first_day) if self._shown_kind == "month" else shown.first_day
 
     def selected(self) -> CalendarEvent | None:
         """The selected event when it is the owner's; Google's can't be changed here."""
@@ -527,7 +538,6 @@ class CalendarPanel(QWidget):
         self._shown = shown
         # The window reads the days of the view shown, and a read started before a switch
         # never shows: so these are the Month view's days when it is the view now.
-        self._shown_month = self.view() is CalendarView.MONTH
         self._shown_kind = range_kind(self.view())
         self._zone = zone
         self._today = today
@@ -605,9 +615,8 @@ class CalendarPanel(QWidget):
                 self._select(entry_key(previous[1]), previous[0])
             else:
                 self._select_day(previous[0])
-        self.empty.setText(
-            EMPTY_MONTH if self._shown_month else EMPTY_DAY if self._shown_kind == "day" else EMPTY
-        )
+        empty = {"month": EMPTY_MONTH, "day": EMPTY_DAY, "week": EMPTY}
+        self.empty.setText(empty[self._shown_kind])
         self.empty.setVisible(
             not shown.events and not shown.markers and not shown.google_events and not shown.blocks
         )
@@ -699,7 +708,7 @@ class CalendarPanel(QWidget):
         reverse."""
         kind = range_kind(self.view())
         if self._shown is not None and kind != self._shown_kind:
-            grids: dict[str, WeekGrid | MonthGrid] = {
+            grids: dict[RangeKind, WeekGrid | MonthGrid] = {
                 "day": self.day_grid,
                 "week": self.week_grid,
                 "month": self.month_grid,
@@ -743,7 +752,7 @@ class CalendarPanel(QWidget):
         shown, today = self._shown, self._today
         if shown is None or today is None:
             self.heading.setText("Calendar")
-        elif self._shown_month:
+        elif self._shown_kind == "month":
             self.heading.setText(f"Calendar · {month_title(shown_month(shown.first_day))}")
         elif self._shown_kind == "day":
             self.heading.setText(f"Calendar · {full_day_text(shown.first_day, today=today)}")
@@ -755,7 +764,9 @@ class CalendarPanel(QWidget):
         once the view's own days are read."""
         view, shown = self.view(), self._shown
         fits = shown is not None and range_kind(view) == self._shown_kind
-        text = free_text(shown, self._zone, view) if shown is not None and fits else ""
+        text = (
+            free_text(shown, self._zone, view, self._clock()) if shown is not None and fits else ""
+        )
         self.free_line.setText(text)
         self.free_line.setVisible(bool(text))
 

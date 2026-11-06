@@ -583,6 +583,24 @@ async def test_only_the_last_schedule_opens_and_never_over_another_panel(
     assert window.status.text() == "Close the open panel, then schedule the task again."
 
 
+async def test_schedule_time_counts_only_blocks_from_today_on(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    # As the tasks to schedule count it (ADR 0029): yesterday's block is never work done.
+    yesterday = scheduled(TODAY - timedelta(days=1), time(9), time(11)).block
+    later = scheduled(TODAY, time(15), time(16)).block
+    task = make_action(
+        public_id=TASK, title="Draft the Q3 report", estimate_minutes=180, blocks=(yesterday, later)
+    )
+    backend.actions[ActionFilter.OPEN] = (task,)
+    await window.initialize()
+    window._open_new_block(TASK, TODAY)
+    await window.drain_calendar_reads()
+    built = window.block_editor.built_time()
+    assert isinstance(built, BlockTime) and built.minutes == 120  # 3 hrs less today's 1 hr.
+    window.block_editor.cancel_button.click()
+
+
 async def test_schedule_time_from_the_detail_opens_on_a_future_target(
     window: MainWindow, backend: FakeBackend
 ) -> None:

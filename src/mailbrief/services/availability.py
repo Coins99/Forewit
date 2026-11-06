@@ -123,6 +123,7 @@ class AvailabilityService:
         rows = (
             await self._session.execute(
                 select(
+                    ActionTable.id,
                     ActionTable.public_id,
                     ActionTable.title,
                     ActionTable.estimate_minutes,
@@ -150,28 +151,44 @@ class AvailabilityService:
                 )
             )
         ).all()
-        found: list[tuple[tuple[date, datetime, int, datetime], UnscheduledTask]] = []
-        for row in rows:
-            precision = DeadlinePrecision(row.deadline_precision)
-            due = deadline_due_at(
-                precision, row.deadline_date, row.deadline_at_utc, row.deadline_timezone
+        dues = {
+            row.id: deadline_due_at(
+                DeadlinePrecision(row.deadline_precision),
+                row.deadline_date,
+                row.deadline_at_utc,
+                row.deadline_timezone,
             )
-            if precision is DeadlinePrecision.DATE:
+            for row in rows
+        }
+        # As the Tasks page orders them: equal urgency keeps ID order. Only the tasks listed
+        # are built.
+        ranked = sorted(
+            rows,
+            key=lambda row: (
+                urgency(
+                    row.target_date, dues[row.id], row.priority, normalize_utc(row.created_at_utc)
+                ),
+                row.id,
+            ),
+        )
+        tasks: list[UnscheduledTask] = []
+        for row in ranked[:limit]:
+            due = dues[row.id]
+            if DeadlinePrecision(row.deadline_precision) is DeadlinePrecision.DATE:
                 deadline_day = row.deadline_date
             elif due is not None:
                 deadline_day = due.astimezone(zone).date()
             else:
                 deadline_day = None
-            task = UnscheduledTask(
-                action_public_id=row.public_id,
-                title=row.title,
-                estimate_minutes=row.estimate_minutes,
-                scheduled_minutes=round(row.scheduled),
-                priority=None if row.priority is None else ActionPriority(row.priority),
-                target_date=row.target_date,
-                deadline_day=deadline_day,
+            tasks.append(
+                UnscheduledTask(
+                    action_public_id=row.public_id,
+                    title=row.title,
+                    estimate_minutes=row.estimate_minutes,
+                    scheduled_minutes=round(row.scheduled),
+                    priority=None if row.priority is None else ActionPriority(row.priority),
+                    target_date=row.target_date,
+                    deadline_day=deadline_day,
+                )
             )
-            order = urgency(row.target_date, due, row.priority, normalize_utc(row.created_at_utc))
-            found.append((order, task))
-        found.sort(key=lambda item: (item[0], item[1].action_public_id))
-        return UnscheduledTasks(tasks=tuple(task for _, task in found[:limit]), total=len(found))
+        return UnscheduledTasks(tasks=tuple(tasks), total=len(rows))

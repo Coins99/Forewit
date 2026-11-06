@@ -102,18 +102,36 @@ class DayAvailability(DomainModel):
     free_minutes: int = Field(default=0, ge=0)
 
 
+type _Taken = tuple[
+    tuple[Interval, ...], tuple[CalendarEvent | GoogleEvent, ...], tuple[Interval, ...]
+]
+
+
+def _taken(shown: CalendarRange, hours: WorkingHours, zone: ZoneInfo) -> _Taken:
+    """What ``shown`` takes, worked out once for all its days: the busy spans, the all-day
+    busy events (days off) and the open tasks' blocks."""
+    events: Sequence[CalendarEvent | GoogleEvent] = (*shown.events, *shown.google_events)
+    busy = busy_spans(events, zone, hours.buffer_minutes) if hours.is_set else ()
+    offs = tuple(event for event in events if event.busy and event.all_day)
+    blocks = tuple(block.block.interval for block in shown.blocks if block.open)
+    return busy, offs, blocks
+
+
 def day_availability(
     shown: CalendarRange, hours: WorkingHours, day: date, zone: ZoneInfo
 ) -> DayAvailability:
     """``day``'s availability from the entries ``shown`` holds, which should cover it."""
-    events: Sequence[CalendarEvent | GoogleEvent] = (*shown.events, *shown.google_events)
-    off = day_off(events, day)
+    return _on_day(hours, day, zone, _taken(shown, hours, zone))
+
+
+def _on_day(hours: WorkingHours, day: date, zone: ZoneInfo, taken: _Taken) -> DayAvailability:
+    busy_all, offs, blocks = taken
+    off = day_off(offs, day)
     if not hours.is_set:
         return DayAvailability(day=day, hours_set=False, day_off=off)
     working = working_spans(hours, day, zone)
-    busy = clip(busy_spans(events, zone, hours.buffer_minutes), *day_span(day, zone))
+    busy = clip(busy_all, *day_span(day, zone))
     after_busy = subtract(working, busy)
-    blocks = [block.block.interval for block in shown.blocks if block.open]
     free = subtract(after_busy, blocks)
     worked, left, available = minutes(working), minutes(after_busy), minutes(free)
     return DayAvailability(
@@ -134,10 +152,16 @@ def availability(
 ) -> tuple[DayAvailability, ...]:
     """Every day of ``shown``, first to last."""
     count = (shown.last_day - shown.first_day).days + 1
+    taken = _taken(shown, hours, zone)
     return tuple(
-        day_availability(shown, hours, shown.first_day + timedelta(days=offset), zone)
+        _on_day(hours, shown.first_day + timedelta(days=offset), zone, taken)
         for offset in range(count)
     )
+
+
+def free_after(day: DayAvailability, after: datetime) -> int:
+    """The minutes of ``day``'s free time from ``after`` on: what has passed is never free."""
+    return round(minutes((max(start, after), end) for start, end in day.free if end > after))
 
 
 def step_up(moment: datetime, zone: ZoneInfo) -> datetime:

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 ZONE_KEY_MAX_CHARS: Final = 64  # The longest IANA zone key stored with a time.
 
@@ -39,11 +39,19 @@ def shape_busy(all_day: bool) -> bool:
     return not all_day
 
 
+_FLAG: Final = TypeAdapter(bool)
+
+
 def busy_by_shape(data: object) -> object:
     """A calendar entry's fields with a missing ``busy`` filled in by shape_busy(). For a
-    model's ``mode="before"`` validator."""
+    model's ``mode="before"`` validator: ``all_day`` is read as the field itself reads it,
+    so 1 or "true" is all-day here too."""
     if isinstance(data, dict) and data.get("busy") is None:
-        return {**data, "busy": shape_busy(data.get("all_day") is True)}
+        try:
+            all_day = _FLAG.validate_python(data.get("all_day"))
+        except ValidationError:
+            return data  # The field's own validation reports it.
+        return {**data, "busy": shape_busy(all_day)}
     return data
 
 
