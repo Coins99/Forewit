@@ -149,6 +149,31 @@ tasks aren't listed. They're in the order of the Tasks page, at most 50.
   time, for what is left of its estimate (up to 2 hours; 1 hour without one).
 - Or drag it onto the hours: it is scheduled there at once, with **Undo schedule**.
 
+## Workload and conflicts
+
+With working hours set, the Day and Week views say what each day holds against the time it
+has, and mark what clashes. It is worked out on this device from what the calendar shows;
+nothing is sent anywhere, and nothing changes a task, a block or an event.
+
+- **Each day's head** says how much is spare ("3h spare": the day's working time less busy
+  events, less what is planned for it), or "Over by 1h" in the warning colour. What is
+  planned is your blocks for open tasks that day, each minute once, plus the estimates of
+  the day's focus tasks that have no block that day.
+- **Provisional days** may hold more than they show: a focus task has no estimate, or, with
+  Google Calendar connected, its saved copy doesn't hold the day or is over a day old. They
+  read "≤ 3h spare" or "Over by 1h+". Refresh fixes the second.
+- **A block in conflict** has a small mark in its top right corner, and "· conflict" in the
+  List view: it overlaps a busy event or another block, sits in a busy event's buffer, is on
+  a day off, falls outside your working hours, ends after its task's deadline, or its task
+  has more time set aside from today on than its estimate. Free events never conflict.
+  Saving a block says the same, except for the estimate.
+- **Why.** Choose a block in conflict, or any entry or day, and the line under the hours
+  says why: "Wed Oct 14: 8 hrs available, 9 hrs planned (6 hrs in blocks, 3 hrs for 1 focus
+  task without time) · over by 1 hr".
+- **Today.** Today's focus adds how much time is free today, from now on, and how far over
+  the day is.
+- **Past days** keep their figures but are never flagged.
+
 ## Time for tasks
 
 Set aside time on the calendar for a task: a **block**, from a start to an end, as many as

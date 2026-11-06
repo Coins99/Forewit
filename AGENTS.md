@@ -40,8 +40,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   evidence; read them, not old commit messages, for what is done.
 - P3, the local calendar, is three PRs, one at a time (`docs/p3-calendar.md`). P3-1, work
   blocks (ADR 0028, migration 0032), and P3-2, Busy/Free, working hours, the tasks to
-  schedule and the Day view (ADR 0029, migration 0033), are implemented and await owner
-  acceptance; P3-3 (conflicts and overfilled days) is not started.
+  schedule and the Day view (ADR 0029, migration 0033), are merged; P3-3, workload and
+  conflicts (ADR 0030, no migration), is implemented; all three await owner acceptance.
 - Where each feature is specified (behavior, acceptance steps and limits):
 
   | Area | Docs | ADRs |
@@ -55,7 +55,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   | Data and recovery (M9) | `m9-durability.md`, `m9-live-validation.md` | |
   | Ranking signals | `ranking.md` | 0020 |
   | Calendar, Google Calendar, AI planning | `calendar.md` | 0018 |
-  | P3 local calendar: work blocks, working hours, workload | `p3-calendar.md`, `calendar.md` | 0028, 0029 |
+  | P3 local calendar: work blocks, working hours, workload | `p3-calendar.md`, `calendar.md` | 0028–0030 |
   | Local email AI (P0-B, experimental) | `p0-b2-local-analysis-plan.md`, `p0-b2-local-analysis.md`, `local-ai-benchmark.md` | 0023 |
   | Planner foundation (P0, P1 tasks, projects, estimates, priorities/tags, repeats, deadlines, waiting, checklists) | `p0-planner-foundation.md`, `p1-foundation-audit.md`, `p1-*.md` | 0021, 0022, 0024 |
   | Today, search and the palette | `today.md`, `search.md` | |
@@ -440,6 +440,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   hours are one revisioned `working_hours` row, never the preferences row; unreadable hours
   count as none and never stop anything. Free time and the tasks to schedule are worked out
   locally and never sent. Making a block from the tasks to schedule never changes the task.
+- Workload and conflicts (ADR 0030) are a read model over the range the window read
+  (`domain/workload.py`): no table, no write, never sent to AI. A block's conflicts and a
+  save's warnings come from one function, `conflicts_for`. Past days are never flagged, and
+  a provisional day (Google Calendar on with the day missing or over a day old, or a focus
+  task without an estimate) is never shown as fitting.
 - Work blocks (ADR 0028) are the owner's planned time for one task, never measured work. A
   block never changes its task: `WorkBlockService` never writes `actions` (no revision,
   activity, deadline or target date), and moving a deadline or target date never moves a

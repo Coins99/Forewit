@@ -67,6 +67,8 @@ from mailbrief.domain.events import (
     ChangeKind,
     EventChange,
     EventEdit,
+    FocusDay,
+    FocusTask,
     ScheduledBlock,
 )
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
@@ -934,7 +936,28 @@ class FakeBackend(FakeDrafts):
                     key=ScheduledBlock.sort_key,
                 )
             ),
+            focus=self._focus_days(first_day, last_day),
         )
+
+    def _focus_days(self, first_day: date, last_day: date) -> tuple[FocusDay, ...]:
+        """The focus tasks the owner does, live and open, as EventService.list_range reads
+        them (ADR 0030)."""
+        open_tasks = {
+            action.public_id: action for action in self.actions.get(ActionFilter.OPEN, ())
+        }
+        found = []
+        for day, plan in sorted(self.focus_plans.items()):
+            tasks = tuple(
+                FocusTask(
+                    action_public_id=item.task_public_id,
+                    estimate_minutes=open_tasks[item.task_public_id].estimate_minutes,
+                )
+                for item in plan.items
+                if item.task_public_id in open_tasks
+            )
+            if first_day <= day <= last_day and tasks:
+                found.append(FocusDay(day=day, tasks=tasks))
+        return tuple(found)
 
     # Work blocks, as WorkBlockService keeps them: own revisions, open tasks only.
 

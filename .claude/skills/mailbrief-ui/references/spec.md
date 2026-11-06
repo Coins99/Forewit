@@ -657,7 +657,13 @@ The brief list's chips keep their shorter forms (see Brief list).
   dragged out reports screen points, and the grid's `placement_at` and `show_placement`
   draw the drop on `selection` with an accent ring; no `QDrag`. **Working hours**
   (`workingHoursButton`) opens `HoursEditor`, a drawer of one `QLineEdit` per weekday and a
-  buffer combo; `calendarFreeTime` (muted) says how much working time is free. The page's stack shows
+  buffer combo; `calendarFreeTime` (muted) says how much working time is free. Workload
+  (ADR 0030): the Week and Day heads (`HEADER_H` 66) carry each day's load line in
+  `CAPTION_PX` under the date, `text_secondary`, or `warning_fg` when overfilled ("Over by
+  1h"); a narrow column drops " spare". A block in conflict has a `warning_fg` dot (radius
+  3) in its top right corner, its title kept clear of it. `calendarReasons`, a muted
+  `wrap_label` under the hours, explains the day or block chosen in the Day and Week views;
+  Today's `focusCapacity` says the free time left today. The page's stack shows
   `WeekGrid` (`calendarWeekGrid`), `MonthGrid` (`calendarMonthGrid`, `ui/calendar_grid.py`) or
   the list. The list's rows hold the selection for every view: a grid's `chosen(day,
   entry)` moves the list's current row (a day's heading for a day alone), and the grids show

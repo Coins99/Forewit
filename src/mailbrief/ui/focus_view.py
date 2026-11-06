@@ -73,6 +73,12 @@ class FocusPanel(HairlineFrame):
         self.workload.setObjectName("focusWorkload")
         self.workload.setAccessibleName("Known selected workload")
         layout.addWidget(self.workload)
+        # Today's free time from now on, and how far over the day is (ADR 0030).
+        self.capacity = wrap_label("", tone="muted")
+        self.capacity.setObjectName("focusCapacity")
+        self.capacity.setAccessibleName("Free time today")
+        self.capacity.hide()
+        layout.addWidget(self.capacity)
         self.list = ActivatingList()
         self.list.setObjectName("focusList" if compact else "focusFullList")
         self.list.setAccessibleName("Selected work, in order")
@@ -216,6 +222,11 @@ class FocusPanel(HairlineFrame):
         self.attention_button.setText(
             f"Other commitments needing attention · {len(summary.attention)}"
         )
+
+    def show_capacity(self, text: str) -> None:
+        """Today's free time and load, or nothing without working hours."""
+        self.capacity.setText(text)
+        self.capacity.setVisible(bool(text))
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy

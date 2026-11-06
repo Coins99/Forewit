@@ -10,7 +10,7 @@ time:
 | --- | --- | --- | --- |
 | P3-1 | C03 work blocks: storage, editor, every view, Today, task detail, drag, resize, keyboard, Undo | `20261105_0032` / [ADR 0028](adr/0028-work-blocks.md) | Implemented, awaiting owner acceptance |
 | P3-2 | Unscheduled-task panel and Day view; Busy/Free on events (Google's "Show as" too); weekly working hours, up to 3 windows a weekday, and a buffer (C04) | `20261105_0033` / [ADR 0029](adr/0029-availability.md) | Implemented, awaiting owner acceptance |
-| P3-3 | C05: conflicts, overfilled and provisional days, with their reasons; a read model only | none expected | Not started |
+| P3-3 | C05: conflicts, overfilled and provisional days, with their reasons; a read model only | none / [ADR 0030](adr/0030-workload.md) | Implemented, awaiting owner acceptance |
 
 The owner's decisions (2026-11-05):
 
@@ -19,6 +19,58 @@ The owner's decisions (2026-11-05):
 - **Busy or free.** Events get a Busy/Free choice: timed events are busy and all-day ones
   free by default. Google events use Google's own "Show as".
 - **Working hours.** These are weekly hours plus a buffer. A day off is an all-day Busy event.
+
+## P3-3: Workload and conflicts
+
+What it shows is in [Calendar: Workload and conflicts](calendar.md#workload-and-conflicts),
+and the definitions are in [ADR 0030](adr/0030-workload.md). Choices from the plan the owner
+approved on 2026-11-06: a read model only, with no migration; a day is provisional only
+while Google Calendar is on and its cache misses the day or is over a day old, or when a
+focus task has no estimate; past days are shown but never flagged.
+
+### Where it lives
+
+- **Data.** No migration. `ScheduledBlock` gains `estimate_minutes`, `due_at_utc` and
+  `upcoming_minutes` (`storage/work_blocks.py`: `task_due_at`, the shared
+  `upcoming_minutes` query, which the tasks to schedule use too); `CalendarRange.focus`
+  (`FocusDay`, `FocusTask`), read by `storage/day_plans.focus_days`.
+- **Domain.** `domain/workload.py`: `workload` (`DayWorkload`: available, scheduled total
+  and unique, focus without time, planned, over, provisional reasons), `conflicts_for`,
+  `block_conflicts`, `PROVISIONAL_AFTER`.
+- **Service.** `EventService.list_range` reads the new data; `WorkBlockService._saved`
+  warns from `conflicts_for`, and `BlockSaved.buffered` names the events whose buffer a
+  block sits in.
+- **Desktop.** `ui/workload_text.py` (every figure and reason in words); the load line in
+  each day's head and the conflict mark (`calendar_grid.py`, `HEADER_H` 66); the
+  explanation line under the hours (`calendarReasons`) and "· conflict" in the List view
+  (`calendar_view.py`); Today's free time (`focusCapacity`); Upcoming's note.
+
+### Known limits
+
+- **A save doesn't know the over-estimate.** It reads no other blocks of the task, so only
+  the Calendar shows "more time set aside than the task's estimate".
+- **Month shows no load.** The explanations are in the Day and Week views.
+- **Narrow columns shorten the load line.** "≤ 2h 50m spare" becomes "≤ 2h 50m" when the
+  tasks panel is open.
+
+### Owner acceptance (desktop)
+
+No migration: a source run doesn't change the database's schema.
+
+1. With weekday hours 9 to 5, give Wednesday 6 hours of blocks and three focus tasks of an
+   hour each: Wednesday's head says "Over by 1h"; choose the day and the line under the
+   hours explains the sum.
+2. Remove one focus task's estimate: the day becomes provisional ("Over by 1h+", "at
+   least").
+3. With a 10-minute buffer, put a block 5 minutes after a meeting: it has a conflict mark,
+   and choosing it says "within the buffer of …"; saving it said so too.
+4. Overlap two blocks, put one on a day off, one after its task's deadline, and set more
+   time aside than a task's estimate: each says why.
+5. Make the meeting Free: its conflict and its busy time go away.
+6. With Google Calendar connected, look at a week its cache doesn't hold: provisional;
+   after Refresh, not.
+7. Today's focus says how much time is free today; Upcoming points to the Calendar.
+8. Past days show figures but no flags. Check light and dark mode, and the same on Windows.
 
 ## P3-2: Working hours, Busy/Free and the tasks to schedule
 
@@ -51,8 +103,8 @@ timed events only.
 
 ### Known limits
 
-- **Buffers only place new time.** A block inside a buffer isn't warned about; P3-3's
-  conflicts will.
+- **Buffers only placed new time.** A block inside a buffer wasn't warned about; P3-3's
+  conflicts now are.
 - **The free line wraps** to two lines beside the legend at 1,100 px.
 - **Owner events still can't be dragged**, as in P3-1.
 

@@ -10,8 +10,9 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.actions import ActionFilter, ActionStatus
 from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks
+from mailbrief.domain.day_plans import DayPlan, DayPlanItem
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
@@ -49,6 +50,7 @@ from mailbrief.ui.event_editor import local_instant
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.theme import apply_theme
 from mailbrief.ui.theme.tokens import ThemeMode
+from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend
 
@@ -225,6 +227,34 @@ def fill_availability(backend: FakeBackend) -> None:
         ),
         total=2,
     )
+    # Workload (ADR 0030): Thursday's focus overfills it; Friday's has no estimate, so it is
+    # provisional.
+    offsite = make_action(
+        public_id=f"00000000-0000-4000-a000-{3:012d}",
+        title="Plan the offsite",
+        estimate_minutes=420,
+    )
+    taxes = make_action(public_id=f"00000000-0000-4000-a000-{4:012d}", title="File the taxes")
+    backend.actions[ActionFilter.OPEN] = (
+        *backend.actions.get(ActionFilter.OPEN, ()),
+        offsite,
+        taxes,
+    )
+    for number, (day, task) in enumerate(
+        ((TODAY + timedelta(days=1), offsite), (TODAY + timedelta(days=2), taxes)), start=5
+    ):
+        backend.focus_plans[day] = DayPlan(
+            day=day,
+            public_id=f"00000000-0000-4000-a000-{number:012d}",
+            revision=1,
+            items=(
+                DayPlanItem(
+                    public_id=f"00000000-0000-4000-a000-{number + 10:012d}",
+                    task_public_id=task.public_id,
+                    position=0,
+                ),
+            ),
+        )
 
 
 async def shown_window(qtbot: QtBot, view: CalendarView, *, blocks: bool = False) -> MainWindow:
