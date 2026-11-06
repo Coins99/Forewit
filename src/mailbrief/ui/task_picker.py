@@ -30,24 +30,30 @@ def choice_text(action: TaskChoice) -> str:
 
 class TaskPickerDialog(QDialog):
     """``search_requested(text)`` asks the window for matches, answered by show_choices()
-    or show_failed(); ``chosen(public_id)`` is the task picked, after which it closes."""
+    or show_failed(); ``chosen(public_id)`` is the task picked, after which it closes.
+
+    By default it links a note to a task (ADR 0027); ``title``, ``blurb``, ``action`` and
+    ``name`` give it the words of another use, as Schedule task does (ADR 0028)."""
 
     search_requested = Signal(str)
     chosen = Signal(str)
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        title: str = "Link to task",
+        blurb: str = "Choose the task this note is about. The task stays as it is.",
+        action: str = "Link",
+        name: str = "Link the note to a task",
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("taskPickerDialog")
-        self.setAccessibleName("Link the note to a task")
-        self.setWindowTitle("Link to task")
+        self.setAccessibleName(name)
+        self.setWindowTitle(title)
         self.resize(480, 460)
         layout = QVBoxLayout(self)
-        dialog_heading(
-            self,
-            layout,
-            "Link to task",
-            "Choose the task this note is about. The task stays as it is.",
-        )
+        dialog_heading(self, layout, title, blurb)
         self.query = QLineEdit()
         self.query.setObjectName("taskPickerSearch")
         self.query.setAccessibleName("Search task titles")
@@ -63,7 +69,7 @@ class TaskPickerDialog(QDialog):
         self.status.setAccessibleName("Task search status")
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
-        self.link_button = outline_button("Link", "taskPickerLink", primary=True)
+        self.link_button = outline_button(action, "taskPickerLink", primary=True)
         self.cancel_button = outline_button("Cancel", "taskPickerCancel")
         for button in (self.link_button, self.cancel_button):
             button.setAccessibleName(button.text())

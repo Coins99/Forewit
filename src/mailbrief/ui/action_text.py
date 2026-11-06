@@ -3,6 +3,7 @@ row and its detail pane, so they can't disagree."""
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from mailbrief.domain.actions import (
@@ -21,6 +22,7 @@ from mailbrief.domain.recurrence import (
     RepeatFrequency,
     RepeatRule,
 )
+from mailbrief.domain.work_blocks import scheduled_time
 from mailbrief.ui.brief_list import with_address
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
@@ -226,6 +228,40 @@ def estimate_text(minutes: int | None) -> str | None:
     """The owner's estimate as "Estimate 45 mins" or "Estimate 1 hr 30 mins", in the event
     editor's words for a length."""
     return None if minutes is None else "Estimate " + length_text(timedelta(minutes=minutes))
+
+
+SCHEDULED_LINES: Final = 3  # The next blocks the detail lists.
+
+
+def scheduled_text(action: Action) -> str | None:
+    """A task's scheduled time (ADR 0028): "1 hr 30 mins in 2 blocks · estimate 2 hrs", or
+    None with no blocks. Overlapping blocks add up here: it is time planned, never time
+    worked."""
+    if not action.blocks:
+        return None
+    found = scheduled_time(action.blocks)
+    count = len(action.blocks)
+    text = (
+        f"{length_text(timedelta(minutes=found.total_minutes))} in {count} "
+        f"{'block' if count == 1 else 'blocks'}"
+    )
+    if action.estimate_minutes is not None:
+        text += f" · estimate {length_text(timedelta(minutes=action.estimate_minutes))}"
+    return text
+
+
+def block_lines(action: Action, *, now: datetime, zone: ZoneInfo, today: date) -> list[str]:
+    """The task's next blocks, those not over yet, at most SCHEDULED_LINES of them:
+    "Mon Nov 2 · 10:00–11:00"."""
+    lines: list[str] = []
+    for block in action.blocks:
+        if block.ends_at_utc <= now:
+            continue
+        start, end = block.starts_at_utc.astimezone(zone), block.ends_at_utc.astimezone(zone)
+        lines.append(f"{day_text(start.date(), today=today)} · {start:%H:%M}–{end:%H:%M}")
+        if len(lines) == SCHEDULED_LINES:
+            break
+    return lines
 
 
 def target_text(details: ActionDetails, *, reason: bool = True) -> str | None:

@@ -24,6 +24,7 @@ from mailbrief.domain.actions import (
     DeadlineChange,
     StepEdit,
     SuggestionState,
+    TaskChoice,
     ThreadLink,
     person_key,
     tag_key,
@@ -65,6 +66,7 @@ from mailbrief.domain.events import (
     ChangeKind,
     EventChange,
     EventEdit,
+    ScheduledBlock,
 )
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleCoverage, GoogleEvent
 from mailbrief.domain.messages import RankedMessage
@@ -73,6 +75,7 @@ from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
 from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
@@ -216,6 +219,12 @@ class FakeBackend(FakeDrafts):
         self.proposals_created = 0  # What a brief run reports having proposed.
         self.events: dict[str, CalendarEvent] = {}
         self.deleted_events: set[str] = set()
+        # Work blocks (ADR 0028): each block with its task, and the unscheduled ones.
+        self.blocks: dict[str, ScheduledBlock] = {}
+        self.unscheduled_blocks: set[str] = set()
+        self.block_calls: list[tuple[object, ...]] = []
+        self.block_fail: Exception | None = None
+        self.open_task_list: tuple[TaskChoice, ...] = ()
         self.markers: list[ActionMarker] = []
         self.event_calls: list[tuple[object, ...]] = []
         self.event_fail: Exception | None = None
@@ -904,7 +913,107 @@ class FakeBackend(FakeDrafts):
                 if event.days(zone)[0] <= last_day and event.days(zone)[1] >= first_day
             ),
             google_coverage=self.google_coverage,
+            blocks=tuple(
+                sorted(
+                    (
+                        block
+                        for key, block in self.blocks.items()
+                        if key not in self.unscheduled_blocks
+                        and block.days(zone)[0] <= last_day
+                        and block.days(zone)[1] >= first_day
+                    ),
+                    key=ScheduledBlock.sort_key,
+                )
+            ),
         )
+
+    # Work blocks, as WorkBlockService keeps them: own revisions, open tasks only.
+
+    def _block_call(self, *call: object) -> None:
+        self.block_calls.append(call)
+        if self.block_fail is not None:
+            raise self.block_fail
+
+    def _live_block(self, public_id: str, revision: int | None) -> ScheduledBlock:
+        from mailbrief.services.work_blocks import BlockConflictError, BlockNotFoundError
+
+        block = self.blocks.get(public_id)
+        if block is None or public_id in self.unscheduled_blocks:
+            raise BlockNotFoundError("That scheduled time was not found.")
+        if revision is not None and block.block.revision != revision:
+            raise BlockConflictError("The scheduled time changed since it was loaded.")
+        return block
+
+    def _block_saved(self, block: ScheduledBlock, previous: BlockTime | None = None) -> BlockSaved:
+        return BlockSaved(block=block.block, previous=previous)
+
+    def _timed(self, block: ScheduledBlock, revision: int, time: BlockTime) -> ScheduledBlock:
+        stored = block.block.model_copy(
+            update={
+                "starts_at_utc": time.starts_at_utc,
+                "ends_at_utc": time.ends_at_utc,
+                "time_zone": time.time_zone,
+                "revision": revision,
+            }
+        )
+        return block.model_copy(update={"block": stored})
+
+    async def open_task_choices(self, text: str = "") -> tuple[TaskChoice, ...]:
+        self.block_calls.append(("open_task_choices", text))
+        return self.open_task_list
+
+    async def schedule_block(self, action_public_id: str, time: BlockTime) -> BlockSaved:
+        self._block_call("schedule_block", action_public_id, time)
+        action = await self.get_action(action_public_id)
+        public_id = f"00000000-0000-4000-9000-{len(self.blocks) + 1:012d}"
+        stored = WorkBlock(
+            public_id=public_id,
+            action_public_id=action_public_id,
+            starts_at_utc=time.starts_at_utc,
+            ends_at_utc=time.ends_at_utc,
+            time_zone=time.time_zone,
+            revision=1,
+            created_at_utc=datetime(2026, 9, 4, 12, tzinfo=UTC),
+            updated_at_utc=datetime(2026, 9, 4, 12, tzinfo=UTC),
+        )
+        self.blocks[public_id] = ScheduledBlock(
+            block=stored, action_title=action.title, action_status=action.status
+        )
+        return self._block_saved(self.blocks[public_id])
+
+    async def move_block(self, public_id: str, revision: int, time: BlockTime) -> BlockSaved:
+        self._block_call("move_block", public_id, revision, time)
+        block = self._live_block(public_id, revision)
+        self.blocks[public_id] = self._timed(block, revision + 1, time)
+        return self._block_saved(self.blocks[public_id], block.block.time)
+
+    async def undo_block_move(
+        self, public_id: str, revision: int, previous: BlockTime
+    ) -> BlockSaved:
+        self._block_call("undo_block_move", public_id, revision, previous)
+        block = self._live_block(public_id, revision)
+        self.blocks[public_id] = self._timed(block, revision + 1, previous)
+        return self._block_saved(self.blocks[public_id])
+
+    async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock:
+        self._block_call("unschedule_block", public_id, revision)
+        block = self._live_block(public_id, revision)
+        self.blocks[public_id] = self._timed(block, revision + 1, block.block.time)
+        self.unscheduled_blocks.add(public_id)
+        return self.blocks[public_id].block
+
+    async def restore_block(self, public_id: str) -> BlockSaved:
+        from mailbrief.services.work_blocks import BlockNotFoundError
+
+        self._block_call("restore_block", public_id)
+        block = self.blocks.get(public_id)
+        if block is None:
+            raise BlockNotFoundError("That scheduled time was not found.")
+        if public_id in self.unscheduled_blocks:
+            self.unscheduled_blocks.discard(public_id)
+            block = self._timed(block, block.block.revision + 1, block.block.time)
+            self.blocks[public_id] = block
+        return self._block_saved(block)
 
     def _stored_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent:
         return CalendarEvent(

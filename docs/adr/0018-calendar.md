@@ -135,8 +135,8 @@ proposes, code checks, the owner applies.
   one revision per event; if any event changed since the request, nothing is applied and
   the owner asks again. Undo reverses the whole batch, and only while every event is as
   the apply left it.
-- **Not yet.** Work blocks linked to actions and deterministic scheduling are the planner
-  roadmap's P3; events made here are ordinary events.
+- **Not yet.** Work blocks linked to actions came in P3-1 ([ADR 0028](0028-work-blocks.md));
+  deterministic scheduling is still later. Events made here are ordinary events.
 - **3b, the panel (2026-10-12).** Plan with AI is a dialog: instruction and parts, the
   preview with the first-use consent box, waiting (cancellable), then the checked changes
   with their reasons and overlaps, all ticked; the owner applies the ticked ones and gets

@@ -8,7 +8,8 @@ import sqlite3
 import sys
 import time
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from datetime import time as clock_time
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -23,6 +24,7 @@ from mailbrief.domain.capture import CaptureRequest
 from mailbrief.domain.drafts import Draft
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
+from mailbrief.domain.work_blocks import BlockTime
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.services.data import (
     CleanupKind,
@@ -80,6 +82,14 @@ async def seed_focus(runtime: DesktopRuntime) -> None:
     summary = await runtime.today_summary(SMOKE_NOW.astimezone(zone).date(), zone, SMOKE_NOW)
     revision = 0 if summary.focus is None else summary.focus.revision
     await runtime.select_day_task(summary.day, zone, task.public_id, revision)
+    # Time set aside for it that afternoon (ADR 0028), kept apart from the task itself.
+    start = datetime.combine(summary.day, clock_time(14), zone)
+    await runtime.schedule_block(
+        task.public_id,
+        BlockTime(
+            starts_at_utc=start, ends_at_utc=start + timedelta(hours=1), time_zone=SMOKE_ZONE
+        ),
+    )
 
 
 async def verify_focus(runtime: DesktopRuntime) -> None:
@@ -92,6 +102,9 @@ async def verify_focus(runtime: DesktopRuntime) -> None:
     task = plan.items[0].action
     if task is None or task.title != SMOKE_TASK.title or plan.items[0].position != 0:
         raise RuntimeError("Previous focus task was not preserved.")
+    blocks = summary.calendar.blocks
+    if len(blocks) != 1 or blocks[0].action_public_id != task.public_id:
+        raise RuntimeError("Previous scheduled time was not preserved.")
 
 
 async def verify_persistence(directory: Path) -> None:
@@ -364,6 +377,8 @@ async def check_package(directory: Path) -> None:
             raise RuntimeError("Portable writing export failed.")
         if len(payload["records"]["day_plan_items"]) != 1:
             raise RuntimeError("Portable focus export failed.")
+        if len(payload["records"]["work_blocks"]) != 1:
+            raise RuntimeError("Portable scheduled-time export failed.")
         preview = await preview_cleanup(database, CleanupRequest(CleanupKind.CACHE, 1))
         await apply_cleanup(database, preview)
     finally:

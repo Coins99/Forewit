@@ -108,6 +108,7 @@ DELETE = "delete"
 SEEN = "seen"
 PROPOSALS = "proposals"
 SKIP = "skip"
+SCHEDULE = "schedule"  # Set aside time for the task on the calendar (ADR 0028).
 
 NO_DATES: Final = "No target or deadline"
 _TAB_NAMES = {
@@ -498,6 +499,7 @@ class ActionsPanel(QWidget):
         self.source_button = detail.source_button
         self.seen_button = detail.seen_button
         self.proposals_button = detail.proposals_button
+        self.schedule_button = detail.schedule_button
         self.draft_button = detail.draft_button
         self.draft_menu = QMenu(self.draft_button)
         self.reply_draft = self.draft_menu.addAction("Reply to its email")
@@ -520,6 +522,7 @@ class ActionsPanel(QWidget):
         self.skip_button.clicked.connect(self._skip)
         self.seen_button.clicked.connect(self._mark_seen)
         self.proposals_button.clicked.connect(self._show_proposals)
+        self.schedule_button.clicked.connect(self._schedule)
         self.source_button.clicked.connect(self._open_source)
         detail.step_toggled.connect(self._toggle_step)
         detail.step_added.connect(self._add_step)
@@ -737,6 +740,9 @@ class ActionsPanel(QWidget):
             enabled and action is not None and bool(pending_proposals(action))
         )
         self.draft_button.setEnabled(enabled)
+        self.schedule_button.setEnabled(
+            enabled and action is not None and action.status is ActionStatus.OPEN
+        )
         self.reply_draft.setEnabled(action is not None and can_reply(action))
         self.detail.arrange_controls()
 
@@ -774,6 +780,11 @@ class ActionsPanel(QWidget):
         action = self.selected()
         if action is not None and has_activity(action):
             self._request(SEEN)
+
+    def _schedule(self) -> None:
+        action = self.selected()
+        if action is not None and action.status is ActionStatus.OPEN:
+            self._request(SCHEDULE)
 
     def _show_proposals(self) -> None:
         action = self.selected()

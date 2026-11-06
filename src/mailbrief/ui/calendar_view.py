@@ -4,7 +4,8 @@ of hours, a month of days or a week of rows (``CalendarView``), as the owner cho
 Event titles are the owner's text and action titles may come from email, so rows are plain
 list-item text and the grids draw them with ``drawText``: never tooltips, which Qt may
 render as rich text. Deadlines and target dates are only shown here; they change on the
-action itself (ADR 0018).
+action itself (ADR 0018). Work blocks (ADR 0028), time set aside for a task, show beside the
+events; changing one never changes its task.
 """
 
 from collections.abc import Callable
@@ -22,14 +23,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
+from mailbrief.domain.events import (
+    ActionMarker,
+    CalendarEvent,
+    CalendarRange,
+    MarkerKind,
+    ScheduledBlock,
+)
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.ui.calendar_grid import MonthGrid, WeekGrid
 from mailbrief.ui.calendar_layout import (
     WEEK_DAYS,
     CalendarView,
     Entry,
+    Timed,
     add_months,
+    block_note,
     clock,
     entry_key,
     marker_label,
@@ -62,6 +71,11 @@ DELETE: Final = "delete"
 OPEN_GOOGLE: Final = "open-google"
 ALLOW: Final = "allow"
 REFRESH: Final = "refresh"
+# What block_requested asks (ADR 0028).
+NEW_BLOCK: Final = "new-block"  # With the day to schedule on.
+OPEN_BLOCK: Final = "open-block"  # With the ScheduledBlock.
+MOVE_BLOCK: Final = "move-block"  # With (block, days, minutes, resize).
+UNSCHEDULE_BLOCK: Final = "unschedule-block"  # With the ScheduledBlock.
 GOOGLE_OFF: Final = "off"  # Gmail isn't connected.
 GOOGLE_ASK: Final = "ask"  # Connected; the sign-in lacks the calendar permissions.
 GOOGLE_ON: Final = "on"
@@ -104,7 +118,7 @@ def day_heading(day: date, today: date) -> str:
     return f"{text} · Today" if day == today else text
 
 
-def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, today: date) -> str:
+def event_when(event: Timed, day: date, zone: ZoneInfo, today: date) -> str:
     """When the event happens, as seen from ``day``: "All day", "09:00–10:00", or with the
     other day for one that crosses midnight: "22:00–Oct 13 01:00". An end at midnight
     belongs to the day before it ("22:00–00:00"), but when that isn't ``day`` the end is
@@ -121,7 +135,7 @@ def event_when(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, to
     return f"{start}–{end}"
 
 
-def list_time(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo) -> str:
+def list_time(event: Timed, day: date, zone: ZoneInfo) -> str:
     """The List view's time column for ``day``: "All day", the start on the event's first
     day, "until 06:00" on its last and "All day" on the days between, so an event that began
     on an earlier day never reads as starting at that day's time."""
@@ -135,23 +149,32 @@ def list_time(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo) -> 
     return f"until {clock(event.ends_at_utc, zone)}" if day == last else "All day"
 
 
-def event_text(event: CalendarEvent | GoogleEvent, day: date, zone: ZoneInfo, today: date) -> str:
-    """A Google event names its calendar; the owner's own events need no label."""
+def event_text(event: Timed, day: date, zone: ZoneInfo, today: date) -> str:
+    """A Google event names its calendar and a work block says it is a task's time, as in
+    "10:00–11:00 · Task · Draft report"; the owner's own events need no label."""
+    if isinstance(event, ScheduledBlock):
+        return f"{event_when(event, day, zone, today)} · {block_note(event)} · {event.title}"
     text = f"{event_when(event, day, zone, today)} · {event.title}"
     return f"{text} · {event.calendar_name}" if isinstance(event, GoogleEvent) else text
 
 
 def day_rows(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Entry]:
-    """One day's entries: all-day events, then action dates, then timed events by start.
+    """One day's entries: all-day events, then action dates, then timed events and work
+    blocks by start.
 
-    The owner's events and Google's are interleaved; at the same start, the owner's first.
+    The owner's events, Google's and the blocks are interleaved; at the same start, the
+    owner's events first, then Google's, then the blocks.
     """
-    candidates: list[CalendarEvent | GoogleEvent] = [*shown.events, *shown.google_events]
+    candidates: list[Timed] = [*shown.events, *shown.google_events, *shown.blocks]
     touching = [event for event in candidates if event.days(zone)[0] <= day <= event.days(zone)[1]]
     whole = [event for event in touching if event.all_day]
     timed = sorted(
         (event for event in touching if not event.all_day),
-        key=lambda event: (event.starts_at_utc, isinstance(event, GoogleEvent)),
+        key=lambda event: (
+            event.starts_at_utc,
+            isinstance(event, GoogleEvent),
+            isinstance(event, ScheduledBlock),
+        ),
     )
     return [*whole, *(marker for marker in shown.markers if marker.day == day), *timed]
 
@@ -169,6 +192,11 @@ class CalendarPanel(QWidget):
     operation runs (``set_busy``), reading days, New event, Open, Open in Google Calendar
     and Plan with AI still work, since they change nothing; Delete event, Allow and Refresh
     wait.
+
+    ``block_requested(kind, value)`` asks about work blocks: NEW_BLOCK with the day to
+    schedule on (Schedule task), OPEN_BLOCK with a block to open, MOVE_BLOCK with
+    ``(block, days, minutes, resize)`` from a drag or a key in the week grid, and
+    UNSCHEDULE_BLOCK with a block. The window decides when a change can be saved.
     """
 
     event_requested = Signal(str, object)
@@ -178,6 +206,7 @@ class CalendarPanel(QWidget):
     google_requested = Signal(str)
     plan_requested = Signal()
     google_preview_requested = Signal(object)
+    block_requested = Signal(str, object)
 
     def __init__(self, view: CalendarView = CalendarView.WEEK) -> None:
         super().__init__()
@@ -270,6 +299,10 @@ class CalendarPanel(QWidget):
         self.plan_button = outline_button("Plan with &AI", "planCalendarButton", mnemonic=True)
         self.new_button.setText("New event")
         self.new_button.setProperty("variant", "primary")
+        # Beside New event in the header: time for a task, chosen next (ADR 0028).
+        self.schedule_button = outline_button("Schedule task", "scheduleTaskButton")
+        self.schedule_button.setAccessibleName("Schedule time for a task")
+        self.schedule_button.clicked.connect(self._request_schedule)
         for button in (
             self.new_button,
             self.open_button,
@@ -310,6 +343,14 @@ class CalendarPanel(QWidget):
             grid.chosen.connect(self._choose)
             grid.activated.connect(self._activate)
             grid.more_requested.connect(self._show_more)
+        self.week_grid.block_change_requested.connect(
+            lambda block, days, minutes, resize: self.block_requested.emit(
+                MOVE_BLOCK, (block, days, minutes, resize)
+            )
+        )
+        self.week_grid.block_unschedule_requested.connect(
+            lambda block: self.block_requested.emit(UNSCHEDULE_BLOCK, block)
+        )
         self.month_grid.period_requested.connect(self._request_period)
         self._google_mode = GOOGLE_OFF
         self.set_google(GOOGLE_OFF, "")
@@ -361,6 +402,10 @@ class CalendarPanel(QWidget):
     def selected_google(self) -> GoogleEvent | None:
         item = self._entry()
         return item if isinstance(item, GoogleEvent) else None
+
+    def selected_block(self) -> ScheduledBlock | None:
+        item = self._entry()
+        return item if isinstance(item, ScheduledBlock) else None
 
     def _entry(self) -> Row:
         row = self.list.currentRow()
@@ -420,6 +465,8 @@ class CalendarPanel(QWidget):
                         preview = (
                             entry.calendar_name
                             if isinstance(entry, GoogleEvent)
+                            else block_note(entry)
+                            if isinstance(entry, ScheduledBlock)
                             else "Your calendar"
                         )
                         first, last = entry.days(zone)
@@ -456,7 +503,9 @@ class CalendarPanel(QWidget):
             else:
                 self._select_day(previous[0])
         self.empty.setText(EMPTY_MONTH if self._shown_month else EMPTY)
-        self.empty.setVisible(not shown.events and not shown.markers and not shown.google_events)
+        self.empty.setVisible(
+            not shown.events and not shown.markers and not shown.google_events and not shown.blocks
+        )
         self.note.hide()
         self._show_heading()
         self._selection_moved()
@@ -502,7 +551,7 @@ class CalendarPanel(QWidget):
         """A grid chose a day, or an entry on it."""
         if not isinstance(day, date):
             return
-        if isinstance(entry, CalendarEvent | GoogleEvent | ActionMarker):
+        if isinstance(entry, CalendarEvent | GoogleEvent | ActionMarker | ScheduledBlock):
             self._select(entry_key(entry), day)
         else:
             self._select_day(day)
@@ -511,6 +560,8 @@ class CalendarPanel(QWidget):
         entry = self._entry()
         if isinstance(entry, CalendarEvent | GoogleEvent):
             self.google_preview_requested.emit(entry)
+        elif isinstance(entry, ScheduledBlock):
+            self.block_requested.emit(OPEN_BLOCK, entry)
 
     def _activate(self, day: object, entry: object) -> None:
         """A double-click or Return in a grid: an event opens (Google's in Google
@@ -521,7 +572,7 @@ class CalendarPanel(QWidget):
         if entry is None:
             if self._shown is not None:
                 self.event_requested.emit(NEW, day)
-        elif isinstance(entry, CalendarEvent | GoogleEvent):
+        elif isinstance(entry, CalendarEvent | GoogleEvent | ScheduledBlock):
             self._preview_selected()
 
     def _show_more(self, day: object) -> None:
@@ -586,6 +637,7 @@ class CalendarPanel(QWidget):
         for button in (self.previous_button, self.this_week_button, self.next_button):
             button.setEnabled(shown)
         self.new_button.setEnabled(shown)
+        self.schedule_button.setEnabled(shown)
         self.plan_button.setEnabled(shown)
         self.open_button.setEnabled(chosen)
         self.delete_button.setEnabled(chosen and not self._busy)  # A change waits its turn.
@@ -618,6 +670,12 @@ class CalendarPanel(QWidget):
         day = self.focus_day()
         if day is not None:
             self.event_requested.emit(NEW, day)
+
+    def _request_schedule(self) -> None:
+        """Time for a task starts on the day in focus, as a new event does."""
+        day = self.focus_day()
+        if day is not None:
+            self.block_requested.emit(NEW_BLOCK, day)
 
     def _request_plan(self) -> None:
         if self._shown is not None:

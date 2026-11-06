@@ -245,6 +245,11 @@ class ScheduledBlock(DomainModel):
     def open(self) -> bool:
         return self.action_status is ActionStatus.OPEN
 
+    @property
+    def all_day(self) -> bool:
+        """Never: a block always has a start and an end, as a timed event does."""
+        return False
+
     def days(self, zone: ZoneInfo) -> tuple[date, date]:
         return self.block.days(zone)
 

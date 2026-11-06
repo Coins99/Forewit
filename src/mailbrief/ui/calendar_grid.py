@@ -6,14 +6,22 @@ reached by the keyboard, ``activated(day, entry)`` on a double-click or Return (
 opens; an empty day asks for a new event) and ``more_requested(day)`` from "+N more". The
 Calendar page keeps the selection and gives it back with ``set_selection``.
 
+A work block of an open task (ADR 0028) can be changed in the week grid: dragged to
+another time or day, its bottom edge dragged to change its length, or, while it is
+selected, Ctrl+arrows (Cmd on macOS) move it 15 minutes or a day, Ctrl+Shift+Up and Down
+change its length and Delete or Backspace unschedules it. The grid only asks:
+``block_change_requested(block, days, minutes, resize)`` and
+``block_unschedule_requested(block)``; the window saves, and the next read shows the result.
+
 Titles are the owner's text, Google's or (for the actions' dates) mail-derived, so they are
 drawn with ``drawText`` only: never rich text, a link or a tooltip. Colours are the theme's
 proven pairs: the owner's events in accent on its tint, Google's in text on a card, the
-actions' dates in warning on its tint, today in white on the primary fill.
+actions' dates in warning on its tint, work blocks in text on a card with an accent rim
+(secondary text and a strong rim once the task is done), today in white on the primary fill.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -32,17 +40,21 @@ from PySide6.QtGui import (
     QResizeEvent,
     QShowEvent,
 )
-from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QScrollArea, QVBoxLayout, QWidget
 
 from mailbrief.domain.common import utc_now
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange
+from mailbrief.domain.events import ActionMarker, CalendarRange, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.domain.work_blocks import BLOCK_STEP_MINUTES
 from mailbrief.ui.calendar_layout import (
+    DAY_MINUTES,
     WEEK_DAYS,
     Bar,
     Entry,
     Part,
+    Timed,
     bars,
+    block_note,
     clock,
     day_parts,
     entry_key,
@@ -86,6 +98,7 @@ LINE_H: Final = 16
 LINE_GAP: Final = 1
 DOT_PX: Final = 6
 RING_W: Final = 1.5
+RESIZE_PX: Final = 6  # How near a block's bottom edge a press drags its end.
 _ALIGN_LEFT: Final = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) | int(
     Qt.TextFlag.TextSingleLine
 )
@@ -97,12 +110,23 @@ _ALIGN_CENTER: Final = int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextS
 
 def entry_style(entry: Entry, tokens: Tokens) -> tuple[str, str, str]:
     """An entry's fill, text and edge colours: the owner's events in accent on its tint,
-    Google's in text on a card, the actions' dates in warning on its tint."""
+    Google's in text on a card, the actions' dates in warning on its tint, and work blocks
+    in text on a card with an accent edge, secondary with a strong edge once the task is
+    done or skipped."""
     if isinstance(entry, ActionMarker):
         return tokens.warning_bg, tokens.warning_fg, tokens.warning_fg
     if isinstance(entry, GoogleEvent):
         return tokens.card, tokens.text, tokens.border_strong
+    if isinstance(entry, ScheduledBlock):
+        if entry.open:
+            return tokens.card, tokens.text, tokens.accent_fg
+        return tokens.card, tokens.text_secondary, tokens.border_strong
     return tokens.accent_bg, tokens.accent_fg, tokens.accent_fg
+
+
+def movable(entry: object) -> bool:
+    """Whether the grid can move ``entry``: a work block of an open task."""
+    return isinstance(entry, ScheduledBlock) and entry.open
 
 
 def entry_label(entry: Entry, zone: ZoneInfo) -> str:
@@ -133,13 +157,18 @@ def paint_ring(painter: QPainter, rect: QRectF, radius: float, color: str) -> No
 def paint_outline(
     painter: QPainter, rect: QRectF, radius: float, entry: Entry, tokens: Tokens
 ) -> None:
-    """Google's entries share the card fill of the month's own days and of today's column,
-    so a hairline in ``border_strong``, as a strong card has, keeps their shape there."""
-    if not isinstance(entry, GoogleEvent):
+    """Google's entries and work blocks share the card fill of the month's own days and of
+    today's column, so a hairline keeps their shape there: ``border_strong``, as a strong
+    card has, for Google's, and a block's edge colour for a block."""
+    if isinstance(entry, GoogleEvent):
+        color = tokens.border_strong
+    elif isinstance(entry, ScheduledBlock):
+        color = entry_style(entry, tokens)[2]
+    else:
         return
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(hairline_pen(tokens.border_strong))
+    painter.setPen(hairline_pen(color))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawRoundedRect(crisp_rect(painter, rect), radius, radius)
     painter.restore()
@@ -185,6 +214,8 @@ class _Grid(QWidget):
     chosen = Signal(object, object)
     activated = Signal(object, object)
     more_requested = Signal(object)
+    block_change_requested = Signal(object, int, int, bool)
+    block_unschedule_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -226,7 +257,12 @@ class _Grid(QWidget):
         if self._key is None or self._shown is None:
             return None
         shown = self._shown
-        entries: list[Entry] = [*shown.events, *shown.google_events, *shown.markers]
+        entries: list[Entry] = [
+            *shown.events,
+            *shown.google_events,
+            *shown.markers,
+            *shown.blocks,
+        ]
         return next((entry for entry in entries if entry_key(entry) == self._key), None)
 
     def day_entries(self, day: date) -> list[Entry]:
@@ -279,11 +315,42 @@ class _Part(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self.grid.setFocus(Qt.FocusReason.MouseFocusReason)
         point = event.position()
-        self.grid._choose(self.grid.hit(self, point), self.grid.day_at(point.x()))
+        hit = self.grid.hit(self, point)
+        self.grid._choose(hit, self.grid.day_at(point.x()))
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.grid.press(self, hit, point)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self.grid.pointer_moved(self, event.position(), bool(event.buttons()))
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.grid.release(event.position())
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        self.grid.cancel_drag()
         point = event.position()
         self.grid._activate(self.grid.hit(self, point), self.grid.day_at(point.x()))
+
+
+@dataclass
+class _Drag:
+    """A press on a movable block in the hours, and how far it has been dragged: ``days``
+    across and ``minutes`` along, snapped to the grid's quarter hours. It starts once the
+    pointer moves the platform's drag distance, so a click stays a click."""
+
+    block: ScheduledBlock
+    part: Part
+    index: int  # The column of the part pressed.
+    origin: QPointF
+    resize: bool  # The press was on the block's bottom edge: its end moves.
+    started: bool = False
+    days: int = 0
+    minutes: int = 0
+
+
+def _snap(minutes: float) -> int:
+    return round(minutes / BLOCK_STEP_MINUTES) * BLOCK_STEP_MINUTES
 
 
 class WeekGrid(_Grid):
@@ -322,6 +389,8 @@ class WeekGrid(_Grid):
         self.minute = QTimer(self)
         self.minute.setInterval(60_000)
         self.minute.timeout.connect(self.hours.update)
+        self._drag: _Drag | None = None
+        self.hours.setMouseTracking(True)  # A block's bottom edge shows it can be dragged.
 
     # Geometry. The heads and the strip line their columns up with the hours, whose
     # scroll bar takes room at the right.
@@ -479,6 +548,112 @@ class WeekGrid(_Grid):
         height = (part.end - part.start) * HOUR_PX / 60 - 2
         return QRectF(left, top, max(4.0, share - 2), max(8.0, height))
 
+    # Dragging a block: its body moves it, in quarter hours and across days; its bottom
+    # edge, on the day it ends, moves its end. Escape stops a drag.
+
+    def press(self, part: QWidget, hit: Hit | None, point: QPointF) -> None:
+        self._drag = None
+        if part is not self.hours or hit is None or not isinstance(hit.entry, ScheduledBlock):
+            return
+        block = hit.entry
+        days = self.days()
+        if not block.open or hit.day not in days:
+            return
+        index = days.index(hit.day)
+        found = next(
+            (p for p in self._parts[index] if entry_key(p.event) == entry_key(block)), None
+        )
+        if found is None:
+            return
+        self._drag = _Drag(block, found, index, point, self._on_end(block, found, index, point))
+
+    def _on_end(self, block: ScheduledBlock, part: Part, index: int, point: QPointF) -> bool:
+        """Whether ``point`` is on the bottom edge of the block's part on the day it ends."""
+        rect = self.block_rect(part, index)
+        ends_here = block.days(self._zone)[1] == part.day
+        return ends_here and rect.contains(point) and point.y() >= rect.bottom() - RESIZE_PX
+
+    def pointer_moved(self, part: QWidget, point: QPointF, pressed: bool) -> None:
+        if part is not self.hours:
+            return
+        drag = self._drag
+        if drag is None or not pressed:
+            self._hover(point)
+            return
+        if not drag.started:
+            if (point - drag.origin).manhattanLength() < QApplication.startDragDistance():
+                return
+            drag.started = True
+            self.hours.setCursor(
+                Qt.CursorShape.SizeVerCursor if drag.resize else Qt.CursorShape.ClosedHandCursor
+            )
+        along = (point.y() - drag.origin.y()) * 60 / HOUR_PX
+        if drag.resize:
+            end = _snap(drag.part.end + along)
+            end = min(DAY_MINUTES, max(drag.part.start + BLOCK_STEP_MINUTES, end))
+            drag.minutes = end - drag.part.end
+        else:
+            start = _snap(drag.part.start + along)
+            start = min(DAY_MINUTES - BLOCK_STEP_MINUTES, max(0, start))
+            drag.minutes = start - drag.part.start
+            day = self.day_at(point.x())
+            if day is not None:
+                drag.days = self.days().index(day) - drag.index
+        self.hours.update()
+
+    def release(self, point: QPointF) -> None:
+        drag, self._drag = self._drag, None
+        self.hours.unsetCursor()
+        if drag is None or not drag.started:
+            return
+        self.hours.update()
+        if drag.days or drag.minutes:
+            self.block_change_requested.emit(drag.block, drag.days, drag.minutes, drag.resize)
+
+    def cancel_drag(self) -> None:
+        if self._drag is not None:
+            self._drag = None
+            self.hours.unsetCursor()
+            self.hours.update()
+
+    def dragging(self) -> bool:
+        return self._drag is not None and self._drag.started
+
+    def _hover(self, point: QPointF) -> None:
+        """A resize cursor over a movable block's bottom edge, the arrow elsewhere."""
+        hit = self.hit(self.hours, point)
+        days = self.days()
+        if hit is not None and isinstance(hit.entry, ScheduledBlock) and hit.entry.open:
+            index = days.index(hit.day)
+            part = next(
+                (p for p in self._parts[index] if entry_key(p.event) == entry_key(hit.entry)),
+                None,
+            )
+            if part is not None and self._on_end(hit.entry, part, index, point):
+                self.hours.setCursor(Qt.CursorShape.SizeVerCursor)
+                return
+        self.hours.unsetCursor()
+
+    def _dragged_part(self) -> tuple[Part, int] | None:
+        """Where the block being dragged would go, as a part of a day shown."""
+        drag = self._drag
+        if drag is None or not drag.started:
+            return None
+        if drag.resize:
+            return replace(drag.part, end=drag.part.end + drag.minutes, column=0, columns=1), (
+                drag.index
+            )
+        index = min(WEEK_DAYS - 1, max(0, drag.index + drag.days))
+        moved = replace(
+            drag.part,
+            day=self.days()[index],
+            start=drag.part.start + drag.minutes,
+            end=min(DAY_MINUTES, drag.part.end + drag.minutes),
+            column=0,
+            columns=1,
+        )
+        return moved, index
+
     def _hour_hits(self) -> list[Hit]:
         return [
             Hit(self.block_rect(part, index), day, part.event)
@@ -570,6 +745,11 @@ class WeekGrid(_Grid):
         for index, parts in enumerate(self._parts):
             for part in parts:
                 self._paint_block(painter, self.block_rect(part, index), part, tokens)
+        if (dragged := self._dragged_part()) is not None:
+            part, index = dragged
+            rect = self.block_rect(part, index)
+            self._paint_block(painter, rect, part, tokens)
+            paint_ring(painter, rect, BLOCK_RADIUS, tokens.accent_fg)
         if self._today in days:
             self._paint_now(painter, days.index(self._today), tokens)
 
@@ -594,9 +774,14 @@ class WeekGrid(_Grid):
             when = (
                 f"{clock(event.starts_at_utc, self._zone)}–{clock(event.ends_at_utc, self._zone)}"
             )
+            if isinstance(event, ScheduledBlock):
+                when = f"{when} · {block_note(event)}"
             painter.setFont(ui_font(CAPTION_PX, tabular=True))
-            # Google's text is secondary on its card; the owner's stays accent on its tint.
-            secondary = tokens.text_secondary if isinstance(event, GoogleEvent) else text
+            # Google's text and a block's are secondary on their card; the owner's stays
+            # accent on its tint.
+            secondary = (
+                tokens.text_secondary if isinstance(event, GoogleEvent | ScheduledBlock) else text
+            )
             painter.setPen(QColor(secondary))
             below = QRectF(area.left(), line.bottom(), area.width(), when_metrics.height())
             painter.drawText(below, _ALIGN_LEFT, _elided(when, when_metrics, area.width()))
@@ -621,7 +806,9 @@ class WeekGrid(_Grid):
 
     # The keyboard: Left and Right move by a day, Up and Down through the day's entries,
     # Return opens the entry (or asks for a new event on an empty day), and Page Up and
-    # Page Down scroll the hours.
+    # Page Down scroll the hours. With a block selected, Ctrl+Up and Ctrl+Down (Cmd on
+    # macOS) move it a quarter hour, Ctrl+Left and Ctrl+Right a day, Ctrl+Shift+Up and
+    # Ctrl+Shift+Down change its length, and Delete or Backspace unschedules it.
 
     def day_entries(self, day: date) -> list[Entry]:
         """The day's entries in the order Up and Down visit them: its bars by lane, then
@@ -643,6 +830,13 @@ class WeekGrid(_Grid):
             super().keyPressEvent(event)
             return
         day = self._day if self._day in days else (self._today if self._today in days else days[0])
+        if key == Qt.Key.Key_Escape and self._drag is not None:
+            self.cancel_drag()
+            event.accept()
+            return
+        if self._block_key(event, self._entry_on(day)):
+            event.accept()
+            return
         if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
             step = -1 if key == Qt.Key.Key_Left else 1
             index = min(len(days) - 1, max(0, days.index(day) + step))
@@ -662,6 +856,30 @@ class WeekGrid(_Grid):
             super().keyPressEvent(event)
             return
         event.accept()
+
+    def _block_key(self, event: QKeyEvent, selected: Entry | None) -> bool:
+        """Ask to move, resize or unschedule the selected block; whether the key did."""
+        if not isinstance(selected, ScheduledBlock):
+            return False
+        key = event.key()
+        modifiers = event.modifiers()
+        control = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and not control:
+            self.block_unschedule_requested.emit(selected)
+            return True
+        if not control or not selected.open:
+            return False
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            step = -BLOCK_STEP_MINUTES if key == Qt.Key.Key_Up else BLOCK_STEP_MINUTES
+            self.block_change_requested.emit(selected, 0, step, shift)
+            return True
+        if key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and not shift:
+            self.block_change_requested.emit(
+                selected, -1 if key == Qt.Key.Key_Left else 1, 0, False
+            )
+            return True
+        return False
 
     def _entry_on(self, day: date) -> Entry | None:
         return next(
@@ -749,13 +967,18 @@ class MonthGrid(_Grid):
         start = first + timedelta(days=row * WEEK_DAYS)
         end = start + timedelta(days=WEEK_DAYS - 1)
         found = bars(self._shown, start, end, self._zone)
-        events: list[CalendarEvent | GoogleEvent] = [
+        events: list[Timed] = [
             *self._shown.events,
             *self._shown.google_events,
+            *self._shown.blocks,
         ]
         timed = sorted(
             (event for event in events if not is_bar(event)),
-            key=lambda event: (event.starts_at_utc, isinstance(event, GoogleEvent)),
+            key=lambda event: (
+                event.starts_at_utc,
+                isinstance(event, GoogleEvent),
+                isinstance(event, ScheduledBlock),
+            ),
         )
         for event in timed:
             touched_first, touched_last = event.days(self._zone)
@@ -902,9 +1125,7 @@ class MonthGrid(_Grid):
         if entry_key(entry) == self._key and self._day is not None and hit.day <= self._day <= last:
             paint_ring(painter, hit.rect, BLOCK_RADIUS, tokens.accent_fg)
 
-    def _paint_line(
-        self, painter: QPainter, hit: Hit, event: CalendarEvent | GoogleEvent, tokens: Tokens
-    ) -> None:
+    def _paint_line(self, painter: QPainter, hit: Hit, event: Timed, tokens: Tokens) -> None:
         """A timed event as one line: a dot in its colour, its start (on its first day) and
         its title."""
         _fill, _text, edge = entry_style(event, tokens)

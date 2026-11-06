@@ -62,6 +62,7 @@ from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderResponseError
 from mailbrief.providers.analysis import analysis_provider
@@ -119,6 +120,7 @@ from mailbrief.services.proposals import ProposalService
 from mailbrief.services.search import SearchService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.today import TodayService
+from mailbrief.services.work_blocks import WorkBlockService
 from mailbrief.storage.database import Database
 from mailbrief.storage.inbox_scan import InboxScanRepository
 from mailbrief.storage.migrate import upgrade_database
@@ -1162,6 +1164,34 @@ class DesktopRuntime:
     async def restore_event(self, public_id: str) -> CalendarEvent:
         async with self._storage().session() as session:
             return await EventService(session).restore(public_id)
+
+    # Work blocks (ADR 0028): local only, and never a change to the task.
+
+    async def open_task_choices(self, text: str = "") -> tuple[TaskChoice, ...]:
+        async with self._storage().session() as session:
+            return await ActionService(session).title_matches(text, open_only=True)
+
+    async def schedule_block(self, action_public_id: str, time: BlockTime) -> BlockSaved:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).schedule(action_public_id, time)
+
+    async def move_block(self, public_id: str, revision: int, time: BlockTime) -> BlockSaved:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).move(public_id, revision, time)
+
+    async def undo_block_move(
+        self, public_id: str, revision: int, previous: BlockTime
+    ) -> BlockSaved:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).undo_move(public_id, revision, previous)
+
+    async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).unschedule(public_id, revision)
+
+    async def restore_block(self, public_id: str) -> BlockSaved:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).restore(public_id)
 
     # Plan with AI (ADR 0018, phase 3b): Groq is opened for each call and closed afterwards;
     # applying and undoing are local.

@@ -669,6 +669,7 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
         "draftButton",
         "editButton",
         "deleteButton",
+        "scheduleTimeButton",
         "seenButton",
         "proposalsButton",
         "sourceButton",
@@ -708,7 +709,13 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
         "No date set",
         "Plan",  # Its heading over the field that adds a step (B04).
     ]  # Nothing calls for a follow-up yet, so there is no prompt.
-    assert shown_buttons(panel) == ["draftButton", "completeButton", "editButton", "deleteButton"]
+    assert shown_buttons(panel) == [
+        "draftButton",
+        "completeButton",
+        "editButton",
+        "deleteButton",
+        "scheduleTimeButton",
+    ]
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))

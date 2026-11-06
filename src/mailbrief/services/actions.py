@@ -1116,11 +1116,14 @@ class ActionService:
         actions."""
         return await self._repository.people(view)
 
-    async def title_matches(self, text: str = "") -> tuple[TaskChoice, ...]:
+    async def title_matches(
+        self, text: str = "", *, open_only: bool = False
+    ) -> tuple[TaskChoice, ...]:
         """Live tasks, open ones first, whose titles contain every word of ``text``, at most
-        TITLE_MATCH_LIMIT; a note's Link to task offers them. Text too short to search
-        (query_terms() keeps no word) matches nothing, and empty text matches every task.
-        Only each task's row is read, never its steps, sources or tags."""
+        TITLE_MATCH_LIMIT; a note's Link to task offers them, and Schedule task offers only
+        open ones (``open_only``). Text too short to search (query_terms() keeps no word)
+        matches nothing, and empty text matches every task. Only each task's row is read,
+        never its steps, sources or tags."""
         terms = query_terms(text)
         if text.strip() and not terms:
             return ()
@@ -1131,7 +1134,7 @@ class ActionService:
                 status=ActionStatus(row.status),
                 ownership=ActionOwnership(row.ownership),
             )
-            for row in await self._repository.title_matches(terms, open_only=False)
+            for row in await self._repository.title_matches(terms, open_only=open_only)
         )
 
     async def count_actions(
