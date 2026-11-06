@@ -15,24 +15,20 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from mailbrief.domain.actions import ACTION_TITLE_MAX_CHARS, PERSON_MAX_CHARS, PUBLIC_ID_CHARS
-from mailbrief.domain.common import DomainModel, normalize_utc
+from mailbrief.domain.actions import (
+    ACTION_TITLE_MAX_CHARS,
+    PERSON_MAX_CHARS,
+    PUBLIC_ID_CHARS,
+    ActionStatus,
+)
+from mailbrief.domain.common import ZONE_KEY_MAX_CHARS, DomainModel, known_zone, normalize_utc
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
+from mailbrief.domain.work_blocks import WorkBlock
 
 EVENT_TITLE_MAX_CHARS: Final = 200
 EVENT_NOTES_MAX_CHARS: Final = 10_000
 EVENT_MAX_DAYS: Final = 31  # The longest an event may last.
-ZONE_KEY_MAX_CHARS: Final = 64
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
-
-
-def known_zone(key: str) -> str:
-    """``key`` when it names an IANA time zone; raises ValueError with a static message."""
-    try:
-        ZoneInfo(key)
-    except (KeyError, ValueError, OSError):
-        raise ValueError("the time zone is unknown") from None
-    return key
 
 
 def _one_line(text: str) -> str:
@@ -214,11 +210,59 @@ class ActionMarker(DomainModel):
         )
 
 
+class ScheduledBlock(DomainModel):
+    """A work block (ADR 0028) with its task's live title and state, for the calendar to
+    show; like a marker, it is never an event."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    block: WorkBlock
+    action_title: str = Field(min_length=1, max_length=ACTION_TITLE_MAX_CHARS, repr=False)
+    action_status: ActionStatus
+    waiting: bool = False  # Someone else is doing the task.
+
+    @property
+    def public_id(self) -> str:
+        return self.block.public_id
+
+    @property
+    def action_public_id(self) -> str:
+        return self.block.action_public_id
+
+    @property
+    def title(self) -> str:
+        return self.action_title
+
+    @property
+    def starts_at_utc(self) -> datetime:
+        return self.block.starts_at_utc
+
+    @property
+    def ends_at_utc(self) -> datetime:
+        return self.block.ends_at_utc
+
+    @property
+    def open(self) -> bool:
+        return self.action_status is ActionStatus.OPEN
+
+    def days(self, zone: ZoneInfo) -> tuple[date, date]:
+        return self.block.days(zone)
+
+    def sort_key(self) -> tuple[datetime, datetime, str, str]:
+        return (
+            self.block.starts_at_utc,
+            self.block.ends_at_utc,
+            self.action_title.casefold(),
+            self.block.public_id,
+        )
+
+
 class CalendarRange(DomainModel):
     """The events touching a run of local days, and the open actions' dates in them.
 
     ``google_events`` are the cached Google events touching those days, read-only, and
-    ``google_coverage`` the days the cache holds (None when nothing is cached).
+    ``google_coverage`` the days the cache holds (None when nothing is cached). ``blocks``
+    are the live work blocks of live tasks touching them (ADR 0028).
     """
 
     first_day: date
@@ -227,6 +271,7 @@ class CalendarRange(DomainModel):
     markers: tuple[ActionMarker, ...]
     google_events: tuple[GoogleEvent, ...] = ()
     google_coverage: GoogleCoverage | None = None
+    blocks: tuple[ScheduledBlock, ...] = ()
 
 
 def wall_clock(day: date, clock: time, zone: ZoneInfo) -> datetime:

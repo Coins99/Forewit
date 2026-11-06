@@ -53,6 +53,7 @@ from mailbrief.domain.events import (
     EventChange,
     EventEdit,
     MarkerKind,
+    ScheduledBlock,
     wall_clock,
 )
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
@@ -97,6 +98,8 @@ class PreparedPlan:
     keys: dict[str, CalendarEvent] = field(repr=False)
     events: tuple[CalendarEvent, ...] = field(repr=False)
     google: tuple[GoogleEvent, ...] = field(repr=False)
+    # The window's work blocks, for local overlap warnings only: never sent (ADR 0028).
+    blocks: tuple[ScheduledBlock, ...] = field(default=(), repr=False)
 
 
 def _local(moment: datetime, zone: ZoneInfo) -> str:
@@ -361,7 +364,8 @@ def _overlaps(
     created: Sequence[EventChange],
 ) -> tuple[str, ...]:
     """Titles of the timed events this change would overlap: the owner's, as the other
-    changes leave them and with the new ones, then Google's.
+    changes leave them and with the new ones, then Google's, then the work blocks', as
+    "Task · title". Blocks are only checked here, locally; they are never sent.
 
     Every timed Google event counts, since its free/busy flag isn't kept.
     """
@@ -388,6 +392,9 @@ def _overlaps(
         assert google.ends_at_utc is not None
         if google.starts_at_utc < end and google.ends_at_utc > start:
             found.append(f"{google.title} ({google.calendar_name})")
+    for block in plan.blocks:
+        if block.starts_at_utc < end and block.ends_at_utc > start:
+            found.append(f"Task · {block.title}")
     return tuple(found[:MAX_OVERLAPS])
 
 
@@ -559,7 +566,9 @@ class CalendarPlanningService:
                 google_coverage=shown.google_coverage,
             ),
         )
-        return PreparedPlan(request, preview, zone, keys, shown.events, shown.google_events)
+        return PreparedPlan(
+            request, preview, zone, keys, shown.events, shown.google_events, shown.blocks
+        )
 
     async def generate(
         self, plan: PreparedPlan, gate: PlanningGate, cancel: asyncio.Event | None = None

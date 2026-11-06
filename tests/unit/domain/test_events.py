@@ -7,13 +7,13 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+from mailbrief.domain.common import known_zone
 from mailbrief.domain.events import (
     ActionMarker,
     CalendarEvent,
     EventEdit,
     MarkerKind,
     check_timing,
-    known_zone,
 )
 
 TORONTO = ZoneInfo("America/Toronto")

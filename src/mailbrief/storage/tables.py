@@ -1178,6 +1178,39 @@ class CalendarEventTable(Base):
     )
 
 
+class WorkBlockTable(Base):
+    """Time the owner set aside for one task (ADR 0028).
+
+    A block belongs to its task, and goes with it when the task is purged, but never changes
+    it: a block has its own revision. Unscheduling is soft, so Undo can bring it back. Rows
+    change only through ORM objects.
+    """
+
+    __tablename__ = "work_blocks"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_work_blocks_public_id"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint("ends_at_utc > starts_at_utc", name="ends_after_start"),
+        Index("ix_work_blocks_starts_at_utc", "starts_at_utc"),
+        Index("ix_work_blocks_action_id", "action_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_id: Mapped[int] = mapped_column(
+        ForeignKey("actions.id", ondelete="CASCADE"), nullable=False
+    )
+    starts_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    ends_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    time_zone: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+
+
 class GoogleCalendarTable(Base):
     """A calendar shown in the owner's Google Calendar, cached to show its events (ADR 0018).
 

@@ -44,6 +44,7 @@ from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.messages import EmailContact, is_own_message, own_addresses
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import RepeatFrequency, RepeatRule, mask_weekdays
+from mailbrief.domain.work_blocks import WorkBlock
 from mailbrief.storage.database import sorted_batches
 from mailbrief.storage.day_plans import remove_task_references
 from mailbrief.storage.projects import ProjectRepository
@@ -65,6 +66,7 @@ from mailbrief.storage.tables import (
     SuggestionDecisionTable,
     deadline_values,
 )
+from mailbrief.storage.work_blocks import WorkBlockRepository, block_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -295,10 +297,11 @@ def action_from_rows(
     project: Project | None = None,
     tags: Sequence[str] = (),
     repeat: ActionRepeat | None = None,
+    blocks: Sequence[WorkBlock] = (),
 ) -> Action:
     """Rebuild an action; each source has its snapshot, then the cached message's Inbox state
-    and sender name, if it is cached, ``thread`` is its derived thread activity, and
-    ``proposals`` its pending proposals."""
+    and sender name, if it is cached, ``thread`` is its derived thread activity,
+    ``proposals`` its pending proposals and ``blocks`` its live work blocks."""
     return Action(
         public_id=row.public_id,
         capture_origin=CaptureOrigin(row.capture_origin),
@@ -355,6 +358,7 @@ def action_from_rows(
         thread=thread,
         proposals=tuple(proposals),
         activity=tuple(activity),
+        blocks=tuple(blocks),
     )
 
 
@@ -1102,6 +1106,7 @@ class ActionRepository:
         accounts, cached = await self._thread_messages(snapshots)
         proposals = await ProposalRepository(self._session).pending_for_actions(ids)
         repeats = await self._repeats(rows)
+        blocks = await WorkBlockRepository(self._session).for_actions(ids)
         return [
             action_from_rows(
                 row,
@@ -1118,6 +1123,7 @@ class ActionRepository:
                 projects.get(row.project_public_id or ""),
                 tags.get(row.id, ()),
                 repeats.get(row.id),
+                [block_from_row(block, row.public_id) for block in blocks.get(row.id, ())],
             )
             for row in rows
         ]
