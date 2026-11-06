@@ -22,6 +22,7 @@ from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.work_blocks import BlockSaved, WorkBlock
 from mailbrief.domain.working_hours import SUGGESTED_HOURS, WorkingHours
 from mailbrief.domain.workload import block_conflicts, workload
+from mailbrief.ui.calendar_grid import WeekGrid
 from mailbrief.ui.calendar_layout import CalendarView
 from mailbrief.ui.calendar_view import GOOGLE_ON, CalendarPanel
 from mailbrief.ui.event_editor import local_instant
@@ -117,7 +118,7 @@ def test_a_day_s_head_says_its_load_and_the_line_explains_it() -> None:
         " without time) · over by 1 hr"
     )
     assert day_reasons(days[FRIDAY], "Fri Oct 16") == (
-        "Fri Oct 16: 8 hrs available, 0 mins planned (0 mins for 1 focus task without time)"
+        "Fri Oct 16: 8 hrs available, 0 mins planned (1 focus task without an estimate)"
         " · at most 8 hrs spare · provisional: 1 focus task has no estimate"
     )
     assert day_reasons(days[THURSDAY], "Thu Oct 15").endswith(" · 1 block in conflict")
@@ -133,6 +134,19 @@ def test_a_day_s_head_says_its_load_and_the_line_explains_it() -> None:
     # Today: free time from 14:20 (15:00–17:00), and how far the day is over.
     assert today_text(days[TODAY], NOW) == "2 hrs free today · planned 9 hrs, over by 1 hr"
     assert today_text(unset[2], NOW) == ""
+    assert today_text(days[SATURDAY], datetime(2026, 10, 17, 10, tzinfo=TORONTO)) == ""
+
+
+def test_blocks_outside_working_hours_use_none_of_the_working_time() -> None:
+    evening = block(TODAY, 19, 21, 62)
+    shown = week().model_copy(update={"blocks": (WEDNESDAY_BLOCK, evening), "focus": ()})
+    load = workload(shown, TORONTO, NOW, google_on=False)[2]
+    assert (load.scheduled_minutes, load.planned_minutes, load.outside_minutes) == (480, 360, 120)
+    assert header_text(load) == ("2h spare", False)  # 15:00–17:00 is still untouched.
+    assert day_reasons(load, "Wed Oct 14") == (
+        "Wed Oct 14: 8 hrs available, 6 hrs planned (6 hrs in blocks, not counting 2 hrs"
+        " outside working hours) · 2 hrs spare · 1 block in conflict"
+    )
     assert [short_length(n) for n in (45, 60, 90)] == ["45m", "1h", "1h 30m"]
 
 
@@ -141,6 +155,16 @@ def test_google_on_makes_an_unsynced_day_provisional(qtbot: QtBot) -> None:
     assert header_text(days[THURSDAY]) == ("≤ 6h 30m spare", False)
     assert header_text(days[TODAY]) == ("Over by 1h+", True)
     assert "Google Calendar isn't synced for this day" in day_reasons(days[TODAY], "Wed")
+
+
+def head(grid: WeekGrid, day: date) -> str:
+    """What a day's head says about its load."""
+    load = grid._loads.get(day)
+    return "" if load is None else header_text(load, wide=grid._count == 1)[0]
+
+
+def why(panel: CalendarPanel) -> str:
+    return "" if panel.reasons.isHidden() else panel.reasons.text()
 
 
 @pytest.fixture
@@ -154,9 +178,9 @@ def panel(qtbot: QtBot) -> CalendarPanel:
 
 def test_the_week_marks_conflicts_and_explains_the_choice(panel: CalendarPanel) -> None:
     grid = panel.week_grid
-    assert grid.load_text(TODAY) == "Over by 1h" and grid.load_text(MONDAY) == ""
-    assert grid.conflicted() == frozenset({THURSDAY_BLOCK.public_id})
-    assert panel.day_grid.conflicted() == grid.conflicted()
+    assert head(grid, TODAY) == "Over by 1h" and head(grid, MONDAY) == ""
+    assert grid._conflicted == frozenset({THURSDAY_BLOCK.public_id})
+    assert panel.day_grid._conflicted == grid._conflicted
     notes = [
         item.data(DISPLAY_ROW_ROLE).preview
         for item in (panel.list.item(row) for row in range(panel.list.count()))
@@ -164,18 +188,20 @@ def test_the_week_marks_conflicts_and_explains_the_choice(panel: CalendarPanel) 
         and item.data(DISPLAY_ROW_ROLE).title == "Draft report"
     ]
     assert notes == ["Task", "Task · conflict"]  # Wednesday's, then Thursday's.
-    assert panel.reasons_text() == ""  # Nothing chosen yet.
+    assert why(panel) == ""  # Nothing chosen yet.
     panel.select_entry(("block", THURSDAY_BLOCK.public_id), THURSDAY)
-    assert panel.reasons_text() == "Task · Draft report: overlaps Standup"
+    assert why(panel) == "Task · Draft report: overlaps Standup"
     grid.chosen.emit(TODAY, None)
-    assert panel.reasons_text().startswith("Wed Oct 14: 8 hrs available, 9 hrs planned")
+    assert why(panel).startswith("Wed Oct 14: 8 hrs available, 9 hrs planned")
     grid.chosen.emit(SATURDAY, None)
-    assert panel.reasons_text() == ""  # No working time and nothing planned.
+    assert why(panel) == ""  # No working time and nothing planned.
     panel.set_google(GOOGLE_ON, "")
-    assert grid.load_text(THURSDAY) == "≤ 6h 30m spare"
+    assert head(grid, THURSDAY) == "≤ 6h 30m spare"
     grid.chosen.emit(TODAY, None)
     panel.set_view(CalendarView.MONTH)
-    assert panel.reasons_text() == ""  # Day and Week only.
+    assert why(panel) == ""  # Day and Week only.
+    panel.show_range(week(), TORONTO, TODAY)  # Read as a month's grid: nothing is worked out.
+    assert panel._conflicts == {} and panel._loads == {} and grid._conflicted == frozenset()
 
 
 def test_a_save_in_a_buffer_says_so() -> None:

@@ -278,6 +278,16 @@ def test_a_block_s_conflicts_name_what_it_clashes_with_in_order() -> None:
     assert ConflictKind.BUFFER not in {item.kind for item in found}
 
 
+def test_more_time_than_the_estimate_marks_the_task_s_latest_block_only() -> None:
+    first = block(at(MONDAY, 9), at(MONDAY, 9, 45), estimate_minutes=60, upcoming_minutes=90)
+    second = block(
+        at(TUESDAY, 9), at(TUESDAY, 9, 45), number=81, estimate_minutes=60, upcoming_minutes=90
+    )
+    found = block_conflicts(shown(blocks=(second, first), last=TUESDAY), TORONTO, EARLY)
+    assert found[first.public_id] == ()
+    assert [item.kind for item in found[second.public_id]] == [ConflictKind.OVER_ESTIMATE]
+
+
 def test_only_open_blocks_from_today_on_are_checked() -> None:
     past = block(at(MONDAY, 9), at(MONDAY, 10))
     done = block(at(TUESDAY, 9), at(TUESDAY, 10), number=81, status=ActionStatus.COMPLETED)

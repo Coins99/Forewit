@@ -131,8 +131,14 @@ class WorkBlockService:
         # Read around the block by the buffer, so an event whose buffer it sits in is seen.
         reach = timedelta(minutes=hours.buffer_minutes)
         start, end = block.starts_at_utc - reach, block.ends_at_utc + reach
-        rows = await EventRepository(self._session).touching(start, end, first_day, last_day)
-        events: list[CalendarEvent | GoogleEvent] = [event_from_row(event) for event in rows]
+        events: list[CalendarEvent | GoogleEvent] = []
+        for stored in await EventRepository(self._session).touching(
+            start, end, first_day, last_day
+        ):
+            try:
+                events.append(event_from_row(stored))
+            except ValueError:  # A row that no longer validates is a warning lost, never a
+                continue  # save refused: warnings never stop a save.
         events += await GoogleCalendarRepository(self._session).touching(
             start, end, first_day, last_day
         )

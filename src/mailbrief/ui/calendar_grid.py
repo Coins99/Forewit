@@ -778,14 +778,6 @@ class WeekGrid(_Grid):
             self.header.update()
             self.hours.update()
 
-    def load_text(self, day: date) -> str:
-        """What the day's head says about its load."""
-        load = self._loads.get(day)
-        return "" if load is None else header_text(load, wide=self._count == 1)[0]
-
-    def conflicted(self) -> frozenset[str]:
-        return self._conflicted
-
     def _paint_strip(self, painter: QPainter, tokens: Tokens) -> None:
         painter.setFont(ui_font(CAPTION_PX))
         painter.setPen(QColor(tokens.text_secondary))

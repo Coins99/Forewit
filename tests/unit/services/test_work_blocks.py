@@ -48,6 +48,7 @@ from mailbrief.storage.recovery import restore_backup
 from mailbrief.storage.tables import (
     ActionActivityTable,
     ActionTable,
+    CalendarEventTable,
     GoogleCalendarTable,
     GoogleEventTable,
     WorkBlockTable,
@@ -476,6 +477,30 @@ async def test_a_block_in_a_busy_event_s_buffer_warns_once_a_buffer_is_set(
     assert (await blocks.move(before.block.public_id, 2, clear)).buffered == ()
 
 
+async def test_an_event_row_that_no_longer_validates_never_stops_a_save(
+    session: AsyncSession, actions: ActionService, blocks: WorkBlockService
+) -> None:
+    created = await actions.create(task())
+    session.add(
+        CalendarEventTable(
+            public_id="00000000-0000-4000-8000-00000000bad1",
+            title="x" * 500,  # Longer than an event title may be.
+            notes="",
+            all_day=False,
+            starts_at_utc=at(MONDAY, 10),
+            ends_at_utc=at(MONDAY, 11),
+            time_zone=ZONE,
+            created_at_utc=NOW,
+            updated_at_utc=NOW,
+            revision=1,
+            busy=True,
+        )
+    )
+    await session.commit()
+    saved = await blocks.schedule(created.public_id, span(MONDAY, 10, 11))
+    assert saved.block.revision == 1 and saved.overlaps == ()
+
+
 async def test_the_range_carries_each_block_s_task_time_and_the_days_focus(
     session: AsyncSession, actions: ActionService, blocks: WorkBlockService
 ) -> None:
@@ -497,7 +522,10 @@ async def test_the_range_carries_each_block_s_task_time_and_the_days_focus(
         plan = await plans.load(MONDAY)
         await plans.select(MONDAY, TORONTO, public_id, plan.revision)
     await actions.complete(done.public_id, done.revision)
-    shown = await EventService(session, clock=Clock(NOW)).list_range(MONDAY, TUESDAY, TORONTO)
+    events = EventService(session, clock=Clock(NOW))
+    plain = await events.list_range(MONDAY, TUESDAY, TORONTO)
+    assert plain.focus == () and {item.upcoming_minutes for item in plain.blocks} == {0}
+    shown = await events.list_range(MONDAY, TUESDAY, TORONTO, with_workload=True)
     monday_block = next(item for item in shown.blocks if item.days(TORONTO)[0] == MONDAY)
     assert monday_block.estimate_minutes == 90
     assert monday_block.due_at_utc == at(date(2026, 11, 4), 0)  # The next local midnight.

@@ -65,14 +65,20 @@ def day_reasons(load: DayWorkload, name: str) -> str:
     available, 8 hrs planned (5 hrs in blocks, 3 hrs for 2 focus tasks without time) · over
     by 1 hr · at least: 1 focus task has no estimate". ``name`` is the day as shown."""
     parts: list[str] = []
-    if load.scheduled_minutes:
-        blocks = f"{length(load.scheduled_minutes)} in blocks"
+    if load.scheduled_working_minutes:
+        blocks = f"{length(load.scheduled_working_minutes)} in blocks"
         if load.scheduled_total_minutes > load.scheduled_minutes:
             blocks += f" that overlap, {length(load.scheduled_total_minutes)} in all"
         parts.append(blocks)
-    if load.focus_tasks:
-        tasks = _plural(load.focus_tasks, "focus task")
+    estimated = load.focus_tasks - load.focus_unestimated
+    if estimated:
+        tasks = _plural(estimated, "focus task")
         parts.append(f"{length(load.focus_minutes)} for {tasks} without time")
+    if load.focus_unestimated:
+        # Never as zero minutes: how long they take isn't known.
+        parts.append(f"{_plural(load.focus_unestimated, 'focus task')} without an estimate")
+    if load.outside_minutes and load.available_minutes is not None:
+        parts.append(f"not counting {length(load.outside_minutes)} outside working hours")
     planned = f"{length(load.planned_minutes)} planned"
     if parts:
         planned += f" ({', '.join(parts)})"
@@ -125,9 +131,11 @@ def block_reasons(title: str, conflicts: tuple[Conflict, ...], estimate: int | N
 
 def today_text(load: DayWorkload, now: datetime) -> str:
     """Today's line under the focus: the free time left from ``now``, and how far the day is
-    over. Nothing without working hours."""
+    over. Nothing without working hours, or on a day without working time."""
     available = load.available_minutes
     if available is None:
+        return ""
+    if not load.availability.working_minutes and not load.availability.day_off:
         return ""
     if load.availability.day_off:
         text = "Day off today"

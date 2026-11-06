@@ -8,12 +8,14 @@ explained.
   buffer; a day off takes the whole day), as ``domain.availability`` works it out. It is
   unknown when no working hours are set.
 - **Scheduled** is the open tasks' blocks clipped to the day: their total length, and the
-  unique minutes they cover, each instant once.
+  unique minutes they cover, each instant once. With working hours set, only their minutes
+  inside the working windows count toward planned: time outside them uses none of the
+  working time (it is a conflict instead).
 - **Focus without time** is the known estimates of the day's focus tasks that have no block
   that day, with a count of those that have no estimate. A focus task with a block that day
   counts through its blocks only.
-- **Planned** is the unique scheduled minutes plus focus without time. A day is
-  **overfilled** when planned is more than available.
+- **Planned** is the unique scheduled minutes (inside the working windows, when set) plus
+  focus without time. A day is **overfilled** when planned is more than available.
 - A day is **provisional** when its figures may be wrong: Google Calendar is on and its
   cache misses the day or was last filled more than PROVISIONAL_AFTER ago, or a focus task
   has no estimate. A provisional day is never shown as fitting.
@@ -44,7 +46,7 @@ from mailbrief.domain.availability import (
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.events import CalendarEvent, CalendarRange, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
-from mailbrief.domain.intervals import Interval, overlaps, subtract
+from mailbrief.domain.intervals import Interval, clip, minutes, overlaps, subtract, union
 from mailbrief.domain.work_blocks import scheduled_time
 from mailbrief.domain.working_hours import WorkingHours
 
@@ -90,6 +92,8 @@ class DayWorkload(DomainModel):
     availability: DayAvailability
     scheduled_minutes: int = Field(default=0, ge=0)  # Unique minutes the day's blocks cover.
     scheduled_total_minutes: int = Field(default=0, ge=0)  # Their lengths added up.
+    # Of the unique minutes, those inside the working windows; all of them without hours.
+    scheduled_working_minutes: int = Field(default=0, ge=0)
     focus_minutes: int = Field(default=0, ge=0)  # Focus tasks without a block that day.
     focus_tasks: int = Field(default=0, ge=0)  # How many those are, estimated or not.
     focus_unestimated: int = Field(default=0, ge=0)
@@ -105,7 +109,12 @@ class DayWorkload(DomainModel):
 
     @property
     def planned_minutes(self) -> int:
-        return self.scheduled_minutes + self.focus_minutes
+        return self.scheduled_working_minutes + self.focus_minutes
+
+    @property
+    def outside_minutes(self) -> int:
+        """The day's block minutes outside its working windows, which planned leaves out."""
+        return self.scheduled_minutes - self.scheduled_working_minutes
 
     @property
     def over_minutes(self) -> int:
@@ -163,6 +172,12 @@ def workload(
         span = day_span(found.day, zone)
         on_day = _blocks_on(open_blocks, span)
         scheduled = scheduled_time([block.block for block in on_day], *span)
+        spans = union(block.block.interval for block in on_day)
+        working = (
+            round(minutes(part for window in found.working for part in clip(spans, *window)))
+            if found.hours_set
+            else scheduled.unique_minutes
+        )
         with_time = {block.action_public_id for block in on_day}
         focus = [
             task for task in shown.focus_on(found.day) if task.action_public_id not in with_time
@@ -182,6 +197,7 @@ def workload(
                 availability=found,
                 scheduled_minutes=scheduled.unique_minutes,
                 scheduled_total_minutes=scheduled.total_minutes,
+                scheduled_working_minutes=min(working, scheduled.unique_minutes),
                 focus_minutes=sum(task.estimate_minutes or 0 for task in focus),
                 focus_tasks=len(focus),
                 focus_unestimated=unestimated,
@@ -257,10 +273,27 @@ def block_conflicts(
     conflict."""
     since = local_moment(owner_today(now, zone), 0, zone)
     events: list[CalendarEvent | GoogleEvent] = [*shown.events, *shown.google_events]
-    return {
+    checked = [block for block in shown.blocks if block.open and block.ends_at_utc > since]
+    found = {
         block.public_id: conflicts_for(
             block, zone, events=events, blocks=shown.blocks, hours=shown.hours
         )
-        for block in shown.blocks
-        if block.open and block.ends_at_utc > since
+        for block in checked
     }
+    # More time than the estimate is the task's, not each block's: only its latest block
+    # shown carries it, so one mark says which task to trim.
+    latest: dict[str, ScheduledBlock] = {}
+    for block in checked:
+        if (
+            block.action_public_id not in latest
+            or block.sort_key() > latest[block.action_public_id].sort_key()
+        ):
+            latest[block.action_public_id] = block
+    for block in checked:
+        if latest[block.action_public_id] is not block:
+            found[block.public_id] = tuple(
+                item
+                for item in found[block.public_id]
+                if item.kind is not ConflictKind.OVER_ESTIMATE
+            )
+    return found

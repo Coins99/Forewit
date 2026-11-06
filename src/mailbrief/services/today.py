@@ -115,6 +115,6 @@ class TodayService:
                 now=now,
             ),
             replies=new_replies(actions),
-            calendar=await self._events.list_range(today, today, zone),
+            calendar=await self._events.list_range(today, today, zone, with_workload=True),
             focus=focus,
         )

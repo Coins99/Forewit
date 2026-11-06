@@ -30,7 +30,9 @@ estimate. Without Google Calendar, the owner's own events are the whole calendar
   on, as the tasks to schedule count them (ADR 0029; `storage.work_blocks.upcoming_minutes`
   is the one query for both). `CalendarRange.focus` holds each day's focus tasks the owner
   does, live and open, with their estimates, read with one bounded query
-  (`storage.day_plans.focus_days`).
+  (`storage.day_plans.focus_days`). Only the Calendar page and Today ask for these
+  (`list_range(..., with_workload=True)`); Plan with AI, Upcoming and the next free time
+  don't pay for them.
 - **Definitions, per local day in the owner's zone.**
   - *Available*: working time less busy time, as P3-2 works it out (busy events widened by
     the buffer; a day off takes the whole day). Unknown without working hours.
@@ -39,8 +41,9 @@ estimate. Without Google Calendar, the owner's own events are the whole calendar
   - *Focus without time*: the known estimates of the day's focus tasks with no block that
     day, and how many have none. A focus task with a block that day counts through its
     blocks only.
-  - *Planned* = unique scheduled minutes + focus without time. *Overfilled*: planned is
-    more than available.
+  - *Planned* = unique scheduled minutes inside the working windows + focus without time;
+    a block's time outside them uses no working time (it is a conflict instead).
+    *Overfilled*: planned is more than available.
   - *Provisional*: Google Calendar is on and its cache misses the day or was last filled
     more than `PROVISIONAL_AFTER` (24 hours) ago, which is apart from the 15 minutes after
     which a refresh is due; or a focus task has no estimate. A provisional day is never
@@ -53,7 +56,8 @@ estimate. Without Google Calendar, the owner's own events are the whole calendar
 - **Conflicts** (`conflicts_for`): a block overlapping a busy event; sitting in a busy
   event's buffer without overlapping it; overlapping another block; on a day off; partly
   outside the working hours; ending after its task's deadline; or its task having more
-  time set aside from today on than its estimate. Free events never conflict. Saving a
+  time set aside from today on than its estimate, marked on the task's latest block shown
+  only. Free events never conflict. Saving a
   block warns from the same function, so a save's "Overlaps …", "Within the buffer of …",
   "Ends after the task's deadline" and "Outside your working hours" match the Calendar's
   marks. Every conflict stays a warning; nothing is refused.

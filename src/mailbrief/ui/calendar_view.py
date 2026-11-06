@@ -560,7 +560,10 @@ class CalendarPanel(QWidget):
         self._shown_kind = range_kind(self.view())
         self._zone = zone
         self._today = today
-        self._conflicts = block_conflicts(shown, zone, self._clock())
+        # The Month view shows neither loads nor conflicts; the List view marks conflicts.
+        self._conflicts = (
+            {} if self._shown_kind == "month" else block_conflicts(shown, zone, self._clock())
+        )
         self._rows = []
         self.list.blockSignals(True)
         try:
@@ -806,6 +809,12 @@ class CalendarPanel(QWidget):
         shown = self._shown
         if shown is None:
             return
+        if self._shown_kind == "month":  # A month's grid shows no load.
+            self._loads = {}
+            for grid in (self.week_grid, self.day_grid):
+                grid.show_workload({}, frozenset())
+            self._show_reasons()
+            return
         google_on = self._google_mode == GOOGLE_ON
         loads = workload(
             shown, self._zone, self._clock(), google_on=google_on, conflicts=self._conflicts
@@ -837,9 +846,6 @@ class CalendarPanel(QWidget):
                 text = day_reasons(load, day_text(day, today=today))
         self.reasons.setText(text)
         self.reasons.setVisible(bool(text))
-
-    def reasons_text(self) -> str:
-        return self.reasons.text() if self.reasons.isVisibleTo(self) else ""
 
     # The tasks to schedule (ADR 0029).
 

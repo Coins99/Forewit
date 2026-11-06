@@ -1145,7 +1145,9 @@ class DesktopRuntime:
         self, first_day: date, last_day: date, zone: ZoneInfo
     ) -> CalendarRange:
         async with self._storage().session() as session:
-            return await EventService(session).list_range(first_day, last_day, zone)
+            return await EventService(session).list_range(
+                first_day, last_day, zone, with_workload=True
+            )
 
     async def today_summary(self, day: date, zone: ZoneInfo, now: datetime) -> DaySummary:
         """The Today page's "Your day": local data only, so it needs no Gmail or AI."""

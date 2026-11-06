@@ -157,8 +157,9 @@ nothing is sent anywhere, and nothing changes a task, a block or an event.
 
 - **Each day's head** says how much is spare ("3h spare": the day's working time less busy
   events, less what is planned for it), or "Over by 1h" in the warning colour. What is
-  planned is your blocks for open tasks that day, each minute once, plus the estimates of
-  the day's focus tasks that have no block that day.
+  planned is your blocks for open tasks that day inside your working hours, each minute
+  once, plus the estimates of the day's focus tasks that have no block that day. A block
+  outside your working hours uses none of them; it is marked as a conflict instead.
 - **Provisional days** may hold more than they show: a focus task has no estimate, or, with
   Google Calendar connected, its saved copy doesn't hold the day or is over a day old. They
   read "≤ 3h spare" or "Over by 1h+". Refresh fixes the second.
