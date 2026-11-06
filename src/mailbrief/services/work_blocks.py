@@ -6,11 +6,13 @@ calls a provider, and AI never sees blocks. Every mutating method reads the cloc
 commits once and rolls back on failure. Errors carry static messages, and nothing logs a
 task's title.
 
-Overlaps and a block ending after its task's deadline are warnings that never stop a save.
+Overlaps, a block ending after its task's deadline and a block outside the working hours
+are warnings that never stop a save. Only busy events overlap a block, and an all-day busy
+event, a day off, overlaps every block on its days (ADR 0029).
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -19,9 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionStatus
 from mailbrief.domain.analysis import DeadlinePrecision, deadline_due_at
+from mailbrief.domain.availability import local_moment, working_spans
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.events import ScheduledBlock
-from mailbrief.domain.intervals import overlaps
+from mailbrief.domain.intervals import Interval, overlaps, subtract
 from mailbrief.domain.work_blocks import (
     MAX_BLOCKS_PER_TASK,
     MAX_OVERLAP_LABELS,
@@ -39,6 +42,7 @@ from mailbrief.storage.work_blocks import (
     block_from_row,
     scheduled_from_rows,
 )
+from mailbrief.storage.working_hours import WorkingHoursRepository
 
 _NO_TASK: Final = "That task was not found."
 _NO_BLOCK: Final = "That scheduled time was not found."
@@ -123,27 +127,46 @@ class WorkBlockService:
     async def _saved(
         self, row: WorkBlockTable, action: ActionTable, previous: BlockTime | None = None
     ) -> BlockSaved:
-        """The block as written, with the timed entries it overlaps and whether it ends after
-        its task's deadline."""
+        """The block as written, with the busy entries it overlaps, whether it ends after its
+        task's deadline and whether it falls outside the working hours."""
         await self._session.flush()
         block = block_from_row(row, action.public_id)
         start, end = block.interval
         labels: list[tuple[datetime, str]] = []
-        days = block.days(ZoneInfo(block.time_zone))
+        zone = ZoneInfo(block.time_zone)
+        days = block.days(zone)
+
+        def busy_overlap(span: Interval | None, first_day: date | None, label: str) -> None:
+            """A timed busy entry's ``span`` overlapping the block, or an all-day one's first
+            day: a day off, which the touching() reads put on one of the block's days."""
+            if first_day is not None:
+                labels.append((local_moment(max(first_day, days[0]), 0, zone), label))
+            elif span is not None and overlaps(block.interval, span):
+                labels.append((span[0], label))
+
         events = await EventRepository(self._session).touching(start, end, days[0], days[1])
         for event in events:
-            if event.all_day or event.starts_at_utc is None or event.ends_at_utc is None:
+            if not event.busy:
                 continue
-            if overlaps(block.interval, (event.starts_at_utc, event.ends_at_utc)):
-                labels.append((event.starts_at_utc, event.title))
+            timed = (
+                None
+                if event.starts_at_utc is None or event.ends_at_utc is None
+                else (event.starts_at_utc, event.ends_at_utc)
+            )
+            busy_overlap(timed, event.start_date if event.all_day else None, event.title)
         cached = await GoogleCalendarRepository(self._session).touching(
             start, end, days[0], days[1]
         )
         for google in cached:
-            if google.all_day or google.starts_at_utc is None or google.ends_at_utc is None:
+            if not google.busy:
                 continue
-            if overlaps(block.interval, (google.starts_at_utc, google.ends_at_utc)):
-                labels.append((google.starts_at_utc, f"{google.title} ({google.calendar_name})"))
+            timed = (
+                None
+                if google.starts_at_utc is None or google.ends_at_utc is None
+                else (google.starts_at_utc, google.ends_at_utc)
+            )
+            label = f"{google.title} ({google.calendar_name})"
+            busy_overlap(timed, google.start_date if google.all_day else None, label)
         for other, task in await self._repository.touching(start, end):
             if other.id != row.id:
                 labels.append((other.starts_at_utc, f"Task · {task.title}"))
@@ -155,7 +178,22 @@ class WorkBlockService:
             overlaps=tuple(label for _, label in labels[:MAX_OVERLAP_LABELS]),
             more_overlaps=max(0, len(labels) - MAX_OVERLAP_LABELS),
             after_deadline=due is not None and block.ends_at_utc > due,
+            outside_hours=await self._outside_hours(block.interval, days, zone),
         )
+
+    async def _outside_hours(
+        self, interval: Interval, days: tuple[date, date], zone: ZoneInfo
+    ) -> bool:
+        """Whether any of the block falls outside the working hours, when there are some."""
+        hours = await WorkingHoursRepository(self._session).read()
+        if not hours.is_set:
+            return False
+        working = [
+            span
+            for offset in range((days[1] - days[0]).days + 1)
+            for span in working_spans(hours, days[0] + timedelta(days=offset), zone)
+        ]
+        return bool(subtract((interval,), working))
 
     async def schedule(self, action_public_id: str, time: BlockTime) -> BlockSaved:
         """Add a block to a live, open task as revision 1."""

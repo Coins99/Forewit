@@ -63,7 +63,25 @@ def test_timed_event_is_kept_in_utc_without_what_the_page_never_shows() -> None:
     assert mapped.ends_at_utc == datetime(2026, 10, 12, 13, 30, tzinfo=UTC)
     assert mapped.calendar_name == "Owner"
     assert "Room 4" not in mapped.model_dump_json()
-    assert {"location", "busy"}.isdisjoint(type(mapped).model_fields)
+    assert "location" not in type(mapped).model_fields
+    assert not mapped.busy  # Shown as free in Google (ADR 0029).
+
+
+def test_show_as_is_busy_unless_google_says_free() -> None:
+    timed = map_event(event(), CALENDAR)
+    opaque = map_event(event(transparency="opaque"), CALENDAR)
+    all_day = map_event(event(start={"date": "2026-10-14"}, end={"date": "2026-10-15"}), CALENDAR)
+    free_day = map_event(
+        event(start={"date": "2026-10-14"}, end={"date": "2026-10-15"}, transparency="transparent"),
+        CALENDAR,
+    )
+    odd = map_event(event(transparency=["transparent"]), CALENDAR)
+    assert timed is not None and timed.busy
+    assert opaque is not None and opaque.busy
+    # Google's default is busy whatever the shape: an all-day busy event is a day off.
+    assert all_day is not None and all_day.all_day and all_day.busy
+    assert free_day is not None and not free_day.busy
+    assert odd is not None and odd.busy
 
 
 def test_all_day_end_is_exclusive_in_google() -> None:

@@ -32,6 +32,7 @@ def google_event_from_row(row: GoogleEventTable, calendar: GoogleCalendarTable) 
         start_date=row.start_date,
         last_date=row.last_date,
         web_link=None if row.web_link is None else HttpUrl(row.web_link),
+        busy=row.busy,
     )
 
 
@@ -105,6 +106,7 @@ class GoogleCalendarRepository:
                     last_date=event.last_date,
                     web_link=None if event.web_link is None else str(event.web_link),
                     fetched_at_utc=now,
+                    busy=event.busy,
                 )
             )
         await self.mark_checked((calendar,), first_day, last_day, now)

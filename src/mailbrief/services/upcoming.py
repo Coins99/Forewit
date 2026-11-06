@@ -16,7 +16,8 @@ from mailbrief.services.events import EventService
 
 
 def overview(calendar: CalendarRange, zone: ZoneInfo) -> Upcoming:
-    """Deduplicate canonical identities and union clipped timed intervals in UTC."""
+    """Deduplicate canonical identities and union the busy events' clipped timed intervals
+    in UTC; free events are listed but take no time (ADR 0029)."""
     first, last = calendar.first_day, calendar.last_day
     start = datetime.combine(first, time.min, zone).astimezone(UTC)
     end = datetime.combine(last + timedelta(days=1), time.min, zone).astimezone(UTC)
@@ -47,7 +48,8 @@ def overview(calendar: CalendarRange, zone: ZoneInfo) -> Upcoming:
             left, right = max(start, event.starts_at_utc), min(end, event.ends_at_utc)
             if left >= right:
                 continue
-            intervals.append((left, right))
+            if event.busy:
+                intervals.append((left, right))
             day = left.astimezone(zone).date()
             reason = (
                 f"{left.astimezone(zone).isoformat(timespec='minutes')} – "

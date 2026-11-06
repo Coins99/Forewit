@@ -74,8 +74,9 @@ async def test_events_request_names_its_fields_and_follows_pages() -> None:
     assert first["timeMin"] == ["2026-10-05T04:00:00Z"] and first["timeMax"] == [
         "2026-12-14T05:00:00Z"
     ]
-    for field in ("description", "attendees", "location", "transparency", "conferenceData"):
+    for field in ("description", "attendees", "location", "conferenceData"):
         assert field not in first["fields"][0]
+    assert "transparency" in first["fields"][0]  # Google's "Show as" (ADR 0029).
     assert "workingLocation" not in first["eventTypes"] and "default" in first["eventTypes"]
     assert parse_qs(urlsplit(str(route.calls[1].request.url)).query)["pageToken"] == ["next"]
 

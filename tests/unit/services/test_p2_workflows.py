@@ -251,6 +251,10 @@ async def test_upcoming_deduplicates_task_reasons_and_keeps_distinct_google_iden
     )
     known = overview(calendar, ZONE)
     assert known.timed_minutes == 120 and known.google_complete
+    # A free event is listed but takes no time (ADR 0029).
+    tentative = foreign.model_copy(update={"busy": False})
+    loose = overview(calendar.model_copy(update={"google_events": (tentative,)}), ZONE)
+    assert loose.timed_minutes == 60 and len(loose.items) == 3
     assert len(known.items) == 3
     assert len(next(item for item in known.items if item.identity[0] == "task").reasons) == 2
     assert known == overview(calendar, ZONE)

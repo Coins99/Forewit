@@ -33,6 +33,20 @@ def new_public_id() -> str:
     return str(uuid.uuid4())
 
 
+def shape_busy(all_day: bool) -> bool:
+    """Whether a calendar entry is busy when nobody chose (ADR 0029): a timed entry is busy,
+    an all-day one free."""
+    return not all_day
+
+
+def busy_by_shape(data: object) -> object:
+    """A calendar entry's fields with a missing ``busy`` filled in by shape_busy(). For a
+    model's ``mode="before"`` validator."""
+    if isinstance(data, dict) and data.get("busy") is None:
+        return {**data, "busy": shape_busy(data.get("all_day") is True)}
+    return data
+
+
 def known_zone(key: str) -> str:
     """``key`` when it names an IANA time zone; raises ValueError with a static message."""
     try:

@@ -162,9 +162,10 @@ class BlockSaved(DomainModel):
     """What scheduling, moving or restoring a block left, with its local warnings.
 
     ``previous`` is the block's time before a move, for Undo. ``overlaps`` names up to
-    MAX_OVERLAP_LABELS timed entries the block now overlaps and ``more_overlaps`` counts the
-    rest. ``after_deadline`` says the block ends after its task's deadline. None of these
-    stop a save.
+    MAX_OVERLAP_LABELS busy entries the block now overlaps, days off included, and
+    ``more_overlaps`` counts the rest. ``after_deadline`` says the block ends after its
+    task's deadline, and ``outside_hours`` that some of it falls outside the working hours
+    (ADR 0029). None of these stop a save.
     """
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -174,3 +175,4 @@ class BlockSaved(DomainModel):
     overlaps: tuple[str, ...] = Field(default=(), max_length=MAX_OVERLAP_LABELS, repr=False)
     more_overlaps: int = Field(default=0, ge=0)
     after_deadline: bool = False
+    outside_hours: bool = False

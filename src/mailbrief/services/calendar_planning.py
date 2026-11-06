@@ -43,7 +43,7 @@ from mailbrief.domain.calendar_planning import (
     ProposedChange,
     ticked_at_first,
 )
-from mailbrief.domain.common import normalize_utc, utc_now
+from mailbrief.domain.common import normalize_utc, shape_busy, utc_now
 from mailbrief.domain.drafting import DraftingProblem, PreviewLine
 from mailbrief.domain.events import (
     EVENT_TITLE_MAX_CHARS,
@@ -286,6 +286,7 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
             start_date=first,
             last_date=last,
             time_zone=zone.key,
+            busy=_kept_busy(current, all_day=True),
         )
     start_clock, end_clock = _clock(change.start_time), _clock(change.end_time)
     timed: tuple[datetime, datetime] | None = None  # The current start and end, in UTC.
@@ -330,7 +331,16 @@ def _edit(change: ChangeCandidate, current: CalendarEvent | None, plan: Prepared
         starts_at_utc=starts,
         ends_at_utc=ends,
         time_zone=zone.key,
+        busy=_kept_busy(current, all_day=False),
     )
+
+
+def _kept_busy(current: CalendarEvent | None, *, all_day: bool) -> bool:
+    """An updated event keeps the owner's Busy or Free while it keeps its shape; a new event,
+    or one changing shape, takes the shape's own: the model never chooses it."""
+    if current is None or current.all_day != all_day:
+        return shape_busy(all_day)
+    return current.busy
 
 
 def _first_after(start: datetime, clock: time, zone: ZoneInfo) -> datetime:
@@ -363,16 +373,18 @@ def _overlaps(
     moved: dict[str, EventEdit],
     created: Sequence[EventChange],
 ) -> tuple[str, ...]:
-    """Titles of the timed events this change would overlap: the owner's, as the other
-    changes leave them and with the new ones, then Google's, then the work blocks', as
-    "Task · title". Blocks are only checked here, locally; they are never sent.
-
-    Every timed Google event counts, since its free/busy flag isn't kept.
+    """Titles of the busy entries this timed change would overlap: the owner's, as the
+    other changes leave them and with the new ones, then Google's, then the work blocks', as
+    "Task · title". An all-day busy event on one of the change's days, a day off, overlaps
+    it too; free events never do (ADR 0029). Blocks are only checked here, locally; they
+    are never sent.
     """
     edit = proposal.edit
     if edit is None or edit.all_day or edit.starts_at_utc is None or edit.ends_at_utc is None:
         return ()
     start, end = edit.starts_at_utc, edit.ends_at_utc
+    first_day = start.astimezone(plan.zone).date()
+    last_day = (end - timedelta(microseconds=1)).astimezone(plan.zone).date()
     own = None if proposal.event is None else proposal.event.public_id
     mine = [
         moved.get(event.public_id) or event.edit()
@@ -380,18 +392,20 @@ def _overlaps(
         if event.public_id not in deleted and event.public_id != own
     ]
     mine += [c.edit for c in created if c is not proposal and c.edit is not None]
-    found: list[str] = []
-    for other in mine:
-        if other.all_day or other.starts_at_utc is None or other.ends_at_utc is None:
-            continue
-        if other.starts_at_utc < end and other.ends_at_utc > start:
-            found.append(other.title)
-    for google in plan.google:
-        if google.all_day or google.starts_at_utc is None:
-            continue
-        assert google.ends_at_utc is not None
-        if google.starts_at_utc < end and google.ends_at_utc > start:
-            found.append(f"{google.title} ({google.calendar_name})")
+
+    def overlapped(other: EventEdit | GoogleEvent) -> bool:
+        if not other.busy:
+            return False
+        if other.all_day:
+            assert other.start_date is not None and other.last_date is not None
+            return other.start_date <= last_day and other.last_date >= first_day
+        assert other.starts_at_utc is not None and other.ends_at_utc is not None
+        return other.starts_at_utc < end and other.ends_at_utc > start
+
+    found: list[str] = [other.title for other in mine if overlapped(other)]
+    found += [
+        f"{google.title} ({google.calendar_name})" for google in plan.google if overlapped(google)
+    ]
     for block in plan.blocks:
         if block.starts_at_utc < end and block.ends_at_utc > start:
             found.append(f"Task · {block.title}")
@@ -526,7 +540,9 @@ class CalendarPlanningService:
         busy = None
         busy_held = None
         if PlanningPart.GOOGLE_BUSY in options.parts:
-            busy_held = len(shown.google_events)
+            # Only what Google shows as busy is a busy time: a free event is never sent.
+            taken = [g for g in shown.google_events if g.busy]
+            busy_held = len(taken)
             titled = PlanningPart.GOOGLE_TITLES in options.parts
             busy = tuple(
                 BusyTime(
@@ -539,8 +555,7 @@ class CalendarPlanningService:
                     )[1],
                     title=g.title if titled else None,
                 )
-                # Every cached Google event counts as busy: its free/busy flag isn't kept.
-                for g in shown.google_events
+                for g in taken
             )[:MAX_SENT_BUSY]
         actions = _actions(shown.markers, zone) if PlanningPart.ACTIONS in options.parts else None
         local_now = normalize_utc(self._clock()).astimezone(zone)

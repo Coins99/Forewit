@@ -89,6 +89,8 @@ def map_event(item: dict[str, object], calendar: GoogleCalendarInfo) -> GoogleEv
     """An event to show, or None when it is cancelled, malformed or longer than a year.
 
     An all-day event's end date is exclusive in Google, so its last day is the day before.
+    It is busy unless Google shows it as free ("transparent"); Google's own default, with no
+    transparency given, is busy, whatever the event's shape (ADR 0029).
     """
     event_id = _identifier(item.get("id"))
     if event_id is None or item.get("status") == "cancelled":
@@ -118,6 +120,7 @@ def map_event(item: dict[str, object], calendar: GoogleCalendarInfo) -> GoogleEv
             event_id=event_id,
             title=_text(item.get("summary"), GOOGLE_TITLE_MAX_CHARS) or UNTITLED,
             web_link=_link(item.get("htmlLink")),
+            busy=item.get("transparency") != "transparent",
             **fields,
         )
     except (ValidationError, ValueError):
