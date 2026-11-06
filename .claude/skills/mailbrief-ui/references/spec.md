@@ -661,8 +661,10 @@ The brief list's chips keep their shorter forms (see Brief list).
   2026"), so a long month never widens the window. Colours are proven pairs only: the
   owner's events accent_fg on accent_bg, Google's text on card (time text_secondary) with a
   `border_strong` hairline, since the month's tiles and today's column are card too,
-  actions' dates warning_fg on warning_bg, today on_primary on primary_fill; the selected
-  entry has a 1.5 px accent_fg ring. No hairlines cross: the week grid draws hour lines
+  actions' dates warning_fg on warning_bg, work blocks (ADR 0028) text on card with an
+  accent_fg edge and hairline (time line text_secondary, "10:00–11:00 · Task"), and a done
+  task's blocks text_secondary on card with a `border_strong` edge and hairline, today
+  on_primary on primary_fill; the selected entry has a 1.5 px accent_fg ring. No hairlines cross: the week grid draws hour lines
   only, and month days are rounded `card` tiles (the month's own) with gaps.
   - `WeekGrid`: day heads (`HEADER_H` 52; weekday 11px Semibold, date 14px Semibold in a
     26px circle for today), an all-day strip (`LANE_H` 20, at most 3 lanes, else 2 and "+N
@@ -675,7 +677,13 @@ The brief list's chips keep their shorter forms (see Brief list).
     minute, and not drawn once the clock passes midnight until the days are read again).
     Keys: Left/Right a day, Up/Down the day's entries, Return opens (or a new event on an
     empty day), Page Up/Down scroll. A newly chosen block scrolls into view (`_reveal`);
-    reading the same selection again keeps where the owner scrolled.
+    reading the same selection again keeps where the owner scrolled. An open task's work
+    block drags (after the platform's drag distance) in 15-minute snaps and across days,
+    or by its bottom 6 px (`RESIZE_PX`, a vertical-resize cursor on hover) to change its
+    end; the preview is the block at its new place with the ring, and Escape stops it.
+    With a block selected, Ctrl/Cmd+Up/Down move it 15 minutes, Ctrl/Cmd+Left/Right a day,
+    Ctrl/Cmd+Shift+Up/Down change its end, Delete/Backspace unschedules; the grid only
+    emits `block_change_requested` and `block_unschedule_requested`.
   - `MonthGrid`: weekday names (24px), then 6 rows × 7 tiles (`TILE_GAP` 2, radius 8); day
     numbers 12px Semibold, muted outside the month, today in a primary circle. Each week's
     items in lanes: bars (merged across neighbouring days of a lane into one) and a line per
@@ -692,7 +700,14 @@ The brief list's chips keep their shorter forms (see Brief list).
   that day's all-day events, then open actions' deadline and target markers, then timed
   events by start. Rows are plain item text, never tooltips. `calendarEmpty` (muted) shows
   under the week when it holds nothing; `calendarNote` (muted) explains markers when there
-  are some. Outline New event, Open and Delete event below. Mnemonics avoid every
+  are some. Outline New event, Open and Delete event below. Work blocks (ADR 0028) are
+  rows among the timed events ("10:00–11:00 · Task · title", the preview "Task", "Task ·
+  waiting" or "Task · completed"); activating one asks `block_requested(OPEN_BLOCK)`.
+  **Schedule task** (`scheduleTaskButton`) sits in the header beside New event: it asks
+  `NEW_BLOCK` with the day in focus, and the window opens `TaskPickerDialog` (open tasks
+  only) and then `BlockEditor` (`ui/block_editor.py`, a drawer: the task's title as plain
+  wrapped text, On / From–to fields as in the event editor, Schedule or Save changes,
+  Unschedule, Open task, Cancel). Mnemonics avoid every
   window-level letter. An event ending at midnight belongs to the day before; when the row
   isn't that day, its end is dated as the clock says ("22:00–Oct 14 00:00"). A refresh
   keeps the selected row (an event, Google event or marker, on the same day when it's

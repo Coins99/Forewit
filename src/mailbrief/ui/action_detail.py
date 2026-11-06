@@ -41,12 +41,14 @@ from mailbrief.domain.actions import (
 from mailbrief.ui.action_text import (
     ActionDetails,
     action_details,
+    block_lines,
     completed_text,
     follow_up_text,
     followed_up_at,
     gmail_source,
     person_text,
     priority_text,
+    scheduled_text,
     since_text,
     tags_text,
     target_text,
@@ -293,6 +295,12 @@ class ActionDetailPane(QScrollArea):
         self.draft_button = outline_button(
             "Dra&ft reply", "draftButton", mnemonic=True, icon_name="pencil"
         )
+        # T: Schedule's other letters are taken by the window's Sync, Complete, Edit and
+        # Delete, Draft's f and Open source's o (ADR 0028).
+        self.schedule_button = outline_button(
+            "Schedule &time…", "scheduleTimeButton", mnemonic=True, icon_name="calendar"
+        )
+        self.schedule_button.setToolTip("Set aside time for this task on the calendar.")
         self.empty = wrap_label("", tone="muted", px=TEXT_PX)
         self.empty.setObjectName("actionEmpty")
         self._top = _Section("actionSummary")
@@ -316,6 +324,9 @@ class ActionDetailPane(QScrollArea):
         plan_layout.addWidget(self._plan_steps)
         plan_layout.addWidget(self.new_step)
         self._step_rows: list[StepRow] = []
+        self._schedule = _Section("actionSchedule")
+        self._schedule.setAccessibleName("Scheduled time")
+        self._schedule_row = _button_row("scheduleRow", self.schedule_button)
         self._activity_summary = _Section("actionActivitySummary")
         self._seen_row = _button_row("seenRow", self.seen_button)
         self._proposals = _Section("actionProposals")
@@ -338,6 +349,8 @@ class ActionDetailPane(QScrollArea):
             self._top,
             self._footer,
             self._plan_box,
+            self._schedule,
+            self._schedule_row,
             self._activity_summary,
             self._seen_row,
             self._proposals,
@@ -369,19 +382,20 @@ class ActionDetailPane(QScrollArea):
 
     def _link_below_footer(self) -> None:
         """Tab goes from the footer's last button (Delete) to the plan's boxes and the field
-        that adds a step, then Mark seen, Proposals and Open source. The whole run is linked
-        each time the boxes are made: Qt skips a link that already holds, so a partial one
-        could leave other widgets between them."""
+        that adds a step, then Schedule time, Mark seen, Proposals and Open source. The whole
+        run is linked each time the boxes are made: Qt skips a link that already holds, so a
+        partial one could leave other widgets between them."""
         chain = [self.delete_button, *self._below_footer()]
         for first, second in zip(chain, chain[1:], strict=False):
             QWidget.setTabOrder(first, second)
 
     def _below_footer(self) -> list[QWidget]:
         """The controls after the footer, in display order: the plan's boxes and field, then
-        Mark seen, Proposals and Open source."""
+        Schedule time, Mark seen, Proposals and Open source."""
         return [
             *(row.box for row in self._step_rows),
             self.new_step,
+            self.schedule_button,
             self.seen_button,
             self.proposals_button,
             self.source_button,
@@ -458,6 +472,7 @@ class ActionDetailPane(QScrollArea):
         """Every button, shown or not, in display order."""
         return [
             *self.all_footer_buttons(),
+            self.schedule_button,
             self.seen_button,
             self.proposals_button,
             self.source_button,
@@ -482,6 +497,7 @@ class ActionDetailPane(QScrollArea):
         for section in (
             self._top,
             self._plan_steps,
+            self._schedule,
             self._activity_summary,
             self._proposals,
             self._sources,
@@ -490,6 +506,7 @@ class ActionDetailPane(QScrollArea):
             section.set_widgets(())
         for row in (
             self._plan_box,
+            self._schedule_row,
             self._seen_row,
             self._proposals_row,
             self._source_row,
@@ -626,6 +643,7 @@ class ActionDetailPane(QScrollArea):
         if action.public_id != self._shown:
             self.new_step.clear()  # A step typed for another action isn't this one's.
         self._show_plan(action, details)
+        self._show_schedule(action, now=now, zone=zone, today=today)
         self._activity_summary.set_widgets(top)
         self._seen_row.setVisible(bool(activity))
         count = len(details.proposals)
@@ -638,6 +656,25 @@ class ActionDetailPane(QScrollArea):
         if action.public_id != self._shown:
             self.verticalScrollBar().setValue(0)
         self._shown = action.public_id
+
+    def _show_schedule(self, action: Action, *, now: datetime, zone: ZoneInfo, today: date) -> None:
+        """The task's scheduled time and its next blocks (ADR 0028), with Schedule time
+        while it is open."""
+        summary = scheduled_text(action)
+        if summary is None:
+            self._schedule.set_widgets(())
+        else:
+            lines: list[QWidget | int] = [
+                _SECTION_GAP,
+                _heading("Scheduled time"),
+                wrap_label(summary, px=TEXT_PX),
+            ]
+            for line in block_lines(action, now=now, zone=zone, today=today):
+                label = wrap_label(line, tone="secondary", px=SMALL_PX)
+                label.setObjectName("actionBlockLine")
+                lines.append(label)
+            self._schedule.set_widgets(lines)
+        self._schedule_row.setVisible(action.status is ActionStatus.OPEN)
 
     def _dates(self, details: ActionDetails) -> list[QWidget | int]:
         widgets: list[QWidget | int] = []

@@ -38,6 +38,10 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   only after the owner completes real-record recovery and the 7–14-day release scenario.
   `docs/project-status.md` and `docs/p0-p2-implementation.md` hold the current state and
   evidence; read them, not old commit messages, for what is done.
+- P3, the local calendar, is three PRs, one at a time (`docs/p3-calendar.md`). P3-1, work
+  blocks (ADR 0028, migration 0032), is implemented and awaits owner acceptance; P3-2
+  (working hours, Busy/Free, unscheduled panel, Day view) and P3-3 (conflicts and
+  overfilled days) are not started.
 - Where each feature is specified (behavior, acceptance steps and limits):
 
   | Area | Docs | ADRs |
@@ -51,6 +55,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   | Data and recovery (M9) | `m9-durability.md`, `m9-live-validation.md` | |
   | Ranking signals | `ranking.md` | 0020 |
   | Calendar, Google Calendar, AI planning | `calendar.md` | 0018 |
+  | P3 local calendar: work blocks, working hours, workload | `p3-calendar.md`, `calendar.md` | 0028 |
   | Local email AI (P0-B, experimental) | `p0-b2-local-analysis-plan.md`, `p0-b2-local-analysis.md`, `local-ai-benchmark.md` | 0023 |
   | Planner foundation (P0, P1 tasks, projects, estimates, priorities/tags, repeats, deadlines, waiting, checklists) | `p0-planner-foundation.md`, `p1-foundation-audit.md`, `p1-*.md` | 0021, 0022, 0024 |
   | Today, search and the palette | `today.md`, `search.md` | |
@@ -109,8 +114,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   analysis, deadlines, digest and brief; for M6: actions; for M7: drafts and drafting
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
   (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
-  `projects` for owner projects and life areas, and `calendar_planning` for AI-proposed
-  calendar changes. `calendar.py` is day boundaries and time zones, not the calendar feature.
+  `projects` for owner projects and life areas, `calendar_planning` for AI-proposed
+  calendar changes, and `work_blocks` for time set aside for a task (ADR 0028).
+  `calendar.py` is day boundaries and time zones, not the calendar feature.
+  `domain/intervals.py` is the half-open UTC interval arithmetic (union, clip, lengths)
+  calendar counts go through, so overlaps never count twice.
   `writes.py`: `committed()` commits one change and rolls it back on any failure, and
   `commit_once()` adds the clock read once; the owner-record services, the auto-send
   permission and the Google Calendar cache write through them. `compose_brief()`
@@ -424,6 +432,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   stored. Only calendars shown in Google Calendar are cached; one the owner unticks goes
   with its events. The Google cache is excluded from exports and from the cleanup
   fingerprint.
+- Work blocks (ADR 0028) are the owner's planned time for one task, never measured work. A
+  block never changes its task: `WorkBlockService` never writes `actions` (no revision,
+  activity, deadline or target date), and moving a deadline or target date never moves a
+  block. Every write needs the revision the caller saw (except restoring an unscheduled
+  block), makes one block revision and goes through ORM objects. Only a live, open task
+  takes a new or moved block. Overlaps and ending after the deadline are local warnings
+  that never stop a save. AI never sees or changes blocks.
 - Once any real database has run a migration, including the owner's from a source run
   of an unmerged branch, never edit that migration; fix forward with a new revision.
 
@@ -483,7 +498,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   window (titles and times only). Google busy times, their titles and open actions go only
   when the owner ticks them, and the preview shows each part's size.
 - Parse dates and times in Python in the owner's zone; never trust the model's arithmetic.
-  Overlap warnings are computed locally and never sent.
+  Overlap warnings are computed locally and never sent; work blocks join them only as
+  local warnings ("Task · title") and are never sent (ADR 0028).
 - Apply all kept changes in one transaction (`EventService.apply_changes`), and undo them
   together only while every event is as the apply left it (`undo_changes`).
 

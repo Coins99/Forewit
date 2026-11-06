@@ -1,7 +1,8 @@
 """The owner's calendar: events, and the open actions' dates beside them (ADR 0018).
 
 Nothing here reads or sends email or calls a provider, and nothing changes an action:
-deadlines and target dates are only read, to be shown as markers. Every mutating method
+deadlines and target dates are only read, to be shown as markers, and work blocks only read,
+to be shown beside the events. Every mutating method
 reads the clock once, commits once and rolls back on failure. Errors carry static messages,
 and nothing logs event text.
 """
@@ -32,6 +33,7 @@ from mailbrief.services.writes import commit_once
 from mailbrief.storage.events import EventRepository, apply_edit, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
 from mailbrief.storage.tables import ActionTable, CalendarEventTable
+from mailbrief.storage.work_blocks import WorkBlockRepository, scheduled_from_rows
 
 MAX_RANGE_DAYS: Final = 42
 _NOT_FOUND: Final = "That event was not found."
@@ -190,8 +192,9 @@ class EventService:
 
     async def list_range(self, first_day: date, last_day: date, zone: ZoneInfo) -> CalendarRange:
         """The live events touching ``first_day`` through ``last_day`` in ``zone``, all-day
-        ones first, then by start; the open actions' dates in those days; and the cached
-        Google events touching them, with the days the cache covers (ADR 0018).
+        ones first, then by start; the open actions' dates in those days; the cached
+        Google events touching them, with the days the cache covers (ADR 0018); and the live
+        work blocks of live tasks touching them, by start (ADR 0028).
 
         Raises ValueError, with a static message, for a range of more than MAX_RANGE_DAYS
         days or one that ends before it starts.
@@ -205,6 +208,7 @@ class EventService:
         events = sorted((event_from_row(row) for row in rows), key=CalendarEvent.sort_key)
         google = GoogleCalendarRepository(self._session)
         cached = await google.touching(start_utc, end_utc, first_day, last_day)
+        blocks = await WorkBlockRepository(self._session).touching(start_utc, end_utc)
         return CalendarRange(
             first_day=first_day,
             last_day=last_day,
@@ -212,6 +216,7 @@ class EventService:
             markers=markers_for(actions, first_day, last_day, zone),
             google_events=tuple(sorted(cached, key=GoogleEvent.sort_key)),
             google_coverage=await google.coverage(),
+            blocks=tuple(scheduled_from_rows(block, action) for block, action in blocks),
         )
 
     async def apply_changes(self, changes: Sequence[EventChange]) -> AppliedBatch:

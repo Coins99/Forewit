@@ -67,9 +67,9 @@ list, body and meta sizes (`docs/ui-redesign.md`).
   the sheet. Keep a dialog's content in its own top-level layout with those default
   margins; never paint a dialog's background, give it a stylesheet background or set its
   top-level margins. The exception is a dialog with the `presentation` property
-  `"center"` (Saved mail) or `"drawer"` (the Calendar's event editor, Google event and
-  Plan with AI): `dialog_guard` shows it inside the window, in the Today template's own
-  layout instead of a `DialogSheet`.
+  `"center"` (Saved mail) or `"drawer"` (the Calendar's event editor, Google event,
+  Plan with AI and block editor): `dialog_guard` shows it inside the window, in the Today
+  template's own layout instead of a `DialogSheet`.
 - Nothing has a sharp corner. Pages sit on the workspace's rounded sheet; never add a
   divider that meets the chrome or another hairline. Anything filled or outlined is
   rounded (`RADIUS`, `CARD_RADIUS`, pills), and pop-ups are rounded by `ThemeStyle`.

@@ -844,6 +844,12 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P3-1 update (2026-11-05): C03 work blocks are implemented, awaiting owner acceptance
+([ADR 0028](adr/0028-work-blocks.md), [P3 register](p3-calendar.md)). Unlike §5.4's
+sketch, block changes are not task activity: blocks keep their own revisions (owner
+decision). Working hours, Busy/Free and the unscheduled panel (P3-2) and C05 workload
+(P3-3) follow.
+
 P2-04–P2-09 update (2026-11-05): Notes/project context, workspace/Mail migration,
 explicit capture processing, upcoming commitments, dated-plan transfers and
 project/saved-brief search are merged (PRs #101 and #102). See [workspace implementation

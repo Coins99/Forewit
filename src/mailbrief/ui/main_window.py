@@ -95,6 +95,7 @@ from mailbrief.domain.events import (
     CalendarRange,
     EventChange,
     EventEdit,
+    ScheduledBlock,
 )
 from mailbrief.domain.google_calendar import CalendarSyncResult, GoogleEvent, is_calendar_link
 from mailbrief.domain.messages import RankedMessage
@@ -115,6 +116,13 @@ from mailbrief.domain.routes import (
 )
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.work_blocks import (
+    BlockSaved,
+    BlockTime,
+    WorkBlock,
+    scheduled_time,
+    suggested_minutes,
+)
 from mailbrief.errors import ConfigurationError
 from mailbrief.infra.files import write_text_atomically
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -185,6 +193,7 @@ from mailbrief.services.ranking import (
     reason_text,
 )
 from mailbrief.services.upcoming import overview
+from mailbrief.services.work_blocks import BlockConflictError, BlockNotFoundError
 from mailbrief.ui.action_editor import ActionEditor
 from mailbrief.ui.action_text import steps_status
 from mailbrief.ui.actions_view import (
@@ -193,6 +202,7 @@ from mailbrief.ui.actions_view import (
     EDIT,
     PROPOSALS,
     REOPEN,
+    SCHEDULE,
     SEEN,
     SKIP,
     ActionsPanel,
@@ -205,9 +215,11 @@ from mailbrief.ui.appearance import (
     theme_mode,
 )
 from mailbrief.ui.auto_send_view import AutoSendDialog
+from mailbrief.ui.block_editor import LENGTH as BLOCK_LENGTH
+from mailbrief.ui.block_editor import BlockEditor
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
-from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start
+from mailbrief.ui.calendar_layout import CalendarView, month_days, month_start, shifted, stretched
 from mailbrief.ui.calendar_preview import GoogleEventDialog
 from mailbrief.ui.calendar_view import ALLOW as ALLOW_CALENDAR
 from mailbrief.ui.calendar_view import DELETE as DELETE_EVENT
@@ -215,7 +227,11 @@ from mailbrief.ui.calendar_view import (
     GOOGLE_ASK,
     GOOGLE_OFF,
     GOOGLE_ON,
+    MOVE_BLOCK,
+    NEW_BLOCK,
+    OPEN_BLOCK,
     OPEN_GOOGLE,
+    UNSCHEDULE_BLOCK,
     CalendarPanel,
     week_start,
 )
@@ -238,7 +254,7 @@ from mailbrief.ui.drafts_view import DELETE as DELETE_DRAFT
 from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
-from mailbrief.ui.event_editor import EventEditor
+from mailbrief.ui.event_editor import EventEditor, suggested_start
 from mailbrief.ui.focus_view import FocusDialog, FocusPanel
 from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
@@ -260,6 +276,7 @@ from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
 from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
+from mailbrief.ui.task_picker import TaskPickerDialog
 from mailbrief.ui.theme import (
     CAPTION_PX,
     SMALL_PX,
@@ -467,6 +484,15 @@ class DesktopBackend(Protocol):
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
     async def restore_event(self, public_id: str) -> CalendarEvent: ...
+    # Work blocks (ADR 0028): time set aside for a task, which never changes the task.
+    async def open_task_choices(self, text: str = "") -> tuple[TaskChoice, ...]: ...
+    async def schedule_block(self, action_public_id: str, time: BlockTime) -> BlockSaved: ...
+    async def move_block(self, public_id: str, revision: int, time: BlockTime) -> BlockSaved: ...
+    async def undo_block_move(
+        self, public_id: str, revision: int, previous: BlockTime
+    ) -> BlockSaved: ...
+    async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock: ...
+    async def restore_block(self, public_id: str) -> BlockSaved: ...
     # Google Calendar, read-only, over the one Google sign-in (ADR 0019).
     async def calendar_allowed(self) -> bool | None: ...
     async def allow_calendar(self) -> bool: ...
@@ -501,6 +527,8 @@ _STALE = (
     DraftNotFoundError,
     EventConflictError,
     EventNotFoundError,
+    BlockConflictError,
+    BlockNotFoundError,
 )
 # Raised when the open draft changed elsewhere; the editor keeps the text.
 _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
@@ -540,6 +568,9 @@ _EVENT_STALE = (
     "This event changed since you opened it. Your edits are still here — copy what you "
     "need, then Cancel and reopen the event."
 )
+_BLOCK_STALE = "This scheduled time changed since you opened it; Cancel and open it again."
+_BLOCK_DONE = "This task is done, so its time stays put. Reopen the task to move it."
+_TASK_UNREADABLE = "That task couldn't be loaded. Try again."
 _NO_SOURCE = "That email is no longer in local mail."
 _DRAFT_CLOSE_FAILED = "Couldn't save. Your text is still here; try again."
 _DRAFT_EXPORT_FAILED = "Couldn't export. Check the folder and try again."
@@ -746,6 +777,18 @@ class DraftWrites:
             log_failure(exc)
 
 
+def block_status(verb: str, title: str, saved: BlockSaved) -> str:
+    """ "Scheduled: Draft report.", with what it overlaps and whether it ends after the
+    task's deadline: warnings only, since a block never stops a save (ADR 0028)."""
+    text = f"{verb}: {title}."
+    if saved.overlaps:
+        more = f" and {saved.more_overlaps} more" if saved.more_overlaps else ""
+        text += f" Overlaps {', '.join(saved.overlaps)}{more}."
+    if saved.after_deadline:
+        text += " Ends after the task's deadline."
+    return text
+
+
 class MainWindow(QMainWindow):
     """Keep the last saved brief visible throughout refresh, failure and cancellation."""
 
@@ -849,7 +892,36 @@ class MainWindow(QMainWindow):
         self.google_event_dialog.event_requested.connect(self._request_event)
         self.event_editor.save_requested.connect(self._request_save_event)
         self.planning_dialog = PlanningDialog(self)
-        for drawer in (self.event_editor, self.google_event_dialog, self.planning_dialog):
+        # Work blocks (ADR 0028): choose a task, then its time; or open a block.
+        self.block_editor = BlockEditor(self)
+        self.block_editor.save_requested.connect(self._request_save_block)
+        self.block_editor.unschedule_requested.connect(self._request_unschedule_from_editor)
+        self.block_editor.task_requested.connect(
+            lambda public_id: self._navigate(TaskRoute(public_id=public_id))
+        )
+        self.block_picker = TaskPickerDialog(
+            self,
+            title="Schedule a task",
+            blurb="Choose the task to set aside time for. The task stays as it is.",
+            action="Choose",
+            name="Choose a task to schedule",
+        )
+        self.block_picker.setObjectName("blockTaskPicker")
+        self.block_picker.search_requested.connect(self._search_block_tasks)
+        self.block_picker.chosen.connect(
+            lambda public_id: self._open_new_block(public_id, self._block_day)
+        )
+        self._block_day: date | None = None  # The day Schedule task was asked on.
+        self._block_open_read = 0  # The newest task read for new time; older ones are dropped.
+        # The latest block move offered for Undo: its block, its revision after the move and
+        # its time before the first of the moves in a row, so nudges undo together.
+        self._block_move: tuple[str, int, BlockTime] | None = None
+        for drawer in (
+            self.event_editor,
+            self.google_event_dialog,
+            self.planning_dialog,
+            self.block_editor,
+        ):
             drawer.setProperty("presentation", "drawer")
         self.planning_dialog.preview_requested.connect(self._request_planning_preview)
         self.planning_dialog.ask_requested.connect(self._request_planning_ask)
@@ -1286,10 +1358,12 @@ class MainWindow(QMainWindow):
         self.calendar_panel.week_requested.connect(self._request_calendar_week)
         self.calendar_panel.google_requested.connect(self._request_google)
         self.calendar_panel.plan_requested.connect(self._request_planning)
+        self.calendar_panel.block_requested.connect(self._request_block)
         workspace.add_page(
             "calendar", _page(self.calendar_panel, "calendarPage", "Calendar", margins=0)
         )
         workspace.add_header_action("calendar", self.calendar_panel.refresh_button)
+        workspace.add_header_action("calendar", self.calendar_panel.schedule_button)
         workspace.add_header_action("calendar", self.calendar_panel.new_button)
         # Sidebar counts; each refresh replaces only its own, and a failure keeps them.
         self._counts: dict[str, int | None] = {"actions": None, "waiting": None, "drafts": None}
@@ -1460,6 +1534,7 @@ class MainWindow(QMainWindow):
         self.inbox_panel.set_busy(busy)
         self.inbox_panel.refresh.setEnabled(not provider_busy)
         self.event_editor.set_busy(busy)
+        self.block_editor.set_busy(busy)
 
     # Pages. The sidebar shows Today while the review or consent is up on the run page, and
     # Actions or Waiting by the actions page's tab.
@@ -1745,6 +1820,7 @@ class MainWindow(QMainWindow):
             self.action_editor.isVisible()
             or self.draft_editor.isVisible()
             or self.event_editor.isVisible()
+            or self.block_editor.isVisible()
             or self.planning_dialog.isVisible()
             or not self.draft_writes.idle
         ):
@@ -1794,6 +1870,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Offer to undo the latest change, or clear the offer when called without one."""
         self._undo = None if label is None or operation is None else (label, operation)
+        self._block_move = None  # A new offer, or none: the next block move starts afresh.
         self.undo_button.setText("&Undo" if self._undo is None else f"&{self._undo[0]}")
         self.undo_button.setVisible(self._undo is not None)
         self._status_visibility(self.status.text())
@@ -2175,6 +2252,12 @@ class MainWindow(QMainWindow):
         elif kind == PROPOSALS:
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
             self.dialog_guard.show_dialog(self.proposals_dialog)
+        elif kind == SCHEDULE:
+            today = self._local_today()
+            target = action.target_date
+            self._open_new_block(
+                action.public_id, target if target is not None and target > today else today
+            )
 
     def _open_organization(self) -> None:
         if self._closing or self._dialog_open() or (self.task is not None and not self.task.done()):
@@ -3255,6 +3338,228 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Deleted: {event.title}.")
         await self._refresh_views()
 
+    # Work blocks (ADR 0028): time the owner sets aside for a task. Saving one never changes
+    # the task, and its warnings (overlaps, ending after the deadline) never stop a save.
+
+    def _request_block(self, kind: str, value: object) -> None:
+        if self._closing:
+            return
+        if kind == NEW_BLOCK and isinstance(value, date):
+            self._block_day = value
+            self.dialog_guard.show_dialog(self.block_picker)
+            self.block_picker.open_fresh()
+        elif kind == OPEN_BLOCK and isinstance(value, ScheduledBlock):
+            self.block_editor.edit_block(value, self.zone)
+            self.dialog_guard.show_dialog(self.block_editor)
+        elif kind == MOVE_BLOCK and isinstance(value, tuple) and len(value) == 4:
+            block, days, minutes, resize = value
+            if (
+                isinstance(block, ScheduledBlock)
+                and isinstance(days, int)
+                and isinstance(minutes, int)
+            ):
+                self._request_block_change(block, days, minutes, resize=bool(resize))
+        elif kind == UNSCHEDULE_BLOCK and isinstance(value, ScheduledBlock):
+            chosen = value
+            started = self.start(lambda: self._unschedule_block(chosen), cancellable=False)
+            if not started and not self._closing:
+                self.status.setText(_BUSY)
+
+    def _search_block_tasks(self, text: str) -> None:
+        """Open tasks only, for Schedule task."""
+        self._read_task_choices(text, self.block_picker, self.backend.open_task_choices)
+
+    def _open_new_block(self, public_id: str, day: date | None) -> None:
+        """Read the task, then open the editor for new time for it on ``day`` (today when
+        None), as long as the task has been read: its estimate and blocks make the length."""
+        if self._closing:
+            return
+        on = day or self._local_today()
+        self._block_open_read += 1
+        read_id = self._block_open_read
+
+        async def read() -> None:
+            try:
+                action = await self.backend.get_action(public_id)
+            except Exception as exc:
+                log_failure(exc)
+                if read_id == self._block_open_read and not self._closing:
+                    self.status.setText(_TASK_UNREADABLE)
+                return
+            if self._closing or read_id != self._block_open_read:
+                return  # A later Schedule asked for another task.
+            if self._dialog_open() or self.block_editor.isVisible():
+                # Something opened meanwhile: never cover it, or replace what the editor holds.
+                self.status.setText("Close the open panel, then schedule the task again.")
+                return
+            if action.status is not ActionStatus.OPEN:
+                self.status.setText("Only an open task can be scheduled. Reopen it first.")
+                return
+            scheduled = scheduled_time(action.blocks).total_minutes
+            minutes = suggested_minutes(action.estimate_minutes, scheduled)
+            start = suggested_start(on, self.now(), self.zone)
+            self.block_editor.edit_new(action.public_id, action.title, start, minutes, self.zone)
+            self.dialog_guard.show_dialog(self.block_editor)
+
+        task = asyncio.get_running_loop().create_task(read())
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _request_save_block(self, value: object) -> None:
+        if not isinstance(value, BlockTime):
+            return
+        chosen = value
+        started = self.start(lambda: self._save_block(chosen), cancellable=False)
+        if not started and not self._closing:
+            self.block_editor.keep_open(_BUSY)
+
+    async def _save_block(self, time: BlockTime) -> None:
+        """The editor closes only once the save succeeds; otherwise it keeps the time."""
+        editing = self.block_editor.editing()
+        title = self.block_editor.task_title()
+        try:
+            if editing is None:
+                saved = await self.backend.schedule_block(self.block_editor.task_id(), time)
+            else:
+                saved = await self.backend.move_block(
+                    editing.public_id, editing.block.revision, time
+                )
+        except BlockConflictError as exc:
+            log_failure(exc)
+            if not self._closing:
+                self.block_editor.keep_open(str(exc))  # Static: it names no task.
+            return
+        except BlockNotFoundError as exc:
+            if not self._closing:
+                self.block_editor.keep_open(_BLOCK_STALE)
+            await self._stale(exc)
+            return
+        except Exception:
+            if not self._closing:
+                self.block_editor.keep_open(_EDITOR_FAILED)
+            raise  # _run logs it and reports the failure.
+        self.block_editor.finish_saved()
+        if editing is None:
+            public_id, revision = saved.block.public_id, saved.block.revision
+
+            async def undo() -> None:
+                await self.backend.unschedule_block(public_id, revision)
+
+            self._offer_undo("Undo schedule", undo)
+            verb = "Scheduled"
+        else:
+            self._offer_move_undo(saved, "Undo move")
+            verb = "Moved"
+        await self._show_saved_block(saved, block_status(verb, title, saved))
+
+    def _request_block_change(
+        self, block: ScheduledBlock, days: int, minutes: int, *, resize: bool
+    ) -> None:
+        """A drag or a key in the week grid: the block's new time along the clock, saved as
+        one move; a length outside 5 minutes to 12 hours is refused here, saying why, as is
+        a done task's block, which stays where it is until the task is reopened."""
+        if not block.open:
+            self.status.setText(_BLOCK_DONE)
+            return
+        try:
+            if resize:
+                start, end = stretched(block, self.zone, minutes)
+            else:
+                start, end = shifted(block, self.zone, days=days, minutes=minutes)
+            time = BlockTime(starts_at_utc=start, ends_at_utc=end, time_zone=self.zone.key)
+        except ValueError:
+            self.status.setText(BLOCK_LENGTH)
+            return
+        label = "Undo resize" if resize else "Undo move"
+        started = self.start(lambda: self._move_block(block, time, label), cancellable=False)
+        if not started and not self._closing:
+            self.status.setText(_BUSY)
+
+    async def _move_block(self, block: ScheduledBlock, time: BlockTime, label: str) -> None:
+        try:
+            saved = await self.backend.move_block(block.public_id, block.block.revision, time)
+        except BlockConflictError as exc:
+            log_failure(exc)
+            self.status.setText(str(exc))  # Static: it names no task.
+            await self._refresh_views()
+            return
+        except BlockNotFoundError as exc:
+            await self._stale(exc)
+            return
+        self._offer_move_undo(saved, label)
+        verb = "Resized" if label == "Undo resize" else "Moved"
+        await self._show_saved_block(saved, block_status(verb, block.title, saved))
+
+    def _offer_move_undo(self, saved: BlockSaved, label: str) -> None:
+        """Offer to put a moved block back. Moves of one block in a row, with nothing else
+        offered between them, undo together: back to where the first one began."""
+        assert saved.previous is not None
+        public_id, revision = saved.block.public_id, saved.block.revision
+        previous = saved.previous
+        last = self._block_move
+        if last is not None and last[0] == public_id and last[1] == revision - 1:
+            previous = last[2]
+
+        async def undo() -> None:
+            await self.backend.undo_block_move(public_id, revision, previous)
+
+        self._offer_undo(label, undo)
+        self._block_move = (public_id, revision, previous)
+
+    async def _show_saved_block(self, saved: BlockSaved, status: str) -> None:
+        """Say what was saved, show the block's week and select it."""
+        self.status.setText(status)
+        day = saved.block.days(self.zone)[0]
+        self._show_calendar_day(day)
+        await self._refresh_views()
+        self.calendar_panel.select_entry(("block", saved.block.public_id), day)
+
+    async def _unschedule_block(self, block: ScheduledBlock) -> None:
+        gone = await self._unless_stale(
+            self.backend.unschedule_block(block.public_id, block.block.revision)
+        )
+        if gone is _GONE:
+            return
+        public_id = block.public_id
+
+        async def undo() -> None:
+            await self.backend.restore_block(public_id)
+
+        self._offer_undo("Undo unschedule", undo)
+        self.status.setText(f"Unscheduled: {block.title}.")
+        await self._refresh_views()
+
+    def _request_unschedule_from_editor(self) -> None:
+        block = self.block_editor.editing()
+        if block is None:
+            return
+        chosen = block
+        started = self.start(lambda: self._unschedule_from_editor(chosen), cancellable=False)
+        if not started and not self._closing:
+            self.block_editor.keep_open(_BUSY)
+
+    async def _unschedule_from_editor(self, block: ScheduledBlock) -> None:
+        try:
+            await self.backend.unschedule_block(block.public_id, block.block.revision)
+        except (BlockConflictError, BlockNotFoundError) as exc:
+            if not self._closing:
+                self.block_editor.keep_open(_BLOCK_STALE)
+            await self._stale(exc)
+            return
+        except Exception:
+            if not self._closing:
+                self.block_editor.keep_open(_EDITOR_FAILED)
+            raise
+        self.block_editor.finish_saved()
+        public_id = block.public_id
+
+        async def undo() -> None:
+            await self.backend.restore_block(public_id)
+
+        self._offer_undo("Undo unschedule", undo)
+        self.status.setText(f"Unscheduled: {block.title}.")
+        await self._refresh_views()
+
     # Google Calendar (ADR 0018, phase 2): read-only. Its failures are handled here, never
     # by _run, whose sign-in handling belongs to Gmail: a calendar problem must never show
     # Gmail as disconnected.
@@ -3976,26 +4281,34 @@ class MainWindow(QMainWindow):
         await self._refresh_drafts()
 
     def _search_note_tasks(self, text: str) -> None:
+        self._read_task_choices(text, self.draft_editor.task_picker, self.backend.task_choices)
+
+    def _read_task_choices(
+        self,
+        text: str,
+        picker: TaskPickerDialog,
+        choices: Callable[[str], Awaitable[tuple[TaskChoice, ...]]],
+    ) -> None:
+        """Ask ``choices`` for the tasks matching ``text`` beside any running operation, and
+        show them in ``picker`` while it is open and still shows that text. Only the newest
+        search answers; a note's Link to task and Schedule task share the count, since one
+        picker is open at a time."""
         if self._closing:
             return
         self._task_choice_read += 1
         read_id = self._task_choice_read
-        editor = self.draft_editor
 
         async def read() -> None:
             try:
-                actions = await self.backend.task_choices(text)
+                tasks = await choices(text)
             except Exception as exc:
                 log_failure(exc)
                 if read_id == self._task_choice_read and not self._closing:
-                    editor.task_choices_failed()
+                    picker.show_failed()
                 return
-            if (
-                not self._closing
-                and read_id == self._task_choice_read
-                and text == editor.task_picker.query.text()
-            ):
-                editor.show_task_choices(actions)
+            current = read_id == self._task_choice_read and text == picker.query.text()
+            if not self._closing and current and picker.isVisible():
+                picker.show_choices(tasks)
 
         task = asyncio.get_running_loop().create_task(read())
         self._calendar_reads.add(task)
@@ -5064,6 +5377,8 @@ class MainWindow(QMainWindow):
                 self.event_editor,
                 self.google_event_dialog,
                 self.planning_dialog,
+                self.block_editor,
+                self.block_picker,
                 self.command_palette,
                 self.capture_dialog,
                 self.focus_dialog,
@@ -5433,6 +5748,7 @@ class MainWindow(QMainWindow):
         for dialog, what in (
             (self.action_editor, "this action"),
             (self.event_editor, "this event"),
+            (self.block_editor, "this scheduled time"),
             (self.settings_dialog, "Settings"),
             (self.capture_dialog, "this capture"),
         ):
@@ -5500,6 +5816,8 @@ class MainWindow(QMainWindow):
         self.projects_dialog.force_close()
         self.action_editor.force_close()  # Even mid-save; a Save during shutdown is refused.
         self.event_editor.force_close()
+        self.block_editor.force_close()
+        self.block_picker.reject()
         self.google_event_dialog.reject()
         self._cancel_planning()
         self.planning_dialog.reject()

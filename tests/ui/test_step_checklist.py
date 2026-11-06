@@ -401,10 +401,15 @@ def test_tab_runs_from_the_footer_through_the_steps_to_the_field(
         boxes = [row.box for row in rows(panel)]
         panel.delete_button.setFocus()
         visited: list[QWidget | None] = []
-        for _ in range(len(boxes) + 2):
+        for _ in range(len(boxes) + 3):
             panel.focusNextChild()
             visited.append(QApplication.focusWidget())
-        assert visited == [*boxes, panel.detail.new_step, panel.seen_button]
+        assert visited == [
+            *boxes,
+            panel.detail.new_step,
+            panel.detail.schedule_button,
+            panel.seen_button,
+        ]
 
 
 # The window: each tick and each added step saved through the backend.

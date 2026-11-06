@@ -22,6 +22,7 @@ from mailbrief.domain.calendar_planning import (
 from mailbrief.domain.drafting import DraftingProblem
 from mailbrief.domain.events import ChangeKind, EventEdit, wall_clock
 from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
+from mailbrief.domain.work_blocks import BlockTime
 from mailbrief.ports.errors import ProviderRateLimitError
 from mailbrief.services.calendar_planning import (
     CALENDAR_SCOPE,
@@ -32,6 +33,7 @@ from mailbrief.services.calendar_planning import (
 )
 from mailbrief.services.events import EventConflictError, EventService
 from mailbrief.services.google_calendar import CalendarSyncService
+from mailbrief.services.work_blocks import WorkBlockService
 from mailbrief.storage.repositories import OwnerConsentRepository
 from mailbrief.storage.tables import ActionTable
 
@@ -694,3 +696,40 @@ async def test_the_preview_says_when_the_event_cap_left_some_out(
     plan = await seeded(session, service)
     assert len(plan.request.events) == 2
     assert plan.preview.lines[1].label.startswith("Your first 2 of 3 events from 2026-10-12")
+
+
+async def test_work_blocks_warn_locally_and_are_never_sent(
+    session: AsyncSession, service: CalendarPlanningService
+) -> None:
+    session.add(
+        ActionTable(
+            public_id="11111111-0000-4000-8000-000000000002",
+            title="Write the summary",
+            ownership="mine",
+            status="open",
+            deadline_precision="none",
+            notes="",
+            created_at_utc=NOW,
+            updated_at_utc=NOW,
+            revision=1,
+        )
+    )
+    await session.commit()
+    await WorkBlockService(session, clock=lambda: NOW).schedule(
+        "11111111-0000-4000-8000-000000000002",
+        BlockTime(
+            starts_at_utc=at(FRIDAY, 10), ends_at_utc=at(FRIDAY, 11), time_zone="America/Toronto"
+        ),
+    )
+    plan = await seeded(session, service, frozenset(PlanningPart))
+    assert [block.title for block in plan.blocks] == ["Write the summary"]
+    sent = plan.request.model_dump_json()
+    assert "Write the summary" not in sent
+    assert "11111111-0000-4000-8000-000000000002" not in sent
+    checked = validate_plan(
+        PlanningCandidate(
+            changes=(change(event_key="e2", start_date="2026-10-16", start_time="10:30"),)
+        ),
+        plan,
+    )
+    assert checked.proposals[0].overlaps == ("Task · Write the summary",)

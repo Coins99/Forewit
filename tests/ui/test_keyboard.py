@@ -372,19 +372,22 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
     QApplication.processEvents()
     panel = window.actions_panel
     detail = [button.objectName() for button in panel.detail.buttons()]
-    assert detail == ["completeButton", "draftButton", "editButton", "deleteButton"]
+    footer = ["completeButton", "draftButton", "editButton", "deleteButton"]
+    assert detail == [*footer, "scheduleTimeButton"]
 
     chain = tab_chain(window, panel.new_task_button)
 
-    # After the detail's buttons comes its plan's field: this task has no steps yet (B04).
+    # After the footer's buttons comes its plan's field (this task has no steps yet, B04),
+    # then Schedule time (ADR 0028).
     assert chain == [
         "newTaskButton",
         "actionGroup",
         "organizeButton",
         "actionsTabs",
         "actionList",
-        *detail,
+        *footer,
         "newStepField",
+        "scheduleTimeButton",
         "planFocusButton",
         "globalCapture",
         "openCaptureInbox",

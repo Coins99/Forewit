@@ -26,6 +26,7 @@ from mailbrief.domain.capture_state import CaptureOrigin
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import RepeatRule
+from mailbrief.domain.work_blocks import WorkBlock
 
 ACTION_TITLE_MAX_CHARS: Final = 200
 ACTION_STEP_MAX_CHARS: Final = 500
@@ -488,6 +489,8 @@ class Action(DeadlineFields):
     proposals: tuple[ActionProposal, ...] = ()  # Pending follow-up proposals only.
     # Recent display history; the complete audit trail stays in storage and exports.
     activity: tuple[ActionActivity, ...] = ()
+    # Its live work blocks, by start (ADR 0028): planned time, which never changes the task.
+    blocks: tuple[WorkBlock, ...] = ()
 
     @field_validator(
         "created_at_utc",

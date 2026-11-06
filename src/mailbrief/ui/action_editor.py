@@ -67,7 +67,7 @@ from mailbrief.domain.recurrence import (
     first_occurrence,
 )
 from mailbrief.services.deadlines import target_for_day
-from mailbrief.ui.action_text import sender_person
+from mailbrief.ui.action_text import scheduled_amount, sender_person
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
     WEEKDAYS,
@@ -438,6 +438,12 @@ class ActionEditor(QDialog):
         form.addRow("Eff&ort", self.effort)
         self.estimate = EstimateBox()
         form.addRow("E&stimate", self.estimate)
+        # The time set aside for it on the Calendar (ADR 0028): shown, never edited here,
+        # since the editor saves one revision of the task and a block is not part of it.
+        self.scheduled = plain_label("", tone="muted")
+        self.scheduled.setObjectName("taskScheduled")
+        self.scheduled.setAccessibleName("Scheduled time")
+        form.addRow("", self.scheduled)
         self.has_target = QCheckBox("Target &date")
         self.target = QDateEdit()
         self.target.setCalendarPopup(True)
@@ -683,6 +689,7 @@ class ActionEditor(QDialog):
             self._form.setRowVisible(widget, show)
         self._show_person_row()
         self._show_deadline_note()
+        self._show_scheduled()
         for control in (self.plan_heading, self.steps, self.step_controls):
             control.setVisible(show)
 
@@ -691,6 +698,10 @@ class ActionEditor(QDialog):
         waits for someone, so New task on the Waiting page can name whom at once (B08)."""
         waiting = _OWNERS[self.owner.currentIndex()][0] is ActionOwnership.WAITING_FOR
         self._form.setRowVisible(self.person_row, self._options or (self._creating and waiting))
+
+    def _show_scheduled(self) -> None:
+        """The scheduled line shows with the other options, for a task with blocks."""
+        self._form.setRowVisible(self.scheduled, self._options and bool(self.scheduled.text()))
 
     def _show_deadline_note(self) -> None:
         """The note's row shows with the other options, and only when it says something."""
@@ -748,6 +759,9 @@ class ActionEditor(QDialog):
         self.use_sender.setVisible(bool(action.sources))
         self.effort.setCurrentIndex([value for value, _ in _EFFORTS].index(action.effort))
         self.estimate.setValue(action.estimate_minutes or 0)
+        amount = scheduled_amount(action)
+        self.scheduled.setText("" if amount is None else f"Scheduled {amount}")
+        self._show_scheduled()
         self.has_target.setChecked(action.target_date is not None)
         self.target.setEnabled(action.target_date is not None)
         shown = action.target_date or action.suggested_target_date or today
@@ -800,6 +814,8 @@ class ActionEditor(QDialog):
         self.use_sender.hide()  # A new task has no email.
         self.effort.setCurrentIndex(0)
         self.estimate.setValue(0)
+        self.scheduled.setText("")  # A new task has no blocks yet.
+        self._show_scheduled()
         self.has_target.setChecked(False)
         self.target.setEnabled(False)
         self.target.setDate(QDate(today.year, today.month, today.day))

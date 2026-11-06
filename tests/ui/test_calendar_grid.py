@@ -10,9 +10,17 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
+from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.events import (
+    ActionMarker,
+    CalendarEvent,
+    CalendarRange,
+    MarkerKind,
+    ScheduledBlock,
+)
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.preferences import OwnerPreferences
+from mailbrief.domain.work_blocks import WorkBlock
 from mailbrief.ui.appearance import Appearance
 from mailbrief.ui.calendar_grid import HOUR_PX, HOURS_PAD, MonthGrid
 from mailbrief.ui.calendar_layout import (
@@ -163,9 +171,37 @@ def fill(backend: FakeBackend) -> None:
     ]
 
 
-async def shown_window(qtbot: QtBot, view: CalendarView) -> MainWindow:
+def fill_blocks(backend: FakeBackend) -> None:
+    """Time set aside for tasks (ADR 0028): an open task's, one beside a Google event, and a
+    completed task's, shown muted."""
+    found = [
+        ("Draft the Q3 report", TODAY + timedelta(days=1), time(13), time(15), "open"),
+        ("Review the contract", TODAY, time(14), time(15), "open"),
+        ("Send the invoices", MONDAY, time(14), time(15), "completed"),
+    ]
+    for title, day, start, end, status in found:
+        number = next(_numbers)
+        public_id = f"00000000-0000-4000-9000-{number:012d}"
+        stored = WorkBlock(
+            public_id=public_id,
+            action_public_id=ACTION,
+            starts_at_utc=local_instant(day, start, TORONTO),
+            ends_at_utc=local_instant(day, end, TORONTO),
+            time_zone="America/Toronto",
+            revision=1,
+            created_at_utc=datetime(2026, 10, 1, tzinfo=UTC),
+            updated_at_utc=datetime(2026, 10, 1, tzinfo=UTC),
+        )
+        backend.blocks[public_id] = ScheduledBlock(
+            block=stored, action_title=title, action_status=ActionStatus(status)
+        )
+
+
+async def shown_window(qtbot: QtBot, view: CalendarView, *, blocks: bool = False) -> MainWindow:
     backend = FakeBackend()
     fill(backend)
+    if blocks:
+        fill_blocks(backend)
     window = MainWindow(backend, saved_appearance=Appearance(calendar_view=view))
     window.now = lambda: NOW
     qtbot.addWidget(window)
@@ -183,7 +219,7 @@ async def test_calendar_views_gallery(
     qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode, view: CalendarView
 ) -> None:
     apply_theme(qapp, mode=mode)
-    window = await shown_window(qtbot, view)
+    window = await shown_window(qtbot, view, blocks=True)
     panel = window.calendar_panel
     assert panel.view() is view
     window.resize(1100, 720)

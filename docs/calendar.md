@@ -1,8 +1,9 @@
 # Calendar
 
-The **Calendar** page (sidebar, Ctrl+7) shows your own events, your open actions' deadlines
-and target dates, and, once you connect it, your Google Calendar. Decisions and limits are
-in [ADR 0018](adr/0018-calendar.md).
+The **Calendar** page (sidebar, Ctrl+7) shows your own events, the time you set aside for
+tasks, your open actions' deadlines and target dates, and, once you connect it, your Google
+Calendar. Decisions and limits are in [ADR 0018](adr/0018-calendar.md) and, for time set
+aside for tasks, [ADR 0028](adr/0028-work-blocks.md).
 
 ## Week, Month and List
 
@@ -116,6 +117,39 @@ the first such time after the start: later that day, or the next morning for an 
 event of at most 12 hours. If your calendar changed while you were
 reviewing, nothing is applied: discard and ask again. Revoking AI consent in Settings covers
 this too.
+
+## Time for tasks
+
+Set aside time on the calendar for a task: a **block**, from a start to an end, as many as
+you like for one task. A block is your plan, never a record of work done, and it never
+changes the task: its title, dates, deadline and history stay as they are, and moving a
+deadline or target date never moves a block.
+
+- **Schedule task**, beside New event, asks which open task, then when. **Schedule time…**
+  in a task's detail does the same for that task. A new block starts at the next whole hour
+  today (09:00 on another day) and lasts what is left of the task's estimate, rounded up to
+  15 minutes and at most 2 hours, or 1 hour without an estimate.
+- Blocks show in the Week, Month and List views and in Today's agenda, with "Task" beside
+  their time: a white card with a blue rim, or grey once the task is done. The task's
+  detail says how much time is scheduled ("1 hr 30 mins in 2 blocks · estimate 2 hrs") and
+  lists the next three blocks.
+- In the Week view, drag a block to move it, in steps of 15 minutes and across days, or
+  drag its bottom edge to change its length; Escape stops a drag. With a block selected,
+  Ctrl+Up and Ctrl+Down (Cmd on a Mac) move it 15 minutes, Ctrl+Left and Ctrl+Right a day,
+  Ctrl+Shift+Up and Ctrl+Shift+Down change its length, and Delete or Backspace unschedules
+  it. Double-click a block, or press Return, to open it: change its time, **Unschedule** it
+  or **Open task**.
+- Every change can be undone with **Undo**. Several moves of one block in a row undo
+  together, back to where it started.
+- A block lasts 5 minutes to 12 hours, and a task holds at most 50. Only an open task's
+  blocks move: a done task keeps its blocks, greyed, until you unschedule them or reopen
+  it, and trying to move one says so. The task editor shows the scheduled time beside the
+  estimate; blocks change on the Calendar, not there.
+- Forewit says when a block overlaps an event, a Google event or another block, and when it
+  ends after the task's deadline. These are warnings: the block is still saved.
+- Deleting a task hides its blocks, and restoring it brings them back. Blocks are kept in
+  backups and in **Export all writing**. Plan with AI never sees them; it only warns when a
+  change it proposes overlaps one.
 
 ## Messages
 

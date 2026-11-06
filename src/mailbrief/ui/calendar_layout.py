@@ -8,21 +8,32 @@
 - All-day events, events of a day or more, and the actions' deadlines and targets are bars
   across the days they cover (``bars``), each in the first lane free on all of them
   (``pack_lanes``): the week grid's top strip and each week of the month grid.
+- Work blocks (ADR 0028) are timed entries like events: blocks in the week's hours and a
+  line in the month. ``shifted`` and ``stretched`` say where a block goes when it is
+  dragged or nudged, along the clock in the owner's zone.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from mailbrief.domain.events import ActionMarker, CalendarEvent, CalendarRange, MarkerKind
+from mailbrief.domain.events import (
+    ActionMarker,
+    CalendarEvent,
+    CalendarRange,
+    MarkerKind,
+    ScheduledBlock,
+    wall_clock,
+)
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.ui.who_text import in_sentence, who_text
 
-Entry = CalendarEvent | GoogleEvent | ActionMarker
+Entry = CalendarEvent | GoogleEvent | ActionMarker | ScheduledBlock
 Event = CalendarEvent | GoogleEvent
+Timed = CalendarEvent | GoogleEvent | ScheduledBlock  # What can sit in the hours.
 
 
 class CalendarView(StrEnum):
@@ -71,6 +82,8 @@ def entry_key(entry: Entry) -> tuple[str, ...]:
         return ("event", entry.public_id)
     if isinstance(entry, GoogleEvent):
         return ("google", entry.calendar_id, entry.event_id)
+    if isinstance(entry, ScheduledBlock):
+        return ("block", entry.public_id)
     return ("marker", entry.kind.value, entry.action_public_id, entry.day.isoformat())
 
 
@@ -110,10 +123,10 @@ def shown_month(first_day: date) -> date:
 
 @dataclass(frozen=True)
 class Part:
-    """A timed event's part of one day, in wall-clock minutes from that day's midnight in
+    """A timed entry's part of one day, in wall-clock minutes from that day's midnight in
     the owner's zone, placed in ``column`` of ``columns`` beside the parts it overlaps."""
 
-    event: Event
+    event: Timed
     day: date
     start: int
     end: int
@@ -121,8 +134,9 @@ class Part:
     columns: int = 1
 
 
-def is_bar(event: Event) -> bool:
-    """Whether the event is drawn as a bar across days rather than a block of hours."""
+def is_bar(event: Timed) -> bool:
+    """Whether the entry is drawn as a bar across days rather than a block of hours; a work
+    block never is, since none lasts a day."""
     if event.all_day:
         return True
     assert event.starts_at_utc is not None and event.ends_at_utc is not None
@@ -133,7 +147,7 @@ def _minutes(moment: datetime) -> int:
     return moment.hour * 60 + moment.minute
 
 
-def timed_part(event: Event, day: date, zone: ZoneInfo) -> Part | None:
+def timed_part(event: Timed, day: date, zone: ZoneInfo) -> Part | None:
     """The part of the timed ``event`` on ``day``, or None when it doesn't touch the day.
     A part that runs past midnight ends at 24:00, one that began the day before starts at
     00:00; an event ending at midnight belongs to the day before (``days``). A part is at
@@ -267,11 +281,39 @@ def pack_lanes(found: Sequence[Bar]) -> list[Bar]:
 
 def day_parts(shown: CalendarRange, day: date, zone: ZoneInfo) -> list[Part]:
     """The day's timed blocks, packed into columns: the timed events shorter than a day that
-    touch it, the owner's and Google's."""
-    events: list[Event] = [*shown.events, *shown.google_events]
+    touch it, the owner's and Google's, and the work blocks."""
+    events: list[Timed] = [*shown.events, *shown.google_events, *shown.blocks]
     parts = [
         part
         for event in events
         if not is_bar(event) and (part := timed_part(event, day, zone)) is not None
     ]
     return pack_columns(parts)
+
+
+def _along_clock(moment: datetime, zone: ZoneInfo, by: timedelta) -> datetime:
+    """``moment`` moved ``by`` along the clock in ``zone``, as UTC: 09:00 plus a day is
+    09:00 the next day, across a DST change too."""
+    wall = moment.astimezone(zone).replace(tzinfo=None) + by
+    return wall_clock(wall.date(), wall.time(), zone).astimezone(UTC)
+
+
+def shifted(
+    block: ScheduledBlock, zone: ZoneInfo, *, days: int = 0, minutes: int = 0
+) -> tuple[datetime, datetime]:
+    """Where ``block`` goes when moved ``days`` and ``minutes`` along the clock: the start
+    moves, and the block keeps its length."""
+    start = _along_clock(block.starts_at_utc, zone, timedelta(days=days, minutes=minutes))
+    return start, start + (block.ends_at_utc - block.starts_at_utc)
+
+
+def stretched(block: ScheduledBlock, zone: ZoneInfo, minutes: int) -> tuple[datetime, datetime]:
+    """Where ``block`` goes when its end moves ``minutes`` along the clock; its start stays."""
+    return block.starts_at_utc, _along_clock(block.ends_at_utc, zone, timedelta(minutes=minutes))
+
+
+def block_note(block: ScheduledBlock) -> str:
+    """What a block is, beside its time: "Task", "Task · waiting" or "Task · completed"."""
+    if not block.open:
+        return f"Task · {block.action_status.value}"
+    return "Task · waiting" if block.waiting else "Task"

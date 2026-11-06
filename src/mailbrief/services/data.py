@@ -27,6 +27,7 @@ from mailbrief.storage.tables import (
     MessageTable,
     SuggestionDecisionTable,
     SyncRunTable,
+    WorkBlockTable,
 )
 
 EXPORT_TABLES = (
@@ -46,6 +47,7 @@ EXPORT_TABLES = (
     "draft_sources",
     "draft_generations",
     "calendar_events",
+    "work_blocks",
 )
 
 
@@ -91,6 +93,7 @@ class CleanupPreview:
     versions: int
     decisions: int
     day_selections: int = 0
+    work_blocks: int = 0
 
     @property
     def summary(self) -> str:
@@ -102,6 +105,8 @@ class CleanupPreview:
         )
         if self.day_selections:
             summary += f" Remove {self.day_selections} daily selections; keep their day plans."
+        if self.work_blocks:
+            summary += f" Remove {self.work_blocks} scheduled times of those actions."
         return summary
 
 
@@ -269,6 +274,18 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
             )
             or 0
         )
+    work_blocks = 0
+    if request.kind == CleanupKind.DELETED:
+        # A purged action takes all its blocks with it, unscheduled ones too (the cascade).
+        work_blocks = (
+            await session.scalar(
+                select(func.count())
+                .select_from(WorkBlockTable)
+                .join(ActionTable, WorkBlockTable.action_id == ActionTable.id)
+                .where(ActionTable.deleted_at_utc < request.before)
+            )
+            or 0
+        )
     return CleanupPreview(
         request,
         await _fingerprint(session),
@@ -281,6 +298,7 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
         versions,
         counts.get(SuggestionDecisionTable, 0),
         day_selections,
+        work_blocks,
     )
 
 

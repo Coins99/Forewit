@@ -1263,8 +1263,8 @@ def test_the_m8_chain_round_trips_with_m7_data(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert _earlier_columns(_rows(path, kept), before) == before
         assert _query(path, "PRAGMA foreign_key_check") == []
-        assert ScriptDirectory.from_config(config).get_heads() == ["20261105_0031"]
-        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0031",)]
+        assert ScriptDirectory.from_config(config).get_heads() == ["20261105_0032"]
+        assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0032",)]
 
         command.downgrade(config, "20260928_0008")
         assert _rows(path, kept) == before
@@ -1431,7 +1431,7 @@ def test_inbox_checkpoint_upgrade_preserves_project_schema(tmp_path: Path) -> No
     before = _schema(path)
     command.upgrade(config, "head")
     assert "inbox_scan_messages" in table_names(path)
-    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0031",)]
+    assert _query(path, "SELECT version_num FROM alembic_version") == [("20261105_0032",)]
     assert len(_query(path, "PRAGMA foreign_key_list(inbox_scan_messages)")) == 2
     command.check(config)
     command.downgrade(config, "20261014_0016")

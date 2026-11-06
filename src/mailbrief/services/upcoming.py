@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.actions import ActionFilter
 from mailbrief.domain.events import CalendarEvent, CalendarRange
 from mailbrief.domain.google_calendar import GoogleEvent
+from mailbrief.domain.intervals import Interval, minutes
 from mailbrief.domain.routes import CalendarRoute, TaskRoute
 from mailbrief.domain.upcoming import Upcoming, UpcomingItem
 from mailbrief.services.events import EventService
@@ -20,7 +21,7 @@ def overview(calendar: CalendarRange, zone: ZoneInfo) -> Upcoming:
     start = datetime.combine(first, time.min, zone).astimezone(UTC)
     end = datetime.combine(last + timedelta(days=1), time.min, zone).astimezone(UTC)
     items: dict[tuple[str, ...], UpcomingItem] = {}
-    intervals: list[tuple[datetime, datetime]] = []
+    intervals: list[Interval] = []
     all_day = 0
     entry: tuple[Literal["event"], str] | tuple[Literal["google"], str, str]
     events: tuple[CalendarEvent | GoogleEvent, ...] = (*calendar.events, *calendar.google_events)
@@ -83,11 +84,6 @@ def overview(calendar: CalendarRange, zone: ZoneInfo) -> Upcoming:
             ),
             sort_at_utc=marker.due_at_utc,
         )
-    minutes = 0.0
-    union_end = start
-    for left, right in sorted(intervals):
-        minutes += max(0, (right - max(left, union_end)).total_seconds()) / 60
-        union_end = max(union_end, right)
     coverage = calendar.google_coverage
     return Upcoming(
         calendar=calendar,
@@ -101,7 +97,7 @@ def overview(calendar: CalendarRange, zone: ZoneInfo) -> Upcoming:
                 ),
             )
         ),
-        timed_minutes=minutes,
+        timed_minutes=minutes(intervals),
         all_day_events=all_day,
         google_complete=coverage is not None and coverage.covers(first, last),
         google_synced_at_utc=None if coverage is None else coverage.synced_at_utc,

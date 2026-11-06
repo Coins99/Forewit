@@ -32,8 +32,13 @@ class WritingRoute(DomainModel):
 class CalendarRoute(DomainModel):
     kind: Literal["calendar"] = "calendar"
     day: date
-    # The existing calendar's typed entry keys: local event or cached Google event.
-    entry: tuple[Literal["event"], PublicId] | tuple[Literal["google"], str, str] | None = None
+    # The calendar's typed entry keys: a local event, a work block or a cached Google event.
+    entry: (
+        tuple[Literal["event"], PublicId]
+        | tuple[Literal["block"], PublicId]
+        | tuple[Literal["google"], str, str]
+        | None
+    ) = None
 
 
 class MailRoute(DomainModel):

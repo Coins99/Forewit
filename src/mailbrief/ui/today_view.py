@@ -39,10 +39,11 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.actions import Action
 from mailbrief.domain.analysis import ActionOwnership
-from mailbrief.domain.events import ActionMarker, CalendarEvent
+from mailbrief.domain.events import ActionMarker, ScheduledBlock
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.today import AttentionItem, AttentionReason, DaySummary
 from mailbrief.ui.brief_list import ROW_PAD_H, ROW_ROLE, SINGLE_LINE, elided, paint_selection
+from mailbrief.ui.calendar_layout import Timed, block_note
 from mailbrief.ui.calendar_view import day_rows, entry_key, event_when
 from mailbrief.ui.deadline_text import day_text, deadline_text
 from mailbrief.ui.hairline import HairlineFrame, paint_focus_ring
@@ -124,9 +125,13 @@ def attention_row(item: AttentionItem, zone: ZoneInfo, today: date) -> DayRow:
     return DayRow(action.title, note, warning=urgent)
 
 
-def agenda_row(event: CalendarEvent | GoogleEvent, zone: ZoneInfo, today: date) -> DayRow:
-    """ "10:00–10:15 · Stand-up", with a Google event's calendar as its note."""
-    note = event.calendar_name if isinstance(event, GoogleEvent) else ""
+def agenda_row(event: Timed, zone: ZoneInfo, today: date) -> DayRow:
+    """ "10:00–10:15 · Stand-up", with a Google event's calendar as its note, or "Task"
+    for time set aside for a task (ADR 0028)."""
+    if isinstance(event, ScheduledBlock):
+        note = block_note(event)
+    else:
+        note = event.calendar_name if isinstance(event, GoogleEvent) else ""
     return DayRow(f"{event_when(event, today, zone, today)} · {event.title}", note)
 
 
@@ -324,7 +329,8 @@ class DayPanel(QWidget):
                 for item in summary.attention
             ]
         )
-        # The actions' dates are under Needs attention, so the agenda lists events only.
+        # The actions' dates are under Needs attention, so the agenda lists events and the
+        # time set aside for tasks.
         events = [
             entry
             for entry in day_rows(summary.calendar, today, zone)
