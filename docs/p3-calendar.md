@@ -9,7 +9,7 @@ time:
 | Part | Scope | Migration / ADR | State |
 | --- | --- | --- | --- |
 | P3-1 | C03 work blocks: storage, editor, every view, Today, task detail, drag, resize, keyboard, Undo | `20261105_0032` / [ADR 0028](adr/0028-work-blocks.md) | Implemented, awaiting owner acceptance |
-| P3-2 | Unscheduled-task panel and Day view; Busy/Free on events (Google's "Show as" too); weekly working hours, up to 3 windows a weekday, and a buffer (C04) | `0033` / ADR 0029 | Not started |
+| P3-2 | Unscheduled-task panel and Day view; Busy/Free on events (Google's "Show as" too); weekly working hours, up to 3 windows a weekday, and a buffer (C04) | `20261105_0033` / [ADR 0029](adr/0029-availability.md) | Implemented, awaiting owner acceptance |
 | P3-3 | C05: conflicts, overfilled and provisional days, with their reasons; a read model only | none expected | Not started |
 
 The owner's decisions (2026-11-05):
@@ -19,6 +19,78 @@ The owner's decisions (2026-11-05):
 - **Busy or free.** Events get a Busy/Free choice: timed events are busy and all-day ones
   free by default. Google events use Google's own "Show as".
 - **Working hours.** These are weekly hours plus a buffer. A day off is an all-day Busy event.
+
+## P3-2: Working hours, Busy/Free and the tasks to schedule
+
+What it does is in [Calendar](calendar.md#busy-or-free-and-working-hours), and the
+decisions are in [ADR 0029](adr/0029-availability.md). Choices made from the plan the owner
+approved on 2026-11-05: working hours are opt-in; they live in their own table, not the
+preferences row; the panel lists the owner's open tasks (not waiting ones) whose estimate
+is more than their blocks from today on, or with no estimate and no block from today on;
+Plan with AI sends only busy Google times; and the buffer applies before and after busy
+timed events only.
+
+### Where it lives
+
+- **Storage.** Migration `20261105_0033_availability` follows `0032`: `busy` on
+  `calendar_events` and `google_events`, and the `working_hours` table
+  (`WorkingHoursTable`, `storage/working_hours.py`).
+- **Domain.** `domain/working_hours.py` (`WorkingWindow`, `HoursEdit`, `WorkingHours`,
+  `SUGGESTED_HOURS`); `domain/availability.py` (`busy_spans`, `day_availability`,
+  `next_free`, `UnscheduledTask`); `intervals.subtract`; `busy` on `EventEdit`,
+  `CalendarEvent` and `GoogleEvent`; `CalendarRange.hours`; `BlockSaved.outside_hours`.
+- **Service.** `services/availability.py` (`AvailabilityService`: hours, next free time,
+  tasks to schedule). `EventService.list_range` reads the hours; `WorkBlockService` and
+  Plan with AI skip free events; Upcoming counts busy time only.
+- **Google.** `transparency` in `EVENT_FIELDS`, mapped by `map_event`.
+- **Desktop.** `CalendarView.DAY` and `WeekGrid(days=1)`; off-hours shading
+  (`Tokens.off_hours`), free events as outlines and the drop preview in `calendar_grid.py`;
+  `ui/hours_editor.py`; `ui/unscheduled_view.py`; the free-time line, **Working hours** and
+  **Tasks to schedule** on the Calendar page; **Show as** in the event editor; Free/Busy in
+  the List view, previews and Today's agenda. `ui/smoke.py` seeds hours and a free event.
+
+### Known limits
+
+- **Buffers only place new time.** A block inside a buffer isn't warned about; P3-3's
+  conflicts will.
+- **The free line wraps** to two lines beside the legend at 1,100 px.
+- **Owner events still can't be dragged**, as in P3-1.
+
+### Verification
+
+Run on Windows on 2026-11-06, from main `b352521` plus this branch:
+
+- Ruff format and lint pass; strict mypy passes for win32 and darwin (522 files).
+- Full suite with Qt offscreen: 5,238 passed and 9 skipped. 4 failed, all
+  `tests/unit/test_branding.py` command tests that need the `forewit*` entry points this
+  machine's older venv lacks; CI installs them.
+- The new modules are fully covered by their tests; `services/work_blocks.py` is at 99%.
+- Migration 0032 → 0033 → 0032 → 0033 keeps every event, with `alembic check` clean.
+- Calendar gallery (Day, Week, Month, List; light and dark, 1x) rendered and inspected.
+- Not run here: the Cocoa UI run, native package builds and a 10,000-task timing of the
+  tasks-to-schedule query; left to CI and owner acceptance.
+
+### Owner acceptance (desktop)
+
+The first run applies migration 0033 (and any earlier ones your database lacks).
+
+1. Open **Working hours**, choose **Weekdays 9 to 5**, set a 10-minute buffer and save.
+   Hours outside 09:00–17:00 and the weekend are shaded; the line under the hours says how
+   much is free.
+2. Make a timed event **Free** in its editor: it shows as an outline and the free time
+   doesn't drop. Make an all-day event **Busy**: that day says "Day off".
+3. In Google Calendar, mark an event Free and refresh: it shows as an outline here too.
+4. Switch to **Day**; use ‹ and ›, and Left and Right, to move by a day, and **Today** to
+   come back. Restart: the Day view is still chosen.
+5. Show **Tasks to schedule**. A task with a 3-hour estimate and a 1-hour block today says
+   "2 hrs left of 3 hrs".
+6. Select a task and press Return: the block editor opens at the next free stretch. Save.
+7. Drag another task onto Wednesday 10:15 in the Week view: it is scheduled there; press
+   **Undo schedule**.
+8. Schedule a block at 07:00: the status says it is outside your working hours.
+9. In Plan with AI with Google times ticked, the preview counts only busy Google events.
+10. Restart, back up, restore and export: hours, Busy/Free and the panel choice remain.
+    Check light and dark mode, and the same on macOS.
 
 ## P3-1: Work blocks
 

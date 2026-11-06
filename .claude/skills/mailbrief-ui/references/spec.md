@@ -645,8 +645,19 @@ The brief list's chips keep their shorter forms (see Brief list).
 - Drafts: with no drafts the list is hidden and `draftsEmpty`, a muted, centred, wrapping
   message, fills the page; with drafts the list shows and the message hides.
 - Calendar views (`CalendarView`, `ui/calendar_layout.py`): a `QTabBar` (`calendarViews`,
-  styled like the Actions tabs) under the heading switches Week, Month and List; the choice
-  is `Appearance.calendar_view` in appearance.json (default Week). The page's stack shows
+  styled like the Actions tabs) under the heading switches Day, Week, Month and List; the
+  choice is `Appearance.calendar_view` in appearance.json (default Week). The Day view is
+  `WeekGrid(days=1)` (`calendarDayGrid`), whose Left and Right ask for the day before or
+  after (ADR 0029). Week and Day shade the hours outside the working hours with
+  `Tokens.off_hours` (a faint wash of `text_muted`), and draw a free event as an outline:
+  its text and edge colours on `panel`, with no edge bar (a ring for its month dot).
+  Beside the hours, `UnscheduledPanel` (`unscheduledPanel`, `ui/unscheduled_view.py`, 260
+  px) lists the tasks to schedule with the display row delegate, shown by **Tasks to
+  schedule** (`unscheduledToggle`, remembered as `Appearance.calendar_tasks`); a row
+  dragged out reports screen points, and the grid's `placement_at` and `show_placement`
+  draw the drop on `selection` with an accent ring; no `QDrag`. **Working hours**
+  (`workingHoursButton`) opens `HoursEditor`, a drawer of one `QLineEdit` per weekday and a
+  buffer combo; `calendarFreeTime` (muted) says how much working time is free. The page's stack shows
   `WeekGrid` (`calendarWeekGrid`), `MonthGrid` (`calendarMonthGrid`, `ui/calendar_grid.py`) or
   the list. The list's rows hold the selection for every view: a grid's `chosen(day,
   entry)` moves the list's current row (a day's heading for a day alone), and the grids show
