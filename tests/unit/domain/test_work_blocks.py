@@ -68,17 +68,6 @@ def test_block_times_are_aware_utc_in_a_known_zone() -> None:
         known_zone("Mars/Base")
 
 
-def test_moved_and_resized_keep_the_other_end() -> None:
-    day = date(2026, 11, 2)
-    time_ = BlockTime(starts_at_utc=at(day, 9), ends_at_utc=at(day, 10), time_zone=ZONE)
-    later = time_.moved(timedelta(minutes=15))
-    assert (later.starts_at_utc, later.ends_at_utc) == (at(day, 9, 15), at(day, 10, 15))
-    longer = time_.resized(timedelta(minutes=30))
-    assert (longer.starts_at_utc, longer.ends_at_utc) == (at(day, 9), at(day, 10, 30))
-    with pytest.raises(ValidationError):
-        time_.resized(timedelta(minutes=-58))
-
-
 def test_days_ending_at_midnight_and_across_a_dst_change() -> None:
     monday = date(2026, 11, 2)
     tuesday = monday + timedelta(days=1)

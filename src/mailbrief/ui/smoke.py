@@ -82,7 +82,10 @@ async def seed_focus(runtime: DesktopRuntime) -> None:
     summary = await runtime.today_summary(SMOKE_NOW.astimezone(zone).date(), zone, SMOKE_NOW)
     revision = 0 if summary.focus is None else summary.focus.revision
     await runtime.select_day_task(summary.day, zone, task.public_id, revision)
-    # Time set aside for it that afternoon (ADR 0028), kept apart from the task itself.
+    # Time set aside for it that afternoon (ADR 0028), kept apart from the task itself. The
+    # package check runs this scenario more than once on one profile, so it is added once.
+    if (await runtime.get_action(task.public_id)).blocks:
+        return
     start = datetime.combine(summary.day, clock_time(14), zone)
     await runtime.schedule_block(
         task.public_id,

@@ -102,6 +102,7 @@ class TodayService:
                 *await self._actions.list_rows(ActionFilter.WAITING, limit=None),
             ],
             include_activity=False,
+            include_blocks=False,  # The agenda reads blocks with the calendar.
         )
         focus = await self._plans.load(today)
         selected = {item.task_public_id for item in focus.items}

@@ -1034,10 +1034,16 @@ class ActionRepository:
         return count or 0
 
     async def load(
-        self, rows: Sequence[ActionTable], *, include_activity: bool = True
+        self,
+        rows: Sequence[ActionTable],
+        *,
+        include_activity: bool = True,
+        include_blocks: bool = True,
     ) -> list[Action]:
-        """Domain actions for rows, reading recent activity, tags, steps, sources and pending
-        proposals with one chunked query each, and thread activity with a fixed number more."""
+        """Domain actions for rows, reading recent activity, tags, steps, sources, pending
+        proposals and live work blocks with one chunked query each, and thread activity with
+        a fixed number more. A read that shows neither history nor scheduled time (Today's
+        summary) leaves out activity and blocks."""
         projects = (
             {
                 project.public_id: project
@@ -1106,7 +1112,7 @@ class ActionRepository:
         accounts, cached = await self._thread_messages(snapshots)
         proposals = await ProposalRepository(self._session).pending_for_actions(ids)
         repeats = await self._repeats(rows)
-        blocks = await WorkBlockRepository(self._session).for_actions(ids)
+        blocks = await WorkBlockRepository(self._session).for_actions(ids) if include_blocks else {}
         return [
             action_from_rows(
                 row,

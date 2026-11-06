@@ -2,11 +2,13 @@
 
 A block is planned time for its task and never changes the task. The editor shows the
 task's title (the owner's text, or mail-derived) as plain text, and when the block is: a
-day, a start and an end, typed or chosen in 15-minute steps, as in the event editor. A block
-lasts 5 minutes to 12 hours; an end outside that is refused with the reason.
+day, a start and an end, typed or chosen in 15-minute steps. The fields and their helpers
+are the event editor's (``DateBox``, ``TimeBox``, ``field_instant`` and the rest), so a time
+an hour a DST change repeats keeps its instant here too. A block lasts 5 minutes to 12
+hours; an end outside that is refused with the reason.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -30,8 +32,11 @@ from mailbrief.ui.event_editor import (
     TimeBox,
     day_times,
     end_choices,
+    field_instant,
     local_instant,
     parse_clock,
+    qdate,
+    qday,
     stepped_wall,
 )
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
@@ -40,16 +45,9 @@ from mailbrief.ui.theme import ui_font
 ENDS_FIRST: Final = "The end must be after the start."
 LENGTH: Final = "Scheduled time lasts 5 minutes to 12 hours."
 UNUSABLE: Final = "This time can't be saved; check it and try again."
+UNSAVED: Final = "Save or Cancel the changed time first, then open the task."
 _LONGEST: Final = timedelta(minutes=BLOCK_MAX_MINUTES)
 _SHORTEST: Final = timedelta(minutes=BLOCK_MIN_MINUTES)
-
-
-def _qdate(day: date) -> QDate:
-    return QDate(day.year, day.month, day.day)
-
-
-def _day(value: QDate) -> date:
-    return date(value.year(), value.month(), value.day())
 
 
 class BlockEditor(QDialog):
@@ -115,7 +113,10 @@ class BlockEditor(QDialog):
         form.addRow("On", self.day)
         row = QHBoxLayout()
         row.addWidget(self.start_time)
-        row.addWidget(plain_label("to", tone="muted"))
+        until = plain_label("to", tone="muted")
+        until.setObjectName("blockUntil")
+        until.setAccessibleName("to")
+        row.addWidget(until)
         row.addWidget(self.end_time)
         row.addStretch(1)
         form.addRow("From", row)
@@ -124,21 +125,21 @@ class BlockEditor(QDialog):
         self.status.setObjectName("blockStatus")
         layout.addWidget(self.status)
         layout.addStretch(1)
-        buttons = QHBoxLayout()
+        # Two rows: the drawer is 320 to 390 px wide, too narrow for four pills in one.
         self.save_button = outline_button("Schedule", "blockSaveButton", primary=True)
+        self.cancel_button = outline_button("Cancel", "blockCancelButton")
         self.unschedule_button = outline_button("Unschedule", "blockUnscheduleButton")
         self.task_button = outline_button("Open task", "blockTaskButton")
-        self.cancel_button = outline_button("Cancel", "blockCancelButton")
-        for button in (
-            self.save_button,
-            self.unschedule_button,
-            self.task_button,
-            self.cancel_button,
+        for pair in (
+            (self.save_button, self.cancel_button),
+            (self.unschedule_button, self.task_button),
         ):
-            button.setAccessibleName(button.text())
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+            buttons = QHBoxLayout()
+            for button in pair:
+                button.setAccessibleName(button.text())
+                buttons.addWidget(button)
+            buttons.addStretch(1)
+            layout.addLayout(buttons)
         self.day.dateChanged.connect(self._day_changed)
         self.start_time.committed.connect(lambda _moment: self._take_start())
         self.start_time.stepped.connect(self._start_stepped)
@@ -173,6 +174,7 @@ class BlockEditor(QDialog):
         self.kicker.setText("SCHEDULE TIME")
         self.heading.setText(title)
         self.save_button.setText("Schedule")
+        self.save_button.setAccessibleName("Schedule")
         self.unschedule_button.hide()
         self._show(start, start + timedelta(minutes=minutes))
         self._reset()
@@ -185,6 +187,7 @@ class BlockEditor(QDialog):
         self.kicker.setText("SCHEDULED TIME")
         self.heading.setText(block.title)
         self.save_button.setText("Save changes")
+        self.save_button.setAccessibleName("Save changes")
         self.unschedule_button.show()
         self._show(block.starts_at_utc, block.ends_at_utc)
         self._reset()
@@ -251,7 +254,7 @@ class BlockEditor(QDialog):
         last = self._end.astimezone(self._zone)
         self._syncing = True
         try:
-            self.day.setDate(_qdate(first.date()))
+            self.day.setDate(qdate(first.date()))
             self.start_time.set_choices(
                 [(f"{clock:%H:%M}", None) for clock in day_times(first.date(), self._zone)]
             )
@@ -275,14 +278,15 @@ class BlockEditor(QDialog):
     def _day_changed(self, value: QDate) -> None:
         if not self._syncing:
             local = self._start.astimezone(self._zone)
-            self._move_start(local_instant(_day(value), time(local.hour, local.minute), self._zone))
+            clock = time(local.hour, local.minute)
+            self._move_start(field_instant(qday(value), clock, self._start, self._zone))
 
     def _take_start(self) -> bool:
         typed = parse_clock(self.start_time.currentText())
         if typed is None:
             self._refuse(BAD_TIME)
             return False
-        self._move_start(local_instant(_day(self.day.date()), typed, self._zone))
+        self._move_start(field_instant(qday(self.day.date()), typed, self._start, self._zone))
         return True
 
     def _start_stepped(self, steps: int) -> None:
@@ -308,7 +312,7 @@ class BlockEditor(QDialog):
         day = local.date()
         if typed <= time(local.hour, local.minute):
             day += timedelta(days=1)
-        return self._try_end(local_instant(day, typed, self._zone))
+        return self._try_end(field_instant(day, typed, self._end, self._zone))
 
     def _end_stepped(self, steps: int) -> None:
         if self.end_time.typing() and not self._take_end():
@@ -366,10 +370,15 @@ class BlockEditor(QDialog):
         self.unschedule_requested.emit()
 
     def _open_task(self) -> None:
-        if self._task_id and not self._saving:
-            task = self._task_id
-            self.reject()
-            self.task_requested.emit(task)
+        if not self._task_id or self._saving:
+            return
+        if self.has_unsaved_input():
+            # Leaving would drop the changed time; quitting asks, and so does this.
+            self.status.setText(UNSAVED)
+            return
+        task = self._task_id
+        self.reject()
+        self.task_requested.emit(task)
 
     def _set_saving(self, saving: bool) -> None:
         self._saving = saving

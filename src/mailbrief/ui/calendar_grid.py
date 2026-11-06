@@ -48,6 +48,7 @@ from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.work_blocks import BLOCK_STEP_MINUTES
 from mailbrief.ui.calendar_layout import (
     DAY_MINUTES,
+    MIN_BLOCK_MINUTES,
     WEEK_DAYS,
     Bar,
     Entry,
@@ -208,6 +209,7 @@ class Hit:
     lane: int = 0  # In the month grid, the item's lane in its week.
     last_day: date | None = None  # A bar merged across days: its last day.
     hidden: int = 0  # "+N more": how many of the day's items it stands for.
+    part: Part | None = None  # In the week's hours: the timed part it is.
 
 
 class _Grid(QWidget):
@@ -316,12 +318,15 @@ class _Part(QWidget):
         self.grid.setFocus(Qt.FocusReason.MouseFocusReason)
         point = event.position()
         hit = self.grid.hit(self, point)
-        self.grid._choose(hit, self.grid.day_at(point.x()))
+        # Pressed before choosing: choosing can scroll the hours to show the block.
         if event.button() == Qt.MouseButton.LeftButton:
-            self.grid.press(self, hit, point)
+            self.grid.press(self, hit, point, event.globalPosition())
+        self.grid._choose(hit, self.grid.day_at(point.x()))
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        self.grid.pointer_moved(self, event.position(), bool(event.buttons()))
+        self.grid.pointer_moved(
+            self, event.position(), event.globalPosition(), bool(event.buttons())
+        )
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -342,8 +347,15 @@ class _Drag:
     block: ScheduledBlock
     part: Part
     index: int  # The column of the part pressed.
+    # Where the press was on the screen: choosing the block can scroll the hours under a
+    # still pointer, so how far it has gone is measured on the screen, not in the hours.
     origin: QPointF
     resize: bool  # The press was on the block's bottom edge: its end moves.
+    # The block's own start and end on the pressed day, in wall-clock minutes (0 and
+    # DAY_MINUTES where it runs on from or into another day), not the part's: a short
+    # block is drawn taller than it is, and one late in the day is drawn earlier.
+    start: int
+    end: int
     started: bool = False
     days: int = 0
     minutes: int = 0
@@ -351,6 +363,16 @@ class _Drag:
 
 def _snap(minutes: float) -> int:
     return round(minutes / BLOCK_STEP_MINUTES) * BLOCK_STEP_MINUTES
+
+
+def _wall_minutes(block: ScheduledBlock, day: date, zone: ZoneInfo) -> tuple[int, int]:
+    """The block's start and end on ``day`` in wall-clock minutes from its midnight: 0 when
+    it began on an earlier day and DAY_MINUTES when it ends on a later one."""
+    start_at = block.starts_at_utc.astimezone(zone)
+    end_at = block.ends_at_utc.astimezone(zone)
+    start = start_at.hour * 60 + start_at.minute if start_at.date() == day else 0
+    end = end_at.hour * 60 + end_at.minute if end_at.date() == day else DAY_MINUTES
+    return start, end
 
 
 class WeekGrid(_Grid):
@@ -391,6 +413,8 @@ class WeekGrid(_Grid):
         self.minute.timeout.connect(self.hours.update)
         self._drag: _Drag | None = None
         self.hours.setMouseTracking(True)  # A block's bottom edge shows it can be dragged.
+        # The hours' hits, made once per layout and column width: hovering asks on each move.
+        self._hour_cache: tuple[float, list[Hit]] | None = None
 
     # Geometry. The heads and the strip line their columns up with the hours, whose
     # scroll bar takes room at the right.
@@ -426,6 +450,7 @@ class WeekGrid(_Grid):
             self._bars = pack_lanes(bars(shown, shown.first_day, last, self._zone))
             self._lanes = 1 + max((bar.lane for bar in self._bars), default=-1)
             self._parts = [day_parts(shown, day, self._zone) for day in self.days()]
+        self._hour_cache = None
         rows = min(self._lanes, STRIP_LANES)
         self.strip.setFixedHeight(rows * (LANE_H + LANE_GAP) + 2 * STRIP_PAD if rows else 0)
         self.strip.setVisible(bool(rows))
@@ -449,6 +474,9 @@ class WeekGrid(_Grid):
             return ""
         text = f"{WEEKDAYS[self._day.weekday()]} {self._day.isoformat()}"
         entry = self._selected_entry()
+        if isinstance(entry, ScheduledBlock):
+            # A task's scheduled time, never mistaken for an event of the same name.
+            return f"{text}: {block_note(entry)}, {entry.title}"
         return text if entry is None else f"{text}: {entry_label(entry, self._zone)}"
 
     def _place_hours(self) -> None:
@@ -551,21 +579,18 @@ class WeekGrid(_Grid):
     # Dragging a block: its body moves it, in quarter hours and across days; its bottom
     # edge, on the day it ends, moves its end. Escape stops a drag.
 
-    def press(self, part: QWidget, hit: Hit | None, point: QPointF) -> None:
+    def press(self, part: QWidget, hit: Hit | None, point: QPointF, screen: QPointF) -> None:
         self._drag = None
-        if part is not self.hours or hit is None or not isinstance(hit.entry, ScheduledBlock):
+        if part is not self.hours or hit is None or hit.part is None:
             return
         block = hit.entry
         days = self.days()
-        if not block.open or hit.day not in days:
+        if not isinstance(block, ScheduledBlock) or not block.open or hit.day not in days:
             return
         index = days.index(hit.day)
-        found = next(
-            (p for p in self._parts[index] if entry_key(p.event) == entry_key(block)), None
-        )
-        if found is None:
-            return
-        self._drag = _Drag(block, found, index, point, self._on_end(block, found, index, point))
+        start, end = _wall_minutes(block, hit.day, self._zone)
+        resize = self._on_end(block, hit.part, index, point)
+        self._drag = _Drag(block, hit.part, index, screen, resize, start, end)
 
     def _on_end(self, block: ScheduledBlock, part: Part, index: int, point: QPointF) -> bool:
         """Whether ``point`` is on the bottom edge of the block's part on the day it ends."""
@@ -573,7 +598,7 @@ class WeekGrid(_Grid):
         ends_here = block.days(self._zone)[1] == part.day
         return ends_here and rect.contains(point) and point.y() >= rect.bottom() - RESIZE_PX
 
-    def pointer_moved(self, part: QWidget, point: QPointF, pressed: bool) -> None:
+    def pointer_moved(self, part: QWidget, point: QPointF, screen: QPointF, pressed: bool) -> None:
         if part is not self.hours:
             return
         drag = self._drag
@@ -581,21 +606,21 @@ class WeekGrid(_Grid):
             self._hover(point)
             return
         if not drag.started:
-            if (point - drag.origin).manhattanLength() < QApplication.startDragDistance():
+            if (screen - drag.origin).manhattanLength() < QApplication.startDragDistance():
                 return
             drag.started = True
             self.hours.setCursor(
                 Qt.CursorShape.SizeVerCursor if drag.resize else Qt.CursorShape.ClosedHandCursor
             )
-        along = (point.y() - drag.origin.y()) * 60 / HOUR_PX
+        along = (screen.y() - drag.origin.y()) * 60 / HOUR_PX
         if drag.resize:
-            end = _snap(drag.part.end + along)
-            end = min(DAY_MINUTES, max(drag.part.start + BLOCK_STEP_MINUTES, end))
-            drag.minutes = end - drag.part.end
+            end = _snap(drag.end + along)
+            end = min(DAY_MINUTES, max(drag.start + BLOCK_STEP_MINUTES, end))
+            drag.minutes = end - drag.end
         else:
-            start = _snap(drag.part.start + along)
+            start = _snap(drag.start + along)
             start = min(DAY_MINUTES - BLOCK_STEP_MINUTES, max(0, start))
-            drag.minutes = start - drag.part.start
+            drag.minutes = start - drag.start
             day = self.day_at(point.x())
             if day is not None:
                 drag.days = self.days().index(day) - drag.index
@@ -616,50 +641,44 @@ class WeekGrid(_Grid):
             self.hours.unsetCursor()
             self.hours.update()
 
-    def dragging(self) -> bool:
-        return self._drag is not None and self._drag.started
-
     def _hover(self, point: QPointF) -> None:
         """A resize cursor over a movable block's bottom edge, the arrow elsewhere."""
         hit = self.hit(self.hours, point)
-        days = self.days()
-        if hit is not None and isinstance(hit.entry, ScheduledBlock) and hit.entry.open:
-            index = days.index(hit.day)
-            part = next(
-                (p for p in self._parts[index] if entry_key(p.event) == entry_key(hit.entry)),
-                None,
-            )
-            if part is not None and self._on_end(hit.entry, part, index, point):
+        if hit is not None and hit.part is not None and isinstance(hit.entry, ScheduledBlock):
+            index = self.days().index(hit.day)
+            if hit.entry.open and self._on_end(hit.entry, hit.part, index, point):
                 self.hours.setCursor(Qt.CursorShape.SizeVerCursor)
                 return
         self.hours.unsetCursor()
 
     def _dragged_part(self) -> tuple[Part, int] | None:
-        """Where the block being dragged would go, as a part of a day shown."""
+        """Where the block being dragged would go, as a part of a day shown, drawn at least
+        MIN_BLOCK_MINUTES tall as every block is."""
         drag = self._drag
         if drag is None or not drag.started:
             return None
         if drag.resize:
-            return replace(drag.part, end=drag.part.end + drag.minutes, column=0, columns=1), (
-                drag.index
-            )
-        index = min(WEEK_DAYS - 1, max(0, drag.index + drag.days))
+            start, end, index = drag.start, drag.end + drag.minutes, drag.index
+        else:
+            start, end = drag.start + drag.minutes, drag.end + drag.minutes
+            index = min(WEEK_DAYS - 1, max(0, drag.index + drag.days))
+        end = min(DAY_MINUTES, max(end, start + MIN_BLOCK_MINUTES))
+        start = min(start, end - MIN_BLOCK_MINUTES)
         moved = replace(
-            drag.part,
-            day=self.days()[index],
-            start=drag.part.start + drag.minutes,
-            end=min(DAY_MINUTES, drag.part.end + drag.minutes),
-            column=0,
-            columns=1,
+            drag.part, day=self.days()[index], start=start, end=end, column=0, columns=1
         )
         return moved, index
 
     def _hour_hits(self) -> list[Hit]:
-        return [
-            Hit(self.block_rect(part, index), day, part.event)
-            for index, (day, parts) in enumerate(zip(self.days(), self._parts, strict=True))
-            for part in parts
-        ]
+        width = self.column_width()
+        if self._hour_cache is None or self._hour_cache[0] != width:
+            found = [
+                Hit(self.block_rect(part, index), day, part.event, part=part)
+                for index, (day, parts) in enumerate(zip(self.days(), self._parts, strict=True))
+                for part in parts
+            ]
+            self._hour_cache = (width, found)
+        return self._hour_cache[1]
 
     # Painting.
 
@@ -868,8 +887,9 @@ class WeekGrid(_Grid):
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and not control:
             self.block_unschedule_requested.emit(selected)
             return True
-        if not control or not selected.open:
+        if not control:
             return False
+        # A done task's block is asked about too, so the window can say why it stays.
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             step = -BLOCK_STEP_MINUTES if key == Qt.Key.Key_Up else BLOCK_STEP_MINUTES
             self.block_change_requested.emit(selected, 0, step, shift)

@@ -569,6 +569,7 @@ _EVENT_STALE = (
     "need, then Cancel and reopen the event."
 )
 _BLOCK_STALE = "This scheduled time changed since you opened it; Cancel and open it again."
+_BLOCK_DONE = "This task is done, so its time stays put. Reopen the task to move it."
 _TASK_UNREADABLE = "That task couldn't be loaded. Try again."
 _NO_SOURCE = "That email is no longer in local mail."
 _DRAFT_CLOSE_FAILED = "Couldn't save. Your text is still here; try again."
@@ -911,7 +912,7 @@ class MainWindow(QMainWindow):
             lambda public_id: self._open_new_block(public_id, self._block_day)
         )
         self._block_day: date | None = None  # The day Schedule task was asked on.
-        self._block_task_read = 0  # The newest task search; older answers are dropped.
+        self._block_open_read = 0  # The newest task read for new time; older ones are dropped.
         # The latest block move offered for Undo: its block, its revision after the move and
         # its time before the first of the moves in a row, so nudges undo together.
         self._block_move: tuple[str, int, BlockTime] | None = None
@@ -3365,28 +3366,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(_BUSY)
 
     def _search_block_tasks(self, text: str) -> None:
-        """Open tasks for Schedule task, read beside any running operation."""
-        if self._closing:
-            return
-        self._block_task_read += 1
-        read_id = self._block_task_read
-        picker = self.block_picker
-
-        async def read() -> None:
-            try:
-                tasks = await self.backend.open_task_choices(text)
-            except Exception as exc:
-                log_failure(exc)
-                if read_id == self._block_task_read and not self._closing:
-                    picker.show_failed()
-                return
-            current = read_id == self._block_task_read and text == picker.query.text()
-            if not self._closing and current and picker.isVisible():
-                picker.show_choices(tasks)
-
-        task = asyncio.get_running_loop().create_task(read())
-        self._calendar_reads.add(task)
-        task.add_done_callback(self._calendar_reads.discard)
+        """Open tasks only, for Schedule task."""
+        self._read_task_choices(text, self.block_picker, self.backend.open_task_choices)
 
     def _open_new_block(self, public_id: str, day: date | None) -> None:
         """Read the task, then open the editor for new time for it on ``day`` (today when
@@ -3394,16 +3375,22 @@ class MainWindow(QMainWindow):
         if self._closing:
             return
         on = day or self._local_today()
+        self._block_open_read += 1
+        read_id = self._block_open_read
 
         async def read() -> None:
             try:
                 action = await self.backend.get_action(public_id)
             except Exception as exc:
                 log_failure(exc)
-                if not self._closing:
+                if read_id == self._block_open_read and not self._closing:
                     self.status.setText(_TASK_UNREADABLE)
                 return
-            if self._closing:
+            if self._closing or read_id != self._block_open_read:
+                return  # A later Schedule asked for another task.
+            if self._dialog_open() or self.block_editor.isVisible():
+                # Something opened meanwhile: never cover it, or replace what the editor holds.
+                self.status.setText("Close the open panel, then schedule the task again.")
                 return
             if action.status is not ActionStatus.OPEN:
                 self.status.setText("Only an open task can be scheduled. Reopen it first.")
@@ -3469,7 +3456,11 @@ class MainWindow(QMainWindow):
         self, block: ScheduledBlock, days: int, minutes: int, *, resize: bool
     ) -> None:
         """A drag or a key in the week grid: the block's new time along the clock, saved as
-        one move; a length outside 5 minutes to 12 hours is refused here, saying why."""
+        one move; a length outside 5 minutes to 12 hours is refused here, saying why, as is
+        a done task's block, which stays where it is until the task is reopened."""
+        if not block.open:
+            self.status.setText(_BLOCK_DONE)
+            return
         try:
             if resize:
                 start, end = stretched(block, self.zone, minutes)
@@ -4290,26 +4281,34 @@ class MainWindow(QMainWindow):
         await self._refresh_drafts()
 
     def _search_note_tasks(self, text: str) -> None:
+        self._read_task_choices(text, self.draft_editor.task_picker, self.backend.task_choices)
+
+    def _read_task_choices(
+        self,
+        text: str,
+        picker: TaskPickerDialog,
+        choices: Callable[[str], Awaitable[tuple[TaskChoice, ...]]],
+    ) -> None:
+        """Ask ``choices`` for the tasks matching ``text`` beside any running operation, and
+        show them in ``picker`` while it is open and still shows that text. Only the newest
+        search answers; a note's Link to task and Schedule task share the count, since one
+        picker is open at a time."""
         if self._closing:
             return
         self._task_choice_read += 1
         read_id = self._task_choice_read
-        editor = self.draft_editor
 
         async def read() -> None:
             try:
-                actions = await self.backend.task_choices(text)
+                tasks = await choices(text)
             except Exception as exc:
                 log_failure(exc)
                 if read_id == self._task_choice_read and not self._closing:
-                    editor.task_choices_failed()
+                    picker.show_failed()
                 return
-            if (
-                not self._closing
-                and read_id == self._task_choice_read
-                and text == editor.task_picker.query.text()
-            ):
-                editor.show_task_choices(actions)
+            current = read_id == self._task_choice_read and text == picker.query.text()
+            if not self._closing and current and picker.isVisible():
+                picker.show_choices(tasks)
 
         task = asyncio.get_running_loop().create_task(read())
         self._calendar_reads.add(task)

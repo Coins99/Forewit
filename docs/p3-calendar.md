@@ -45,8 +45,8 @@ are in [ADR 0028](adr/0028-work-blocks.md).
   - The Calendar page and grids (`calendar_view.py`, `calendar_grid.py` and
     `calendar_layout.py`) show blocks and handle dragging and the keys.
   - Schedule task reuses `TaskPickerDialog`.
-  - The task detail shows Scheduled time and Schedule time, and Today's agenda lists
-    blocks.
+  - The task detail shows Scheduled time and Schedule time, the task editor shows a
+    read-only "Scheduled …" line beside Estimate, and Today's agenda lists blocks.
   - The window saves blocks and offers Undo.
 - **Export and cleanup.** `work_blocks` is in `EXPORT_TABLES`, and the deleted-records
   cleanup counts the blocks it removes.
@@ -67,12 +67,12 @@ plus this branch:
 
 - **Linting.** Ruff format and lint pass.
 - **Types.** Strict mypy passes for the native platform, win32 and darwin (511 files).
-- **Tests.** The full suite, with the Qt tests offscreen, had 5,189 passed, 7 skipped and
+- **Tests.** The full suite, with the Qt tests offscreen, had 5,198 passed, 7 skipped and
   1 failed. The failure is
   `tests/unit/services/test_calendar.py::test_day_window_matches_the_window_of_any_moment_that_day[America/Havana-day5-25]`,
   which fails the same way on unchanged main code with this machine's time-zone data. It
   has nothing to do with blocks.
-- **Coverage.** Coverage is 94.83% overall, and every service meets the 90% gate.
+- **Coverage.** Coverage is 94.97% overall, and every service meets the 90% gate.
   `services/work_blocks.py` is at 98%, `domain/work_blocks.py` at 99% and
   `domain/intervals.py` and `storage/work_blocks.py` at 100%.
 - **Migration.** Migration 0031 → 0032 → 0031 → 0032 is clean, and `alembic check`

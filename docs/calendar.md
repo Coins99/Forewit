@@ -142,7 +142,9 @@ deadline or target date never moves a block.
 - Every change can be undone with **Undo**. Several moves of one block in a row undo
   together, back to where it started.
 - A block lasts 5 minutes to 12 hours, and a task holds at most 50. Only an open task's
-  blocks move; a done task keeps its blocks, greyed, until you unschedule them or reopen it.
+  blocks move: a done task keeps its blocks, greyed, until you unschedule them or reopen
+  it, and trying to move one says so. The task editor shows the scheduled time beside the
+  estimate; blocks change on the Calendar, not there.
 - Forewit says when a block overlaps an event, a Google event or another block, and when it
   ends after the task's deadline. These are warnings: the block is still saved.
 - Deleting a task hides its blocks, and restoring it brings them back. Blocks are kept in

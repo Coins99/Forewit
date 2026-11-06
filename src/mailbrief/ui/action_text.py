@@ -233,18 +233,24 @@ def estimate_text(minutes: int | None) -> str | None:
 SCHEDULED_LINES: Final = 3  # The next blocks the detail lists.
 
 
-def scheduled_text(action: Action) -> str | None:
-    """A task's scheduled time (ADR 0028): "1 hr 30 mins in 2 blocks · estimate 2 hrs", or
-    None with no blocks. Overlapping blocks add up here: it is time planned, never time
-    worked."""
+def scheduled_amount(action: Action) -> str | None:
+    """How much time a task has set aside (ADR 0028): "1 hr 30 mins in 2 blocks", or None
+    with no blocks. Overlapping blocks add up here: it is time planned, never time worked."""
     if not action.blocks:
         return None
-    found = scheduled_time(action.blocks)
     count = len(action.blocks)
-    text = (
-        f"{length_text(timedelta(minutes=found.total_minutes))} in {count} "
-        f"{'block' if count == 1 else 'blocks'}"
+    total = scheduled_time(action.blocks).total_minutes
+    return (
+        f"{length_text(timedelta(minutes=total))} in {count} {'block' if count == 1 else 'blocks'}"
     )
+
+
+def scheduled_text(action: Action) -> str | None:
+    """The detail's line: the scheduled amount and the estimate, "1 hr 30 mins in 2 blocks ·
+    estimate 2 hrs"; None with no blocks."""
+    text = scheduled_amount(action)
+    if text is None:
+        return None
     if action.estimate_minutes is not None:
         text += f" · estimate {length_text(timedelta(minutes=action.estimate_minutes))}"
     return text

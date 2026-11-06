@@ -69,22 +69,6 @@ class BlockTime(DomainModel):
     def minutes(self) -> int:
         return int((self.ends_at_utc - self.starts_at_utc).total_seconds() // 60)
 
-    def moved(self, by: timedelta) -> "BlockTime":
-        """The same length, starting ``by`` later (earlier when negative)."""
-        return BlockTime(
-            starts_at_utc=self.starts_at_utc + by,
-            ends_at_utc=self.ends_at_utc + by,
-            time_zone=self.time_zone,
-        )
-
-    def resized(self, by: timedelta) -> "BlockTime":
-        """The same start, ending ``by`` later (earlier when negative)."""
-        return BlockTime(
-            starts_at_utc=self.starts_at_utc,
-            ends_at_utc=self.ends_at_utc + by,
-            time_zone=self.time_zone,
-        )
-
 
 class WorkBlock(DomainModel):
     """A live block, as stored."""

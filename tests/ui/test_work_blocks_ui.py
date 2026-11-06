@@ -16,7 +16,8 @@ from mailbrief.domain.actions import ActionFilter, ActionStatus, TaskChoice
 from mailbrief.domain.events import CalendarRange, ScheduledBlock
 from mailbrief.domain.work_blocks import BlockTime, WorkBlock
 from mailbrief.ui.action_text import block_lines, scheduled_text
-from mailbrief.ui.block_editor import ENDS_FIRST, LENGTH, BlockEditor
+from mailbrief.ui.actions_view import SCHEDULE
+from mailbrief.ui.block_editor import ENDS_FIRST, LENGTH, UNSAVED, BlockEditor
 from mailbrief.ui.calendar_layout import day_parts, entry_key, shifted, stretched
 from mailbrief.ui.calendar_view import (
     MOVE_BLOCK,
@@ -83,14 +84,21 @@ def panel(qtbot: QtBot) -> CalendarPanel:
     return result
 
 
-def send(widget: QWidget, kind: QEvent.Type, point: QPointF, held: bool) -> None:
+def send(
+    widget: QWidget,
+    kind: QEvent.Type,
+    point: QPointF,
+    held: bool,
+    screen: QPointF | None = None,
+) -> None:
+    """A mouse event at ``point`` in ``widget``; ``screen`` is where the pointer is on the
+    screen, by default where ``point`` is now."""
     button = Qt.MouseButton.LeftButton
     buttons = Qt.MouseButton.LeftButton if held else Qt.MouseButton.NoButton
     if kind == QEvent.Type.MouseMove:
         button = Qt.MouseButton.NoButton
-    event = QMouseEvent(
-        kind, point, widget.mapToGlobal(point), button, buttons, Qt.KeyboardModifier.NoModifier
-    )
+    at = widget.mapToGlobal(point) if screen is None else screen
+    event = QMouseEvent(kind, point, at, button, buttons, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(widget, event)
 
 
@@ -145,7 +153,7 @@ def test_dragging_a_block_asks_to_move_it_by_whole_quarter_hours(
     end = QPointF(start.x() + grid.column_width(), start.y() + 50 * grid_px_per_minute())
     drag(grid.hours, start, end)
     assert asked == [(MOVE_BLOCK, (block, 1, 45, False))]
-    assert not grid.dragging()
+    assert grid._drag is None
 
 
 def grid_px_per_minute() -> float:
@@ -188,10 +196,47 @@ def test_a_done_task_s_block_never_moves_but_can_be_unscheduled(panel: CalendarP
     assert asked == []
     panel.select_entry(entry_key(block), TODAY)
     grid.setFocus()
+    # Ctrl+arrows still ask, so the window can say why the block stays, and the selection
+    # stays on it rather than stepping to another entry.
     QTest.keyClick(grid, Qt.Key.Key_Down, Qt.KeyboardModifier.ControlModifier)
-    assert asked == []
+    assert asked == [(MOVE_BLOCK, (block, 0, 15, False))]
+    assert panel.selected_block() == block
     QTest.keyClick(grid, Qt.Key.Key_Delete)
-    assert asked == [(UNSCHEDULE_BLOCK, block)]
+    assert asked[-1] == (UNSCHEDULE_BLOCK, block)
+    assert grid.accessibleDescription() == "Wed 2026-10-14: Task · completed, Draft the Q3 report"
+
+
+def test_a_scroll_while_pressing_never_moves_the_block(panel: CalendarPanel) -> None:
+    """Choosing a block can scroll the hours to show it under a still pointer: only the
+    pointer's own movement counts."""
+    block = scheduled(TODAY, time(10), time(11))
+    asked: list[tuple[str, object]] = []
+    panel.block_requested.connect(lambda kind, value: asked.append((kind, value)))
+    panel.show_range(week(block), TORONTO, TODAY)
+    grid = panel.week_grid
+    hit = next(hit for hit in grid.hits(grid.hours) if hit.entry == block)
+    point = hit.rect.center()
+    screen = grid.hours.mapToGlobal(point)
+    send(grid.hours, QEvent.Type.MouseButtonPress, point, True, screen)
+    bar = grid.hours_area.verticalScrollBar()
+    bar.setValue(bar.value() + 100)  # As _reveal would; the pointer is where it was.
+    moved = point + QPointF(0, 100)
+    send(grid.hours, QEvent.Type.MouseMove, moved, True, screen + QPointF(0, 3))
+    send(grid.hours, QEvent.Type.MouseButtonRelease, moved, False, screen + QPointF(0, 3))
+    assert asked == []
+
+
+def test_a_short_block_resizes_from_its_own_end(panel: CalendarPanel) -> None:
+    """A 10-minute block is drawn 20 minutes tall; its end moves from 10:10, not 10:20."""
+    block = scheduled(TODAY, time(10), time(10, 10))
+    asked: list[tuple[str, object]] = []
+    panel.block_requested.connect(lambda kind, value: asked.append((kind, value)))
+    panel.show_range(week(block), TORONTO, TODAY)
+    grid = panel.week_grid
+    hit = next(hit for hit in grid.hits(grid.hours) if hit.entry == block)
+    edge = QPointF(hit.rect.center().x(), hit.rect.bottom() - 2)
+    drag(grid.hours, edge, edge + QPointF(0, 20 * grid_px_per_minute()))
+    assert asked == [(MOVE_BLOCK, (block, 0, 20, True))]  # 10:10 to 10:30.
 
 
 def test_the_keyboard_moves_resizes_and_unschedules_the_selected_block(
@@ -474,3 +519,134 @@ def test_the_status_names_overlaps_and_a_late_end() -> None:
     assert block_status("Scheduled", "Report", late) == (
         "Scheduled: Report. Ends after the task's deadline."
     )
+
+
+async def test_the_editor_s_buttons_fit_the_drawer(window: MainWindow) -> None:
+    window.resize(1100, 720)
+    block = scheduled(TODAY, time(10), time(11))
+    window._request_block(OPEN_BLOCK, block)
+    QApplication.processEvents()
+    editor = window.block_editor
+    assert editor.width() <= 390  # A drawer.
+    for button in (
+        editor.save_button,
+        editor.cancel_button,
+        editor.unschedule_button,
+        editor.task_button,
+    ):
+        assert button.isVisible()
+        assert button.width() >= button.sizeHint().width(), button.objectName()
+
+
+def test_open_task_keeps_changed_time(editor: BlockEditor) -> None:
+    asked: list[str] = []
+    editor.task_requested.connect(asked.append)
+    editor.edit_block(scheduled(TODAY, time(10), time(11)), TORONTO)
+    editor.show()
+    editor.start_time.setEditText("13:00")
+    editor.start_time.commit_typed()
+    editor.task_button.click()
+    assert asked == [] and editor.isVisible()
+    assert editor.status.text() == UNSAVED
+    editor.cancel_button.click()
+    editor.edit_block(scheduled(TODAY, time(10), time(11)), TORONTO)
+    editor.show()
+    editor.task_button.click()
+    assert asked == [TASK] and not editor.isVisible()
+
+
+async def test_a_done_task_s_block_is_refused_with_the_reason(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    block = scheduled(TODAY, time(10), time(11), status=ActionStatus.COMPLETED)
+    window._request_block(MOVE_BLOCK, (block, 0, 15, False))
+    assert "Reopen the task" in window.status.text()
+    assert backend.block_calls == []
+
+
+async def test_only_the_last_schedule_opens_and_never_over_another_panel(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    other = make_action(public_id=f"{TASK[:-2]}78", title="Read the contract")
+    backend.actions[ActionFilter.OPEN] = (*backend.actions[ActionFilter.OPEN], other)
+    await window.initialize()
+    window._open_new_block(TASK, TODAY)
+    window._open_new_block(other.public_id, TODAY)
+    await window.drain_calendar_reads()
+    assert window.block_editor.isVisible()
+    assert window.block_editor.task_id() == other.public_id
+    # With the editor open, another Schedule never replaces what it holds.
+    window._open_new_block(TASK, TODAY)
+    await window.drain_calendar_reads()
+    assert window.block_editor.task_id() == other.public_id
+    assert window.status.text() == "Close the open panel, then schedule the task again."
+
+
+async def test_schedule_time_from_the_detail_opens_on_a_future_target(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    later = TODAY + timedelta(days=3)
+    task = make_action(public_id=TASK, title="Draft the Q3 report", target_date=later)
+    backend.actions[ActionFilter.OPEN] = (task,)
+    await window.initialize()
+    window._request_action(SCHEDULE, task)
+    await window.drain_calendar_reads()
+    built = window.block_editor.built_time()
+    assert isinstance(built, BlockTime)
+    assert built.starts_at_utc.astimezone(window.zone).date() == later
+    window.block_editor.cancel_button.click()
+    window._request_action(SCHEDULE, task.model_copy(update={"target_date": MONDAY}))
+    await window.drain_calendar_reads()
+    built = window.block_editor.built_time()
+    assert isinstance(built, BlockTime)
+    assert built.starts_at_utc.astimezone(window.zone).date() == window._local_today()
+
+
+async def test_the_editor_unschedules_with_undo_and_keeps_a_stale_move(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    saved = await backend.schedule_block(
+        TASK,
+        BlockTime(
+            starts_at_utc=local_instant(TODAY, time(10), TORONTO),
+            ends_at_utc=local_instant(TODAY, time(11), TORONTO),
+            time_zone="America/Toronto",
+        ),
+    )
+    block = backend.blocks[saved.block.public_id]
+    window._request_block(OPEN_BLOCK, block)
+    window.block_editor.unschedule_button.click()
+    await finish(window)
+    assert not window.block_editor.isVisible()
+    assert saved.block.public_id in backend.unscheduled_blocks
+    assert window.undo_button.text() == "&Undo unschedule"
+    window.undo_button.click()
+    await finish(window)
+    assert saved.block.public_id not in backend.unscheduled_blocks
+
+    # The block went away meanwhile: the editor stays open with its time and says why.
+    from mailbrief.services.work_blocks import BlockNotFoundError
+
+    window._request_block(OPEN_BLOCK, backend.blocks[saved.block.public_id])
+    backend.block_fail = BlockNotFoundError("That scheduled time was not found.")
+    window.block_editor.save_button.click()
+    await finish(window)
+    assert window.block_editor.isVisible()
+    assert "changed since you opened it" in window.block_editor.status.text()
+
+
+def test_the_task_editor_shows_scheduled_time(qtbot: QtBot) -> None:
+    from mailbrief.ui.action_editor import ActionEditor
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    editor = ActionEditor(parent)
+    first = scheduled(TODAY, time(10), time(11)).block
+    second = scheduled(TODAY, time(14), time(14, 30)).block
+    editor.edit(make_action(blocks=(first, second)), TODAY, TORONTO)
+    assert editor.scheduled.text() == "Scheduled 1 hr 30 mins in 2 blocks"
+    assert not editor.scheduled.isHidden()
+    editor.edit(make_action(), TODAY, TORONTO)
+    assert editor.scheduled.text() == "" and editor.scheduled.isHidden()

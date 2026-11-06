@@ -47,6 +47,20 @@ async def test_persistence_checks_previous_process_values(
     assert settings.read_text("utf-8") == original
 
 
+async def test_seeding_again_keeps_one_scheduled_block(tmp_path: Path, qapp: QApplication) -> None:
+    # check_package.py runs the full scenario at each scale on one profile, so the seed
+    # runs again on a profile that has it: the task keeps one block, and the check passes.
+    await seed_profile(tmp_path)
+    runtime = DesktopRuntime(tmp_path / "smoke.sqlite3")
+    try:
+        await runtime.load_saved()
+        await seed_focus(runtime)
+        await seed_focus(runtime)
+    finally:
+        await runtime.close()
+    await verify_persistence(tmp_path)
+
+
 async def test_persistence_refuses_empty_profile(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Missing previous"):
         await verify_persistence(tmp_path)

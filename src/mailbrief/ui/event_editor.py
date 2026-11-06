@@ -73,12 +73,17 @@ _DEFAULT_LENGTH: Final = timedelta(hours=1)
 _TYPED_TIME: Final = re.compile(r"\s*([01]?[0-9]|2[0-3]):([0-5][0-9])\s*")
 
 
-def _qdate(day: date) -> QDate:
+def qdate(day: date) -> QDate:
     return QDate(day.year, day.month, day.day)
 
 
-def _day(value: QDate) -> date:
+def qday(value: QDate) -> date:
     return date(value.year(), value.month(), value.day())
+
+
+# The editor's own names for them, kept for its callers.
+_qdate = qdate
+_day = qday
 
 
 def _clock(value: QTime) -> time:
@@ -132,6 +137,15 @@ def end_choices(start: datetime, zone: ZoneInfo) -> tuple[tuple[str, datetime], 
         if length > timedelta(0):
             found.append((f"{at:%H:%M} ({length_text(length)})", end))
     return tuple(found)
+
+
+def field_instant(day: date, clock: time, accepted: datetime, zone: ZoneInfo) -> datetime:
+    """The instant a date and a time field show: ``accepted`` while they still show it, since
+    rebuilding it from the clock would take the first of an hour a DST change repeats."""
+    shown = accepted.astimezone(zone)
+    if (shown.date(), time(shown.hour, shown.minute)) == (day, clock):
+        return accepted
+    return local_instant(day, clock, zone)
 
 
 def _wall(moment: datetime) -> datetime:
@@ -673,13 +687,8 @@ class EventEditor(QDialog):
             return UNUSABLE
 
     def _field_instant(self, day: date, clock: time, accepted: datetime) -> datetime:
-        """The instant a date and time field show: the accepted one while they still show
-        it, since rebuilding it from the clock would take the first of an hour a DST change
-        repeats."""
-        shown = accepted.astimezone(self._zone)
-        if (shown.date(), time(shown.hour, shown.minute)) == (day, clock):
-            return accepted
-        return local_instant(day, clock, self._zone)
+        """The instant a date and time field show; see field_instant."""
+        return field_instant(day, clock, accepted, self._zone)
 
     def _save(self) -> None:
         if self._busy or self._saving:
