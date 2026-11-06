@@ -7,7 +7,7 @@ description: Use for any change to Forewit's desktop UI under src/mailbrief/ui, 
 
 Read AGENTS.md first; its invariants win. Component specs and the token table are in
 `references/spec.md`. The default look is Studio (`docs/ui/studio.md`: white and Studio
-Mist grey, one blue, Semibold titles, glass pills, filled cards with no borders or
+Mist grey, one blue, Semibold titles, flat buttons, filled cards with no borders or
 shadows), in the system's light or dark mode. Its approved renders are
 `docs/ui/studio-light.png` and `docs/ui/studio-dark.png` (the window at 1100 × 720) and
 `docs/ui/studio-dialog.png` (a dialog). The layout's original mockup is
@@ -28,36 +28,40 @@ list, body and meta sizes (`docs/ui-redesign.md`).
   before losing it.
 - Mail and AI text reaches the screen only through `plain_label()` (`ui/labels.py`, plain
   text, word wrap), `wrap_label()` (plain text that also wraps inside a long unbroken
-  token), a delegate's or a painted widget's `drawText()` (the Inbox's monogram) or a
-  glass pill's label (`GlassButton` paints the
-  `button_label()` text `outline_button` gave it with `drawText()`: plain text, mnemonics
-  hidden). Never put it in a tooltip, and never use rich text
+  token) or a delegate's or a painted widget's `drawText()` (the Inbox's monogram).
+  Never put it in a tooltip, and never use rich text
   or automatic links for it. Use `wrap_label()` wherever an address, link or long word
   could otherwise widen the layout.
-- Every button is a glass pill that looks like Disconnect (in Settings' Account card):
-  frosted and lit at rest, wherever it sits, brighter under the pointer. Make buttons with `outline_button()`
-  in ui/labels.py. `glass=True` makes a `GlassButton` (`ui/glass/button.py`, which adds the
-  hover spring and light), and `primary=True` tints the one primary action of a screen.
-  `ThemeStyle` draws every other `QPushButton` as the same pill: a plain
-  `outline_button()`, `variant="primary"` and Qt's own buttons in message boxes and button
-  boxes. Never style `QPushButton` in the stylesheet; only the sidebar's `variant="nav"`
-  rows are. Button text is escaped with `button_label()` unless it is app text carrying
-  its own `&` mnemonic (`mnemonic=True`); long mail-derived text uses `shorten=True`.
+- Every button is flat, as the fields and the Today template's switchers are: an 8 px
+  (`FIELD_RADIUS`) rounded rectangle, `panel` in a `hairline` edge, `card` under the
+  pointer, darker pressed, `selection` in an `accent_border` edge when checked, no
+  animation, and a focus ring only after the keyboard moved focus. `ThemeStyle` draws
+  every `QPushButton` (`paint_button`, `button_colors`): `outline_button()`'s and Qt's own
+  in message boxes and button boxes. Make buttons with `outline_button()` in
+  ui/labels.py; `primary=True` fills the one primary action of a screen with
+  `primary_fill`, and `compact=True` makes a dense row's label `COMPACT_PX` (9); every
+  other label is `TEXT_PX` Medium, so never set a button's font by hand. Never style
+  `QPushButton` in the stylesheet; only the sidebar's `variant="nav"` rows are. Button
+  text is escaped with `button_label()` unless it is app text carrying its own `&`
+  mnemonic (`mnemonic=True`); long mail-derived text uses `shorten=True`.
+- Make every date field's drop-down calendar with `calendar_popup(field)`
+  (`ui/date_picker.py`): a flat `DatePicker`, never Qt's own (the source rules refuse
+  `setCalendarPopup` elsewhere).
 - Text is the bundled DM Sans (`FONT_FAMILY`), through `ui_font(px, medium=...,
   semibold=...)`; `tabular=True` gives Inter's equal-width figures for times and counts
   in columns. Medium is for emphasis in text, Semibold for titles; sizes are in pixels,
   never points, and display sizes are tracked tighter automatically. Metrics: `TEXT_PX`
   13, `READING_PX` 14, `SMALL_PX` 12, `CAPTION_PX` 11, `HEADING_PX` 17, `TITLE_PX` 20,
   `RADIUS` 10, `CARD_RADIUS` 18, `PILL_RADIUS` 14, `FIELD_RADIUS` 8, `SIDEBAR_WIDTH` 214.
-- Buttons are pills; a screen has at most one primary (`primary_fill`). Status text
+- A screen has at most one primary button (`primary_fill`). Status text
   (deadlines, proposals) is bare coloured text, never a filled chip. Cards are
   `HairlineFrame`s: a `card` fill, no border. Combo boxes, date, time and number fields,
   check boxes and radio buttons are drawn by `ThemeStyle`; don't style them in QSS.
 - Icons are plain: a button's icon (`icon_name`) is drawn in the label's colour beside
-  the label, never in a tile or square behind it. An icon with no label makes a round
-  glass button; give it an accessible name and a tooltip.
+  the label, never in a tile or square behind it. An icon with no label makes a square
+  button; give it an accessible name and a tooltip.
 - Glass panels are the chrome only: the header, sidebar, gutter, status strip and a
-  dialog's frame. Pages and a dialog's content sit on a white sheet, and the selected
+  dialog's frame, never a button. Pages and a dialog's content sit on a white sheet, and the selected
   page is a fill, never a second layer of glass. Studio, the default scheme, keeps the
   chrome flat: its glass backdrop is flat and its lights are off (`GlassTokens`).
 - Dialogs get the home screen's style automatically: `ThemeStyle.polish` installs

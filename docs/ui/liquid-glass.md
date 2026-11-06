@@ -1,8 +1,12 @@
 # Liquid Glass
 
 Forewit's navigation chrome is Liquid Glass, painted with QPainter. The header, the
-sidebar and the pill buttons are glass. The lists and the reading pane stay opaque, so
-mail is never read through glass. The planner's prototype renders are the visual
+sidebar and a dialog's frame are glass. The lists and the reading pane stay opaque, so
+mail is never read through glass. Buttons were glass pills until 2026-11-06, when the
+owner chose flat buttons in every scheme, to match the Today template's fields and
+switchers (`docs/ui/studio.md`); the glass button, its hover spring and light, and the
+pill painters and tokens were removed. The glass frame round dialogs and the other
+schemes' glass header and sidebar wait for the owner's later decision. The planner's prototype renders are the visual
 reference; `docs/ui/mockup-three-pane-dark.png` stays the layout reference.
 
 The component rules, tokens and APIs are in the UI spec
@@ -21,20 +25,12 @@ This page says what was built, why, and what it costs.
 - **Each panel:** an opaque underlay, the blurred backdrop, a tint, a sheen at the top
   and a lit top edge.
 - **The selected page:** a raised fill on the glass, never a second layer of glass.
-- **Pill buttons:** a fill that is lighter on top and shaded below, with a rim one
-  device pixel wide.
-  - Rims snap to the device pixel grid, so they stay crisp at 125% and 150%.
-  - Hovering animates in, as Apple's glass lights from within on interaction. The pill
-    grows a little on a spring, a glow starts inside its edge under the pointer and
-    spreads round it, and its rim lights near the pointer. Leaving eases it back.
-  - Only a 3 px band inside the edge and the rim light up: labels sit 6 px in, and any
-    light on the body would cut the dark primary pill's text below 4.5:1.
-  - Pressing shrinks a pill, and it springs back on release.
+- **Rims** snap to the device pixel grid, so they stay crisp at 125% and 150%.
 
 ## Colour and contrast
 
 - **Schemes:** seven, each with a dark and a light set: Studio (the default, with calm
-  glass: a flat backdrop, no streaks or sheen, flat pills and a solid blue primary; see
+  glass: a flat backdrop, no streaks or sheen; see
   `docs/ui/studio.md`), Slate (grey-blue), Graphite, Ocean, Sage, Plum and Rose. The
   owner picks one in Settings > Appearance.
 - **Proof:** for every scheme and mode, `tests/ui/theme/test_glass.py` composites each
@@ -59,9 +55,9 @@ This page says what was built, why, and what it costs.
 
 ## Cost
 
-Paint times, measured with paint profiling on an Apple silicon laptop (2026-10-13). Each
-size had 50 repaints of the whole workspace and 50 of a hovered pill; times are p50 /
-p95 in milliseconds.
+Paint times, measured with paint profiling on an Apple silicon laptop (2026-10-13), while
+buttons were glass. Each size had 50 repaints of the whole workspace and 50 of a hovered
+pill; times are p50 / p95 in milliseconds.
 
 | Widget | 1100×720, 1x | 1600×1000, 1x | 1100×720, 2x | 1600×1000, 2x |
 |---|---|---|---|---|
@@ -86,7 +82,7 @@ MAILBRIEF_PAINT_PROFILE=1 /Applications/Forewit.app/Contents/MacOS/Forewit
 ```
 
 Use Forewit, then quit. `desktop.log` in Forewit's data folder then has one line per
-widget kind, such as `paint widget=GlassButton count=120 p50_ms=0.13 p95_ms=0.20`. The
+widget kind, such as `paint widget=SidebarNav count=120 p50_ms=0.13 p95_ms=0.20`. The
 count is every paint, and the percentiles cover the last 10,000 of each kind, so memory
 stays flat however long the session. It records nothing else. `tests/ui/glass/test_profile.py` fails if any glass paint's p95
 passes 50 ms, a margin for slow CI machines that still catches a regression such as
@@ -120,6 +116,6 @@ QT_SCALE_FACTOR=2 MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/gla
 The gallery saves:
 
 - `glass-{scheme}-{mode}-{dpr}x.png`: a glass sampler for every scheme.
-- `glass-states-{theme}-{dpr}x.png`: every pill state on the glass header.
+- `buttons-{theme}-{dpr}x.png`: every flat button state.
 - `accessibility-{mode}-{dpr}x.png`: the workspace in each glass mode.
 - The workspace pages, as before.
