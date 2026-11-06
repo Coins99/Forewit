@@ -6,15 +6,11 @@ from collections import deque
 from collections.abc import Iterator
 
 import pytest
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QEnterEvent
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.diagnostics import logger
 from mailbrief.ui.glass import profile
-from mailbrief.ui.glass.button import GlassButton
-from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import apply_theme
 from tests.ui.test_workspace import build
 from tests.ui.window_wait import show
@@ -103,24 +99,18 @@ def test_the_log_gets_counts_and_times_only() -> None:
         assert [word.split("=")[0] for word in words[1:]] == ["widget", "count", "p50_ms", "p95_ms"]
 
 
-def test_the_glass_chrome_and_pills_paint_well_inside_a_frame(
+def test_the_glass_chrome_paints_well_inside_a_frame(
     qtbot: QtBot, qapp: QApplication, themed: None
 ) -> None:
     apply_theme(qapp)
     workspace = build(qtbot)
-    pill = outline_button("&Sync and review", "generateButton", mnemonic=True, glass=True)
-    assert isinstance(pill, GlassButton)
-    workspace.header.add_widget(pill)
     workspace.resize(1100, 720)
     show(qtbot, workspace)
     profile.set_enabled(True)
     for _ in range(20):
         workspace.repaint()
-        point = QPointF(10, pill.height() / 2)
-        pill.enterEvent(QEnterEvent(point, point, point))  # Hovered: lifted, rim lit.
-        pill.repaint()
     stats = profile.summary()
-    for kind in ("HeaderBar", "SidebarNav", "GlassButton", "SidebarPage", "SidebarButton"):
+    for kind in ("HeaderBar", "SidebarNav", "SidebarPage", "SidebarButton"):
         assert stats[kind].count >= 20, kind
         assert stats[kind].p95_ms < BUDGET_MS, (kind, stats[kind])
 

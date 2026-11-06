@@ -27,6 +27,7 @@ from mailbrief.domain.today import AttentionItem, DaySummary
 from mailbrief.services.today import attention_reason
 from mailbrief.ui.brief_list import ROW_ROLE
 from mailbrief.ui.calendar_view import day_rows
+from mailbrief.ui.date_picker import calendar_popup
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import ElidedLabel, outline_button, wrap_label
@@ -321,7 +322,7 @@ class FocusDialog(QDialog):
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
         dates = QHBoxLayout()
         self.day = QDateEdit()
-        self.day.setCalendarPopup(True)
+        calendar_popup(self.day)
         self.day.setObjectName("focusDate")
         self.day.setAccessibleName("Day plan date")
         self.day.setDisplayFormat("yyyy-MM-dd")
@@ -351,7 +352,7 @@ class FocusDialog(QDialog):
         transfer = QVBoxLayout(self.transfer_area)
         transfer.setContentsMargins(0, 0, 0, 0)
         self.destination = QDateEdit()
-        self.destination.setCalendarPopup(True)
+        calendar_popup(self.destination)
         self.destination.setDisplayFormat("yyyy-MM-dd")
         self.destination.setObjectName("focusDestination")
         self.destination.setAccessibleName("Destination plan date")

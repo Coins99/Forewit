@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.events import ScheduledBlock
 from mailbrief.domain.work_blocks import BLOCK_MAX_MINUTES, BLOCK_MIN_MINUTES, BlockTime
+from mailbrief.ui.date_picker import calendar_popup
 from mailbrief.ui.event_editor import (
     BAD_TIME,
     DATE_FORMAT,
@@ -102,7 +103,7 @@ class BlockEditor(QDialog):
         form.setContentsMargins(0, 0, 0, 0)
         self.day = DateBox()
         self.day.setObjectName("blockDay")
-        self.day.setCalendarPopup(True)
+        calendar_popup(self.day)
         self.day.setDisplayFormat(DATE_FORMAT)
         self.day.setAccessibleName("On")
         self.day.setKeyboardTracking(False)

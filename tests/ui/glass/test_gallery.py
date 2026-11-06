@@ -1,22 +1,22 @@
-"""A glass sampler for every colour scheme: a header with pill buttons, a sidebar with the
-selected page raised, and pills on an opaque content pane.
+"""A glass sampler for every colour scheme: a glass header with flat buttons, a sidebar
+with the selected page raised, and buttons on an opaque content pane; and every flat
+button state, drawn by ThemeStyle.
 
 With MAILBRIEF_UI_SHOTS set to a folder, each render is saved there as
-``glass-{scheme}-{mode}-{dpr}x.png``, to compare with the Liquid Glass reference.
+``glass-{scheme}-{mode}-{dpr}x.png`` and ``buttons-{mode}-{dpr}x.png``.
 """
 
 import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui.glass.backdrop import BackdropKey, render_backdrop
-from mailbrief.ui.glass.button import PRESSED_SCALE, GlassButton
-from mailbrief.ui.glass.painter import GlassMode, paint_panel, paint_pill, paint_raised
+from mailbrief.ui.glass.painter import GlassMode, paint_panel, paint_raised
 from mailbrief.ui.glass.preferences import GlassPreferences, set_glass_preferences
 from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import (
@@ -30,6 +30,8 @@ from mailbrief.ui.theme import (
     ui_font,
     ui_metrics,
 )
+from mailbrief.ui.theme.style import button_colors
+from mailbrief.ui.theme.tokens import FIELD_RADIUS
 from tests.ui.test_workspace import build
 from tests.ui.window_wait import show
 
@@ -42,10 +44,15 @@ def pill_width(text: str) -> float:
 
 
 def pill(painter: QPainter, left: float, top: float, text: str, *, primary: bool = False) -> float:
-    """A pill starting at ``left``; returns where the next one may start."""
+    """A flat button starting at ``left``, in ThemeStyle's colours; returns where the next
+    one may start."""
+    tokens = current_tokens()
     rect = QRectF(left, top, pill_width(text), PILL_HEIGHT)
-    paint_pill(painter, rect, current_glass(), primary=primary)
-    painter.setPen(QColor(current_tokens().text))
+    fill, edge = button_colors(tokens, QStyle.StateFlag.State_Enabled, primary=primary)
+    painter.setPen(QColor(edge or fill))
+    painter.setBrush(QColor(fill))
+    painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), FIELD_RADIUS, FIELD_RADIUS)
+    painter.setPen(QColor(tokens.on_primary if primary else tokens.text))
     painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
     return rect.right() + 8
 
@@ -123,41 +130,57 @@ def test_workspace_renders_in_each_glass_mode(
 
 
 @pytest.mark.parametrize("theme", list(ThemeMode))
-def test_glass_button_states_render(
+def test_button_states_render(
     qtbot: QtBot, qapp: QApplication, themed: None, theme: ThemeMode
 ) -> None:
-    """Every pill state on the glass header. Saved as ``glass-states-{theme}-{dpr}x.png``
-    with MAILBRIEF_UI_SHOTS set."""
+    """Every flat button state, drawn by ThemeStyle as a real button would be. Saved as
+    ``buttons-{theme}-{dpr}x.png`` with MAILBRIEF_UI_SHOTS set."""
     apply_theme(qapp, theme)
-    workspace = build(qtbot)
-    pills: dict[str, GlassButton] = {}
-    for state in ("Normal", "Hover", "Pressed", "Focus", "Disabled", "Primary"):
-        pill = outline_button(state, f"{state.lower()}Pill", glass=True)
-        assert isinstance(pill, GlassButton)
-        workspace.header.add_widget(pill)
-        pills[state] = pill
-    workspace.resize(1100, 720)
-    show(qtbot, workspace)
-    with qtbot.waitActive(workspace, timeout=5000):
-        workspace.activateWindow()
-    for pill in pills.values():
-        pill.leaveEvent(QEvent(QEvent.Type.Leave))  # Shown at the pointer, one may be hovered.
-    point = QPointF(12, pills["Hover"].height() / 2)
-    pills["Hover"].enterEvent(QEnterEvent(point, point, point))
-    pills["Hover"]._set_hover(1.0)  # Settled, not mid-animation.
-    pills["Pressed"].setDown(True)
-    pills["Pressed"]._set_scale(PRESSED_SCALE)
-    workspace.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, True)  # As Tab.
-    pills["Focus"].setFocus()
-    qtbot.waitUntil(pills["Focus"].hasFocus)
-    pills["Disabled"].setEnabled(False)
-    pills["Primary"].primary = True
-    image = workspace.header.grab()
-    assert not image.isNull()
-    states = [pill.grab().toImage() for pill in pills.values()]
-    assert len({state.size().width() for state in states}) > 1  # Each its own label.
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.setAutoFillBackground(True)
+    plain = outline_button("Normal", "plainButton")
+    primary = outline_button("Primary", "primaryButton", primary=True)
+    for button in (plain, primary):
+        button.setParent(host)
+        button.ensurePolished()
+    s = QStyle.StateFlag
+    states = [
+        ("Normal", plain, s.State_Enabled),
+        ("Hover", plain, s.State_Enabled | s.State_MouseOver),
+        ("Pressed", plain, s.State_Enabled | s.State_MouseOver | s.State_Sunken),
+        ("Checked", plain, s.State_Enabled | s.State_On),
+        ("Disabled", plain, s.State_None),
+        ("Primary", primary, s.State_Enabled),
+        ("Primary hover", primary, s.State_Enabled | s.State_MouseOver),
+    ]
+    ratio = 2.0
+    width = sum(round(pill_width(label)) + 14 for label, _button, _state in states) + 12
+    image = QImage(round(width * ratio), round(56 * ratio), QImage.Format.Format_ARGB32)
+    image.setDevicePixelRatio(ratio)
+    image.fill(QColor(current_tokens().panel))
+    painter = QPainter(image)
+    left, samples = 12, []
+    for label, button, state in states:
+        option = QStyleOptionButton()
+        button.initStyleOption(option)
+        option.text = label
+        option.state = state
+        size = button.style().sizeFromContents(
+            QStyle.ContentsType.CT_PushButton,
+            option,
+            option.fontMetrics.size(0, label),
+            button,
+        )
+        option.rect = QRect(left, 10, size.width(), size.height())
+        button.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, button)
+        samples.append(QRect(left + 6, 10 + size.height() // 2, 1, 1))
+        left += size.width() + 8
+    painter.end()
+    colours = [image.pixelColor(round(r.x() * ratio), round(r.y() * ratio)).name() for r in samples]
+    assert len(set(colours[:4])) == 4, colours  # Rest, hover, pressed and checked differ.
+    assert colours[5] != colours[6]  # So does the primary under the pointer.
     folder = os.environ.get("MAILBRIEF_UI_SHOTS")
     if folder:
         Path(folder).mkdir(parents=True, exist_ok=True)
-        name = f"glass-states-{theme.value}-{image.devicePixelRatio():g}x.png"
-        assert image.save(str(Path(folder) / name))
+        assert image.save(str(Path(folder) / f"buttons-{theme.value}-{ratio:g}x.png"))

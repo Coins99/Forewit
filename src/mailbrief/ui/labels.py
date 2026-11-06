@@ -14,9 +14,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
-from mailbrief.ui.glass.button import GlassButton
 from mailbrief.ui.theme.assets import icon, ui_font
-from mailbrief.ui.theme.style import current_glass, current_tokens, follow_theme
+from mailbrief.ui.theme.style import current_tokens, follow_theme
 
 
 def plain_label(
@@ -95,6 +94,9 @@ def short_button_label(text: str, limit: int = 40) -> str:
 
 
 OUTLINE_ICON_PX: Final = 14
+# A compact button's label, for dense rows: a brief's suggestion cards, a toolbar beside
+# small tabs. Every other button's is the app font's TEXT_PX.
+COMPACT_PX: Final = 9
 
 
 def outline_button(
@@ -103,10 +105,9 @@ def outline_button(
     *,
     mnemonic: bool = False,
     shorten: bool = False,
-    px: int | None = None,
+    compact: bool = False,
     icon_name: str | None = None,
     accessible_name: str | None = None,
-    glass: bool = False,
     primary: bool = False,
 ) -> QPushButton:
     """An outline button named ``name``; every outline button is made here.
@@ -114,10 +115,10 @@ def outline_button(
     ``text`` is escaped with button_label, so mail text can't create a mnemonic. App text
     that carries its own ``&`` mnemonic passes ``mnemonic=True``. With ``shorten``, long
     mail-derived text is cut by short_button_label and the full text becomes the
-    accessible name, never a tooltip. ``px`` sets the font size, ``icon_name`` adds a
-    bundled icon in the text colour, and ``accessible_name`` is what screen readers say
-    (without it, Qt reads the button's text). With ``glass`` it is a Liquid Glass pill
-    (GlassButton); ``primary`` tints the one primary action.
+    accessible name, never a tooltip. ``compact`` makes the label COMPACT_PX for a dense
+    row, ``icon_name`` adds a bundled icon in the label's colour, and ``accessible_name``
+    is what screen readers say (without it, Qt reads the button's text). ``primary`` fills
+    the one primary action. ThemeStyle draws the button (ui/theme/style.py).
     """
     if mnemonic and shorten:
         raise ValueError("A shortened label can't carry a mnemonic.")
@@ -127,21 +128,16 @@ def outline_button(
         shown = short_button_label(text)
     else:
         shown = button_label(text)
-    if glass:
-        button: QPushButton = GlassButton(shown, primary=primary)
-    else:
-        button = QPushButton(shown)
-        button.setProperty("variant", "outline")
-    if primary and not glass:
-        button.setProperty("variant", "primary")
+    button = QPushButton(shown)
+    button.setProperty("variant", "primary" if primary else "outline")
     button.setObjectName(name)
     button.setAutoDefault(False)
     if shorten:
         button.setAccessibleName(text)
     if accessible_name is not None:
         button.setAccessibleName(accessible_name)
-    if px is not None:
-        button.setFont(ui_font(px, medium=glass))
+    if compact:
+        button.setFont(ui_font(COMPACT_PX, medium=True))
     if icon_name is not None:
         button.setProperty("iconName", icon_name)
         follow_theme(button, _tint_icon)
@@ -151,12 +147,9 @@ def outline_button(
 
 def _tint_icon(button: QPushButton) -> None:
     """Colour ``button``'s icon for the fill it has now: the primary text colour on the one
-    primary action, the text colour on every other pill."""
-    if isinstance(button, GlassButton):
-        on_fill = button.primary
-    else:
-        on_fill = button.property("variant") == "primary"
-    color = current_glass().primary_text if on_fill else current_tokens().text
+    primary action, the text colour on every other button."""
+    tokens = current_tokens()
+    color = tokens.on_primary if button.property("variant") == "primary" else tokens.text
     button.setIcon(icon(str(button.property("iconName")), color, OUTLINE_ICON_PX))
 
 

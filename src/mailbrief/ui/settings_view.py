@@ -184,14 +184,12 @@ class SettingsDialog(QDialog):
             "disconnectButton",
             mnemonic=True,
             accessible_name="Disconnect Gmail",
-            glass=True,
         )
         self.sign_in_button = outline_button(
             "Sign in with &Google",
             "settingsSignInButton",
             mnemonic=True,
             accessible_name="Sign in with Google",
-            glass=True,
         )
         for button in (self.disconnect_button, self.sign_in_button):
             row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)

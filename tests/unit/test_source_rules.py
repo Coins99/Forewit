@@ -11,6 +11,7 @@ SOURCE: Final = ROOT / "src" / "mailbrief"
 UI: Final = SOURCE / "ui"
 TOKENS: Final = UI / "theme" / "tokens.py"
 LISTS: Final = UI / "lists.py"
+DATE_PICKER: Final = UI / "date_picker.py"
 
 # strftime directives that print words or formats of the system language: weekday and month
 # names (%a %A %b %B), AM or PM (%p), and the system's date and date-time formats (%c %x).
@@ -22,6 +23,8 @@ SYSTEM_LANGUAGE_DATE: Final = re.compile(r"(?<!%)%[aAbBpcx](?![0-9A-Za-z])")
 HEX_COLOUR: Final = re.compile(r"#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})(?![0-9A-Za-z])")
 # Qt's own list widget made or subclassed: its clear() can crash on Cocoa (see ui/lists.py).
 PLAIN_LIST: Final = re.compile(r"\bQListWidget\(|\(QListWidget\)")
+# A date field's own drop-down calendar, which is Qt's unstyled one.
+CALENDAR_POPUP: Final = re.compile(r"\.setCalendarPopup\(")
 
 
 def offending_lines(files: Iterable[Path], pattern: re.Pattern[str]) -> list[str]:
@@ -53,6 +56,13 @@ def test_ui_lists_clear_safely() -> None:
     assert offending_lines(files, PLAIN_LIST) == []
 
 
+def test_date_fields_use_the_date_picker() -> None:
+    """Every date field's drop-down calendar is a ``DatePicker``, through
+    ``calendar_popup()`` in ``ui/date_picker.py``."""
+    files = (path for path in UI.rglob("*.py") if path != DATE_PICKER)
+    assert offending_lines(files, CALENDAR_POPUP) == []
+
+
 def test_the_rules_find_what_they_are_for() -> None:
     """The patterns catch the slips they exist for, and pass what only looks like them."""
     for line in ('f"{day:%b} {day.day}"', 'when.strftime("%a %d %B")', '"%I:%M %p"', '"%x"'):
@@ -67,3 +77,5 @@ def test_the_rules_find_what_they_are_for() -> None:
         assert PLAIN_LIST.search(line), line
     for line in ("QListWidgetItem(title)", "listing: QListWidget", "isinstance(x, QListWidget)"):
         assert not PLAIN_LIST.search(line), line
+    assert CALENDAR_POPUP.search("self.day.setCalendarPopup(True)")
+    assert not CALENDAR_POPUP.search("calendar_popup(self.day)")

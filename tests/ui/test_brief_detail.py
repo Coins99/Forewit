@@ -112,7 +112,7 @@ def test_mockup_item_reads_like_the_mockup(pane: BriefDetailPane) -> None:
             if b.objectName() == "acceptButton"
             else "link"
             if b.objectName() == "viewEmailButton"
-            else "glass"
+            else "outline"
         )
         for b in pane.findChildren(QPushButton)
     )

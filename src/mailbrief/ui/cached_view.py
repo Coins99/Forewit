@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.cached_mail import CachedAccount, CachedMailPage
 from mailbrief.ui.brief_list import sender_with_address
+from mailbrief.ui.date_picker import calendar_popup
 from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.hairline import HairlineSplitter
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
@@ -93,7 +94,7 @@ class CachedMailDialog(QDialog):
         self.accounts.setAccessibleName("Cached Gmail account")
         self.day = QDateEdit()
         self.day.setAccessibleName("Received date in your time zone")
-        self.day.setCalendarPopup(True)
+        calendar_popup(self.day)
         self.day.setDisplayFormat("yyyy-MM-dd")
         filters.addWidget(self.accounts, 1)
         filters.addWidget(self.day)

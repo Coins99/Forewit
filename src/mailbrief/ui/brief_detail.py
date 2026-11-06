@@ -204,7 +204,7 @@ class BriefDetailPane(QScrollArea):
         source = str(item.source_url)
         if is_gmail_link(source):
             view_email = outline_button(
-                "View complete email", "viewEmailButton", icon_name="external-link", px=9
+                "View complete email", "viewEmailButton", icon_name="external-link", compact=True
             )
             view_email.setProperty("variant", "link")
             view_email.clicked.connect(
@@ -334,13 +334,13 @@ class BriefDetailPane(QScrollArea):
         layout.addSpacing(4)
         decisions = QHBoxLayout()
         decisions.setSpacing(8)
-        accept = outline_button("Add action", "acceptButton", primary=True, px=10)
+        accept = outline_button("Add action", "acceptButton", primary=True, compact=True)
         accept.clicked.connect(
             lambda _checked=False, sid=view.suggestion_id: self.suggestion_requested.emit(
                 ACCEPT, sid
             )
         )
-        dismiss = outline_button("Dismiss", "dismissButton", glass=True, px=10)
+        dismiss = outline_button("Dismiss", "dismissButton", compact=True)
         dismiss.clicked.connect(
             lambda _checked=False, sid=view.suggestion_id: self.suggestion_requested.emit(
                 DISMISS, sid
@@ -354,7 +354,7 @@ class BriefDetailPane(QScrollArea):
             # One row each, so a long title never widens the pane.
             row = QHBoxLayout()
             button = outline_button(
-                f"Add to “{link.title}”", "addToButton", shorten=True, glass=True, px=9
+                f"Add to “{link.title}”", "addToButton", shorten=True, compact=True
             )
             button.clicked.connect(self._into(view.suggestion_id, link))
             row.addWidget(button)
@@ -385,14 +385,13 @@ class BriefDetailPane(QScrollArea):
             effect_text(proposal, zone, today=today),
             "applyProposalButton",
             shorten=True,
-            glass=True,
         )
         apply.clicked.connect(
             lambda _checked=False, pid=proposal.id, revision=proposal.action_revision: (
                 self.proposal_requested.emit(APPLY, pid, revision)
             )
         )
-        dismiss = outline_button("Dismiss", "dismissProposalButton", glass=True)
+        dismiss = outline_button("Dismiss", "dismissProposalButton")
         dismiss.clicked.connect(
             lambda _checked=False, pid=proposal.id, revision=proposal.action_revision: (
                 self.proposal_requested.emit(DISMISS, pid, revision)
@@ -407,7 +406,7 @@ class BriefDetailPane(QScrollArea):
     def _footer(self, item: DigestItem, account_email: str) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
-        reply = outline_button("Draft a reply", "replyButton", icon_name="pencil", glass=True, px=9)
+        reply = outline_button("Draft a reply", "replyButton", icon_name="pencil", compact=True)
         reply.clicked.connect(
             lambda _checked=False, key=item.message_key: self.reply_requested.emit(
                 account_email, key
@@ -420,8 +419,7 @@ class BriefDetailPane(QScrollArea):
                 "Open in Gmail",
                 "openInGmailButton",
                 icon_name="external-link",
-                glass=True,
-                px=9,
+                compact=True,
             )
             open_gmail.clicked.connect(
                 lambda _checked=False, url=source: self.source_requested.emit(url)

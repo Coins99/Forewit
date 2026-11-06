@@ -42,6 +42,7 @@ from mailbrief.domain.events import (
     CalendarEvent,
     EventEdit,
 )
+from mailbrief.ui.date_picker import calendar_popup
 from mailbrief.ui.deadline_text import length_text
 from mailbrief.ui.fields import takes_wheel
 from mailbrief.ui.labels import plain_label, primary_action
@@ -429,7 +430,7 @@ class EventEditor(QDialog):
     def _moment(name: str, day_name: str, clock_name: str) -> tuple[DateBox, TimeBox]:
         day = DateBox()
         day.setObjectName(day_name)
-        day.setCalendarPopup(True)
+        calendar_popup(day)
         day.setDisplayFormat(DATE_FORMAT)
         day.setAccessibleName(f"{name} on")
         day.setKeyboardTracking(False)  # A typed date counts once it's finished.

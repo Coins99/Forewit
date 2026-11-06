@@ -50,7 +50,7 @@ from mailbrief.ui.actions_view import (
     describe,
 )
 from mailbrief.ui.brief_list import ROW_ROLE, Chip, ChipTone, row_height
-from mailbrief.ui.theme import ThemeMode, apply_theme, current_glass, current_tokens, icon
+from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens, icon
 from tests.factories import make_action, make_proposal
 from tests.ui.window_wait import show as show_window
 
@@ -732,7 +732,7 @@ def test_waiting_swaps_the_primary_action_and_its_icons(
     def tinted(name: str, color: str) -> QImage:
         return icon(name, color, 14).pixmap(14).toImage()
 
-    on_fill, on_pill = current_glass().primary_text, current_tokens().text
+    on_fill, on_pill = current_tokens().on_primary, current_tokens().text
     panel.show_view(ActionFilter.WAITING)
     # Mark received is an outline pill there: a tick kept white from Complete's blue fill
     # would vanish on it in light mode.

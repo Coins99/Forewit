@@ -4,12 +4,13 @@ import math
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetricsF, QImage, QTextLayout
+from PySide6.QtGui import QFont, QFontMetricsF, QImage, QTextLayout
 from PySide6.QtWidgets import QApplication, QPushButton
 from pytestqt.qtbot import QtBot
 
 from mailbrief.ui import labels
 from mailbrief.ui.labels import (
+    COMPACT_PX,
     ElidedLabel,
     WrapLabel,
     button_label,
@@ -25,7 +26,6 @@ from mailbrief.ui.theme import (
     SIDEBAR_WIDTH,
     ThemeMode,
     apply_theme,
-    current_glass,
     current_tokens,
     icon,
     ui_font,
@@ -252,8 +252,9 @@ def test_a_shortened_outline_button_keeps_the_whole_text_for_screen_readers(
 
 
 def test_outline_button_takes_a_size_and_an_icon(qtbot: QtBot) -> None:
-    sized = outline_button("Connect", "x", px=12)
-    assert sized.font().pixelSize() == 12
+    compact = outline_button("Connect", "x", compact=True)
+    assert compact.font().pixelSize() == COMPACT_PX
+    assert compact.font().weight() == QFont.Weight.Medium
     iconic = outline_button("Draft a reply", "replyButton", icon_name="pencil")
     assert not iconic.icon().isNull()
     assert (iconic.iconSize().width(), iconic.iconSize().height()) == (14, 14)
@@ -276,7 +277,7 @@ def test_a_button_s_icon_follows_its_variant(
     apply_theme(qapp, mode)
     button = outline_button("Complete", "x", primary=True, icon_name="check")
     qtbot.addWidget(button)
-    on_fill, on_pill = current_glass().primary_text, current_tokens().text
+    on_fill, on_pill = current_tokens().on_primary, current_tokens().text
     assert shown_icon(button) == tinted("check", on_fill)
 
     # The primary fill's white tick would vanish on a light outline pill.
@@ -298,18 +299,6 @@ def test_a_switched_icon_keeps_its_variant_s_tint_through_a_theme_change(
     apply_theme(qapp, ThemeMode.DARK)
 
     assert shown_icon(button) == tinted("check", current_tokens().text)
-
-
-def test_a_glass_button_s_icon_follows_its_own_fill(
-    qtbot: QtBot, qapp: QApplication, themed: None
-) -> None:
-    apply_theme(qapp, ThemeMode.LIGHT)
-    primary = outline_button("Sync", "x", glass=True, primary=True, icon_name="refresh")
-    plain = outline_button("Sync", "y", glass=True, icon_name="refresh")
-    qtbot.addWidget(primary)
-    qtbot.addWidget(plain)
-    assert shown_icon(primary) == tinted("refresh", current_glass().primary_text)
-    assert shown_icon(plain) == tinted("refresh", current_tokens().text)
 
 
 def test_set_variant_leaves_a_button_without_an_icon_without_one(qtbot: QtBot) -> None:

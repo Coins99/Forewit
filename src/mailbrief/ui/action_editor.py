@@ -68,6 +68,7 @@ from mailbrief.domain.recurrence import (
 )
 from mailbrief.services.deadlines import target_for_day
 from mailbrief.ui.action_text import scheduled_amount, sender_person
+from mailbrief.ui.date_picker import calendar_popup
 from mailbrief.ui.deadline_text import (
     FULL_WEEKDAYS,
     WEEKDAYS,
@@ -446,7 +447,7 @@ class ActionEditor(QDialog):
         form.addRow("", self.scheduled)
         self.has_target = QCheckBox("Target &date")
         self.target = QDateEdit()
-        self.target.setCalendarPopup(True)
+        calendar_popup(self.target)
         self.target.setDisplayFormat("yyyy-MM-dd")
         self.has_target.toggled.connect(self.target.setEnabled)
         target_row = QHBoxLayout()
@@ -467,7 +468,7 @@ class ActionEditor(QDialog):
         self.repeat_end = QDateEdit()
         self.repeat_end.setObjectName("taskRepeatEnd")
         self.repeat_end.setAccessibleName("The last date it repeats on")
-        self.repeat_end.setCalendarPopup(True)
+        calendar_popup(self.repeat_end)
         self.repeat_end.setDisplayFormat("yyyy-MM-dd")
         self.repeat_ends.toggled.connect(self.repeat_end.setEnabled)
         repeat_label = QLabel("R&epeats")
@@ -504,7 +505,7 @@ class ActionEditor(QDialog):
         self.deadline_date = DateBox()
         self.deadline_date.setObjectName("taskDeadlineDate")
         self.deadline_date.setAccessibleName("Deadline date")
-        self.deadline_date.setCalendarPopup(True)
+        calendar_popup(self.deadline_date)
         self.deadline_date.setDisplayFormat("yyyy-MM-dd")
         self.deadline_date.setDateRange(_qdate(DEADLINE_FIRST_DAY), _qdate(DEADLINE_LAST_DAY))
         self.deadline_date.setKeyboardTracking(False)  # A typed date counts once it's finished.

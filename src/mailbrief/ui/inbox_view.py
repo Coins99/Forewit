@@ -365,7 +365,7 @@ class InboxPanel(QWidget):
         row.addStretch(1)
         shortcut = QKeySequence("Ctrl+K").toString(QKeySequence.SequenceFormat.NativeText)
         self.search = outline_button(
-            "", "inboxSearchButton", icon_name="search", accessible_name="Search", glass=True
+            "", "inboxSearchButton", icon_name="search", accessible_name="Search"
         )
         self.search.setToolTip(f"Search your mail, actions and notes ({shortcut})")
         row.addWidget(self.search)
@@ -374,7 +374,6 @@ class InboxPanel(QWidget):
             "refreshInboxButton",
             icon_name="refresh",
             accessible_name="Refresh Inbox",
-            glass=True,
         )
         self.refresh.setToolTip("Check Gmail for changes to your Inbox")
         row.addWidget(self.refresh)
@@ -401,7 +400,6 @@ class InboxPanel(QWidget):
             "previousInboxButton",
             icon_name="chevron-left",
             accessible_name="Previous 100",
-            glass=True,
         )
         self.previous.setToolTip("Newer")
         self.previous.hide()  # Remote browsing appends rather than replacing cached pages.
@@ -410,7 +408,6 @@ class InboxPanel(QWidget):
             "nextInboxButton",
             icon_name="chevron-right",
             accessible_name="Load 100 more",
-            glass=True,
         )
         self.next.setToolTip("Load up to 100 more messages")
         pager.addWidget(self.previous)
