@@ -1051,15 +1051,14 @@ class MainWindow(QMainWindow):
             "&Sync and review",
             "generateButton",
             mnemonic=True,
-            glass=True,
             primary=True,
             icon_name="refresh",
         )
         self.generate_button.setToolTip("Refresh today's Inbox or retry an incomplete run.")
-        self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True, glass=True)
+        self.cancel_button = outline_button("&Cancel", "cancelButton", mnemonic=True)
         workspace.add_header_action("today", self.generate_button)
         workspace.header.add_widget(self.cancel_button)
-        self.capture_button = outline_button("Capture", "globalCapture", glass=True)
+        self.capture_button = outline_button("Capture", "globalCapture")
         self.capture_button.setAccessibleName("Capture task or note")
         self.capture_button.setToolTip(
             "Capture a task or note (Ctrl+Shift+N, Cmd+Shift+N on macOS)."
@@ -1082,9 +1081,7 @@ class MainWindow(QMainWindow):
             "&Google sign-in",
             "connectButton",
             mnemonic=True,
-            px=SMALL_PX,
             accessible_name="Sign in with Google",
-            glass=True,
         )
         sidebar.footer.addWidget(self.connect_button)
         # Today: the banner for a past brief and the retry row, above the brief.

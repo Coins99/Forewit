@@ -77,15 +77,6 @@ def tints(g: GlassTokens) -> list[Tint]:
     return [g.tint, dataclasses.replace(g.tint, alpha=g.min_tint_alpha)]
 
 
-def pills(fill: Tint, g: GlassTokens, below: list[RGB], *, hover: bool = True) -> list[RGB]:
-    """A pill over each of ``below``: bare, under its sheen, under its shade and, unless
-    it's the primary pill (which never takes it), under its full hover fill."""
-    extras: list[tuple[Tint, ...]] = [(), (g.pill_sheen,), (g.pill_shade,)]
-    if hover:  # The lensed glow lights a pill's body too (never the primary's).
-        extras += [(g.pill_hover,), (g.lens,), (g.pill_hover, g.lens)]
-    return [layered(b, fill, *extra) for b in below for extra in extras]
-
-
 def test_compositing_matches_the_theme_contrast() -> None:
     assert contrast("#777777", rgb("#ffffff")) == pytest.approx(hex_contrast("#777777", "#ffffff"))
     half = over(Tint("#ffffff", 0.5), rgb("#000000"))
@@ -129,13 +120,9 @@ def test_text_on_glass_meets_wcag_aa(scheme: ColorScheme, mode: ThemeMode) -> No
     for tint in tints(g):
         glass = panels(g, tint)
         raised = [layered(b, g.raised, g.raised_sheen) for b in glass]
-        # Pills also sit on opaque surfaces: panes, cards, the opaque fallback and the header.
-        content = [rgb(t.panel), rgb(t.card), rgb(g.opaque), rgb(t.canvas)]
         surfaces = [
             ("panel", glass, (t.text, t.text_secondary)),
             ("raised", raised, (t.text,)),
-            ("pill", pills(g.pill, g, glass + content), (t.text,)),
-            ("primary", pills(g.primary, g, glass + content, hover=False), (g.primary_text,)),
         ]
         for name, backgrounds, texts in surfaces:
             for text in texts:
@@ -145,7 +132,8 @@ def test_text_on_glass_meets_wcag_aa(scheme: ColorScheme, mode: ThemeMode) -> No
 
 @pytest.mark.parametrize(("scheme", "mode"), SETS)
 def test_focus_ring_stands_out_beside_glass(scheme: ColorScheme, mode: ThemeMode) -> None:
-    """The ring is drawn just outside a pill, on the panel around it (WCAG 1.4.11)."""
+    """A focused control on the glass chrome (WCAG 1.4.11): the ring against the glass
+    and the panels round it."""
     t, g = tokens_for(mode, scheme), glass_for(mode, scheme)
     around = [*panels(g, g.tint), rgb(t.panel), rgb(g.opaque)]
     assert min(contrast(t.accent_fg, background) for background in around) >= 3.0

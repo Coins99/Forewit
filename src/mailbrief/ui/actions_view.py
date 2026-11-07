@@ -415,7 +415,7 @@ class ActionsPanel(QWidget):
         self.group.setFont(ui_font(9))
         self.group.currentIndexChanged.connect(lambda _index: self.group_changed.emit())
         grouping.addWidget(self.group, 1)
-        self.organize_button = outline_button("More", "organizeButton")
+        self.organize_button = outline_button("More", "organizeButton", compact=True)
         self.organize_button.setAccessibleName("Manage projects and life areas")
         tools = QMenu(self.organize_button)
         tools.addAction("Projects & areas", self.organize_requested.emit)
@@ -458,7 +458,6 @@ class ActionsPanel(QWidget):
         grouping.removeWidget(self.organize_button)
         grouping.addWidget(self.organize_button)
         self.organize_button.setProperty("variant", "ghost")
-        self.organize_button.setFont(ui_font(9))
         self.group.setMinimumContentsLength(8)
         self.group.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon

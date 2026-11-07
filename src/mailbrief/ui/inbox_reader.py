@@ -151,7 +151,7 @@ class InboxReader(QWidget):
         self.subject.setContentsMargins(0, SUBJECT_DROP, 0, 0)
         top.addWidget(self.subject, 1, Qt.AlignmentFlag.AlignTop)
         self.close_button = outline_button(
-            "", "inboxCloseButton", icon_name="x", accessible_name="Close message", glass=True
+            "", "inboxCloseButton", icon_name="x", accessible_name="Close message"
         )
         self.close_button.setToolTip("Close (Esc)")
         top.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
@@ -195,9 +195,9 @@ class InboxReader(QWidget):
         self._actions = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._actions.setSpacing(8)
         self.source = outline_button(
-            "Open in Gmail", "inboxSourceButton", icon_name="external-link", glass=True
+            "Open in Gmail", "inboxSourceButton", icon_name="external-link"
         )
-        self.wanted = outline_button(WANT, "inboxWantedButton", glass=True)
+        self.wanted = outline_button(WANT, "inboxWantedButton")
         # Left-aligned, so stacked they keep their size rather than fill the column.
         self._actions.addWidget(self.source, 0, Qt.AlignmentFlag.AlignLeft)
         self._actions.addWidget(self.wanted, 0, Qt.AlignmentFlag.AlignLeft)

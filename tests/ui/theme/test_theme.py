@@ -87,6 +87,24 @@ def test_text_meets_wcag_aa_contrast(scheme: ColorScheme, mode: ThemeMode) -> No
         assert contrast(foreground, background) >= 4.5, (scheme, mode, foreground, background)
 
 
+@pytest.mark.parametrize(("scheme", "mode"), SETS)
+def test_flat_buttons_meet_wcag(scheme: ColorScheme, mode: ThemeMode) -> None:
+    """A button's label on every fill ThemeStyle gives it, hovered and pressed included.
+    Hovering or pressing the primary button never lowers its label's contrast. (With
+    increased contrast its edge is the glass's `rim_contrast`, 3:1 on the panel: see
+    test_glass.)"""
+    t = tokens_for(mode, scheme)
+    for fill in (t.panel, t.card, t.button_pressed, t.selection):
+        assert contrast(t.text, fill) >= 4.5, (scheme, mode, fill)
+    for fill in (t.primary_fill, t.primary_hover, t.primary_pressed):
+        assert contrast(t.on_primary, fill) >= 4.5, (scheme, mode, fill)
+    resting = contrast(t.on_primary, t.primary_fill)
+    assert contrast(t.on_primary, t.primary_hover) >= resting
+    assert contrast(t.on_primary, t.primary_pressed) >= contrast(t.on_primary, t.primary_hover)
+    for colour in (t.button_pressed, t.primary_hover, t.primary_pressed):
+        assert re.fullmatch(r"#[0-9a-f]{6}", colour)
+
+
 @pytest.mark.parametrize("mode", list(ThemeMode))
 def test_stylesheet_substitutes_every_token(mode: ThemeMode) -> None:
     stylesheet = build_stylesheet(tokens_for(mode))

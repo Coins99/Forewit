@@ -16,6 +16,9 @@ email. Calendar preview, creation and planning use right drawers, while Saved ma
 centered dialog. The unified-day lists remain available through Today's **Your day** button
 inside a bounded scroll area, so they do not duplicate the reference overview by default.
 
+Buttons and date pickers follow the template too: flat 8 px rounded rectangles in the
+template's colours with one blue, in every scheme ([Studio](ui/studio.md#buttons-and-date-fields)).
+
 The branch is based on current `main`. It retains bounded Inbox loading, the full Inbox
 reader and search, task estimates/priorities/tags, the shared Calendar grids, appearance
 settings, consent, recovery, draft versions and safe Qt lifetime handling. It adds no

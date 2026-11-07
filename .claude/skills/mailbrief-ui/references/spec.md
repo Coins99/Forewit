@@ -61,27 +61,20 @@ prototype, for every scheme. `GLASS_DARK` and `GLASS_LIGHT` are Studio's. Studio
 follows WWDC25's Liquid Glass over a fluid colour field (`docs/ui/studio.md`): a flat
 backdrop (both stops Studio Mist) with no streak, sheen or lit edge (alpha 0, a light
 turned off), and three soft pools of sage, amber and rose light (`pool_a`, `pool_b`,
-`pool_c`) that show through its frosted chrome. Its pills are lit as a Liquid Glass tab
-is (measured on one): `highlight` (light on the rim along the top and the bottom), `lens`
-(the glow that light lenses into the body from both long edges), `end_shade` (the ends,
-where that light never reaches), `edge` (an even contact ring, light mode only) and
-`shadow` (a soft shadow below, light mode only). Every pill is frosted (`pill`) and lit
-at rest, wherever it sits, and brightens under the pointer (`pill_hover`). Its selected page is a vibrant white fill with no rim
-(`raised_rim` alpha 0: no glass on glass), and its primary pill is solid blue, labelled
-in `primary_text` (white). The other schemes' pools and layers have alpha 0, their
-`pill_hover` too, and their `primary_text` is their `text`. Glass belongs to navigation
-chrome only (header, sidebar, a dialog's frame) and pill buttons. Lists and the reading
-pane stay opaque.
+`pool_c`) that show through its frosted chrome. Its selected page is a vibrant white fill
+with no rim (`raised_rim` alpha 0: no glass on glass). The other schemes' pools have
+alpha 0. Glass belongs to navigation chrome only (header, sidebar, a dialog's frame);
+buttons are flat (see Buttons, lists and tabs), and lists and the reading pane stay
+opaque.
 A translucent colour is a `Tint`: an opaque `#rrggbb` and a separate alpha, never an
 eight-digit hex. Glass lies over a backdrop drawn from `backdrop_top`, `backdrop_bottom`
 `streak` and the pools, so contrast can be proven. `tests/ui/theme/test_glass.py` checks
 the worst case over the backdrop's darkest and brightest pixels (either stop, under the
-streak and under every combination of the pools), under full sheen, shade or hover fill,
-at the tint's alpha and at `min_tint_alpha`:
+streak and under every combination of the pools), under full sheen, at the tint's alpha
+and at `min_tint_alpha`:
 
 - `text` and `text_secondary` on a glass panel reach 4.5:1.
-- `text` on the raised pill and on pill buttons, and `primary_text` on the primary
-  pill, reach 4.5:1, over glass, `panel`, `card` or `opaque`.
+- `text` on the raised pill reaches 4.5:1 over glass.
 - `accent_fg` (the focus ring) beside glass reaches 3:1.
 - The opaque fallbacks reach 4.5:1 for text on `opaque`, and 3:1 for `rim_contrast`
   on `opaque` and `panel`.
@@ -100,7 +93,8 @@ them.
   raised fill at `ACTIVE_RAISE` strength, with no rim.
 - Muted labels inside the sidebar (the note) take `text_secondary`, because `text_muted`
   fails contrast on glass.
-- The sidebar's Google sign-in and Settings' Disconnect are glass pills.
+- Buttons on the chrome (Sync and review, the sidebar's Google sign-in) are the same flat
+  buttons as everywhere else.
 
 - **Backdrop** (`backdrop.py`): a diagonal gradient from `backdrop_top` to
   `backdrop_bottom`, under five streaks of light, then three pools of colour (`POOLS`:
@@ -129,72 +123,12 @@ them.
   - `paint_raised` is a fill with a sheen, never a second layer of glass. Its rim is lit
     from `raised_rim`; alpha 0 draws none (Studio: Apple's selected controls have no
     rim), except under increased contrast.
-  - `paint_pill` is a fill, lighter in its top half, shaded in its bottom half. A pill
-    that isn't primary fills with `pill_hover` at the hover's strength (Studio: a soft
-    ink or white fill, as apple.com's buttons fill on hover; the other schemes' is 0).
   - `paint_rim` is 1 device pixel wide. `hairline.crisp_rect` snaps it onto the device
     pixel grid through the painter's device transform, rounding inward to the first
     and last whole pixels inside the widget's clip. It stays one full pixel at 125% and
     150% at any position. `HairlineFrame` (cards) uses the same helper.
   - `GlassMode.REDUCED_TRANSPARENCY` makes panels `opaque` and drops the backdrop and
     sheens. `INCREASED_CONTRAST` does the same and draws every rim in `rim_contrast`.
-- **Pill buttons** (`button.py`, `GlassButton`, made by `outline_button(..., glass=True)`).
-  Every button in Forewit looks like Settings' Disconnect: a pill of glass at rest,
-  wherever it sits. A `GlassButton` paints itself; `ThemeStyle` draws every other push
-  button as the same pill (see Buttons, lists and tabs).
-  - **Size:** its label (and icon) plus `PAD_X` (10 px) each side and `PAD_Y` (6 px)
-    above and below, plus `ROOM_X` (3 px) each side and `ROOM_Y` (3 px) above and below,
-    room for the pill to grow into on hover and for its shadow. Its label is 13 px Medium
-    (`outline_button(px=...)` keeps Medium for glass). Keep `PAD_X` at 10: 12 widens the
-    content past the 680 px width tests.
-  - **Icon:** plain, as the label is: `outline_button(icon_name=...)` sets a bundled icon
-    tinted in `text` (through `follow_theme`), drawn at the leading end, then `ICON_GAP`
-    (6) and the label. Never put an icon in a tile or square. Sync and review (refresh),
-    Draft a reply (pencil) and Open in Gmail (external-link) have icons.
-  - **Icon alone:** `outline_button("", name, icon_name=..., accessible_name=...,
-    glass=True)` makes a circle (`is_round()`): as wide as it is tall, the icon centred
-    with no gap, growing evenly on hover (`GROW_ROUND`, 1.6 px each side). Give it an
-    accessible name and an app-text tooltip. The Inbox's Search, Refresh, Newer, Older and
-    Close are circles.
-  - **Light:** with Studio's layers lit (`highlight` alpha above 0), `paint_liquid_pill`
-    paints every pill as glass at rest, wherever it sits: frosted (`pill`) with its
-    highlight, lens and shadow, and `pill_hover` over the body as the hover rises. Its
-    light follows a Liquid Glass tab's, measured pixel by pixel: light enters along the
-    two long edges, as a crisp 1 device px rim line along the top and an almost equal one
-    along the bottom (`RIM_LIGHT`, a profile down the pill's height), each glowing into
-    the body and falling steeply within a point, then faintly over about six
-    (`LENS_LIGHT`; the middle is darkest). Round the ends the light fades out and the
-    outermost edge is shaded (`END_SHADE`, by distance in from each end as a share of the
-    radius: darkest at the end, gone by one radius). The primary's glow stays off its
-    body, so its white label keeps its contrast. The shadow (`SHADOW_RINGS`) falls below
-    the pill only and outside it. The other schemes paint `paint_pill`.
-  - **Hover:** animates in, as Apple's glass lights from within on interaction.
-    - The pill grows `GROW_X` and `GROW_Y` each side on an OutBack spring (260 ms),
-      whose overshoot still fits the room.
-    - `paint_glow` lights a band within `GLOW_WIDTH` (3 px) inside the edge. It starts
-      under the pointer and spreads round the pill as the animation runs.
-    - The rim's `specular` light fades in and follows the pointer, and the body fills
-      with `pill_hover`. Studio has no coloured light (specular alpha 0): only the fill
-      and the spring.
-    - Leaving eases it all out (OutCubic, 200 ms). With motion reduced, the light comes
-      at once and the pill never grows. The solid modes paint no light.
-    - The body is never lit, and labels sit at least `PAD_Y` (6 px) inside the edge,
-      clear of the glow. Lighting the body would cut the primary pill's text contrast
-      below 4.5:1 in dark mode.
-  - **Press:** shrinks it to 0.97 in 90 ms, and release springs it back with OutBack in
-    280 ms. Both are instant when motion is reduced. They follow the button's `pressed`
-    and `released` signals, so a keyboard press (Space) shrinks it too. Qt emits
-    `released` when a held button is disabled, and disabling also drops the hover.
-  - **Focus:** a 2 px `accent_fg` ring inside the pill's edge, only after keyboard
-    navigation (`hairline.keyboard_focus`), like the app's other focus rings; a click
-    gives no ring.
-  - **Disabled:** the body at half opacity, with `text_muted` text.
-  - **Text:** painted with `drawText` and mnemonics hidden, after `button_label`
-    escaping.
-  - **Where:** the header's Sync and review (primary) and Cancel, the sidebar's Google
-    sign-in, Settings' Disconnect and Sign in with Google, and the Today page's card and
-    footer buttons. Every other
-    button is a `ThemeStyle` pill that looks the same at rest.
 - **Preferences** (`preferences.py`): `glass_preferences()` holds the `GlassMode` and
   reduced motion that widgets read at paint time. `effective_preferences` sets them from:
   - the system (`system.py`): Increase contrast (Qt's `contrastPreference`, or macOS
@@ -211,8 +145,7 @@ them.
   inside `paused_collection()`.
 - **The Appearance tab** shows a note when the system makes glass solid or still.
 - **Paint profiling** (`profile.py`): with `MAILBRIEF_PAINT_PROFILE=1`, the `@profiled`
-  paint methods are timed (GlassButton, HeaderBar, SidebarNav, SidebarPage and
-  SidebarButton). `run_desktop` logs one line per kind at quit: count, p50 and p95 in
+  paint methods are timed (HeaderBar, SidebarNav, SidebarPage and SidebarButton). `run_desktop` logs one line per kind at quit: count, p50 and p95 in
   ms. Without the variable, a paint costs one check. Measured costs are in
   `docs/ui/liquid-glass.md`.
 - **Tests:** `tests/ui/glass/` checks that every backdrop pixel stays inside the bounds
@@ -365,7 +298,7 @@ line is a `WrapLabel`):
 9. Footer: "Draft a reply" (pencil) and, only for https links on mail.google.com,
    "Open in Gmail" (external-link).
 10. A stretch.
-Buttons are made with `outline_button(..., glass=True)` (`button_label()` text,
+Buttons are made with `outline_button(..., compact=True)` (`button_label()` text,
 `setAutoDefault(False)`) and have an objectName: `acceptButton`, `dismissButton`,
 `addToButton`, `applyProposalButton`, `dismissProposalButton`, `replyButton` and
 `openInGmailButton`.
@@ -607,8 +540,8 @@ The brief list's chips keep their shorter forms (see Brief list).
   weekday labels) and, when it shows, the Briefs page, through `start()`. While another
   operation runs, that reload waits (`_day_refresh_pending`) and is retried each tick.
   `closeEvent` stops the timer.
-- Sidebar footer, top to bottom: Saved mail, Data, Settings, then Google sign-in (12px
-  glass pill, `connectButton`) only while no account is connected, and only once
+- Sidebar footer, top to bottom: Saved mail, Data, Settings, then Google sign-in (a flat
+  button, `connectButton`) only while no account is connected, and only once
   `initialize()` has checked the saved session, so it never flashes at launch. A failed
   check says why on the status line, since the Gmail line is in Settings. Rows and buttons
   are muted while disabled.
@@ -872,7 +805,7 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
      in brief" 13px Medium and the note, 12px secondary.
   5. Footer: a `HairlineDivider` across the column, then Open in Gmail (external-link,
      `inboxSourceButton`) and Should have been in my brief / Remove mark
-     (`inboxWantedButton`), glass pills, side by side when they fit the column, else one
+     (`inboxWantedButton`), flat buttons, side by side when they fit the column, else one
      above the other (`_fit_actions`). Neither is primary: Sync and review is the
      window's one primary.
 
@@ -964,27 +897,44 @@ Gmail shows mail; opening a message splits it as Outlook does; Close or Escape g
   wrapped label in it the height its text needs.
 
 - "Outline" in this spec names a button made by `outline_button()`, not its look: every
-  button is drawn as a glass pill.
-- Every `QPushButton` that isn't a `GlassButton` (a plain `outline_button()`, a
-  `variant="primary"` button, Qt's own in message boxes and button boxes) is drawn by
-  `ThemeStyle` as a glass pill, the same as Settings' Disconnect at rest. The
-  stylesheet has no `QPushButton` rules except the sidebar's `[variant="nav"]` rows; never
-  add any, or Qt draws the stylesheet's box instead of the pill.
-  - `paint_button_pill` (`PE_PanelButtonCommand`) paints `paint_liquid_pill` (or
-    `paint_pill` in the other schemes) inside the same room as a `GlassButton`
-    (`_PILL_ROOM_X`, `_PILL_ROOM_Y` 3): `pill_hover` at full strength under the pointer,
-    shrunk to 0.97 while pressed or checked, and at half strength while disabled. It
-    neither grows nor springs; only a `GlassButton` animates.
-  - `sizeFromContents(CT_PushButton)` gives it a `GlassButton`'s size: the label (and
-    icon) plus `_PILL_PAD_X` (10, the same as `PAD_X`) and `_PILL_PAD_Y` (6), plus the
-    room. `polish` sets its label to Medium, keeping any size set before.
-  - `variant="primary"` is the solid `primary` pill with its label in `primary_text`
-    (`drawControl(CE_PushButtonLabel)`). A default button gets no second frame
-    (`PE_FrameDefaultButton` draws nothing).
-  - Focus (`PE_FrameFocusRect`): a 2 px ring inside the pill, only after keyboard
-    navigation, in `accent_fg` (`primary_text` on the primary), as a `GlassButton`'s.
-  - A disabled pill's label is the palette's disabled `ButtonText` (`text_muted`); the
-    primary's stays `primary_text`.
+  button is flat, as the fields and the Today template's switchers are.
+- Every `QPushButton` (an `outline_button()`, a `variant="primary"` button, Qt's own in
+  message boxes and button boxes) is drawn by `ThemeStyle`. The stylesheet has no
+  `QPushButton` rules except the sidebar's `[variant="nav"]` rows; never add any, or Qt
+  draws the stylesheet's box instead.
+  - `paint_button` (`PE_PanelButtonCommand`) paints a `FIELD_RADIUS` (8 px) rounded
+    rectangle inside the room the button keeps (`_BUTTON_ROOM_X`, `_BUTTON_ROOM_Y` 3), its
+    1 px outline snapped by `hairline.crisp_rect`, in `button_colors`: `panel` in a
+    `hairline` edge at rest, `card` under the pointer, `button_pressed` while pressed,
+    `selection` in an `accent_border` edge while checked. With increased contrast every
+    edge is the glass's `rim_contrast`. Disabled, it is at half strength. Nothing grows,
+    shrinks or animates.
+  - `sizeFromContents(CT_PushButton)`: the label (and icon) plus `_BUTTON_PAD_X` (10) and
+    `_BUTTON_PAD_Y` (6), plus the room, the size the glass pills had, so no layout moved.
+    An icon with no text makes a square button. Keep the padding: more widens content past
+    the 680 px width tests. `polish` sets the label to Medium, keeping its size: `TEXT_PX`
+    (the app font), or `COMPACT_PX` (9) for `outline_button(compact=True)` in dense rows
+    (the brief's cards, the Tasks toolbar's More). Never set a button's font by hand.
+  - `variant="primary"` is `primary_fill` (`primary_hover`, `primary_pressed`: moved away
+    from the label, so its contrast only rises) with its label, icon and menu chevron in
+    `on_primary` (`drawControl(CE_PushButtonLabel)`). A default button gets no second
+    frame (`PE_FrameDefaultButton` draws nothing).
+  - Focus: `paint_button` draws a 2 px ring inside the edge, only after keyboard
+    navigation (`State_KeyboardFocusChange`), in `accent_fg` (`on_primary` on the primary).
+    Fusion doesn't ask for a push button's `PE_FrameFocusRect`, which draws nothing.
+  - Icons are plain, beside the label: `outline_button(icon_name=...)` tints a bundled
+    icon in the label's colour through `follow_theme`.
+  - A disabled button's label is the palette's disabled `ButtonText` (`text_muted`); the
+    primary's stays `on_primary`.
+- Date fields' drop-down calendars are `DatePicker` (`ui/date_picker.py`), made by
+  `calendar_popup(field)`: a rounded `panel` with a `hairline` edge in a translucent
+  pop-up window (`QCalendarPopup` is in `_POPUPS`), the navigation row transparent with
+  `chevron-left` and `chevron-right` icons in `text_secondary` and the month and year as
+  flat buttons (`card` under the pointer; stylesheet rules on `QCalendarWidget
+  QToolButton`), weekday names in `text_secondary` (weekends too: never Qt's red), no grid
+  or week numbers. `paintCell` paints each day: the chosen one a `FIELD_RADIUS`
+  `primary_fill` cell with an `on_primary` number, today a 1.5 px `accent_fg` ring, other
+  months' and out-of-range days `text_muted`.
 - `QListView` (unless named, as the brief, action and page lists are): `panel`, a 1px
   `hairline` border, radius `RADIUS`, padding 3px; a list set to `NoFrame` (Your day's)
   is transparent, with no border or padding. `QListWidget::item`: padding 5px 10px,
@@ -1044,11 +994,11 @@ editor, Settings, the project dialog, message boxes and Qt's own dialogs alike.
 
 ## Stylesheet additions from the Phase 4 visual pass
 
-- Pills pad `PAD_X` 10 each side (`_PILL_PAD_X` for `ThemeStyle`'s), with 14px icons:
-  14 cost the rounded sheet's room at 680 px, and 12 fails the 680 px width tests
+- Buttons pad `_BUTTON_PAD_X` 10 each side, with 14px icons: 14 cost the rounded sheet's
+  room at 680 px, and 12 fails the 680 px width tests
   (`test_unbroken_mail_text_never_widens_the_workspace`,
-  `test_a_long_unbroken_title_never_widens_the_page`) now that every button is a pill
-  with room round it.
+  `test_a_long_unbroken_title_never_widens_the_page`), since every button keeps room
+  round it.
 - Scrollbars are thin token-coloured handles with no arrow buttons: 8px wide, handle
   `border_strong`, radius 3, transparent track.
 - Focus rings in the painted lists show only after the keyboard moves focus

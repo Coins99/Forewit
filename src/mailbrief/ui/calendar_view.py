@@ -416,13 +416,10 @@ class CalendarPanel(QWidget):
         buttons.addStretch(1)  # Buttons keep their own width.
         buttons.setContentsMargins(24, 12, 24, 12)
         self.plan_button.setText("Plan with AI")
-        self.plan_button.setFont(ui_font(10))
         self.hours_button = outline_button("Working hours", "workingHoursButton")
         self.hours_button.setAccessibleName("Set your working hours")
-        self.hours_button.setFont(ui_font(10))
         self.hours_button.clicked.connect(self.hours_requested.emit)
         self.tasks_button = outline_button("Tasks to schedule", "unscheduledToggle")
-        self.tasks_button.setFont(ui_font(10))
         self.tasks_button.clicked.connect(lambda: self.set_tasks_shown(not self._tasks_shown))
         self.free_line = plain_label("", tone="muted", px=10)
         self.free_line.setObjectName("calendarFreeTime")

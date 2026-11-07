@@ -185,11 +185,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - `ui/glass/`: Liquid Glass: `backdrop.py` paints the backdrop
   from the glass tokens at a quarter of the window's size and blurs it, off the Qt thread
   (`BackdropRenderer`, which caches four and drops stale renders), and `painter.py` paints a
-  glass panel, a raised pill and a pill button, with opaque fallbacks (`GlassMode`).
-  `button.py` is the glass pill button (`outline_button(..., glass=True)`), used in the
-  header, the sidebar footer, Settings' Account card and on the Today page; every other
-  push button is drawn by `ThemeStyle` as the same glass pill, so every button looks like
-  Disconnect. Icons are plain, beside the label. `dialog.py` (`DialogSheet`) gives every
+  glass panel and a raised pill, with opaque fallbacks (`GlassMode`). Glass is the chrome
+  only: buttons are flat, drawn by `ThemeStyle` (see `ui/theme/`). `dialog.py` (`DialogSheet`) gives every
   dialog the home screen's glass round a rounded sheet. `motion.py` holds the fluid easing
   the sidebar's selection glides on. The header and sidebar are glass
   (`workspace.GlassChrome`) over the workspace's backdrop, and the selected page is a
@@ -208,12 +205,16 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   and a light set for each `ColorScheme`, Studio by default, and the Liquid Glass tokens),
   the Fusion palette and stylesheet (`style.py`, `apply_theme`; `follow_theme` re-colours
   what a widget keeps, such as a tinted icon, when the scheme changes; `ThemeStyle` draws
-  push buttons as glass pills, fields, chevrons, check boxes and radio buttons, with
+  every push button flat (`paint_button`: an 8 px rounded rectangle in `button_colors`, the
+  one primary `primary_fill`, a keyboard-only focus ring; icons plain, beside the label),
+  fields, chevrons, check boxes and radio buttons, with
   `indicators.py`, and installs `DialogSheet` on every dialog), bundled DM Sans for
   text and Inter Regular, Medium and SemiBold for tabular figures, under the SIL OFL
   (`fonts/`), and Tabler icons under MIT
   (`icons/`). `ui/labels.py` holds
-  `plain_label`, `wrap_label` (`WrapLabel`) and `button_label`. MainWindow hosts the three-pane workspace
+  `plain_label`, `wrap_label` (`WrapLabel`), `button_label` and `outline_button` (every
+  button; `compact=True` for dense rows). Every date field's drop-down calendar is
+  `ui/date_picker.py`'s flat `DatePicker`, through `calendar_popup()`. MainWindow hosts the three-pane workspace
   (`workspace.py`, with `hairline.py`, `brief_list.py` and `brief_detail.py`): the header
   (when Gmail was last checked, Sync and review, Cancel), the sidebar's pages and footer
   (Saved mail, Data, Settings, and Google sign-in while signed out; the Gmail and AI lines
@@ -552,9 +553,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
 - Use the `/mailbrief-ui` skill (`.claude/skills/mailbrief-ui/`) for any change under
   `src/mailbrief/ui`.
 - Colours come only from `ui/theme/tokens.py`; mail and AI text only through
-  `plain_label()`, `wrap_label()`, a delegate's or a painted widget's `drawText()` (the
-  Inbox's monogram) or a glass pill's label (`GlassButton` paints its `button_label()`
-  text with `drawText()`, plain, mnemonics hidden); button text through `button_label()`.
+  `plain_label()`, `wrap_label()` or a delegate's or a painted widget's `drawText()` (the
+  Inbox's monogram); button text through `button_label()`.
 - Render the screenshot gallery with
   `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
   and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).

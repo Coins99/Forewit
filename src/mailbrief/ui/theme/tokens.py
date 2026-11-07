@@ -96,8 +96,56 @@ class Tokens:
         drawn over it keeps its own proven fill."""
         return Tint(self.text_muted, OFF_HOURS_ALPHA)
 
+    # A flat button (ThemeStyle): `panel` inside a `hairline` edge at rest, `card` under the
+    # pointer, and these, derived so every scheme has them and the contrast tests cover them.
+    @property
+    def button_pressed(self) -> str:
+        """A pressed button's fill: the hover fill a little toward the text."""
+        return _mix(self.card, self.text, 0.08)
+
+    @property
+    def primary_hover(self) -> str:
+        """The primary button under the pointer: its fill moved away from its label, so the
+        label's contrast only rises."""
+        return _away(self.primary_fill, self.on_primary, 0.08)
+
+    @property
+    def primary_pressed(self) -> str:
+        """The primary button while pressed, further from its label than when hovered."""
+        return _away(self.primary_fill, self.on_primary, 0.16)
+
 
 OFF_HOURS_ALPHA: Final = 0.08
+
+
+def _channels(hex_colour: str) -> tuple[int, int, int]:
+    value = int(hex_colour[1:7], 16)
+    return value >> 16, (value >> 8) & 0xFF, value & 0xFF
+
+
+def _mix(colour: str, toward: str, amount: float) -> str:
+    """``colour`` moved ``amount`` (0 to 1) of the way to ``toward``, as #rrggbb."""
+    mixed = (
+        round(a + (b - a) * amount)
+        for a, b in zip(_channels(colour), _channels(toward), strict=True)
+    )
+    return "#" + "".join(f"{channel:02x}" for channel in mixed)
+
+
+def _luminance(hex_colour: str) -> float:
+    """WCAG's relative luminance."""
+    linear = []
+    for channel in _channels(hex_colour):
+        c = channel / 255
+        linear.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _away(fill: str, label: str, amount: float) -> str:
+    """``fill`` moved ``amount`` toward black under a lighter label, or toward white under a
+    darker one, so the label stands out more, never less."""
+    darker = _luminance(label) > _luminance(fill)
+    return _mix(fill, "#000000" if darker else "#ffffff", amount)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,20 +157,18 @@ class Tint:
     alpha: float  # 0 is clear, 1 is opaque.
 
 
-# A layer turned off: alpha 0 paints nothing. Only Studio lights the colour field and a
-# pill's Liquid Glass layers; every other scheme leaves them at these defaults.
+# A layer turned off: alpha 0 paints nothing. Only Studio lights the colour field; every
+# other scheme leaves it at this default.
 _LIGHT_OFF: Final = Tint("#ffffff", 0.0)
-_SHADE_OFF: Final = Tint("#000000", 0.0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class GlassTokens:
-    """Liquid Glass for navigation chrome only (header, sidebar, pill buttons); lists and
-    the reading pane stay opaque. Glass lies over a backdrop painted from these tokens, so
-    its text contrast can be proven: `text` and `text_secondary` on a panel, `text` on a
-    raised pill and on pill buttons, `primary_text` on the primary pill. `text_muted` never
-    sits on glass. A calm scheme (Studio) has a flat backdrop and turns its lights off with
-    an alpha of 0."""
+    """Liquid Glass for navigation chrome only (header, sidebar and a dialog's frame);
+    buttons, lists and the reading pane are flat. Glass lies over a backdrop painted from
+    these tokens, so its text contrast can be proven: `text` and `text_secondary` on a
+    panel and `text` on a raised pill. `text_muted` never sits on glass. A calm scheme
+    (Studio) has a flat backdrop and turns its lights off with an alpha of 0."""
 
     backdrop_top: str  # The backdrop's gradient, top left to bottom right.
     backdrop_bottom: str
@@ -137,31 +183,12 @@ class GlassTokens:
     rim_top: Tint  # A pill's rim, bright at the top left, dim along the bottom.
     rim_mid: Tint
     rim_bottom: Tint
-    pill: Tint  # A pill button's fill.
-    pill_sheen: Tint  # Its top half's light.
-    pill_shade: Tint  # Its bottom half's shade.
-    pill_hover: Tint  # A pill button's fill under the pointer, faded in with the hover.
-    primary: Tint  # The one primary pill's fill.
-    primary_rim: Tint
-    primary_text: str  # The primary pill's label.
-    specular: Tint  # The light a pointer casts on a pill's rim; never on its body.
     opaque: str  # A panel's fill when transparency is reduced or contrast increased.
     # The colour field behind the glass: three soft pools of light over the backdrop, as
     # colourful content spills onto Liquid Glass. Alpha 0 paints no pool.
     pool_a: Tint = _LIGHT_OFF
     pool_b: Tint = _LIGHT_OFF
     pool_c: Tint = _LIGHT_OFF
-    # Liquid Glass's layers on a pill (WWDC25), lit as a Liquid Glass tab is: the light on its
-    # rim, along the top and the bottom; the glow it lenses into the body from both edges;
-    # and the soft shadow it casts. Alpha 0 turns a layer off.
-    highlight: Tint = _LIGHT_OFF
-    lens: Tint = _LIGHT_OFF
-    shadow: Tint = _SHADE_OFF
-    # A pill's edges, as on a Liquid Glass tab: an even contact ring just outside it (for a
-    # light page, where its light can't show), and the shade at its ends, where the light
-    # that runs along its long edges never reaches.
-    edge: Tint = _SHADE_OFF
-    end_shade: Tint = _SHADE_OFF
     rim_contrast: str  # Every rim when contrast is increased (3:1 on `opaque`).
 
 
@@ -423,10 +450,7 @@ _TOKENS: Final[Mapping[tuple[ColorScheme, ThemeMode], Tokens]] = {
 _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
     # Liquid Glass after WWDC25, over a fluid colour field after monopo saigon: three soft
     # pools of sage, amber and rose light behind frosted chrome, with no streak, sheen or
-    # lit edge. Every pill, wherever it sits, is frosted at rest with a specular rim, a
-    # lensing band and a soft shadow, as Disconnect in Settings is. The selected page is
-    # a vibrant white fill with no rim (no glass on glass); the primary pill is solid blue
-    # with white text.
+    # lit edge. The selected page is a vibrant white fill with no rim (no glass on glass).
     (ColorScheme.STUDIO, ThemeMode.DARK): GlassTokens(
         backdrop_top="#161617",
         backdrop_bottom="#161617",
@@ -441,24 +465,11 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.28),
         rim_mid=Tint("#ffffff", 0.28),
         rim_bottom=Tint("#ffffff", 0.28),
-        pill=Tint("#ffffff", 0.03),
-        pill_sheen=Tint("#ffffff", 0.0),
-        pill_shade=Tint("#000000", 0.0),
-        pill_hover=Tint("#ffffff", 0.07),
-        primary=Tint("#0071e3", 1.0),
-        primary_rim=Tint("#0071e3", 1.0),
-        primary_text="#ffffff",
-        specular=Tint("#ffffff", 0.5),
         opaque="#242426",
         rim_contrast="#a1a1a6",
         pool_a=Tint("#2f5a3c", 0.7),
         pool_b=Tint("#6b4614", 0.6),
         pool_c=Tint("#5a1f22", 0.65),
-        highlight=Tint("#ffffff", 0.24),
-        lens=Tint("#ffffff", 0.18),
-        shadow=Tint("#000000", 0.0),
-        edge=Tint("#000000", 0.0),
-        end_shade=Tint("#000000", 0.45),
     ),
     (ColorScheme.STUDIO, ThemeMode.LIGHT): GlassTokens(
         backdrop_top="#f5f5f7",
@@ -474,24 +485,11 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#86868b", 1.0),
         rim_mid=Tint("#86868b", 1.0),
         rim_bottom=Tint("#86868b", 1.0),
-        pill=Tint("#ffffff", 0.5),
-        pill_sheen=Tint("#ffffff", 0.0),
-        pill_shade=Tint("#000000", 0.0),
-        pill_hover=Tint("#ffffff", 0.92),
-        primary=Tint("#0071e3", 1.0),
-        primary_rim=Tint("#0071e3", 1.0),
-        primary_text="#ffffff",
-        specular=Tint("#ffffff", 0.8),
         opaque="#f5f5f7",
         rim_contrast="#6e6e73",
         pool_a=Tint("#a0e0ab", 0.55),
         pool_b=Tint("#ffc46b", 0.5),
         pool_c=Tint("#eaa3a8", 0.45),
-        highlight=Tint("#ffffff", 0.95),
-        lens=Tint("#ffffff", 0.6),
-        shadow=Tint("#000000", 0.07),
-        edge=Tint("#000000", 0.065),
-        end_shade=Tint("#000000", 0.14),
     ),
     (ColorScheme.SLATE, ThemeMode.DARK): GlassTokens(
         backdrop_top="#323640",
@@ -507,14 +505,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#8db4ee", 0.18),
-        primary_rim=Tint("#a9c7f5", 0.7),
-        primary_text="#eff0f2",
-        specular=Tint("#ffffff", 0.9),
         opaque="#15171c",
         rim_contrast="#c3c6cd",
     ),
@@ -532,14 +522,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#eceef3", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#eceef3", 0.0),
-        primary=Tint("#1d4f91", 0.12),
-        primary_rim=Tint("#1d4f91", 0.45),
-        primary_text="#1c1d20",
-        specular=Tint("#1d4f91", 0.6),
         opaque="#eef0f3",
         rim_contrast="#646872",
     ),
@@ -557,14 +539,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#8db4ee", 0.18),
-        primary_rim=Tint("#a8c7f5", 0.7),
-        primary_text="#f0efec",
-        specular=Tint("#ffffff", 0.9),
         opaque="#181715",
         rim_contrast="#c3c2b8",
     ),
@@ -582,14 +556,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#eeeeec", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#eeeeec", 0.0),
-        primary=Tint("#204e91", 0.12),
-        primary_rim=Tint("#204e91", 0.45),
-        primary_text="#1f1e1b",
-        specular=Tint("#204e91", 0.6),
         opaque="#f0f0ef",
         rim_contrast="#6f6e69",
     ),
@@ -607,14 +573,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#64c2d7", 0.18),
-        primary_rim=Tint("#8dd2e3", 0.7),
-        primary_text="#eef1f1",
-        specular=Tint("#ffffff", 0.9),
         opaque="#121919",
         rim_contrast="#bfc8c9",
     ),
@@ -632,14 +590,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#e9f0f0", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#e9f0f0", 0.0),
-        primary=Tint("#035a6a", 0.12),
-        primary_rim=Tint("#035a6a", 0.45),
-        primary_text="#1a1e1e",
-        specular=Tint("#035a6a", 0.6),
         opaque="#edf1f1",
         rim_contrast="#5e6b6d",
     ),
@@ -657,14 +607,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#86c393", 0.18),
-        primary_rim=Tint("#a4d3ad", 0.7),
-        primary_text="#eff1ef",
-        specular=Tint("#ffffff", 0.9),
         opaque="#141815",
         rim_contrast="#c2c8c3",
     ),
@@ -682,14 +624,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#ebefec", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#ebefec", 0.0),
-        primary=Tint("#03612a", 0.12),
-        primary_rim=Tint("#03612a", 0.45),
-        primary_text="#1b1e1c",
-        specular=Tint("#03612a", 0.6),
         opaque="#eef1ee",
         rim_contrast="#626b63",
     ),
@@ -707,14 +641,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#c0a3e3", 0.18),
-        primary_rim=Tint("#d0baec", 0.7),
-        primary_text="#f1eff1",
-        specular=Tint("#ffffff", 0.9),
         opaque="#19161b",
         rim_contrast="#c8c4cb",
     ),
@@ -732,14 +658,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#efedf2", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#efedf2", 0.0),
-        primary=Tint("#603b85", 0.12),
-        primary_rim=Tint("#603b85", 0.45),
-        primary_text="#1e1c1f",
-        specular=Tint("#603b85", 0.6),
         opaque="#f1eff2",
         rim_contrast="#6b666f",
     ),
@@ -757,14 +675,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 0.42),
         rim_mid=Tint("#ffffff", 0.06),
         rim_bottom=Tint("#ffffff", 0.16),
-        pill=Tint("#ffffff", 0.055),
-        pill_sheen=Tint("#ffffff", 0.1),
-        pill_shade=Tint("#000000", 0.22),
-        pill_hover=Tint("#ffffff", 0.0),
-        primary=Tint("#e699aa", 0.18),
-        primary_rim=Tint("#efb2bf", 0.7),
-        primary_text="#f2efef",
-        specular=Tint("#ffffff", 0.9),
         opaque="#1c1516",
         rim_contrast="#cdc3c4",
     ),
@@ -782,14 +692,6 @@ _GLASS: Final[Mapping[tuple[ColorScheme, ThemeMode], GlassTokens]] = {
         rim_top=Tint("#ffffff", 1.0),
         rim_mid=Tint("#000000", 0.1),
         rim_bottom=Tint("#000000", 0.26),
-        pill=Tint("#f3eced", 0.9),
-        pill_sheen=Tint("#ffffff", 0.75),
-        pill_shade=Tint("#000000", 0.07),
-        pill_hover=Tint("#f3eced", 0.0),
-        primary=Tint("#842d47", 0.12),
-        primary_rim=Tint("#842d47", 0.45),
-        primary_text="#201c1c",
-        specular=Tint("#842d47", 0.6),
         opaque="#f3efef",
         rim_contrast="#716466",
     ),
@@ -810,11 +712,11 @@ SHEET_RADIUS: Final = 12  # The rounded sheet the pages sit on.
 # rounded corners).
 DIALOG_GUTTER: Final = 8
 DIALOG_MARGIN: Final = 22
-# The command palette's search field is a pill: half its height. Buttons are glass pills,
-# drawn by GlassButton and ThemeStyle.
+# The command palette's search field is a pill: half its height. Buttons are flat rounded
+# rectangles with FIELD_RADIUS corners, drawn by ThemeStyle.
 PILL_RADIUS: Final = 14
 TAB_RADIUS: Final = 12  # Tabs are segments of a pill.
-FIELD_RADIUS: Final = 8  # Text fields, combo boxes and date and time fields.
+FIELD_RADIUS: Final = 8  # Text fields, combo boxes, date and time fields and buttons.
 MENU_ITEM_RADIUS: Final = 6  # Menu items and tooltips.
 SIDEBAR_WIDTH: Final = 214
 BODY_PX: Final = 11

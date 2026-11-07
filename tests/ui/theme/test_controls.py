@@ -25,17 +25,17 @@ from PySide6.QtWidgets import (
 )
 from pytestqt.qtbot import QtBot
 
+from mailbrief.ui.labels import outline_button
 from mailbrief.ui.theme import (
     DIALOG_GUTTER,
     DIALOG_MARGIN,
     ThemeMode,
     apply_theme,
-    current_glass,
     current_tokens,
     tokens_for,
 )
 from mailbrief.ui.theme.indicators import indicator_colors, paint_check_box, paint_radio
-from mailbrief.ui.theme.style import CHEVRON_PX, paint_chevron
+from mailbrief.ui.theme.style import CHEVRON_PX, button_colors, paint_chevron
 from tests.ui.test_keyboard import activate
 
 
@@ -244,17 +244,16 @@ def test_menus_and_combo_lists_have_round_corners(
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
-def test_every_push_button_is_a_glass_pill(
+def test_every_push_button_is_flat(
     qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode
 ) -> None:
-    """A plain push button, as Qt's own in a message box, is drawn as the sidebar's
-    Disconnect is: a pill of glass the size of a GlassButton, with a Medium label;
-    brighter hovered, fainter disabled; the primary one blue with a white label."""
+    """A plain push button, as Qt's own in a message box, is flat, as the fields are: a
+    rounded rectangle in a hairline edge, the size the glass pill was, with a Medium
+    label; the primary one `primary_fill`; fainter disabled."""
     apply_theme(qapp, mode)
     tokens = current_tokens()
     host = QWidget()
     qtbot.addWidget(host)
-    host.setAutoFillBackground(True)
     plain = QPushButton("Save", host)
     primary = QPushButton("Continue", host)
     primary.setProperty("variant", "primary")
@@ -271,19 +270,95 @@ def test_every_push_button_is_a_glass_pill(
     assert 2 * (10 + 3) <= padding <= 2 * (10 + 3) + 1
     assert plain.sizeHint().height() == plain.fontMetrics().height() + 2 * (6 + 3)
 
-    def at(button: QPushButton, x: float) -> QColor:
+    def at(button: QPushButton, x: float, y: float | None = None) -> QColor:
         image = button.grab().toImage()
         ratio = image.devicePixelRatio()
-        return image.pixelColor(round(x * ratio), image.height() // 2)
+        row = image.height() // 2 if y is None else round(y * ratio)
+        return image.pixelColor(round(x * ratio), row)
 
-    # The pill's end: glass's shaded edge, not the panel behind it (in light mode the
-    # body is white on white, so its edge is what shows).
-    edge = min((at(plain, 3 + step / 2) for step in range(4)), key=QColor.lightness)
-    assert edge.name() != tokens.panel
-    assert at(primary, 12).name() == current_glass().primary.color
-    resting = at(plain, 12)
+    # 3 px of room, then the 1 px edge, then the fill; the corner is rounded off.
+    assert at(plain, 3).name() == tokens.hairline
+    assert at(plain, 12).name() == tokens.panel
+    assert at(plain, 3, 3).name() != tokens.hairline
+    assert at(primary, 3).name() == tokens.primary_fill  # No edge: the fill reaches it.
+    assert at(primary, 12).name() == tokens.primary_fill
+    resting = at(plain, 3)
     plain.setEnabled(False)
-    assert at(plain, 3.5) != edge or at(plain, 12) != resting
+    assert at(plain, 3) != resting
+
+
+S = QStyle.StateFlag
+
+
+@pytest.mark.parametrize(
+    ("state", "primary", "fill", "edge"),
+    [
+        (S.State_Enabled, False, "panel", "hairline"),
+        (S.State_Enabled | S.State_MouseOver, False, "card", "hairline"),
+        (S.State_Enabled | S.State_MouseOver | S.State_Sunken, False, "button_pressed", "hairline"),
+        (S.State_Enabled | S.State_On, False, "selection", "accent_border"),
+        (S.State_MouseOver, False, "panel", "hairline"),  # Disabled: no hover.
+        (S.State_Enabled, True, "primary_fill", None),
+        (S.State_Enabled | S.State_MouseOver, True, "primary_hover", None),
+        (S.State_Enabled | S.State_Sunken, True, "primary_pressed", None),
+    ],
+)
+def test_a_button_s_colours_follow_its_state(
+    state: QStyle.StateFlag, primary: bool, fill: str, edge: str | None
+) -> None:
+    tokens = tokens_for(ThemeMode.LIGHT)
+    expected_edge = None if edge is None else getattr(tokens, edge)
+    assert button_colors(tokens, state, primary=primary) == (
+        getattr(tokens, fill),
+        expected_edge,
+    )
+
+
+def test_increased_contrast_edges_every_button_with_the_contrast_rim() -> None:
+    tokens = tokens_for(ThemeMode.DARK)
+    for primary in (False, True):
+        _fill, edge = button_colors(
+            tokens, S.State_Enabled, primary=primary, contrast_edge="#a1a1a6"
+        )
+        assert edge == "#a1a1a6"
+
+
+def test_keyboard_focus_rings_a_button_and_a_click_does_not(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    accent = current_tokens().accent_fg
+    host = QWidget()
+    qtbot.addWidget(host)
+    button = QPushButton("Save", host)
+    button.resize(button.sizeHint())
+    host.resize(120, 60)
+    host.show()
+    qtbot.waitExposed(host)
+
+    def ringed() -> bool:
+        image = button.grab().toImage()
+        ratio = image.devicePixelRatio()
+        row = image.height() // 2
+        return any(image.pixelColor(round(x * ratio), row).name() == accent for x in (4, 4.5, 5))
+
+    button.setFocus(Qt.FocusReason.MouseFocusReason)
+    qtbot.waitUntil(button.hasFocus)
+    assert not ringed()
+    host.setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, True)  # As Tab does.
+    button.update()
+    assert ringed()
+
+
+def test_an_icon_alone_makes_a_square_button(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    apply_theme(qapp, ThemeMode.LIGHT)
+    button = outline_button("", "searchButton", icon_name="search", accessible_name="Search")
+    qtbot.addWidget(button)
+    button.ensurePolished()
+    hint = button.sizeHint()
+    assert hint.width() == hint.height()
 
 
 @pytest.mark.parametrize("mode", list(ThemeMode))
@@ -310,8 +385,8 @@ def test_a_primary_menu_button_s_arrow_is_white_as_its_label(
         round(18 * ratio),
         round(8 * ratio),
     )
-    fill = QColor(current_glass().primary.color)
-    white = QColor(current_glass().primary_text)
+    fill = QColor(current_tokens().primary_fill)
+    white = QColor(current_tokens().on_primary)
     arrow = [QColor(c) for c in colours(band)]
     assert max(c.lightness() for c in arrow) > (fill.lightness() + white.lightness()) / 2
     assert all(c.lightness() >= fill.lightness() - 12 for c in arrow)

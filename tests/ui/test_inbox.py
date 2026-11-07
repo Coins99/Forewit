@@ -809,7 +809,12 @@ def test_inbox_empty_gallery(
     save_shot(window.grab(), f"inbox-empty-{mode}")
 
 
-def test_the_reader_s_actions_stack_when_the_pane_is_narrow(qtbot: QtBot) -> None:
+def test_the_reader_s_actions_stack_when_the_pane_is_narrow(
+    qtbot: QtBot, qapp: QApplication, themed: None
+) -> None:
+    # The app's own style sizes the buttons; a platform's native one (Windows') measures
+    # them narrower, and they would never need to stack.
+    apply_theme(qapp)
     panel = shown_panel(qtbot, width=1000)
     # Unmarked, so the long "Should have been in my brief" is beside Open in Gmail.
     panel.show_page(two_messages(), select="one")
