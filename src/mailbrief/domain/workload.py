@@ -222,7 +222,8 @@ def conflicts_for(
     time set aside counts only when ``block.upcoming_minutes`` was read."""
     start, end = block.block.interval
     first_day, last_day = block.days(zone)
-    buffer = timedelta(minutes=hours.buffer_minutes)
+    before = timedelta(minutes=hours.before_minutes)
+    after = timedelta(minutes=hours.after_minutes)
     found: list[Conflict] = []
     for event in events:
         if not event.busy:
@@ -242,7 +243,7 @@ def conflicts_for(
         span = (event.starts_at_utc, event.ends_at_utc)
         if overlaps((start, end), span):
             found.append(Conflict(kind=ConflictKind.BUSY, at=span[0], label=label))
-        elif buffer and overlaps((start, end), (span[0] - buffer, span[1] + buffer)):
+        elif (before or after) and overlaps((start, end), (span[0] - before, span[1] + after)):
             found.append(Conflict(kind=ConflictKind.BUFFER, at=span[0], label=label))
     for other in blocks:
         if other.public_id != block.public_id and overlaps((start, end), other.block.interval):

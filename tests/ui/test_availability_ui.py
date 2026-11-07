@@ -17,7 +17,13 @@ from mailbrief.domain.events import CalendarEvent, CalendarRange, EventEdit
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.preferences import OwnerPreferences
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime
-from mailbrief.domain.working_hours import SUGGESTED_HOURS, HoursEdit, WorkingHours, WorkingWindow
+from mailbrief.domain.working_hours import (
+    SUGGESTED_HOURS,
+    DatedHours,
+    HoursEdit,
+    WorkingHours,
+    WorkingWindow,
+)
 from mailbrief.ui.calendar_grid import HOUR_PX, HOURS_PAD, entry_style, is_free
 from mailbrief.ui.calendar_layout import CalendarView, off_hours, show_as
 from mailbrief.ui.calendar_view import NO_HOURS, event_text, free_text
@@ -176,9 +182,9 @@ def test_the_hours_editor_builds_the_week_and_names_a_bad_day(qtbot: QtBot) -> N
 
 
 def test_off_hours_and_the_free_line() -> None:
-    assert off_hours(WorkingHours.unset(), 0) == []
-    assert off_hours(HOURS, 0) == [(0, 540), (1020, 1440)]
-    assert off_hours(HOURS, 6) == [(0, 1440)]
+    assert off_hours(WorkingHours.unset(), MONDAY) == []
+    assert off_hours(HOURS, MONDAY) == [(0, 540), (1020, 1440)]
+    assert off_hours(HOURS, MONDAY + timedelta(days=6)) == [(0, 1440)]
     before = datetime(2026, 10, 12, tzinfo=TORONTO)  # Monday's midnight: nothing has passed.
     day = shown(TODAY, TODAY, event(time(10), time(11)))
     assert free_text(day, TORONTO, CalendarView.DAY, before) == "Working 09:00–17:00 · 7 hrs free"
@@ -189,6 +195,18 @@ def test_off_hours_and_the_free_line() -> None:
     assert free_text(week, TORONTO, CalendarView.WEEK, before) == "39 hrs free of 40 hrs this week"
     saturday = shown(date(2026, 10, 17), date(2026, 10, 17))
     assert free_text(saturday, TORONTO, CalendarView.DAY, before) == "No working hours this day"
+
+
+@pytest.mark.parametrize("day_off", [False, True])
+def test_dated_hours_match_shading_and_day_label(day_off: bool) -> None:
+    windows = () if day_off else (WorkingWindow(start_minute=600, end_minute=720),)
+    hours = HOURS.model_copy(update={"overrides": (DatedHours(day=MONDAY, windows=windows),)})
+    assert off_hours(hours, MONDAY) == ([(0, 1440)] if day_off else [(0, 600), (720, 1440)])
+    assert off_hours(hours, MONDAY + timedelta(days=7)) == [(0, 540), (1020, 1440)]
+    before = datetime.combine(MONDAY, time.min, TORONTO)
+    assert free_text(shown(MONDAY, MONDAY, hours=hours), TORONTO, CalendarView.DAY, before) == (
+        "No working hours this day" if day_off else "Working 10:00–12:00 · 2 hrs free"
+    )
 
 
 def test_the_free_line_counts_only_time_still_ahead() -> None:

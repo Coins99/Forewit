@@ -74,6 +74,7 @@ class WorkBlock(DomainModel):
     """A live block, as stored."""
 
     public_id: str = Field(min_length=_PUBLIC_ID_CHARS, max_length=_PUBLIC_ID_CHARS)
+    locked: bool = False
     action_public_id: str = Field(min_length=_PUBLIC_ID_CHARS, max_length=_PUBLIC_ID_CHARS)
     starts_at_utc: datetime
     ends_at_utc: datetime

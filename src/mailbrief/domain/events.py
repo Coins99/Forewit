@@ -32,7 +32,7 @@ from mailbrief.domain.common import (
     known_zone,
     normalize_utc,
 )
-from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
+from mailbrief.domain.google_calendar import CalendarKnowledge, GoogleCoverage, GoogleEvent
 from mailbrief.domain.work_blocks import WorkBlock
 from mailbrief.domain.working_hours import WorkingHours
 
@@ -330,6 +330,8 @@ class CalendarRange(DomainModel):
     markers: tuple[ActionMarker, ...]
     google_events: tuple[GoogleEvent, ...] = ()
     google_coverage: GoogleCoverage | None = None
+    google_knowledge: CalendarKnowledge = CalendarKnowledge()
+    google_checked_coverage: GoogleCoverage | None = None
     blocks: tuple[ScheduledBlock, ...] = ()
     hours: WorkingHours = Field(default_factory=WorkingHours.unset)
     focus: tuple[FocusDay, ...] = ()

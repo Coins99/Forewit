@@ -85,3 +85,9 @@ async def test_upgrade_scenario_preserves_writing_and_original(tmp_path: Path) -
     )
     with pytest.raises(RuntimeError, match="new test profile"):
         await check_upgrade(tmp_path)
+
+
+async def test_additive_scheduling_package_fixture(tmp_path: Path) -> None:
+    from mailbrief.ui.smoke import check_scheduling
+
+    await check_scheduling(tmp_path)

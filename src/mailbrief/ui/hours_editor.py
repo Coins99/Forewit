@@ -9,6 +9,7 @@ shown as Busy.
 """
 
 import re
+from datetime import date
 from typing import Final
 
 from pydantic import ValidationError
@@ -17,8 +18,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
+    QPlainTextEdit,
+    QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +34,7 @@ from mailbrief.domain.working_hours import (
     HOURS_STEP_MINUTES,
     MAX_WINDOWS_PER_DAY,
     SUGGESTED_HOURS,
+    DatedHours,
     DayWindows,
     HoursEdit,
     WorkingHours,
@@ -154,8 +160,32 @@ class HoursEditor(QDialog):
         self.buffer.setAccessibleName("Buffer before and after busy events")
         for minutes in BUFFER_CHOICES:
             self.buffer.addItem(buffer_text(minutes), minutes)
-        form.addRow("Buffer", self.buffer)
-        layout.addWidget(self._fields)
+        form.addRow("Both buffers", self.buffer)
+        self.before = QSpinBox()
+        self.after = QSpinBox()
+        for name, spin in (("Before", self.before), ("After", self.after)):
+            spin.setObjectName(f"hoursBuffer{name}")
+            spin.setAccessibleName(f"Minutes {name.lower()} busy events")
+            spin.setRange(0, 120)
+            form.addRow(name + " event (min)", spin)
+        self.buffer.currentIndexChanged.connect(self._both_buffers)
+        self.overrides = QPlainTextEdit()
+        self.overrides.setObjectName("hoursDatedOverrides")
+        self.overrides.setAccessibleName(
+            "Dated replacement hours, one date equals hours per line; empty hours means day off"
+        )
+        self.overrides.setPlaceholderText("2026-11-09 = 10:00-12:00, 13:00-16:00\n2026-11-10 =")
+        self.overrides.setMaximumHeight(90)
+        form.addRow("Dated replacements", self.overrides)
+        self.fields_scroll = QScrollArea()
+        self.fields_scroll.setObjectName("hoursFieldsScroll")
+        self.fields_scroll.setAccessibleName("Weekly hours, event buffers and dated replacements")
+        self.fields_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.fields_scroll.setWidgetResizable(True)
+        self.fields_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.fields_scroll.setMinimumHeight(120)
+        self.fields_scroll.setWidget(self._fields)
+        layout.addWidget(self.fields_scroll, 1)
         presets = QHBoxLayout()
         self.suggest_button = outline_button("Weekdays 9 to 5", "hoursSuggestButton")
         self.copy_button = outline_button("Copy Monday to weekdays", "hoursCopyButton")
@@ -165,7 +195,6 @@ class HoursEditor(QDialog):
         presets.addStretch(1)
         layout.addLayout(presets)
         layout.addWidget(self.status)
-        layout.addStretch(1)
         buttons = QHBoxLayout()
         self.save_button = outline_button("Save", "hoursSaveButton", primary=True)
         self.cancel_button = outline_button("Cancel", "hoursCancelButton")
@@ -190,6 +219,13 @@ class HoursEditor(QDialog):
         for field, windows in zip(self.days, hours.days, strict=True):
             field.setText(windows_text(windows))
         self.buffer.setCurrentIndex(max(0, self.buffer.findData(hours.buffer_minutes)))
+        self.before.setValue(hours.before_minutes)
+        self.after.setValue(hours.after_minutes)
+        self.overrides.setPlainText(
+            "\n".join(
+                f"{item.day.isoformat()} = {windows_text(item.windows)}" for item in hours.overrides
+            )
+        )
         self.status.setText(WAITING if self._busy else "")
         self._set_saving(False)
         self._loaded_input = self._input()
@@ -205,8 +241,28 @@ class HoursEditor(QDialog):
             week.append(parsed)
         minutes = self.buffer.currentData()
         try:
-            return HoursEdit(days=tuple(week), buffer_minutes=int(minutes or 0))
-        except ValidationError:
+            overrides = []
+            lines = self.overrides.toPlainText().splitlines()
+            if len(lines) > 366:
+                return "Use at most 366 dated replacements."
+            for line in lines:
+                if not line.strip():
+                    continue
+                day, separator, times = line.partition("=")
+                if not separator:
+                    return "Use YYYY-MM-DD = hours for each dated replacement."
+                parsed = parse_windows(times.strip())
+                if isinstance(parsed, str):
+                    return parsed
+                overrides.append(DatedHours(day=date.fromisoformat(day.strip()), windows=parsed))
+            return HoursEdit(
+                days=tuple(week),
+                buffer_minutes=int(minutes or 0),
+                buffer_before_minutes=self.before.value(),
+                buffer_after_minutes=self.after.value(),
+                overrides=tuple(overrides),
+            )
+        except (ValidationError, ValueError):
             return UNUSABLE
 
     def has_unsaved_input(self) -> bool:
@@ -238,7 +294,18 @@ class HoursEditor(QDialog):
             super().reject()
 
     def _input(self) -> tuple[object, ...]:
-        return (*(field.text() for field in self.days), self.buffer.currentIndex())
+        return (
+            *(field.text() for field in self.days),
+            self.buffer.currentIndex(),
+            self.before.value(),
+            self.after.value(),
+            self.overrides.toPlainText(),
+        )
+
+    def _both_buffers(self) -> None:
+        value = int(self.buffer.currentData() or 0)
+        self.before.setValue(value)
+        self.after.setValue(value)
 
     def _suggest(self) -> None:
         for field, windows in zip(self.days, SUGGESTED_HOURS.days, strict=True):

@@ -212,7 +212,7 @@ async def _selections(
 
 # The Google Calendar cache is rewritten by every calendar sync, and no cleanup reads or
 # deletes it (ADR 0018), so a sync between a preview and its cleanup must not void it.
-_NOT_FINGERPRINTED = frozenset({"google_calendars", "google_events"})
+_NOT_FINGERPRINTED = frozenset({"google_calendars", "google_events", "google_calendar_state"})
 
 
 async def _fingerprint(session: AsyncSession) -> str:

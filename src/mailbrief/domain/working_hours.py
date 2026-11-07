@@ -7,7 +7,7 @@ clear before and after each busy timed event. Hours that were never set are not 
 is shaded and no free time is worked out until the owner sets them.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Final, Self
 
 from pydantic import Field, field_validator, model_validator
@@ -51,12 +51,53 @@ class WorkingWindow(DomainModel):
 type DayWindows = tuple[WorkingWindow, ...]
 
 
+class DatedHours(DomainModel):
+    day: date
+    windows: DayWindows = ()
+
+    @field_validator("windows")
+    @classmethod
+    def _windows(cls, value: DayWindows) -> DayWindows:
+        # Share the weekly validation, including ordering and the three-window limit.
+        return HoursEdit(days=(value, (), (), (), (), (), ())).days[0]
+
+
 class HoursEdit(DomainModel):
     """The owner's full set of working hours: each weekday's windows, Monday first, and the
     buffer. A day's windows are kept in order; they may touch but not overlap."""
 
     days: tuple[DayWindows, ...] = ((),) * WEEKDAYS
     buffer_minutes: int = 0
+    buffer_before_minutes: int | None = Field(default=None, ge=0, le=120)
+    buffer_after_minutes: int | None = Field(default=None, ge=0, le=120)
+    overrides: tuple[DatedHours, ...] = Field(default=(), max_length=366)
+
+    @field_validator("overrides")
+    @classmethod
+    def _unique_dates(cls, value: tuple[DatedHours, ...]) -> tuple[DatedHours, ...]:
+        if len({item.day for item in value}) != len(value):
+            raise ValueError("Choose each override date once.")
+        return tuple(sorted(value, key=lambda item: item.day))
+
+    @property
+    def before_minutes(self) -> int:
+        return (
+            self.buffer_minutes
+            if self.buffer_before_minutes is None
+            else self.buffer_before_minutes
+        )
+
+    @property
+    def after_minutes(self) -> int:
+        return (
+            self.buffer_minutes if self.buffer_after_minutes is None else self.buffer_after_minutes
+        )
+
+    def on_day(self, day: date) -> DayWindows:
+        return next(
+            (item.windows for item in self.overrides if item.day == day),
+            self.windows(day.weekday()),
+        )
 
     @field_validator("days")
     @classmethod
@@ -86,7 +127,7 @@ class HoursEdit(DomainModel):
     @property
     def is_set(self) -> bool:
         """Whether any day has working hours; without any, there is no free time to show."""
-        return any(self.days)
+        return any(self.days) or bool(self.overrides)
 
     def windows(self, weekday: int) -> DayWindows:
         """The windows of a weekday, 0 for Monday."""
@@ -114,7 +155,7 @@ class WorkingHours(HoursEdit):
         return cls(revision=0)
 
     def edit(self) -> HoursEdit:
-        return HoursEdit(days=self.days, buffer_minutes=self.buffer_minutes)
+        return HoursEdit(**self.model_dump(include=set(HoursEdit.model_fields)))
 
 
 def _nine_to_five() -> DayWindows:

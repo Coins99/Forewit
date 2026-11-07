@@ -15,9 +15,10 @@ They are the calendar's conflicts, from one definition (``domain.workload``, ADR
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Final
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import ActionStatus
@@ -35,7 +36,7 @@ from mailbrief.domain.workload import ConflictKind, conflicts_for
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.events import EventRepository, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
-from mailbrief.storage.tables import ActionTable, WorkBlockTable
+from mailbrief.storage.tables import ActionTable, BlockCommandTable, WorkBlockTable
 from mailbrief.storage.work_blocks import (
     WorkBlockRepository,
     apply_time,
@@ -83,8 +84,11 @@ class WorkBlockService:
         self._clock = clock
         self._id_factory = id_factory
         self._repository = WorkBlockRepository(session)
+        self._command_clock: datetime | None = None
 
     async def _write[T](self, operation: Callable[[datetime], Awaitable[T]]) -> T:
+        if self._command_clock is not None:
+            return await operation(self._command_clock)
         return await commit_once(self._session, self._clock, operation)
 
     async def _task(self, action_public_id: str) -> ActionTable:
@@ -129,7 +133,7 @@ class WorkBlockService:
         first_day, last_day = block.days(zone)
         hours = await WorkingHoursRepository(self._session).read()
         # Read around the block by the buffer, so an event whose buffer it sits in is seen.
-        reach = timedelta(minutes=hours.buffer_minutes)
+        reach = timedelta(minutes=max(hours.before_minutes, hours.after_minutes))
         start, end = block.starts_at_utc - reach, block.ends_at_utc + reach
         events: list[CalendarEvent | GoogleEvent] = []
         for stored in await EventRepository(self._session).touching(
@@ -196,6 +200,8 @@ class WorkBlockService:
         async def run(now: datetime) -> BlockSaved:
             row, action = await self._live(public_id, expected_revision)
             self._open(action)
+            if row.locked:
+                raise BlockConflictError("Unlock this block before changing its time.")
             previous = block_from_row(row, action.public_id).time
             apply_time(row, time)
             _touch(row, now)
@@ -214,6 +220,8 @@ class WorkBlockService:
                 raise BlockConflictError(_UNDO)
             row, action = found
             self._open(action)
+            if row.locked:
+                raise BlockConflictError("Unlock this block before changing its time.")
             apply_time(row, previous)
             _touch(row, now)
             return await self._saved(row, action)
@@ -226,6 +234,8 @@ class WorkBlockService:
 
         async def run(now: datetime) -> WorkBlock:
             row, action = await self._live(public_id, expected_revision)
+            if row.locked:
+                raise BlockConflictError("Unlock this block before unscheduling it.")
             row.deleted_at_utc = now
             _touch(row, now)
             return block_from_row(row, action.public_id)
@@ -254,6 +264,117 @@ class WorkBlockService:
         """A live block of a live task, with the task's title and state."""
         row, action = await self._live(public_id, None)
         return scheduled_from_rows(row, action)
+
+    async def set_locked(self, public_id: str, expected_revision: int, locked: bool) -> BlockSaved:
+        async def change(now: datetime) -> BlockSaved:
+            row, action = await self._live(public_id, expected_revision)
+            if row.locked != locked:
+                row.locked = locked
+                _touch(row, now)
+            return await self._saved(row, action)
+
+        return await self._write(change)
+
+    async def command(
+        self,
+        command_id: str,
+        operation: str,
+        target: str,
+        *,
+        revision: int | None = None,
+        time: BlockTime | None = None,
+        locked: bool | None = None,
+    ) -> BlockSaved | WorkBlock:
+        """Execute or confirm the same manual command without duplicating its effects.
+
+        A receipt survives deletion/purge, but replay refuses changed or missing results.
+        Previous times support move Undo without storing warning labels or task text.
+        """
+        from mailbrief.services.scheduling import fingerprint
+
+        command_id = str(UUID(command_id))
+        valid = (
+            (operation == "schedule" and time is not None and revision is None)
+            or (operation in ("move", "undo_move") and time is not None and revision is not None)
+            or (operation == "unschedule" and revision is not None and time is None)
+            or (operation == "restore" and time is None and revision is None)
+            or (operation == "lock" and revision is not None and locked is not None)
+        )
+        if not valid:
+            raise BlockConflictError("Invalid block command.")
+        digest = fingerprint(
+            (
+                operation,
+                target,
+                revision,
+                None if time is None else time.model_dump(mode="json"),
+                locked,
+            )
+        )
+
+        async def change(now: datetime) -> BlockSaved | WorkBlock:
+            await self._session.execute(text("BEGIN IMMEDIATE"))
+            receipt = await self._session.get(BlockCommandTable, command_id, populate_existing=True)
+            if receipt is not None:
+                if receipt.input_hash != digest or receipt.operation != operation:
+                    raise BlockConflictError("This block command already has different input.")
+                pair = await self._repository.get(receipt.result_public_id, include_deleted=True)
+                if (
+                    pair is None
+                    or pair[0].revision != receipt.result_revision
+                    or (pair[0].deleted_at_utc is not None) != receipt.result_deleted
+                ):
+                    raise BlockConflictError(
+                        "This command already applied; its result changed or was removed. "
+                        "Nothing was recreated."
+                    )
+                row, action = pair
+                if operation == "unschedule":
+                    return block_from_row(row, action.public_id)
+                previous = (
+                    None if receipt.previous is None else BlockTime.model_validate(receipt.previous)
+                )
+                return await self._saved(row, action, previous)
+            self._command_clock = now
+            try:
+                if operation == "schedule":
+                    assert time is not None
+                    result: BlockSaved | WorkBlock = await self.schedule(target, time)
+                elif operation in ("move", "undo_move"):
+                    assert time is not None and revision is not None
+                    result = await (
+                        self.move(target, revision, time)
+                        if operation == "move"
+                        else self.undo_move(target, revision, time)
+                    )
+                elif operation == "unschedule":
+                    assert revision is not None
+                    result = await self.unschedule(target, revision)
+                elif operation == "lock":
+                    assert revision is not None and locked is not None
+                    result = await self.set_locked(target, revision, locked)
+                else:
+                    result = await self.restore(target)
+            finally:
+                self._command_clock = None
+            block = result.block if isinstance(result, BlockSaved) else result
+            self._session.add(
+                BlockCommandTable(
+                    command_id=command_id,
+                    operation=operation,
+                    input_hash=digest,
+                    result_public_id=block.public_id,
+                    result_revision=block.revision,
+                    result_deleted=operation == "unschedule",
+                    previous=result.previous.model_dump(mode="json")
+                    if isinstance(result, BlockSaved) and result.previous is not None
+                    else None,
+                    created_at_utc=now,
+                )
+            )
+            return result
+
+        return await commit_once(self._session, self._clock, change)
 
     async def for_action(self, action_public_id: str) -> tuple[WorkBlock, ...]:
         """A live task's live blocks, by start."""

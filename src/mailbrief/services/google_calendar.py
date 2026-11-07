@@ -28,7 +28,6 @@ from mailbrief.infra.tasks import running
 from mailbrief.ports.calendar import CalendarReader
 from mailbrief.ports.errors import (
     AuthenticationRequiredError,
-    MessageUnavailableError,
     ProviderError,
     ProviderRateLimitError,
 )
@@ -68,12 +67,17 @@ def shown_calendars(calendars: Sequence[GoogleCalendarInfo]) -> list[GoogleCalen
 
 
 def needs_sync(
-    coverage: GoogleCoverage | None, first_day: date, last_day: date, now: datetime
+    coverage: GoogleCoverage | None,
+    first_day: date,
+    last_day: date,
+    now: datetime,
+    zone: ZoneInfo | None = None,
 ) -> bool:
     """Whether the cache misses these days or is older than STALE_AFTER."""
     return (
         coverage is None
-        or not coverage.covers(first_day, last_day)
+        or not coverage.covers(first_day, last_day, zone)
+        or normalize_utc(now) < coverage.synced_at_utc
         or normalize_utc(now) - coverage.synced_at_utc >= STALE_AFTER
     )
 
@@ -103,9 +107,15 @@ class CalendarSyncService:
         first_day, last_day = sync_window(around)
         start_utc = day_window(first_day, zone).start_utc
         end_utc = day_window(last_day, zone).end_utc
-        shown = shown_calendars(await self._reader.list_calendars())
+        try:
+            shown = shown_calendars(await self._reader.list_calendars())
+        except BaseException:
+            await self._saved(self._repository.list_failed())
+            raise
         now = normalize_utc(self._clock())
-        rows = await self._saved(self._repository.replace_calendars(shown, now))
+        rows = await self._saved(
+            self._repository.replace_calendars(shown, now, first_day, last_day, zone.key)
+        )
         slots = asyncio.Semaphore(CONCURRENCY)
         stop = asyncio.Event()
 
@@ -136,8 +146,8 @@ class CalendarSyncService:
                     throttled = throttled or isinstance(outcome, ProviderRateLimitError)
                     continue
                 row = rows[calendar.calendar_id]
-                if isinstance(outcome, MessageUnavailableError):
-                    outcome = ()  # Gone: nothing of it is left to show.
+                # A refused/gone calendar is not evidence of an empty schedule.
+                # A later successful calendar-list read can remove it explicitly.
                 if isinstance(outcome, ProviderError):
                     failed += 1
                     await self._saved(
@@ -145,7 +155,9 @@ class CalendarSyncService:
                     )
                 else:
                     events += await self._saved(
-                        self._repository.replace_events(row, outcome, first_day, last_day, now)
+                        self._repository.replace_events(
+                            row, outcome, first_day, last_day, now, zone.key
+                        )
                     )
                     synced += 1
                 done.add(calendar.calendar_id)

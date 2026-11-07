@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
-from mailbrief.domain.working_hours import HoursEdit, WorkingHours, WorkingWindow
+from mailbrief.domain.working_hours import DatedHours, HoursEdit, WorkingHours, WorkingWindow
 from mailbrief.storage.tables import WorkingHoursTable
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,8 @@ def hours_from_row(row: WorkingHoursTable | None) -> WorkingHours:
         return WorkingHours.unset()
     try:
         days = row.windows_json
-        if not isinstance(days, list):
+        overrides = row.overrides_json
+        if not isinstance(days, list) or not isinstance(overrides, list):
             raise ValueError(_INVALID)
         week: list[tuple[WorkingWindow, ...]] = []
         for windows in days:
@@ -88,6 +89,9 @@ def hours_from_row(row: WorkingHoursTable | None) -> WorkingHours:
         return WorkingHours(
             days=tuple(week),
             buffer_minutes=row.buffer_minutes,
+            buffer_before_minutes=row.buffer_before_minutes,
+            buffer_after_minutes=row.buffer_after_minutes,
+            overrides=tuple(DatedHours.model_validate(item) for item in overrides),
             revision=row.revision,
             updated_at_utc=row.updated_at_utc,
         )
@@ -101,3 +105,6 @@ def apply_hours(row: WorkingHoursTable, edit: HoursEdit) -> None:
         [[window.start_minute, window.end_minute] for window in windows] for windows in edit.days
     ]
     row.buffer_minutes = edit.buffer_minutes
+    row.buffer_before_minutes = edit.before_minutes
+    row.buffer_after_minutes = edit.after_minutes
+    row.overrides_json = [item.model_dump(mode="json") for item in edit.overrides]
