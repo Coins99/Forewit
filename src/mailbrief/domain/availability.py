@@ -19,6 +19,7 @@ from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.events import CalendarEvent, CalendarRange, wall_clock
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.intervals import Interval, clip, minutes, subtract, union
+from mailbrief.domain.scheduling_time import working_window_intervals
 from mailbrief.domain.work_blocks import suggested_minutes
 from mailbrief.domain.working_hours import DAY_MINUTES, HOURS_STEP_MINUTES, WorkingHours
 
@@ -43,8 +44,9 @@ def working_spans(hours: WorkingHours, day: date, zone: ZoneInfo) -> tuple[Inter
     """The day's working windows as UTC spans, merged; one a DST change leaves empty is
     dropped."""
     return union(
-        (local_moment(day, window.start_minute, zone), local_moment(day, window.end_minute, zone))
-        for window in hours.windows(day.weekday())
+        (interval.start, interval.end)
+        for window in hours.on_day(day)
+        for interval in working_window_intervals(day, window.start_minute, window.end_minute, zone)
     )
 
 
@@ -53,11 +55,16 @@ def _all_day_span(first: date, last: date, zone: ZoneInfo) -> Interval:
 
 
 def busy_spans(
-    events: Iterable[CalendarEvent | GoogleEvent], zone: ZoneInfo, buffer_minutes: int = 0
+    events: Iterable[CalendarEvent | GoogleEvent],
+    zone: ZoneInfo,
+    buffer_minutes: int = 0,
+    *,
+    after_minutes: int | None = None,
 ) -> tuple[Interval, ...]:
     """What busy events take, merged: a timed one its time and the buffer either side, an
     all-day one its whole local days. Free events take nothing."""
     buffer = timedelta(minutes=buffer_minutes)
+    after = timedelta(minutes=buffer_minutes if after_minutes is None else after_minutes)
     spans: list[Interval] = []
     for event in events:
         if not event.busy:
@@ -67,7 +74,7 @@ def busy_spans(
             spans.append(_all_day_span(event.start_date, event.last_date, zone))
         else:
             assert event.starts_at_utc is not None and event.ends_at_utc is not None
-            spans.append((event.starts_at_utc - buffer, event.ends_at_utc + buffer))
+            spans.append((event.starts_at_utc - buffer, event.ends_at_utc + after))
     return union(spans)
 
 
@@ -111,7 +118,11 @@ def _taken(shown: CalendarRange, hours: WorkingHours, zone: ZoneInfo) -> _Taken:
     """What ``shown`` takes, worked out once for all its days: the busy spans, the all-day
     busy events (days off) and the open tasks' blocks."""
     events: Sequence[CalendarEvent | GoogleEvent] = (*shown.events, *shown.google_events)
-    busy = busy_spans(events, zone, hours.buffer_minutes) if hours.is_set else ()
+    busy = (
+        busy_spans(events, zone, hours.before_minutes, after_minutes=hours.after_minutes)
+        if hours.is_set
+        else ()
+    )
     offs = tuple(event for event in events if event.busy and event.all_day)
     blocks = tuple(block.block.interval for block in shown.blocks if block.open)
     return busy, offs, blocks

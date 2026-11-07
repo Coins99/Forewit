@@ -176,7 +176,7 @@ async def test_reader_lists_primary_first_and_maps_events() -> None:
                     "start": {"dateTime": "2026-10-12T09:00:00-04:00"},
                     "end": {"dateTime": "2026-10-12T09:30:00-04:00"},
                 },
-                {"id": "bad"},
+                {"id": "bad", "status": "cancelled"},
             ]
         )
     )
@@ -190,6 +190,27 @@ async def test_reader_lists_primary_first_and_maps_events() -> None:
         assert [c.name for c in calendars] == ["Owner", "Alpha"]
         events = await reader.list_events(PRIMARY, START, END)
     assert [event.event_id for event in events] == ["e"] and reader.auth is not None
+
+
+@respx.mock
+async def test_unreadable_non_cancelled_event_never_proves_empty_time() -> None:
+    from mailbrief.ports.errors import ProviderError
+
+    respx.get(events_url("owner@example.com")).mock(return_value=page([{"id": "bad"}]))
+    async with httpx.AsyncClient() as http:
+        reader = GoogleCalendarReader(
+            cast(GmailAuth, Tokens()), CalendarClient(http, Tokens(), no_sleep)
+        )
+        with pytest.raises(ProviderError, match="completely"):
+            await reader.list_events(PRIMARY, START, END)
+
+
+@respx.mock
+async def test_malformed_page_entry_is_not_silently_dropped() -> None:
+    respx.get(CALENDAR_LIST_URL).mock(return_value=httpx.Response(200, json={"items": [None]}))
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(ProviderResponseError, match="incomplete page"):
+            await CalendarClient(http, Tokens(), no_sleep).calendars()
 
 
 def listing(*items: dict[str, Any]) -> httpx.Response:

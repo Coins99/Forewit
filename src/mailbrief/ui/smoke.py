@@ -25,8 +25,9 @@ from mailbrief.domain.drafts import Draft
 from mailbrief.domain.events import EventEdit
 from mailbrief.domain.messages import AccountIdentity, EmailContact, NormalizedMessage, ProviderKind
 from mailbrief.domain.preferences import PreferencesEdit
-from mailbrief.domain.work_blocks import BlockTime
-from mailbrief.domain.working_hours import SUGGESTED_HOURS
+from mailbrief.domain.scheduling import SchedulingRequest, SchedulingTask
+from mailbrief.domain.work_blocks import BlockSaved, BlockTime
+from mailbrief.domain.working_hours import SUGGESTED_HOURS, DatedHours, HoursEdit, WorkingWindow
 from mailbrief.infra.data_lock import create_data_lock
 from mailbrief.services.data import (
     CleanupKind,
@@ -36,6 +37,7 @@ from mailbrief.services.data import (
     preview_cleanup,
 )
 from mailbrief.services.drafts import DraftService
+from mailbrief.services.scheduling import SchedulingKnowledgeError
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config, upgrade_database
@@ -420,5 +422,82 @@ async def check_package(directory: Path) -> None:
             raise RuntimeError("Recovery lost owner writing or duplicated a captured note.")
     finally:
         await recovered.close()
+    await check_scheduling(directory / f"planning-{suffix}")
     report = json.dumps({"ok": True, "platform": sys.platform, "launches": 2})
     await asyncio.to_thread((directory / "smoke-result.json").write_text, report, encoding="utf-8")
+
+
+async def check_scheduling(directory: Path) -> None:
+    """Exercise the additive scheduling APIs in a separate disposable package profile."""
+    path = directory / "planner.sqlite3"
+    runtime = DesktopRuntime(path)
+    try:
+        await runtime.load_saved()
+        await runtime.save_owner_preferences(PreferencesEdit(time_zone="UTC"), 0)
+        task = await runtime.capture(SMOKE_TASK)
+        assert isinstance(task, Action)
+        day = datetime.now(UTC).date() + timedelta(days=1)
+        windows = (WorkingWindow(start_minute=540, end_minute=1020),)
+        await runtime.save_working_hours(
+            HoursEdit(
+                days=(windows,) * 7,
+                buffer_before_minutes=5,
+                buffer_after_minutes=20,
+                overrides=(DatedHours(day=day, windows=windows),),
+            ),
+            0,
+        )
+        review = await runtime.review_schedule(
+            SchedulingRequest(
+                first_day=day,
+                last_day=day,
+                tasks=(SchedulingTask(task_public_id=task.public_id, remaining_minutes=60),),
+            )
+        )
+        key = str(uuid4())
+        try:
+            await runtime.apply_schedule(review.proposal, (task.public_id,), key)
+        except SchedulingKnowledgeError as error:
+            saved = await runtime.apply_schedule(
+                review.proposal, (task.public_id,), key, acknowledged_knowledge=error.token
+            )
+        else:
+            raise RuntimeError("Missing calendar knowledge was not acknowledged.")
+        if not (await runtime.apply_schedule(review.proposal, (task.public_id,), key)).replayed:
+            raise RuntimeError("Planning receipt was not replayed.")
+        assert saved.undo is not None
+        undo_key = str(uuid4())
+        await runtime.undo_schedule(saved.undo, undo_key)
+        if not (await runtime.undo_schedule(saved.undo, undo_key)).replayed:
+            raise RuntimeError("Planning Undo receipt was not replayed.")
+        edit = BlockTime(
+            starts_at_utc=review.proposal.blocks[0].starts_at_utc,
+            ends_at_utc=review.proposal.blocks[0].ends_at_utc,
+            time_zone="UTC",
+        )
+        manual_key = str(uuid4())
+        block = await runtime.block_command(manual_key, "schedule", task.public_id, time=edit)
+        assert isinstance(block, BlockSaved)
+        retried = await runtime.block_command(manual_key, "schedule", task.public_id, time=edit)
+        assert isinstance(retried, BlockSaved)
+        if retried.block.public_id != block.block.public_id:
+            raise RuntimeError("A manual retry duplicated its block.")
+        await runtime.lock_block(block.block.public_id, block.block.revision, True)
+    finally:
+        await runtime.close()
+    archive, restored = directory / "planning.zip", directory / "restored.sqlite3"
+    await asyncio.to_thread(create_backup, path, archive)
+    await asyncio.to_thread(restore_backup, archive, restored)
+    runtime = DesktopRuntime(restored)
+    try:
+        await runtime.load_saved()
+        loaded = await runtime.get_action(task.public_id)
+        hours = await runtime.working_hours()
+        if len(loaded.blocks) != 1 or not loaded.blocks[0].locked:
+            raise RuntimeError("Recovery lost the locked reservation.")
+        if hours.after_minutes != 20 or len(hours.overrides) != 1:
+            raise RuntimeError("Recovery lost the additive availability rules.")
+        if not (await runtime.undo_schedule(saved.undo, undo_key)).replayed:
+            raise RuntimeError("Recovery lost the batch Undo receipt.")
+    finally:
+        await runtime.close()

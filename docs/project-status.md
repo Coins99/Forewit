@@ -247,3 +247,11 @@ that structure under `tests`.
 Keep the checkout and its `.venv` out of folders synced by iCloud Drive (Desktop &
 Documents), OneDrive or Dropbox: they set the macOS hidden flag on `.venv` files, and then
 Python 3.13 skips hidden `.pth` files and Qt skips hidden plugins.
+
+
+## P3 scheduling add-ons (2026-11-06)
+
+Built on merged main `54e27c9`, preserving #105–#108. See
+[the add-ons register](p3-scheduling-addons.md) for the six complementary features,
+additive migrations 0034–0036, development-profile conversion and verification.
+Implementation and engineering checks do not establish owner or native macOS acceptance.

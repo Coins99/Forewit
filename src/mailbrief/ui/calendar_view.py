@@ -280,6 +280,7 @@ class CalendarPanel(QWidget):
     view_requested = Signal(str, bool)
     google_requested = Signal(str)
     plan_requested = Signal()
+    scheduling_requested = Signal()
     google_preview_requested = Signal(object)
     block_requested = Signal(str, object)
     day_requested = Signal(object)
@@ -398,6 +399,12 @@ class CalendarPanel(QWidget):
         self.open_google_button = outline_button(
             "Open &in Google Calendar", "openGoogleEventButton", mnemonic=True
         )
+        self.scheduling_button = outline_button("Suggest time", "calendarSuggestTime")
+        self.scheduling_button.setAccessibleName("Review local task scheduling suggestions")
+        self.scheduling_button.clicked.connect(self.scheduling_requested)
+        task_layout = self.unscheduled.layout()
+        assert task_layout is not None
+        task_layout.addWidget(self.scheduling_button)
         self.plan_button = outline_button("Plan with &AI", "planCalendarButton", mnemonic=True)
         self.new_button.setText("New event")
         self.new_button.setProperty("variant", "primary")

@@ -1190,6 +1190,10 @@ class WorkBlockTable(Base):
     change only through ORM objects.
     """
 
+    locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+
     __tablename__ = "work_blocks"
     __table_args__ = (
         UniqueConstraint("public_id", name="uq_work_blocks_public_id"),
@@ -1223,6 +1227,14 @@ class GoogleCalendarTable(Base):
     last dealt with it, in the owner's zone then: its events were read, or the read failed
     and it kept what it had.
     """
+
+    successful_from: Mapped[date | None] = mapped_column(Date)
+    successful_until: Mapped[date | None] = mapped_column(Date)
+    successful_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    successful_zone: Mapped[str | None] = mapped_column(String(64))
+    read_failed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     __tablename__ = "google_calendars"
     __table_args__ = (UniqueConstraint("calendar_id", name="uq_google_calendars_calendar_id"),)
@@ -1279,6 +1291,12 @@ class WorkingHoursTable(Base):
     so a calendar setting can never stop email work, and changes only through ORM objects.
     """
 
+    buffer_before_minutes: Mapped[int | None] = mapped_column(Integer)
+    buffer_after_minutes: Mapped[int | None] = mapped_column(Integer)
+    overrides_json: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+
     __tablename__ = "working_hours"
     __table_args__ = (
         CheckConstraint("id = 1", name="single_row"),
@@ -1293,3 +1311,52 @@ class WorkingHoursTable(Base):
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class GoogleCalendarStateTable(Base):
+    """Cache control metadata, not an owner record; unknown on upgrade/restore."""
+
+    __tablename__ = "google_calendar_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="singleton"),
+        CheckConstraint("list_succeeded IN (0,1)", name="list_succeeded_boolean"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generation: Mapped[str] = mapped_column(String(36), nullable=False)
+    list_succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    listed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    first_day: Mapped[date | None] = mapped_column(Date)
+    last_day: Mapped[date | None] = mapped_column(Date)
+    time_zone: Mapped[str | None] = mapped_column(String(64))
+
+
+class BlockCommandTable(Base):
+    """Manual retry receipts; no owner text or foreign keys to purged results."""
+
+    __tablename__ = "block_commands"
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    previous: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class PlanningCommandTable(Base):
+    """Add-only scheduling batch receipts contain control IDs/revisions, never owner text."""
+
+    __tablename__ = "planning_commands"
+    __table_args__ = (
+        CheckConstraint("length(command_id) = 36", name="command_id_length"),
+        CheckConstraint("operation IN ('apply','undo')", name="operation_known"),
+        CheckConstraint(
+            "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'", name="input_hash_valid"
+        ),
+    )
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    results: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

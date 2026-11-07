@@ -130,6 +130,9 @@ def test_visible_mnemonics_stay_unique(panel: CalendarPanel, mode: str) -> None:
 @pytest.fixture
 def backend() -> FakeBackend:
     result = FakeBackend()
+    result.owner_preferences = result.owner_preferences.model_copy(
+        update={"time_zone": TORONTO.key}
+    )
     result.calendar_now = NOW.astimezone(UTC)
     return result
 
@@ -151,7 +154,9 @@ async def finish(window: MainWindow) -> None:
 def synced(backend: FakeBackend, *, at: datetime = NOW) -> None:
     backend.calendar_permission = True
     first, last = sync_window(TODAY)
-    backend.google_coverage = GoogleCoverage(first_day=first, last_day=last, synced_at_utc=at)
+    backend.google_coverage = GoogleCoverage(
+        first_day=first, last_day=last, synced_at_utc=at, time_zone=TORONTO.key
+    )
     backend.google_events = [google()]
 
 

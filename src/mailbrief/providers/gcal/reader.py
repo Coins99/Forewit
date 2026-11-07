@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from mailbrief.domain.google_calendar import GoogleCalendarInfo, GoogleEvent
+from mailbrief.ports.errors import ProviderError
 from mailbrief.providers.gcal.client import CalendarClient
 from mailbrief.providers.gcal.errors import calendar_response_error
 from mailbrief.providers.gcal.mapper import map_calendar, map_event
@@ -28,6 +29,18 @@ class GoogleCalendarReader:
         found: dict[str, GoogleCalendarInfo] = {}
         for item in await self._client.calendars():
             mapped = map_calendar(item)
+            if (
+                mapped is None
+                and item.get("deleted") is not True
+                and (
+                    item.get("primary") is True
+                    or (item.get("selected") is True and item.get("hidden") is not True)
+                )
+            ):
+                raise ProviderError(
+                    "A shown calendar cannot be read completely.",
+                    provider_error_code="calendar_incomplete",
+                )
             if mapped is not None:
                 found.setdefault(mapped.calendar_id, mapped)  # A repeat is kept once.
         if sum(calendar.primary for calendar in found.values()) != 1:
@@ -40,10 +53,25 @@ class GoogleCalendarReader:
                 calendar.name.casefold(),
             ),
         )
+        if sum(calendar.shown for calendar in ordered) > MAX_CALENDARS:
+            raise ProviderError(
+                "Too many shown calendars to establish complete coverage.",
+                provider_error_code="calendar_incomplete",
+            )
         return tuple(ordered[:MAX_CALENDARS])
 
     async def list_events(
         self, calendar: GoogleCalendarInfo, start_utc: datetime, end_utc: datetime
     ) -> tuple[GoogleEvent, ...]:
         items = await self._client.events(calendar.calendar_id, start_utc, end_utc)
-        return tuple(mapped for item in items if (mapped := map_event(item, calendar)) is not None)
+        result = []
+        for item in items:
+            mapped = map_event(item, calendar)
+            if mapped is None and item.get("status") != "cancelled":
+                raise ProviderError(
+                    "A calendar entry could not be read completely.",
+                    provider_error_code="calendar_incomplete",
+                )
+            if mapped is not None:
+                result.append(mapped)
+        return tuple(result)

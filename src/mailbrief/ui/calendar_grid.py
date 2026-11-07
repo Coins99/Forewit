@@ -624,7 +624,12 @@ class WeekGrid(_Grid):
             return
         block = hit.entry
         days = self.days()
-        if not isinstance(block, ScheduledBlock) or not block.open or hit.day not in days:
+        if (
+            not isinstance(block, ScheduledBlock)
+            or not block.open
+            or block.block.locked
+            or hit.day not in days
+        ):
             return
         index = days.index(hit.day)
         start, end = _wall_minutes(block, hit.day, self._zone)

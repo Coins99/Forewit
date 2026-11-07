@@ -120,6 +120,8 @@ class CalendarClient:
             found = page.get("items", [])
             if not isinstance(found, list):
                 raise calendar_response_error("Google Calendar returned an invalid page.")
+            if any(not isinstance(item, dict) for item in found):
+                raise calendar_response_error("Google Calendar returned an incomplete page.")
             items.extend(item for item in found if isinstance(item, dict))
             next_token = page.get("nextPageToken")
             if next_token is None:
