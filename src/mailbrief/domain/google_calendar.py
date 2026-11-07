@@ -148,14 +148,44 @@ class GoogleCoverage(DomainModel):
     first_day: date
     last_day: date
     synced_at_utc: datetime
+    time_zone: str | None = None
 
     @field_validator("synced_at_utc")
     @classmethod
     def _aware(cls, value: datetime) -> datetime:
         return normalize_utc(value)
 
-    def covers(self, first_day: date, last_day: date) -> bool:
-        return self.first_day <= first_day and last_day <= self.last_day
+    def covers(self, first_day: date, last_day: date, zone: ZoneInfo | None = None) -> bool:
+        return (
+            (zone is None or self.time_zone == zone.key)
+            and self.first_day <= first_day
+            and last_day <= self.last_day
+        )
+
+
+class CalendarKnowledge(DomainModel):
+    """Successful publication is separate from attempt-based retry throttling."""
+
+    generation: str | None = None
+    list_succeeded: bool = False
+    failed: bool = False
+    calendars: int = 0
+    coverage: GoogleCoverage | None = None
+    disconnected: bool = False
+
+    def status(self, first: date, last: date, zone: ZoneInfo, now: datetime) -> str:
+        if self.disconnected:
+            return "no calendar connection"
+        if self.generation is None:
+            return "never successfully read"
+        if not self.list_succeeded or self.failed:
+            return "failed or incomplete read"
+        coverage = self.coverage
+        if coverage is None or not coverage.covers(first, last, zone):
+            return "partial range or different time zone"
+        if not timedelta(0) <= normalize_utc(now) - coverage.synced_at_utc < timedelta(minutes=15):
+            return "stale"
+        return "fresh shown-calendar coverage"
 
 
 class CalendarSyncResult(DomainModel):

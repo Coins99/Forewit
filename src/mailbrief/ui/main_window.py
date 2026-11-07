@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import Final, Protocol, assert_never
+from typing import Final, Protocol, assert_never, cast
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
@@ -287,6 +287,7 @@ from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
+from mailbrief.ui.scheduling_view import PlanningBackend, SchedulingDialog
 from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
 from mailbrief.ui.task_picker import TaskPickerDialog
 from mailbrief.ui.theme import (
@@ -506,6 +507,7 @@ class DesktopBackend(Protocol):
     ) -> BlockSaved: ...
     async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock: ...
     async def restore_block(self, public_id: str) -> BlockSaved: ...
+    async def lock_block(self, public_id: str, revision: int, locked: bool) -> BlockSaved: ...
     # Working hours and the tasks to schedule (ADR 0029): local only.
     async def working_hours(self) -> WorkingHours: ...
     async def save_working_hours(self, edit: HoursEdit, revision: int) -> WorkingHours: ...
@@ -920,9 +922,12 @@ class MainWindow(QMainWindow):
         self.planning_dialog = PlanningDialog(self)
         # Work blocks (ADR 0028): choose a task, then its time; or open a block.
         self.block_editor = BlockEditor(self)
+        self.scheduling_dialog = SchedulingDialog(self, cast(PlanningBackend, backend))
+        self.scheduling_dialog.changed.connect(self._scheduling_changed)
         self.hours_editor = HoursEditor(self)
         self.hours_editor.save_requested.connect(self._request_save_hours)
         self.block_editor.save_requested.connect(self._request_save_block)
+        self.block_editor.lock_requested.connect(self._request_block_lock)
         self.block_editor.unschedule_requested.connect(self._request_unschedule_from_editor)
         self.block_editor.task_requested.connect(
             lambda public_id: self._navigate(TaskRoute(public_id=public_id))
@@ -1387,6 +1392,7 @@ class MainWindow(QMainWindow):
         self.calendar_panel.google_requested.connect(self._request_google)
         self.calendar_panel.plan_requested.connect(self._request_planning)
         self.calendar_panel.block_requested.connect(self._request_block)
+        self.calendar_panel.scheduling_requested.connect(self._open_scheduling)
         self.calendar_panel.day_requested.connect(self._request_calendar_day)
         self.calendar_panel.hours_requested.connect(self._request_working_hours)
         self.calendar_panel.task_schedule_requested.connect(self._schedule_task)
@@ -1856,6 +1862,7 @@ class MainWindow(QMainWindow):
             or self.event_editor.isVisible()
             or self.block_editor.isVisible()
             or self.hours_editor.isVisible()
+            or self.scheduling_dialog.isVisible()
             or self.planning_dialog.isVisible()
             or not self.draft_writes.idle
         ):
@@ -3392,6 +3399,20 @@ class MainWindow(QMainWindow):
     # Work blocks (ADR 0028): time the owner sets aside for a task. Saving one never changes
     # the task, and its warnings (overlaps, ending after the deadline) never stop a save.
 
+    def _open_scheduling(self) -> None:
+        if self._closing or self._dialog_open():
+            return
+        day = self.calendar_panel.focus_day() or self._local_today()
+        self.scheduling_dialog.open_range(day, day + timedelta(days=6), day)
+        self.dialog_guard.show_dialog(self.scheduling_dialog)
+
+    def _scheduling_changed(self) -> None:
+        self.start(self._reload_after_planning, cancellable=False)
+
+    async def _reload_after_planning(self) -> None:
+        await self._refresh_views()
+        await self._refresh_calendar()
+
     def _request_block(self, kind: str, value: object) -> None:
         if self._closing:
             return
@@ -3460,6 +3481,25 @@ class MainWindow(QMainWindow):
         self._calendar_reads.add(task)
         task.add_done_callback(self._calendar_reads.discard)
 
+    def _request_block_lock(self, locked: bool) -> None:
+        async def change() -> None:
+            block = self.block_editor.editing()
+            if block is None:
+                return
+            try:
+                await self.backend.lock_block(block.public_id, block.block.revision, locked)
+            except Exception:
+                self.block_editor.keep_open(
+                    "The lock could not be saved. Reload this block before retrying."
+                )
+                raise
+            self.block_editor.finish_saved()
+            await self._refresh_views()
+            await self._refresh_calendar()
+
+        if not self.start(change, cancellable=False):
+            self.block_editor.keep_open(_BUSY)
+
     def _request_save_block(self, value: object) -> None:
         if not isinstance(value, BlockTime):
             return
@@ -3473,7 +3513,18 @@ class MainWindow(QMainWindow):
         editing = self.block_editor.editing()
         title = self.block_editor.task_title()
         try:
-            if editing is None:
+            command = getattr(self.backend, "block_command", None)
+            if command is not None:
+                result = await command(
+                    self.block_editor.command_id,
+                    "schedule" if editing is None else "move",
+                    self.block_editor.task_id() if editing is None else editing.public_id,
+                    revision=None if editing is None else editing.block.revision,
+                    time=time,
+                )
+                assert isinstance(result, BlockSaved)
+                saved = result
+            elif editing is None:
                 saved = await self.backend.schedule_block(self.block_editor.task_id(), time)
             else:
                 saved = await self.backend.move_block(
@@ -3491,7 +3542,9 @@ class MainWindow(QMainWindow):
             return
         except Exception:
             if not self._closing:
-                self.block_editor.keep_open(_EDITOR_FAILED)
+                self.block_editor.keep_open(
+                    "Save could not be confirmed. Retry sends the same command.", uncertain=True
+                )
             raise  # _run logs it and reports the failure.
         self.block_editor.finish_saved()
         if editing is None:
@@ -3591,7 +3644,11 @@ class MainWindow(QMainWindow):
                 return
             if self._closing:
                 return
-            if self._dialog_open() or self.hours_editor.isVisible():
+            if (
+                self._dialog_open()
+                or self.hours_editor.isVisible()
+                or self.scheduling_dialog.isVisible()
+            ):
                 self.status.setText("Close the open panel, then open Working hours again.")
                 return
             self.hours_editor.edit_hours(hours)
@@ -3808,7 +3865,13 @@ class MainWindow(QMainWindow):
         return (
             self._calendar_allowed is True
             and shown is not None
-            and needs_sync(shown.google_coverage, shown.first_day, shown.last_day, self.now())
+            and needs_sync(
+                shown.google_checked_coverage or shown.google_coverage,
+                shown.first_day,
+                shown.last_day,
+                self.now(),
+                self.zone,
+            )
         )
 
     def _request_google(self, kind: str) -> None:
@@ -5956,6 +6019,7 @@ class MainWindow(QMainWindow):
             (self.event_editor, "this event"),
             (self.block_editor, "this scheduled time"),
             (self.hours_editor, "your working hours"),
+            (self.scheduling_dialog, "your task scheduling review"),
             (self.settings_dialog, "Settings"),
             (self.capture_dialog, "this capture"),
         ):
@@ -6025,6 +6089,7 @@ class MainWindow(QMainWindow):
         self.event_editor.force_close()
         self.block_editor.force_close()
         self.hours_editor.force_close()
+        self.scheduling_dialog.force_close()
         self.block_picker.reject()
         self.google_event_dialog.reject()
         self._cancel_planning()
@@ -6059,6 +6124,7 @@ class MainWindow(QMainWindow):
             for read in self._calendar_reads:
                 read.cancel()
             await self.drain_calendar_reads()
+            await self.scheduling_dialog.drain()
             for read in tuple(self._draft_reads):
                 read.cancel()
             await asyncio.gather(*self._draft_reads, return_exceptions=True)

@@ -230,6 +230,8 @@ class EventService:
             markers=markers_for(actions, first_day, last_day, zone),
             google_events=tuple(sorted(cached, key=GoogleEvent.sort_key)),
             google_coverage=await google.coverage(),
+            google_knowledge=await google.knowledge(),
+            google_checked_coverage=await google.checked_coverage(),
             blocks=tuple(
                 scheduled_from_rows(block, action, upcoming_minutes=upcoming.get(action.id, 0))
                 for block, action in blocks

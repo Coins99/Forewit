@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
@@ -61,6 +62,14 @@ from mailbrief.domain.messages import ProviderKind
 from mailbrief.domain.preferences import AnalysisMode, OwnerPreferences, PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
+from mailbrief.domain.scheduling import (
+    PlanningCandidatePage,
+    PlanningResult,
+    PlanningReview,
+    PlanningUndo,
+    SchedulingProposal,
+    SchedulingRequest,
+)
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
@@ -120,6 +129,7 @@ from mailbrief.services.preferences import (
 )
 from mailbrief.services.projects import ProjectService
 from mailbrief.services.proposals import ProposalService
+from mailbrief.services.scheduling import SchedulingService
 from mailbrief.services.search import SearchService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.today import TodayService
@@ -1176,27 +1186,110 @@ class DesktopRuntime:
         async with self._storage().session() as session:
             return await ActionService(session).title_matches(text, open_only=True)
 
-    async def schedule_block(self, action_public_id: str, time: BlockTime) -> BlockSaved:
-        async with self._storage().session() as session:
-            return await WorkBlockService(session).schedule(action_public_id, time)
+    async def schedule_block(
+        self, action_public_id: str, time: BlockTime, *, command_id: str | None = None
+    ) -> BlockSaved:
+        result = await self.block_command(
+            command_id or str(uuid4()), "schedule", action_public_id, time=time
+        )
+        assert isinstance(result, BlockSaved)
+        return result
 
-    async def move_block(self, public_id: str, revision: int, time: BlockTime) -> BlockSaved:
-        async with self._storage().session() as session:
-            return await WorkBlockService(session).move(public_id, revision, time)
+    async def move_block(
+        self, public_id: str, revision: int, time: BlockTime, *, command_id: str | None = None
+    ) -> BlockSaved:
+        result = await self.block_command(
+            command_id or str(uuid4()), "move", public_id, revision=revision, time=time
+        )
+        assert isinstance(result, BlockSaved)
+        return result
 
     async def undo_block_move(
-        self, public_id: str, revision: int, previous: BlockTime
+        self, public_id: str, revision: int, previous: BlockTime, *, command_id: str | None = None
     ) -> BlockSaved:
-        async with self._storage().session() as session:
-            return await WorkBlockService(session).undo_move(public_id, revision, previous)
+        result = await self.block_command(
+            command_id or str(uuid4()), "undo_move", public_id, revision=revision, time=previous
+        )
+        assert isinstance(result, BlockSaved)
+        return result
 
-    async def unschedule_block(self, public_id: str, revision: int) -> WorkBlock:
-        async with self._storage().session() as session:
-            return await WorkBlockService(session).unschedule(public_id, revision)
+    async def unschedule_block(
+        self, public_id: str, revision: int, *, command_id: str | None = None
+    ) -> WorkBlock:
+        result = await self.block_command(
+            command_id or str(uuid4()), "unschedule", public_id, revision=revision
+        )
+        assert isinstance(result, WorkBlock)
+        return result
 
-    async def restore_block(self, public_id: str) -> BlockSaved:
+    async def restore_block(self, public_id: str, *, command_id: str | None = None) -> BlockSaved:
+        result = await self.block_command(command_id or str(uuid4()), "restore", public_id)
+        assert isinstance(result, BlockSaved)
+        return result
+
+    async def planning_candidates(
+        self,
+        first: date,
+        last: date,
+        *,
+        query: str = "",
+        offset: int = 0,
+        needs_time: bool = True,
+        project_id: str | None = None,
+        focus_only: bool = False,
+        focus_day: date | None = None,
+    ) -> PlanningCandidatePage:
         async with self._storage().session() as session:
-            return await WorkBlockService(session).restore(public_id)
+            return await SchedulingService(session).candidates(
+                first,
+                last,
+                query=query,
+                offset=offset,
+                needs_time=needs_time,
+                project_id=project_id,
+                focus_only=focus_only,
+                focus_day=focus_day,
+            )
+
+    async def review_schedule(self, request: SchedulingRequest) -> PlanningReview:
+        async with self._storage().session() as session:
+            return await SchedulingService(session).review(request)
+
+    async def apply_schedule(
+        self,
+        proposal: SchedulingProposal,
+        selected: tuple[str, ...],
+        command_id: str,
+        *,
+        acknowledged_knowledge: str | None = None,
+    ) -> PlanningResult:
+        async with self._storage().session() as session:
+            return await SchedulingService(session).apply(
+                proposal, selected, command_id, acknowledged_knowledge=acknowledged_knowledge
+            )
+
+    async def undo_schedule(self, token: PlanningUndo, command_id: str) -> PlanningResult:
+        async with self._storage().session() as session:
+            return await SchedulingService(session).undo(token, command_id)
+
+    async def block_command(
+        self,
+        command_id: str,
+        operation: str,
+        target: str,
+        *,
+        revision: int | None = None,
+        time: BlockTime | None = None,
+        locked: bool | None = None,
+    ) -> BlockSaved | WorkBlock:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).command(
+                command_id, operation, target, revision=revision, time=time, locked=locked
+            )
+
+    async def lock_block(self, public_id: str, revision: int, locked: bool) -> BlockSaved:
+        async with self._storage().session() as session:
+            return await WorkBlockService(session).set_locked(public_id, revision, locked)
 
     # Working hours and the tasks to schedule (ADR 0029): local only.
 

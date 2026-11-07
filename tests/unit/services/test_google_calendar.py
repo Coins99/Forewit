@@ -95,7 +95,10 @@ def test_sync_window_is_ten_weeks_from_the_week_before() -> None:
 
 def test_needs_sync() -> None:
     coverage = GoogleCoverage(
-        first_day=date(2026, 10, 5), last_day=date(2026, 12, 13), synced_at_utc=NOW
+        first_day=date(2026, 10, 5),
+        last_day=date(2026, 12, 13),
+        synced_at_utc=NOW,
+        time_zone=TORONTO.key,
     )
     week = (date(2026, 10, 12), date(2026, 10, 18))
     assert needs_sync(None, *week, NOW)
@@ -125,13 +128,16 @@ async def test_sync_reads_shown_calendars_for_the_window(
     shown = await EventService(session).list_range(date(2026, 10, 12), date(2026, 10, 18), TORONTO)
     assert [event.event_id for event in shown.google_events] == ["a", "b"]
     assert shown.google_coverage == GoogleCoverage(
-        first_day=date(2026, 10, 5), last_day=date(2026, 12, 13), synced_at_utc=NOW
+        first_day=date(2026, 10, 5),
+        last_day=date(2026, 12, 13),
+        synced_at_utc=NOW,
+        time_zone=TORONTO.key,
     )
     outside = await EventService(session).list_range(date(2027, 1, 4), date(2027, 1, 10), TORONTO)
     assert outside.google_events == ()
 
 
-async def test_failed_calendar_keeps_its_cache_and_gone_one_loses_it(
+async def test_failed_and_unavailable_calendars_keep_busy_cache_without_proving_free_time(
     service: CalendarSyncService, reader: FakeReader, session: AsyncSession
 ) -> None:
     start = datetime(2026, 10, 14, 13, 0, tzinfo=UTC)
@@ -145,9 +151,10 @@ async def test_failed_calendar_keeps_its_cache_and_gone_one_loses_it(
         TEAM.calendar_id: MessageUnavailableError("gone"),
     }
     result = await service.sync(TODAY, TORONTO)
-    assert (result.synced, result.failed, result.events) == (1, 1, 0)
+    assert (result.synced, result.failed, result.events) == (0, 2, 0)
     shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
-    assert [event.event_id for event in shown.google_events] == ["a"]
+    assert [event.event_id for event in shown.google_events] == ["a", "b"]
+    assert shown.google_coverage is None
 
 
 async def test_stopping_errors_end_the_sync(
@@ -193,10 +200,11 @@ async def test_a_calendar_that_keeps_failing_waits_for_the_window_to_go_stale(
     assert (result.synced, result.failed, result.stopped_code) == (1, 1, None)
     shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
     assert [event.event_id for event in shown.google_events] == ["a"]
+    assert shown.google_coverage is None
     week = (date(2026, 10, 12), date(2026, 10, 18))
     # Team counts as checked, so it is tried again only once the window goes stale.
-    assert not needs_sync(shown.google_coverage, *week, NOW)
-    assert needs_sync(shown.google_coverage, *week, NOW + STALE_AFTER)
+    assert not needs_sync(shown.google_checked_coverage, *week, NOW)
+    assert needs_sync(shown.google_checked_coverage, *week, NOW + STALE_AFTER)
 
 
 async def test_a_calendar_google_refuses_does_not_stop_the_others(
@@ -228,7 +236,7 @@ async def test_a_rate_limit_counts_the_unread_calendars_as_checked(
     result = await CalendarSyncService(session, reader, clock=lambda: NOW).sync(TODAY, TORONTO)
     assert result.stopped_code == "RATE_LIMITED" and result.synced < len(others)
     shown = await EventService(session).list_range(TODAY, TODAY, TORONTO)
-    assert not needs_sync(shown.google_coverage, TODAY, TODAY, NOW)
+    assert not needs_sync(shown.google_checked_coverage, TODAY, TODAY, NOW)
 
 
 async def test_a_sign_in_stop_leaves_unread_calendars_unchecked(

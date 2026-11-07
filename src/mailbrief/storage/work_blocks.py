@@ -25,6 +25,7 @@ def block_from_row(row: WorkBlockTable, action_public_id: str) -> WorkBlock:
     return WorkBlock(
         public_id=row.public_id,
         action_public_id=action_public_id,
+        locked=row.locked,
         starts_at_utc=row.starts_at_utc,
         ends_at_utc=row.ends_at_utc,
         time_zone=row.time_zone,

@@ -1047,6 +1047,12 @@ class FakeBackend(FakeDrafts):
             self.blocks[public_id] = block
         return self._block_saved(block)
 
+    async def lock_block(self, public_id: str, revision: int, locked: bool) -> BlockSaved:
+        block = self._live_block(public_id, revision)
+        updated = block.block.model_copy(update={"locked": locked, "revision": revision + 1})
+        self.blocks[public_id] = block.model_copy(update={"block": updated})
+        return self._block_saved(self.blocks[public_id])
+
     async def working_hours(self) -> WorkingHours:
         self.hours_calls.append(("working_hours",))
         if self.hours_fail is not None:
@@ -1138,7 +1144,7 @@ class FakeBackend(FakeDrafts):
             raise CalendarNotAllowedError("Google Calendar isn't allowed yet.")
         first, last = sync_window(around)
         self.google_coverage = GoogleCoverage(
-            first_day=first, last_day=last, synced_at_utc=self.calendar_now
+            first_day=first, last_day=last, synced_at_utc=self.calendar_now, time_zone=zone.key
         )
         return self.calendar_result
 

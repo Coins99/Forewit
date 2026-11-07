@@ -82,6 +82,9 @@ def test_metadata_contains_all_initial_tables() -> None:
         "calendar_events",
         "work_blocks",
         "working_hours",
+        "planning_commands",
+        "block_commands",
+        "google_calendar_state",
         "google_calendars",
         "google_events",
     }

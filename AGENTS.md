@@ -38,10 +38,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   only after the owner completes real-record recovery and the 7–14-day release scenario.
   `docs/project-status.md` and `docs/p0-p2-implementation.md` hold the current state and
   evidence; read them, not old commit messages, for what is done.
-- P3, the local calendar, is three PRs, one at a time (`docs/p3-calendar.md`). P3-1, work
-  blocks (ADR 0028, migration 0032), and P3-2, Busy/Free, working hours, the tasks to
-  schedule and the Day view (ADR 0029, migration 0033), are merged; P3-3, workload and
-  conflicts (ADR 0030, no migration), is implemented; all three await owner acceptance.
+- P3's work blocks, availability and workload are merged (#105–#107), as are flat
+  buttons/date pickers (#108). Owner acceptance remains open. The scheduling add-ons
+  branch extends main with dated hours, independent buffers, locks, successful Google
+  knowledge and deterministic local suggestions with retry-safe apply/Undo. New migrations
+  0034–0036 preserve merged 0032/0033. See `docs/p3-scheduling-addons.md` and ADR 0031;
+  do not replace main's Day view, Busy/Free, gestures or daily workload. The divergent
+  unmerged candidate requires separate-copy conversion, never a normal schema upgrade.
 - Where each feature is specified (behavior, acceptance steps and limits):
 
   | Area | Docs | ADRs |

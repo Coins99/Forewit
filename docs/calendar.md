@@ -233,3 +233,10 @@ deadline or target date never moves a block.
 5. Disconnect in Settings (Account): Gmail disconnects and the Google rows disappear.
    Sign in with Google again: Google asks once for Gmail and both calendar permissions, and the rows
    come back.
+
+
+## Local scheduling additions
+
+See [Scheduling add-ons](p3-scheduling-addons.md) for dated working hours, separate
+event buffers, block locks and the local Suggest time review with atomic apply/Undo.
+The merged Day view, direct block editing, Busy/Free and daily workload remain available.

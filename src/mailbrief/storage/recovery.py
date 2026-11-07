@@ -264,6 +264,7 @@ def _prepare_restored_database(database: Path) -> None:
         # old schedule as current (ADR 0018). The next sync reads them again.
         connection.execute("DELETE FROM google_events")
         connection.execute("DELETE FROM google_calendars")
+        connection.execute("DELETE FROM google_calendar_state")
         connection.commit()
         # Publish a self-contained file; no staging WAL can be left behind.
         connection.execute("PRAGMA journal_mode=DELETE")

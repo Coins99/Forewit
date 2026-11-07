@@ -46,6 +46,13 @@ def upgrade_database(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.stat().st_size:
         with closing(sqlite3.connect(path)) as source:
+            block_columns = {row[1] for row in source.execute("PRAGMA table_info(work_blocks)")}
+            if "task_public_id" in block_columns:
+                raise ConfigurationError(
+                    "This database uses the unmerged P3 development schema. "
+                    "Keep it with that checkout, or convert a separate copy with "
+                    "python -m scripts.convert_p3_candidate SOURCE DESTINATION --owner-zone ZONE."
+                )
             has_version = source.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alembic_version'"
             ).fetchone()

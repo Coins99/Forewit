@@ -10,6 +10,7 @@ hours; an end outside that is refused with the reason.
 
 from datetime import UTC, datetime, time, timedelta
 from typing import Final
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
@@ -61,6 +62,7 @@ class BlockEditor(QDialog):
     """
 
     save_requested = Signal(object)
+    lock_requested = Signal(bool)
     unschedule_requested = Signal()
     task_requested = Signal(str)
 
@@ -74,6 +76,8 @@ class BlockEditor(QDialog):
         self._task_id = ""
         self._title = ""
         self._zone = ZoneInfo("UTC")
+        self.command_id = str(uuid4())
+        self._uncertain = False
         self._busy = False
         self._saving = False
         self._syncing = False
@@ -122,6 +126,10 @@ class BlockEditor(QDialog):
         row.addStretch(1)
         form.addRow("From", row)
         layout.addWidget(self._fields)
+        self.lock_button = outline_button("Lock block", "blockLockButton")
+        self.lock_button.setAccessibleName("Lock or unlock this reservation")
+        self.lock_button.clicked.connect(self._toggle_lock)
+        layout.addWidget(self.lock_button)
         self.status = wrap_label("", tone="muted")
         self.status.setObjectName("blockStatus")
         layout.addWidget(self.status)
@@ -169,6 +177,9 @@ class BlockEditor(QDialog):
         self, task_id: str, title: str, start: datetime, minutes: int, zone: ZoneInfo
     ) -> None:
         """New time for the task ``task_id`` (titled ``title``), from ``start``."""
+        self.command_id = str(uuid4())
+        self._uncertain = False
+        self.lock_button.hide()
         self._block, self._task_id, self._zone = None, task_id, zone
         self._title = title
         self.setWindowTitle("Schedule time")
@@ -182,6 +193,10 @@ class BlockEditor(QDialog):
 
     def edit_block(self, block: ScheduledBlock, zone: ZoneInfo) -> None:
         """Change or unschedule ``block``; its times are shown in ``zone``."""
+        self.command_id = str(uuid4())
+        self._uncertain = False
+        self.lock_button.show()
+        self.lock_button.setText("Unlock block" if block.block.locked else "Lock block")
         self._block, self._task_id, self._zone = block, block.action_public_id, zone
         self._title = block.title
         self.setWindowTitle("Scheduled time")
@@ -212,7 +227,7 @@ class BlockEditor(QDialog):
             return UNUSABLE
 
     def has_unsaved_input(self) -> bool:
-        return not self._saving and self._input() != self._loaded_input
+        return self._uncertain or (not self._saving and self._input() != self._loaded_input)
 
     def set_busy(self, busy: bool) -> None:
         """Another operation is running: Save and Unschedule wait for it, and say so."""
@@ -227,16 +242,22 @@ class BlockEditor(QDialog):
         self._set_saving(False)
         self.accept()
 
-    def keep_open(self, message: str) -> None:
+    def keep_open(self, message: str, *, uncertain: bool = False) -> None:
+        self._uncertain = uncertain
+        if not uncertain:
+            self.command_id = str(uuid4())
         self._set_saving(False)
+        if uncertain:
+            self.save_button.setText("Retry save")
         self.status.setText(message)
 
     def force_close(self) -> None:
+        self._uncertain = False
         self._set_saving(False)
         self.reject()
 
     def reject(self) -> None:
-        if not self._saving:
+        if not self._saving and not self._uncertain:
             super().reject()
 
     # The fields.
@@ -349,6 +370,14 @@ class BlockEditor(QDialog):
 
     # The buttons.
 
+    def _toggle_lock(self) -> None:
+        if self._block is not None and not (self._busy or self._saving):
+            if self.has_unsaved_input():
+                self.status.setText("Save or cancel the changed time before changing its lock.")
+                return
+            self._set_saving(True)
+            self.lock_requested.emit(not self._block.block.locked)
+
     def _save(self) -> None:
         if self._busy or self._saving:
             return
@@ -383,12 +412,14 @@ class BlockEditor(QDialog):
 
     def _set_saving(self, saving: bool) -> None:
         self._saving = saving
-        self._fields.setEnabled(not saving)
+        self._fields.setEnabled(not saving and not self._uncertain)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
         idle = not (self._busy or self._saving)
         done = self._block is not None and not self._block.open
-        self.save_button.setEnabled(idle and not done)
-        self.unschedule_button.setEnabled(idle)
-        self.task_button.setEnabled(not self._saving)
+        locked = self._block is not None and self._block.block.locked
+        self.lock_button.setEnabled(idle and not self._uncertain)
+        self.save_button.setEnabled(idle and not done and not locked)
+        self.unschedule_button.setEnabled(idle and not locked and not self._uncertain)
+        self.task_button.setEnabled(not self._saving and not self._uncertain)
