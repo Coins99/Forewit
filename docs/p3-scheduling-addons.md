@@ -1,6 +1,7 @@
 # P3 scheduling add-ons
 
 Base: merged main `54e27c9` (#105–#108). Branch: `feat/p3-scheduling-addons`.
+Engineering verification completed 2026-11-07 on Windows; owner acceptance remains open.
 Contract: [ADR 0031](adr/0031-scheduling-addons.md).
 
 ## Use
@@ -37,8 +38,34 @@ No real owner database was used for automated engineering checks.
 
 ## Verification register
 
-Final source, migration, UI, coverage and package results are recorded here after checks
-complete. Owner acceptance and native macOS execution are not implied by automated results.
+| Check | Result |
+| --- | --- |
+| Frozen-source Windows suite, Qt offscreen | 5,357 passed, nine platform/capability skips, 26 warnings; 859.30 seconds |
+| Combined statement/branch coverage | 94.78%; every service meets its 90% gate |
+| Focused scheduling/manual service checks | 53 passed; 98.45% combined coverage (scheduling 98%, work blocks 99%) |
+| Ruff lint / formatting / whitespace | Passed |
+| Strict mypy, Windows and macOS targets | Passed, 539 source/test/script files |
+| Light/dark gallery and all-scheme contrast | 303 passed, one redundant-render skip at each of 1x and 2x |
+| Final drawer follow-up | 20 checks passed at each of 1x/2x; covers short-window scrolling, dated inputs and existing Calendar controls |
+| Windows one-file package | Passed full/restart at 1x/2x offscreen and native Windows; copied/renamed executable locks, upgrade, export and separate-profile restore |
+| Packaged add-on scenario | Passed suggestions, acknowledgement, apply/retry, batch Undo/retry, manual retry, locking and recovery of buffers/overrides/receipts in a separate synthetic profile |
+| Frozen archive comparison | All 30 affected application modules and three migration resources match current source |
+
+The final full run uses the frozen application source. An earlier broad run found old
+migration-head expectations and Google-cache fixtures that omitted the newly required zone
+or treated attempted reads as successful coverage. Those fixtures were corrected before
+the final passing run. Final UI review moved Suggest time into the existing task panel and
+made the hours fields scroll while keeping Save/Cancel reachable on short windows.
+
+Local evidence is under ignored `scratch/` and root `scratch-*.log` files, including
+`scratch-final-full-tests.log`, `scratch-package-final.log`, `scratch/frozen-verification.json`
+and the gallery images. All records and provider responses are synthetic; no real profile,
+mailbox, vault credential, provider request or paid AI was used.
+
+Development executable: `out/dist/onefile/Forewit.exe`, SHA-256
+`aa1aaf7062edf971c627dd214cf25127de4995d8e72457686e31af29b8992b3f`.
+This is a local development artifact, not a staged release. Native macOS/Cocoa execution
+and owner acceptance are not established by cross-target typing or Windows checks.
 
 ## Hands-on acceptance still required
 
