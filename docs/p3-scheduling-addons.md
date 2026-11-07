@@ -67,6 +67,26 @@ Development executable: `out/dist/onefile/Forewit.exe`, SHA-256
 This is a local development artifact, not a staged release. Native macOS/Cocoa execution
 and owner acceptance are not established by cross-target typing or Windows checks.
 
+## PR 109 review follow-up (2026-11-07)
+
+The five review findings are addressed: project choices survive reload/search/paging;
+definitive retry rejections release the uncertain-save freeze; Calendar shading, Day labels
+and initial scrolling resolve dated hours; scheduled totals retain individually clipped
+bookings while occupancy counts their union; invalid override containers fall back to
+unset hours with the saved revision so the owner can repair them.
+
+Final review also found and fixed all-day summary counts including adjacent dates or
+outside-range credit dates. A regression reproduced four commitments where only one was
+inside the selected range. These fixes add 13 regression cases. The targeted run passes
+64 tests; Ruff and strict Windows/macOS typing pass. Gallery and contrast runs pass
+307 tests with one intentional gallery skip at each of 1x/2x. Evidence is in ignored
+`scratch-pr109-*.log` files and `scratch/pr109-ui-shots/`.
+
+The executable and frozen-source comparison above predate these review fixes; this
+follow-up is source validation, and that executable has not been rebuilt. Native macOS
+execution and owner acceptance remain open. The earlier PR CI's Windows job passed;
+its macOS job timed out fetching the uv installer manifest before checking application code.
+
 ## Hands-on acceptance still required
 
 - Native macOS/Cocoa package and offline lifecycle on an actual macOS session.

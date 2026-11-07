@@ -518,11 +518,7 @@ class WeekGrid(_Grid):
             return
         starts = [part.start for parts in self._parts for part in parts if part.start > 0]
         hours = self._shown.hours
-        working = [
-            windows[0].start_minute
-            for day in self.days()
-            if (windows := hours.windows(day.weekday()))
-        ]
+        working = [windows[0].start_minute for day in self.days() if (windows := hours.on_day(day))]
         opening = min(working) / 60 - 0.5 if working else SCROLL_TO_HOUR
         hour = min([opening, *(start / 60 - 0.5 for start in starts)])
         self.hours_area.verticalScrollBar().setValue(max(0, round(hour * HOUR_PX)))
@@ -850,7 +846,7 @@ class WeekGrid(_Grid):
         wash.setAlphaF(tokens.off_hours.alpha)
         width = self.column_width()
         for index, day in enumerate(self.days()):
-            for start, end in off_hours(self._shown.hours, day.weekday()):
+            for start, end in off_hours(self._shown.hours, day):
                 top = 0.0 if start == 0 else HOURS_PAD + start * HOUR_PX / 60
                 bottom = (
                     float(self.hours.height())

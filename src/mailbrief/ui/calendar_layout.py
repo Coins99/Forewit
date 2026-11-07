@@ -331,14 +331,14 @@ def show_as(event: Event) -> str | None:
     return "Busy" if event.busy else "Free"
 
 
-def off_hours(hours: WorkingHours, weekday: int) -> list[tuple[int, int]]:
-    """The minutes of a weekday outside its working windows, to shade; none when no working
+def off_hours(hours: WorkingHours, day: date) -> list[tuple[int, int]]:
+    """The minutes of a date outside its working windows, to shade; none when no working
     hours are set, so a calendar without them looks as it always did."""
     if not hours.is_set:
         return []
     found: list[tuple[int, int]] = []
     start = 0
-    for window in hours.windows(weekday):
+    for window in hours.on_day(day):
         if window.start_minute > start:
             found.append((start, window.start_minute))
         start = max(start, window.end_minute)

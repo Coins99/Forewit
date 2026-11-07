@@ -110,6 +110,28 @@ async def test_new_obstacle_invalidates_absence_snapshot(session: AsyncSession) 
     assert not (await session.scalars(select(WorkBlockTable))).all()
 
 
+async def test_workload_preserves_overlapping_bookings_and_clips_each_to_horizon(
+    session: AsyncSession,
+) -> None:
+    from mailbrief.services.work_blocks import WorkBlockService
+
+    service, task = await setup(session)
+    blocks = WorkBlockService(session)
+    for start, end in (
+        (START, START + timedelta(hours=1)),
+        (START + timedelta(minutes=30), START + timedelta(minutes=90)),
+        (START.replace(hour=23, minute=30), START + timedelta(days=1)),
+    ):
+        await blocks.schedule(
+            task, BlockTime(starts_at_utc=start, ends_at_utc=end, time_zone="UTC")
+        )
+    review = await service.review(request(task))
+    assert review.workload.scheduled_minutes == 150
+    assert review.workload.unique_scheduled_minutes == 120
+    assert review.workload.free_minutes == 390
+    assert review.snapshot.demands[0].needs_repair
+
+
 async def test_split_is_opt_in_and_never_leaves_partial_task(session: AsyncSession) -> None:
     service, task = await setup(session)
     for hour in (10, 12, 14, 16):
@@ -290,6 +312,34 @@ async def test_inactive_all_day_and_missing_task(session: AsyncSession) -> None:
     assert shown.free_minutes == 0
     assert shown.all_day_commitments == 1 and shown.timed_busy_minutes == 0
     await service.undo(result.undo, command_id())
+
+
+async def test_all_day_summary_counts_only_commitments_in_requested_dates(
+    session: AsyncSession,
+) -> None:
+    from mailbrief.services.work_blocks import WorkBlockService
+
+    service, task = await setup(session)
+    await WorkBlockService(session).schedule(
+        task,
+        BlockTime(
+            starts_at_utc=START + timedelta(days=7),
+            ends_at_utc=START + timedelta(days=7, hours=1),
+            time_zone="UTC",
+        ),
+    )
+    for offset in (-1, 0, 1, 7):
+        await EventService(session).create(
+            EventEdit(
+                title="All-day commitment",
+                all_day=True,
+                busy=True,
+                start_date=DAY + timedelta(days=offset),
+                last_date=DAY + timedelta(days=offset),
+                time_zone="UTC",
+            )
+        )
+    assert (await service.workload(request(task))).all_day_commitments == 1
 
 
 async def test_outside_horizon_credit_tracks_its_obstacles(session: AsyncSession) -> None:

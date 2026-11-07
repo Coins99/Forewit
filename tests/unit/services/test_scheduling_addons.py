@@ -19,7 +19,12 @@ from mailbrief.services.events import EventService
 from mailbrief.services.scheduling import SchedulingChangedError
 from mailbrief.services.work_blocks import BlockConflictError, WorkBlockService
 from mailbrief.storage.database import Database
-from mailbrief.storage.tables import ActionTable, BlockCommandTable, WorkBlockTable
+from mailbrief.storage.tables import (
+    ActionTable,
+    BlockCommandTable,
+    WorkBlockTable,
+    WorkingHoursTable,
+)
 from tests.unit.services.test_scheduling import DAY, NOW, START, ZONE, acknowledged, request, setup
 
 
@@ -161,6 +166,21 @@ async def test_export_keeps_hours_and_locks_but_omits_command_receipts(
 def test_buffer_limits(value: tuple[int, int]) -> None:
     with pytest.raises(ValueError):
         HoursEdit(buffer_before_minutes=value[0], buffer_after_minutes=value[1])
+
+
+@pytest.mark.parametrize("value", [None, 1, True, "invalid", {}, {"day": "2026-11-09"}])
+async def test_invalid_override_containers_fall_back_and_allow_repair(
+    session: AsyncSession, value: object
+) -> None:
+    await setup(session)
+    row = (await session.scalars(select(WorkingHoursTable))).one()
+    row.overrides_json = value  # type: ignore[assignment]
+    await session.commit()
+    service = AvailabilityService(session)
+    fallback = await service.hours()
+    assert not fallback.is_set and fallback.revision == 1
+    repaired = await service.save_hours(HoursEdit(), fallback.revision)
+    assert repaired.revision == 2 and repaired.overrides == ()
 
 
 def test_dated_windows_share_weekly_validation() -> None:

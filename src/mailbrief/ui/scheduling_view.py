@@ -185,12 +185,15 @@ class PlanningTaskPanel(QWidget):
                     focus_only=focus,
                     focus_day=self.focus_day,
                 )
-                projects = await self.backend.list_projects() if self.projects.count() == 1 else ()
+                projects = (
+                    await self.backend.list_projects() if self.projects.count() == 1 else None
+                )
                 if self._closed or generation != self._generation:
                     return
-                self.projects.blockSignals(True)
-                fill_project_choice(self.projects, projects, project, none_label="All projects")
-                self.projects.blockSignals(False)
+                if projects is not None:
+                    self.projects.blockSignals(True)
+                    fill_project_choice(self.projects, projects, project, none_label="All projects")
+                    self.projects.blockSignals(False)
                 selected_ids = {demand.task_public_id for demand in self.selected()}
                 if not more:
                     clear_list(self.tasks)
@@ -648,6 +651,7 @@ class SchedulingDialog(QDialog):
                     self.chooser.load()
             except SchedulingKnowledgeError as exc:
                 self._pending = None
+                self._uncertain = False
                 if not self._closed:
                     self._knowledge_token = exc.token
                     self.ack.setChecked(False)
@@ -658,6 +662,7 @@ class SchedulingDialog(QDialog):
                     )
             except SchedulingChangedError as exc:
                 self._pending = None
+                self._uncertain = False
                 if not self._closed:
                     self._review = None
                     self.status.setText(str(exc))

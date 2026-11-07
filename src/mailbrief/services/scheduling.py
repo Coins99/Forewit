@@ -311,14 +311,20 @@ class SchedulingService:
                 ),
                 horizon,
             ),
-            all_day_commitments=sum(event.busy and event.all_day for event in fixed),
-            reserved=clip_intervals(
-                (
-                    UtcInterval(start=block.starts_at_utc, end=block.ends_at_utc)
-                    for block in in_range
-                    if block.open
-                ),
-                horizon,
+            all_day_commitments=sum(
+                event.busy
+                and event.all_day
+                and event.days(zone)[0] <= last
+                and event.days(zone)[1] >= first
+                for event in fixed
+            ),
+            reserved=tuple(
+                UtcInterval(
+                    start=max(block.starts_at_utc, horizon.start),
+                    end=min(block.ends_at_utc, horizon.end),
+                )
+                for block in in_range
+                if block.open
             ),
             blocks=tuple(block.block for block in in_range),
             demands=tuple(demands),

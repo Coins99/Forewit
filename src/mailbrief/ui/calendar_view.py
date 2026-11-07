@@ -153,7 +153,7 @@ def free_text(shown: CalendarRange, zone: ZoneInfo, view: CalendarView, now: dat
         if not found.working_minutes:
             return "No working hours this day"
         left = length_text(timedelta(minutes=free_after(found, now)))
-        return f"Working {windows_text(hours.windows(found.day.weekday()))} · {left} free"
+        return f"Working {windows_text(hours.on_day(found.day))} · {left} free"
     working = sum(day.working_minutes for day in found_days)
     free = sum(free_after(day, now) for day in found_days)
     if not working:

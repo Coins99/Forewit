@@ -78,7 +78,8 @@ def hours_from_row(row: WorkingHoursTable | None) -> WorkingHours:
         return WorkingHours.unset()
     try:
         days = row.windows_json
-        if not isinstance(days, list):
+        overrides = row.overrides_json
+        if not isinstance(days, list) or not isinstance(overrides, list):
             raise ValueError(_INVALID)
         week: list[tuple[WorkingWindow, ...]] = []
         for windows in days:
@@ -90,7 +91,7 @@ def hours_from_row(row: WorkingHoursTable | None) -> WorkingHours:
             buffer_minutes=row.buffer_minutes,
             buffer_before_minutes=row.buffer_before_minutes,
             buffer_after_minutes=row.buffer_after_minutes,
-            overrides=tuple(DatedHours.model_validate(item) for item in row.overrides_json),
+            overrides=tuple(DatedHours.model_validate(item) for item in overrides),
             revision=row.revision,
             updated_at_utc=row.updated_at_utc,
         )

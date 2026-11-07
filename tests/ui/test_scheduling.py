@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 from PySide6.QtWidgets import QWidget
@@ -16,7 +17,11 @@ from mailbrief.domain.scheduling import (
     SchedulingProposal,
     SchedulingRequest,
 )
-from mailbrief.services.scheduling import SchedulingService
+from mailbrief.services.scheduling import (
+    SchedulingChangedError,
+    SchedulingKnowledgeError,
+    SchedulingService,
+)
 from mailbrief.storage.database import Database
 from mailbrief.ui.hours_editor import HoursEditor
 from mailbrief.ui.scheduling_view import SchedulingDialog
@@ -90,6 +95,92 @@ async def ready(dialog: SchedulingDialog) -> None:
         await asyncio.gather(*tuple(dialog._reads))
     if dialog.chooser._reads:
         await asyncio.gather(*tuple(dialog.chooser._reads))
+
+
+async def test_project_selection_survives_reload_search_and_paging(
+    qtbot: QtBot, database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = Project(
+        public_id="11111111-1111-4111-8111-111111111111",
+        name="Work",
+        revision=1,
+        created_at_utc=NOW,
+        updated_at_utc=NOW,
+    )
+    backend = Backend(database)
+    projects = AsyncMock(return_value=(project,))
+    candidates = AsyncMock(return_value=PlanningCandidatePage(items=(), next_offset=50))
+    monkeypatch.setattr(backend, "list_projects", projects)
+    monkeypatch.setattr(backend, "planning_candidates", candidates)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SchedulingDialog(parent, backend)
+    dialog.open_range(DAY, DAY, DAY)
+    await ready(dialog)
+    chooser = dialog.chooser
+    chooser.projects.setCurrentIndex(chooser.projects.findData(project.public_id))
+    await ready(dialog)
+    chooser.query.setText("report")
+    chooser.timer.stop()
+    chooser.load()
+    await ready(dialog)
+    chooser.more_button.click()
+    await ready(dialog)
+    assert chooser.projects.count() == 2
+    assert chooser.projects.currentData() == project.public_id
+    assert candidates.await_args is not None
+    assert candidates.await_args.kwargs["project_id"] == project.public_id
+    assert candidates.await_args.kwargs["query"] == "report"
+    assert candidates.await_args.kwargs["offset"] == 50
+    projects.assert_awaited_once()
+    dialog.force_close()
+    await dialog.drain()
+
+
+@pytest.mark.parametrize("knowledge", [False, True])
+async def test_definitive_retry_rejection_unfreezes_review(
+    qtbot: QtBot, database: Database, monkeypatch: pytest.MonkeyPatch, knowledge: bool
+) -> None:
+    async with database.session() as session:
+        await setup(session)
+    backend = Backend(database)
+    failure = (
+        SchedulingKnowledgeError("stale coverage", "new-token")
+        if knowledge
+        else SchedulingChangedError("Suggested time has elapsed.")
+    )
+    apply = AsyncMock(side_effect=[RuntimeError("Synthetic pre-commit failure"), failure])
+    monkeypatch.setattr(backend, "apply_schedule", apply)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SchedulingDialog(parent, backend)
+    dialog.open_range(DAY, DAY, DAY)
+    await ready(dialog)
+    dialog.chooser.tasks.item(0).setSelected(True)
+    dialog.chooser._review()
+    dialog._generate()
+    await ready(dialog)
+    dialog._apply()
+    assert dialog._write is not None
+    await dialog._write
+    assert bool(dialog._uncertain) and not dialog.discard_button.isEnabled()
+    dialog._apply()
+    assert dialog._write is not None
+    await dialog._write
+    assert apply.await_args_list[0] == apply.await_args_list[1]
+    assert not dialog._uncertain and dialog._pending is None
+    assert dialog.body.isEnabled() and dialog.discard_button.isEnabled()
+    if knowledge:
+        assert dialog._review is not None and dialog._knowledge_token == "new-token"
+        dialog.ack.setChecked(True)
+        assert dialog.apply_button.isEnabled()
+    else:
+        assert dialog._review is None and dialog.review_button.isEnabled()
+    dialog._discard()
+    assert not dialog.has_unsaved_input()
+    dialog.reject()
+    assert dialog._closed
+    await dialog.drain()
 
 
 async def test_review_acknowledgement_lost_response_retry_and_undo(
