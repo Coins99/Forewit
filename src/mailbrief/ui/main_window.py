@@ -274,6 +274,8 @@ from mailbrief.ui.history_view import NEEDS_CONNECTION, BriefHistoryPanel
 from mailbrief.ui.hours_editor import HoursEditor
 from mailbrief.ui.inbox_view import INBOX_PAGE_SIZE, InboxPanel
 from mailbrief.ui.inbox_view import INCOMPLETE as INBOX_INCOMPLETE
+from mailbrief.ui.insights_backend import InsightsBackend
+from mailbrief.ui.insights_view import InsightsPage
 from mailbrief.ui.labels import button_label, outline_button, plain_label, wrap_label
 from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.lists import SafeList, clear_list
@@ -310,6 +312,8 @@ from mailbrief.ui.workspace import ThreePaneWorkspace
 
 
 class DesktopBackend(Protocol):
+    async def insights(self) -> InsightsBackend: ...
+
     def reset_inbox_browsing(self) -> None: ...
 
     async def sync_inbox(
@@ -1346,6 +1350,9 @@ class MainWindow(QMainWindow):
         notes_layout = QVBoxLayout(self.notes_page)
         notes_layout.setContentsMargins(0, 0, 0, 0)
         workspace.add_page("notes", self.notes_page)
+        self.insights_page = InsightsPage()
+        self.insights_page.open_requested.connect(self._navigate)
+        workspace.add_page("insights", self.insights_page)
         self.project_page = ProjectPage()
         self.project_page.manage_requested.connect(self._open_organization)
         self.project_page.task_requested.connect(
@@ -1435,6 +1442,7 @@ class MainWindow(QMainWindow):
         # Dialogs open non-modal behind this cover, so Cmd+Q and the Dock's Quit still reach
         # closeEvent on macOS (a modal dialog's AppKit session drops them).
         self.dialog_guard = DialogGuard(self)
+        self.insights_page.dialog_requested.connect(self.dialog_guard.show_dialog)
         # Ctrl+K (Cmd+K on macOS): go to a page, start something, or search local records.
         self.command_palette = CommandPalette(self)
         self.command_palette.query_changed.connect(self._search)
@@ -1587,6 +1595,8 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, key: str) -> None:
         self._navigation_generation += 1
+        if key == "insights":
+            self.insights_page.run(self._load_insights())
         self.capture_inbox_button.setVisible(key in ("actions", "notes"))
         mail_views = {
             "inbox": "inbox",
@@ -1634,6 +1644,12 @@ class MainWindow(QMainWindow):
             self.workspace.header.date.setText(
                 day_text(self.workspace._digest.local_date, today=self._local_today())
             )
+
+    async def _load_insights(self) -> None:
+        backend = await self.backend.insights()
+        if not self._closing:
+            backend.metrics.google_on = self._google_mode() == GOOGLE_ON
+            self.insights_page.attach(backend, self.zone.key, self._projects, self._areas)
 
     def _sidebar_key(self) -> str:
         """The sidebar row for the page shown."""
@@ -1802,6 +1818,7 @@ class MainWindow(QMainWindow):
         zone, when the owner's follows it, is handled the same way."""
         zone_changed = self._follow_system_zone()
         today = self._local_today()
+        self.insights_page.follow_day(today, self.zone.key)
         if self._day is not None and (today != self._day or zone_changed):
             self._render_checked()
             self.workspace.set_today(today, self.zone)
@@ -1993,6 +2010,7 @@ class MainWindow(QMainWindow):
             await self._show_digest(digest)
 
     async def _refresh_actions(self) -> None:
+        self.insights_page.refresh()
         now = self.now()
         today = now.astimezone(self.zone).date()
         try:
@@ -2138,6 +2156,7 @@ class MainWindow(QMainWindow):
             )
 
     async def _refresh_views(self) -> None:
+        self.insights_page.refresh()
         await self._reload_brief()
         await self._refresh_actions()
         await self._refresh_drafts()
@@ -2641,6 +2660,9 @@ class MainWindow(QMainWindow):
     # page shows local data only, so it never needs Gmail or an AI provider.
 
     async def _refresh_calendar(self) -> None:
+        if (insights := self.insights_page.backend) is not None:
+            insights.metrics.google_on = self._google_mode() == GOOGLE_ON
+            self.insights_page.refresh()
         self._calendar_read += 1
         read = self._calendar_read
         first, last = self._calendar_bounds()
@@ -4926,6 +4948,7 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        self.insights_page.follow_day(self._local_today(), self.zone.key)
         self._email_analysis_mode = preferences.analysis_mode
         self.generate_button.setText(
             "&Sync and summarize"
@@ -6014,6 +6037,8 @@ class MainWindow(QMainWindow):
     def _unsaved_input(self) -> str | None:
         """What quitting now would throw away: the open dialog holding unsaved input. The
         draft editor isn't asked: closing saves its text."""
+        if self.insights_page.has_unsaved_input():
+            return "your Insights changes"
         for dialog, what in (
             (self.action_editor, "this action"),
             (self.event_editor, "this event"),
@@ -6125,6 +6150,7 @@ class MainWindow(QMainWindow):
                 read.cancel()
             await self.drain_calendar_reads()
             await self.scheduling_dialog.drain()
+            await self.insights_page.drain()
             for read in tuple(self._draft_reads):
                 read.cancel()
             await asyncio.gather(*self._draft_reads, return_exceptions=True)

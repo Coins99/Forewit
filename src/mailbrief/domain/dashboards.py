@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from mailbrief.domain.common import DomainModel
 from mailbrief.domain.metric_entries import exact_decimal_input
 from mailbrief.domain.metrics import (
+    MetricDateRange,
     MetricDescriptor,
     MetricQuery,
     MetricRangeMode,
@@ -54,10 +55,13 @@ class WidgetSpec(DomainModel):
     size: WidgetSize = WidgetSize.SMALL
     target: WidgetTarget | None = None
     previous_period: bool = False
+    use_global_range: bool = True
 
 
 class DashboardLayout(DomainModel):
     """Tuple order is layout order; one dashboard revision guards every layout mutation."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     schema_version: int = Field(default=1, ge=1, le=1, strict=True)
     widgets: tuple[WidgetSpec, ...] = Field(default=(), max_length=MAX_DASHBOARD_WIDGETS)
@@ -68,6 +72,29 @@ class DashboardLayout(DomainModel):
         if len({item.public_id for item in value}) != len(value):
             raise ValueError("Each widget must have its own identity.")
         return value
+
+
+class SavedDashboard(DomainModel):
+    revision: int = Field(ge=1, strict=True)
+    layout: DashboardLayout
+
+
+def resolved_widget_query(
+    widget: WidgetSpec,
+    dates: MetricDateRange,
+    *,
+    project_public_id: str | None = None,
+    area_public_id: str | None = None,
+) -> MetricQuery:
+    """One inheritance rule for the editor preview and the saved dashboard."""
+    return MetricQuery.model_validate(
+        {
+            **widget.query.model_dump(),
+            "dates": dates if widget.use_global_range else widget.query.dates,
+            "project_public_id": widget.query.project_public_id or project_public_id,
+            "area_public_id": widget.query.area_public_id or area_public_id,
+        }
+    )
 
 
 class ValidatedWidget(DomainModel):

@@ -130,6 +130,7 @@ class MetricPlot(QWidget):
                     int((event.position().x() - self._area().left()) * count / self._area().width())
                 )
                 self.setFocus(Qt.FocusReason.MouseFocusReason)
+                self.activated.emit(self.display.samples[self.selection].key)
         super().mousePressEvent(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -237,7 +238,7 @@ class MetricPlot(QWidget):
 
 
 class MetricChartCard(HairlineFrame):
-    """A renderer spike kept out of navigation until durable Insights is implemented."""
+    """Prepared-data chart with an equivalent exact table and keyboard inspection."""
 
     activated = Signal(str)
 
@@ -265,6 +266,7 @@ class MetricChartCard(HairlineFrame):
         self.selection_label = wrap_label("", px=CAPTION_PX)
         self.selection_label.setObjectName("metric-chart-selection")
         self.selection_label.setAccessibleName("Selected value")
+        self.selection_label.setVisible(data.chart is not ChartKind.NUMBER)
         layout.addWidget(self.selection_label)
         self.plot.selected.connect(self._selected)
         caption_text = data.caption

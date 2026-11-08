@@ -1465,3 +1465,28 @@ class MetricCommandTable(Base):
     result_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
     result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class DashboardTable(Base):
+    __tablename__ = "dashboards"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="singleton"),
+        CheckConstraint("revision >= 1", name="revision_valid"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    layout_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class DashboardCommandTable(Base):
+    __tablename__ = "dashboard_commands"
+    __table_args__ = (
+        CheckConstraint("length(command_id) = 36", name="command_id_length"),
+        CheckConstraint("result_revision >= 1", name="revision_valid"),
+        CheckConstraint(
+            "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'", name="hash_valid"
+        ),
+    )
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_revision: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -119,6 +119,7 @@ PAGES: Final = (
     ("projects", "Projects", "bookmark"),
     ("calendar", "Calendar", "calendar-week"),
     ("notes", "Notes", "notes"),
+    ("insights", "Insights", "bookmark"),
     ("inbox", "Mail", "mail"),
 )
 PAGE_SHORTCUTS: Final = (
@@ -1096,6 +1097,7 @@ class ThreePaneWorkspace(QWidget):
             "actions": "Tasks",
             "mail_current": "Mail · Current brief",
             "notes": "Notes",
+            "insights": "Insights",
             "projects": "Projects",
             "drafts": "Drafts",
             "briefs": "Briefs",

@@ -48,7 +48,7 @@ def test_published_profile_converges_and_round_trips(tmp_path: Path, revision: s
             "11111111-1111-4111-8111-111111111111",
         )
         assert connection.execute("SELECT * FROM alembic_version").fetchall() == [
-            ("20261108_0037",)
+            ("20261108_0038",)
         ]
 
     for _ in range(2):
@@ -56,7 +56,7 @@ def test_published_profile_converges_and_round_trips(tmp_path: Path, revision: s
         command.check(config)
         with closing(sqlite3.connect(path)) as connection:
             assert connection.execute("SELECT * FROM alembic_version").fetchall() == [
-                ("20261108_0037",)
+                ("20261108_0038",)
             ]
             assert connection.execute("SELECT * FROM draft_versions").fetchall() == before
             assert connection.execute("SELECT * FROM draft_sources").fetchall() == sources
@@ -77,4 +77,4 @@ def test_published_profile_converges_and_round_trips(tmp_path: Path, revision: s
     command.downgrade(config, "base")
     command.upgrade(config, "head")
     command.check(config)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20261108_0037"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20261108_0038"]

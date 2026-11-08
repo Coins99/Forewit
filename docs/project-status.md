@@ -6,15 +6,17 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
-- P4 backend milestones 1–4 are implemented locally on `feat/p4-insights`:
-  durable exact metric logs/corrections/retry receipts (migration 0037), uncapped
-  effective task-history aggregates, custom/workload queries, comparisons/targets
-  and generation-checked contributors. Author code review findings are fixed.
-  Windows source/package and final focused checks passed; see
-  [P4 evidence and remaining work](p4-insights.md) and
-  [the backend review](p4-backend-code-review.md). Dashboard layouts/editors and
-  UI integration remain P4-05–09; large-profile dashboard latency, native macOS
-  and owner acceptance remain open. Full P4 is not claimed complete.
+- P4's remaining dashboard/UI implementation is present on `feat/p4-insights`:
+  one revisioned saved layout with atomic retry receipts (migration 0038), offline
+  Insights navigation, numeric log management, widget preview/editing, keyboard
+  reorder/resize/remove with guarded Undo, exact chart tables, contributing-record
+  pagination, canonical source opening and mutation/day/zone refresh. The existing
+  backend retains correction-aware task/custom/workload semantics. See
+  [the P4 implementation and acceptance register](p4-insights.md).
+  Native macOS, real-display/assistive-technology and owner acceptance remain open.
+  Implementation and automated/native engineering evidence are distinct from acceptance.
+  The [dashboard author review](p4-dashboard-code-review.md) records ten resolved
+  findings and their regressions.
 
 - P3-1 work blocks implemented, awaiting owner acceptance (ADR 0028, migration
   `20261105_0032`): set aside time for a task on the Calendar, as many blocks as you like,

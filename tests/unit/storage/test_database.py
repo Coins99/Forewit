@@ -88,6 +88,8 @@ def test_metadata_contains_all_initial_tables() -> None:
         "metric_entries",
         "metric_entry_changes",
         "metric_commands",
+        "dashboards",
+        "dashboard_commands",
         "google_calendar_state",
         "google_calendars",
         "google_events",

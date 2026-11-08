@@ -6,8 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from mailbrief.domain.common import new_public_id
+from mailbrief.domain.dashboards import ChartKind, DashboardLayout, WidgetSpec, WidgetTarget
 from mailbrief.domain.metric_entries import MeasurementKind, MetricDefinitionSpec, MetricEntryInput
 from mailbrief.domain.metrics import MetricDateRange, MetricQuery, MetricReducer
+from mailbrief.services.dashboards import DashboardService
 from mailbrief.services.data import export_writing
 from mailbrief.services.metric_entries import MetricEntryService
 from mailbrief.services.metrics import MetricService
@@ -71,10 +74,48 @@ async def check_metrics(directory: Path) -> None:
         result = await MetricService(database, google_on=False, clock=lambda: now).query(query)
         if str(result.total) != "12.50":
             raise RuntimeError("Packaged metric aggregate failed.")
+        async with database.session() as session:
+            dashboard_service = DashboardService(session)
+            initial = await dashboard_service.load(query.dates)
+            layout = DashboardLayout(
+                widgets=(
+                    *initial.layout.widgets,
+                    WidgetSpec(
+                        public_id=new_public_id(),
+                        title="Synthetic reading",
+                        query=query,
+                        chart=ChartKind.BAR,
+                        target=WidgetTarget(value="20.00"),
+                    ),
+                )
+            )
+            dashboard_command = new_public_id()
+            dashboard = await dashboard_service.save(
+                layout, initial.revision, command_id=dashboard_command
+            )
+            if (
+                await dashboard_service.save(layout, initial.revision, command_id=dashboard_command)
+                != dashboard
+            ):
+                raise RuntimeError("Packaged dashboard retry failed.")
+        if (
+            len(
+                await MetricService(database, google_on=False).query_many(
+                    tuple(widget.query for widget in dashboard.layout.widgets)
+                )
+            )
+            != 5
+        ):
+            raise RuntimeError("Packaged dashboard query failed.")
         output = directory / "metrics.json"
         await export_writing(database, output)
         records = json.loads(await asyncio.to_thread(output.read_text, encoding="utf-8"))["records"]
-        if len(records["metric_entry_changes"]) != 3 or "metric_commands" in records:
+        if (
+            len(records["metric_entry_changes"]) != 3
+            or "metric_commands" in records
+            or len(records["dashboards"]) != 1
+            or "dashboard_commands" in records
+        ):
             raise RuntimeError("Packaged metric export failed.")
         archive, recovered = directory / "metrics.zip", directory / "recovered.sqlite3"
         await asyncio.to_thread(create_backup, path, archive)
@@ -96,5 +137,7 @@ async def check_metrics(directory: Path) -> None:
                 != saved
             ):
                 raise RuntimeError("Packaged recovery lost the metric retry receipt.")
+            if await DashboardService(session).load(query.dates) != dashboard:
+                raise RuntimeError("Packaged recovery lost the dashboard layout or targets.")
     finally:
         await restored.dispose()

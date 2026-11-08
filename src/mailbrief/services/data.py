@@ -54,6 +54,7 @@ EXPORT_TABLES = (
     "metric_definitions",
     "metric_entries",
     "metric_entry_changes",
+    "dashboards",
 )
 
 

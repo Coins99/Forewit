@@ -153,6 +153,9 @@ def validate_snapshot(path: Path, *, current_schema: bool = False) -> tuple[str,
 
             try:
                 validate_metric_records(connection)
+                from mailbrief.storage.dashboard_validation import validate_dashboard_records
+
+                validate_dashboard_records(connection)
             except (ValueError, TypeError, KeyError, IndexError, OverflowError):
                 raise BackupValidationError(_INVALID) from None
         if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:

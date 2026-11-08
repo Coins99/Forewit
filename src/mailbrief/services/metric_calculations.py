@@ -5,10 +5,10 @@ import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import cast
 from zoneinfo import ZoneInfo
 
-from mailbrief.domain.actions import ActionActivity, ActionActivityKind
+from mailbrief.domain.actions import ActionActivityKind
 from mailbrief.domain.analysis import DeadlinePrecision, deadline_due_at
 from mailbrief.domain.availability import availability, busy_spans, day_span
 from mailbrief.domain.intervals import clip, union
@@ -35,7 +35,6 @@ from mailbrief.domain.metrics import (
     custom_metric,
     validate_metric_query,
 )
-from mailbrief.domain.task_history import resolve_task_history
 from mailbrief.domain.workload import workload
 from mailbrief.storage.metric_sources import MetricSources
 
@@ -68,13 +67,6 @@ def _matches(row: MetricContribution, query: MetricQuery) -> bool:
 def _tasks(
     query: MetricQuery, sources: MetricSources, now: datetime
 ) -> tuple[list[MetricContribution], int]:
-    history: dict[int, list[ActionActivity]] = defaultdict(list)
-    for record in sources.activities:
-        history[record["action_id"]].append(
-            ActionActivity.model_validate(
-                {key: value for key, value in record.items() if key != "action_id"}
-            )
-        )
     first, end = query.dates.instant_bounds()
     zone = ZoneInfo(query.dates.zone)
     rows: list[MetricContribution] = []
@@ -108,7 +100,7 @@ def _tasks(
                     )
                 )
             continue
-        resolved = resolve_task_history(history[task["id"]], task["revision"])
+        resolved = sources.task_histories[task["id"]]
         partial += not resolved.complete
         kind = (
             ActionActivityKind.CREATED
@@ -402,9 +394,24 @@ def calculate_metric(
     partial = missing = 0
     calendar_status: tuple[tuple[date, str], ...] = ()
     if query.metric_key.startswith("tasks."):
-        contributions, partial = _tasks(query, sources, now)
+        base_key = (
+            (
+                "tasks.completions"
+                if query.metric_key == "tasks.distinct_completed"
+                else query.metric_key
+            )
+            + query.dates.model_dump_json()
+            + now.isoformat()
+        )
+        if base_key not in sources.prepared:
+            sources.prepared[base_key] = _tasks(query, sources, now)
+        contributions, partial = cast(
+            tuple[list[MetricContribution], int], sources.prepared[base_key]
+        )
     elif sources.definition is not None:
-        contributions = _logs(query, sources)
+        if "logs" not in sources.prepared:
+            sources.prepared["logs"] = _logs(query, sources)
+        contributions = cast(list[MetricContribution], sources.prepared["logs"])
     elif query.metric_key == "plan.selected_estimates":
         contributions = _selections(sources)
     elif query.metric_key.startswith("blocks."):
@@ -450,17 +457,6 @@ def calculate_metric(
         notes=tuple(notes),
     )
     buckets = _buckets(query, descriptor, sources, rows)
-    calendar: Any = None
-    if sources.calendar is not None:
-        shown = sources.calendar
-        calendar = (
-            shown.hours.model_dump(mode="json"),
-            shown.google_knowledge.model_dump(mode="json"),
-            [(event.public_id, event.revision) for event in shown.events],
-            [event.model_dump(mode="json") for event in shown.google_events],
-            [(block.public_id, block.block.revision) for block in shown.blocks],
-            [focus.model_dump(mode="json") for focus in shown.focus],
-        )
     fingerprint = hashlib.sha256(
         json.dumps(
             (
@@ -468,14 +464,7 @@ def calculate_metric(
                 now.isoformat(),
                 [row.model_dump(mode="json") for row in rows],
                 coverage.model_dump(mode="json"),
-                sources.tasks,
-                sources.activities,
-                sources.entries,
-                sources.selections,
-                sources.projects,
-                sources.areas,
-                None if sources.definition is None else sources.definition.model_dump(mode="json"),
-                calendar,
+                sources.signature,
             ),
             sort_keys=True,
             default=str,

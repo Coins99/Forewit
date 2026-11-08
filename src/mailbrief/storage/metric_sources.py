@@ -1,5 +1,8 @@
 """Consistent local metric inputs; no provider calls and no capped UI list readers."""
 
+import hashlib
+import json
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import cached_property
@@ -9,10 +12,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.domain.actions import ActionActivity
 from mailbrief.domain.availability import day_span
 from mailbrief.domain.events import CalendarRange
 from mailbrief.domain.metric_entries import MetricDefinition
 from mailbrief.domain.metrics import MetricQuery
+from mailbrief.domain.task_history import TaskHistory, resolve_task_history
 from mailbrief.storage.day_plans import focus_days
 from mailbrief.storage.events import EventRepository, event_from_row
 from mailbrief.storage.google_calendar import GoogleCalendarRepository
@@ -49,8 +54,58 @@ class MetricSources:
     calendar: CalendarRange | None = None
 
     @cached_property
+    def prepared(self) -> dict[str, Any]:
+        """Derived values live only as long as this read snapshot, on its one worker."""
+        return {}
+
+    @cached_property
+    def signature(self) -> str:
+        calendar: Any = None
+        if self.calendar is not None:
+            shown = self.calendar
+            calendar = (
+                shown.hours.model_dump(mode="json"),
+                shown.google_knowledge.model_dump(mode="json"),
+                [(event.public_id, event.revision) for event in shown.events],
+                [event.model_dump(mode="json") for event in shown.google_events],
+                [(block.public_id, block.block.revision) for block in shown.blocks],
+                [focus.model_dump(mode="json") for focus in shown.focus],
+            )
+        return hashlib.sha256(
+            json.dumps(
+                (
+                    self.tasks,
+                    self.activities,
+                    self.entries,
+                    self.selections,
+                    self.projects,
+                    self.areas,
+                    None if self.definition is None else self.definition.model_dump(mode="json"),
+                    calendar,
+                ),
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+
+    @cached_property
     def project_areas(self) -> dict[str, str | None]:
         return {row["public_id"]: row["area_public_id"] for row in self.projects}
+
+    @cached_property
+    def task_histories(self) -> dict[int, TaskHistory]:
+        history: dict[int, list[ActionActivity]] = defaultdict(list)
+        for record in self.activities:
+            history[record["action_id"]].append(
+                ActionActivity.model_validate(
+                    {key: value for key, value in record.items() if key != "action_id"}
+                )
+            )
+        return {
+            task["id"]: resolve_task_history(history[task["id"]], task["revision"])
+            for task in self.tasks
+        }
 
 
 async def _rows(

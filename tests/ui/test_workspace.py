@@ -489,8 +489,11 @@ def test_arrow_keys_reach_briefs_like_any_page(qtbot: QtBot) -> None:
     sidebar.set_current("notes")
     sidebar.nav.setFocus()
     QTest.keyClick(sidebar.nav, Qt.Key.Key_Down)
-    assert sidebar.current_key() == "inbox"
+    assert sidebar.current_key() == "insights"
+    QTest.keyClick(sidebar.nav, Qt.Key.Key_Down)
     assert pages.at(pages.count() - 1) == ["inbox"]
+    QTest.keyClick(sidebar.nav, Qt.Key.Key_Up)
+    assert pages.at(pages.count() - 1) == ["insights"]
     QTest.keyClick(sidebar.nav, Qt.Key.Key_Up)
     assert pages.at(pages.count() - 1) == ["notes"]
 
@@ -1130,7 +1133,7 @@ def test_workspace_pages_preserve_legacy_shortcut_meanings(qtbot: QtBot) -> None
     workspace = build(qtbot)
     sidebar = workspace.sidebar
     keys = [str(sidebar.pages.item(row).data(KEY_ROLE)) for row in range(sidebar.pages.rowCount())]
-    assert keys == ["today", "actions", "projects", "calendar", "notes", "inbox"]
+    assert keys == ["today", "actions", "projects", "calendar", "notes", "insights", "inbox"]
     assert list(PAGE_SHORTCUTS) == [
         "today",
         "inbox",

@@ -24,7 +24,7 @@ from mailbrief.domain.metrics import (
 )
 from mailbrief.services.metric_calculations import calculate_metric
 from mailbrief.storage.database import Database
-from mailbrief.storage.metric_sources import read_metric_sources
+from mailbrief.storage.metric_sources import MetricSources, read_metric_sources
 
 
 class MetricDataError(ValueError):
@@ -66,6 +66,75 @@ class MetricService:
         self.database = database
         self.google_on = google_on
         self.clock = clock
+        self._dashboard_reads = asyncio.Semaphore(1)
+
+    async def query_many(
+        self, queries: tuple[MetricQuery, ...], *, captured_at: datetime | None = None
+    ) -> tuple[MetricQueryResult, ...]:
+        async with self._dashboard_reads:
+            return await self._query_many(queries, captured_at=captured_at)
+
+    async def _query_many(
+        self, queries: tuple[MetricQuery, ...], *, captured_at: datetime | None = None
+    ) -> tuple[MetricQueryResult, ...]:
+        """One short snapshot for a dashboard, sharing identical complete source reads.
+
+        There is no cross-refresh cache: edits, purge and profile replacement cannot
+        reuse an old generation. Calculations run serially on one worker.
+        """
+        if len(queries) > 24:
+            raise ValueError("Choose at most twelve widgets and their comparisons.")
+        now = normalize_utc(self.clock() if captured_at is None else captured_at)
+        queries = tuple(_validated_query(query, now) for query in queries)
+        cache: dict[str, MetricSources] = {}
+        inputs: list[MetricSources] = []
+        async with self.database.session() as session:
+            await session.execute(text("BEGIN"))
+            for query in queries:
+                # Task transition reads are complete and independent of date/group filters.
+                key = (
+                    "task_history"
+                    if query.metric_key.startswith("tasks.")
+                    and query.metric_key != "tasks.current_overdue"
+                    else query.model_copy(
+                        update={
+                            "group_by": None,
+                            "project_public_id": None,
+                            "area_public_id": None,
+                        }
+                    ).model_dump_json()
+                )
+                if key not in cache:
+                    cache[key] = await read_metric_sources(
+                        session,
+                        query,
+                        now,
+                        google_on=self.google_on,
+                    )
+                inputs.append(cache[key])
+
+        def calculate() -> tuple[MetricQueryResult, ...]:
+            try:
+                return tuple(
+                    calculate_metric(query, sources, now, google_on=self.google_on)
+                    for query, sources in zip(queries, inputs, strict=True)
+                )
+            except (ValueError, KeyError, TypeError, OverflowError):
+                raise MetricDataError() from None
+
+        worker = asyncio.create_task(asyncio.to_thread(calculate))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # A Python worker cannot be stopped; keep the slot until it finishes so
+            # rapid range changes never accumulate parallel dashboard calculations.
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+            worker.result()
+            raise
 
     async def query(
         self, query: MetricQuery, *, captured_at: datetime | None = None
@@ -84,8 +153,10 @@ class MetricService:
         except (ValueError, KeyError, TypeError, OverflowError):
             raise MetricDataError() from None
 
-    async def compare(self, query: MetricQuery) -> MetricComparison:
-        now = normalize_utc(self.clock())
+    async def compare(
+        self, query: MetricQuery, *, captured_at: datetime | None = None
+    ) -> MetricComparison:
+        now = normalize_utc(self.clock() if captured_at is None else captured_at)
         query = _validated_query(query, now)
         previous = query.model_copy(update={"dates": query.dates.previous()})
         async with self.database.session() as session:

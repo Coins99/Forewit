@@ -1,8 +1,8 @@
 # ADR 0032: Exact metric contracts and prepared-data charts
 
-Date: 2026-11-08. Status: metric contracts, durable logs and backend queries
-implemented. Renderer remains a feasibility candidate; full Insights and owner
-acceptance remain open.
+Date: 2026-11-08. Status: contracts, logs, query engine, durable dashboard and
+Insights editors implemented. Native platform, accessibility and owner acceptance
+remain open; see the P4 register for exact engineering evidence.
 
 ## Context
 
@@ -82,13 +82,35 @@ rendered; category membership remains exact.
 
 ## Limits and follow-up
 
-The backend is implemented; durable dashboard layouts, desktop log/widget editors,
-canonical source routes and UI refresh integration remain later P4 milestones.
+The dashboard is a singleton SQLite row guarded by one revision. Migration 0038
+adds it and separate text-free retry receipts. Whole-layout writes validate every
+widget against its resolved definition, reserve SQLite's writer, and commit the
+layout/revision/receipt together. Conflicts preserve editor input; unsupported saved
+schemas expose an explicit reset state. Removal/reset Undo requires the exact revision
+it produced, so later layout edits cannot be overwritten. Backup validation checks
+configurations and references; portable exports include layouts and omit receipts.
+
+Insights has a canonical page/palette route without changing the eight shortcuts.
+Queries, definition/entry saves and layout writes use independent sessions and do
+not join the window's AI queue. One dashboard snapshot shares complete task-history
+reads, pure history resolution, base contributions and input signatures; it never
+persists a copied aggregate. Desktop source materialization and calculations run on
+a worker-owned engine/event loop; no ORM/session objects cross loops. The GUI retains
+query/fingerprint handles, while detail revalidation and paging stay on the worker.
+A current-state card can appear while the retained-history widgets load. Obsolete dashboard reads discard late results and retain their
+worker slot until cancellation has joined the worker. Range refresh keeps existing
+cards until replacement; resize repacks prepared widgets without reading storage.
+
+Charts use the prepared-data Qt painter/table component: exact accessible tables,
+keyboard and pointer inspection, gaps, zero baselines and neutral target differences.
+Editors expose units/precision/date/project/corrections and preserve explicit widget
+zone/range overrides. All owner text stays plain. Dialogs use DialogGuard and the
+existing quit guard; shutdown drains pending saves before closing the database.
 Current retained plans do not prove historical workload or actual work performed.
 No account/provider is accessed by metrics, no processing permission changes and
 no dependency is added. The package check includes a separate synthetic metric
 profile with lifecycle, retry, aggregate, export and restore verification.
 
-The chart candidate remains subject to native package, assistive-technology and
+The renderer remains subject to platform package, assistive-technology and
 real-display checks. Offscreen painting and accessible names do not establish
 screen-reader acceptance. See `../p4-insights.md` for current verification.
