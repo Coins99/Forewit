@@ -14,7 +14,7 @@ PublicId = Annotated[str, Field(min_length=36, max_length=36)]
 
 class PageRoute(DomainModel):
     kind: Literal["page"] = "page"
-    page: Literal["today", "tasks", "projects", "calendar", "notes", "mail"]
+    page: Literal["today", "tasks", "projects", "calendar", "notes", "mail", "insights"]
 
 
 class TaskRoute(DomainModel):

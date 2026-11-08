@@ -45,6 +45,14 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   0034–0036 preserve merged 0032/0033. See `docs/p3-scheduling-addons.md` and ADR 0031;
   do not replace main's Day view, Busy/Free, gestures or daily workload. The divergent
   unmerged candidate requires separate-copy conversion, never a normal schema upgrade.
+- P4 now includes the durable offline Insights page: exact metric logs/corrections,
+  task/workload/custom queries, saved revisioned dashboard layouts (migration 0038),
+  widget preview/editing, targets/comparisons, keyboard layout controls and stale-safe
+  record inspection. Ctrl/Cmd+1?8 keep their existing meanings; Insights is in the
+  sidebar and palette. Source/native verification and remaining acceptance gates are
+  recorded in `docs/p4-insights.md` and ADR 0032. Native macOS, assistive-technology,
+  real-display and owner acceptance remain open; do not claim P4 accepted.
+
 - Where each feature is specified (behavior, acceptance steps and limits):
 
   | Area | Docs | ADRs |
@@ -71,7 +79,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   mailbrief.diagnostics.backup`. Gmail diagnostic database commands hold `desktop.lock`
   for their whole run: they exit 5 while the desktop is open, and the desktop reports
   that Forewit is busy while one runs.
-- The desktop's sidebar is Today, Tasks, Projects, Calendar, Notes and Mail. Ctrl/Cmd+1–8
+- The desktop's sidebar is Today, Tasks, Projects, Calendar, Notes, Insights and Mail. Ctrl/Cmd+1–8
   keep their earlier meanings: 1 Today, 2 Inbox, 3 Tasks, 4 Waiting, 5 Mail drafts,
   6 brief history, 7 Calendar, 8 Notes. New task is Ctrl/Cmd+N, Capture
   Ctrl/Cmd+Shift+N and the palette Ctrl/Cmd+K. The default look is Studio (`docs/ui/studio.md`), in the system's light or

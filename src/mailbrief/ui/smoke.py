@@ -19,6 +19,7 @@ from PySide6.QtCore import QLibraryInfo
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
+from mailbrief.diagnostics.metric_smoke import check_metrics
 from mailbrief.domain.actions import Action
 from mailbrief.domain.capture import CaptureRequest
 from mailbrief.domain.drafts import Draft
@@ -423,6 +424,7 @@ async def check_package(directory: Path) -> None:
     finally:
         await recovered.close()
     await check_scheduling(directory / f"planning-{suffix}")
+    await check_metrics(directory / f"metrics-{suffix}")
     report = json.dumps({"ok": True, "platform": sys.platform, "launches": 2})
     await asyncio.to_thread((directory / "smoke-result.json").write_text, report, encoding="utf-8")
 

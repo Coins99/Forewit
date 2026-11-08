@@ -92,6 +92,7 @@ from mailbrief.services.google_calendar import sync_window
 from mailbrief.services.local_setup import SetupProgress, SetupState, SetupStatus
 from mailbrief.services.preferences import PreferencesConflictError
 from mailbrief.services.today import needs_attention, new_replies
+from mailbrief.ui.insights_backend import InsightsBackend
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
 from tests.factories import make_action, make_digest_item, make_message
@@ -100,6 +101,9 @@ from tests.ui.fake_drafts import FakeDrafts
 
 
 class FakeBackend(FakeDrafts):
+    async def insights(self) -> "InsightsBackend":
+        raise RuntimeError("Insights is not configured in this fixture.")
+
     async def local_ai_status(self) -> SetupStatus:
         return SetupStatus(SetupState.NOT_SET_UP)
 

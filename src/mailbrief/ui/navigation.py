@@ -30,6 +30,8 @@ def legacy_page_route(key: str) -> Route | None:
             return PageRoute(page="calendar")
         case "notes":
             return PageRoute(page="notes")
+        case "insights":
+            return PageRoute(page="insights")
         case "projects":
             return PageRoute(page="projects")
         case "inbox" | "mail":

@@ -25,6 +25,8 @@ from mailbrief.storage.tables import (
     DraftTable,
     DraftVersionTable,
     MessageTable,
+    MetricEntryChangeTable,
+    MetricEntryTable,
     SuggestionDecisionTable,
     SyncRunTable,
     WorkBlockTable,
@@ -49,6 +51,10 @@ EXPORT_TABLES = (
     "calendar_events",
     "work_blocks",
     "working_hours",
+    "metric_definitions",
+    "metric_entries",
+    "metric_entry_changes",
+    "dashboards",
 )
 
 
@@ -95,6 +101,8 @@ class CleanupPreview:
     decisions: int
     day_selections: int = 0
     work_blocks: int = 0
+    metric_entries: int = 0
+    metric_changes: int = 0
 
     @property
     def summary(self) -> str:
@@ -108,6 +116,11 @@ class CleanupPreview:
             summary += f" Remove {self.day_selections} daily selections; keep their day plans."
         if self.work_blocks:
             summary += f" Remove {self.work_blocks} scheduled times of those actions."
+        if self.metric_entries:
+            summary += (
+                f" Remove {self.metric_entries} deleted metric observations "
+                f"and {self.metric_changes} corrections."
+            )
         return summary
 
 
@@ -177,7 +190,7 @@ async def _selections(
     if request.kind == CleanupKind.DELETED:
         return {
             cls: select(cls).where(cls.deleted_at_utc < request.before)
-            for cls in (ActionTable, DraftTable)
+            for cls in (ActionTable, DraftTable, MetricEntryTable)
         }
     account = await session.get(AccountTable, request.account_id)
     if account is None or account.provider != "gmail":
@@ -287,6 +300,19 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
             )
             or 0
         )
+    metric_changes = 0
+    if request.kind == CleanupKind.DELETED:
+        metric_changes = (
+            await session.scalar(
+                select(func.count())
+                .select_from(MetricEntryChangeTable)
+                .join(
+                    MetricEntryTable, MetricEntryChangeTable.entry_id == MetricEntryTable.public_id
+                )
+                .where(MetricEntryTable.deleted_at_utc < request.before)
+            )
+            or 0
+        )
     return CleanupPreview(
         request,
         await _fingerprint(session),
@@ -300,6 +326,8 @@ async def _preview(session: AsyncSession, request: CleanupRequest) -> CleanupPre
         counts.get(SuggestionDecisionTable, 0),
         day_selections,
         work_blocks,
+        counts.get(MetricEntryTable, 0),
+        metric_changes,
     )
 
 

@@ -149,6 +149,15 @@ def validate_snapshot(path: Path, *, current_schema: bool = False) -> tuple[str,
             if not expected <= tables:
                 raise BackupValidationError(_INVALID)
             _check_schema(connection, path)
+            from mailbrief.storage.metric_validation import validate_metric_records
+
+            try:
+                validate_metric_records(connection)
+                from mailbrief.storage.dashboard_validation import validate_dashboard_records
+
+                validate_dashboard_records(connection)
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError):
+                raise BackupValidationError(_INVALID) from None
         if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
             raise BackupValidationError(_INVALID)
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:

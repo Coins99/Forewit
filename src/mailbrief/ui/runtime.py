@@ -146,6 +146,7 @@ from mailbrief.storage.repositories import (
     SyncRunRepository,
 )
 from mailbrief.storage.tables import AccountTable
+from mailbrief.ui.insights_backend import InsightsBackend
 from mailbrief.ui.preferences import DesktopPreferences, PreferencesStore
 
 logger = logging.getLogger(__name__)
@@ -776,6 +777,9 @@ class DesktopRuntime:
         if self._database is None:
             raise RuntimeError("Desktop storage is not initialized.")
         return self._database
+
+    async def insights(self) -> InsightsBackend:
+        return InsightsBackend(self._storage(), google_on=self._calendar_allowed is True)
 
     async def list_actions(self, view: ActionFilter) -> tuple[Action, ...]:
         async with self._storage().session() as session:
