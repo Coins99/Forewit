@@ -45,6 +45,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   0034–0036 preserve merged 0032/0033. See `docs/p3-scheduling-addons.md` and ADR 0031;
   do not replace main's Day view, Busy/Free, gestures or daily workload. The divergent
   unmerged candidate requires separate-copy conversion, never a normal schema upgrade.
+- P4 milestones 1–4 implement durable exact metric logs/corrections/retry receipts
+  (migration 0037), uncapped effective task-history aggregates, local workload/custom
+  queries, comparisons, targets and generation-checked contributors. The Qt chart/table
+  component remains a feasibility candidate; dashboard persistence and Insights editors
+  are pending. See `docs/p4-insights.md` and ADR 0032; P4 and owner acceptance remain open.
+
 - Where each feature is specified (behavior, acceptance steps and limits):
 
   | Area | Docs | ADRs |

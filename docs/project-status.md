@@ -6,6 +6,16 @@ later use after Microsoft Entra access is resolved.
 
 ## Current state
 
+- P4 backend milestones 1–4 are implemented locally on `feat/p4-insights`:
+  durable exact metric logs/corrections/retry receipts (migration 0037), uncapped
+  effective task-history aggregates, custom/workload queries, comparisons/targets
+  and generation-checked contributors. Author code review findings are fixed.
+  Windows source/package and final focused checks passed; see
+  [P4 evidence and remaining work](p4-insights.md) and
+  [the backend review](p4-backend-code-review.md). Dashboard layouts/editors and
+  UI integration remain P4-05–09; large-profile dashboard latency, native macOS
+  and owner acceptance remain open. Full P4 is not claimed complete.
+
 - P3-1 work blocks implemented, awaiting owner acceptance (ADR 0028, migration
   `20261105_0032`): set aside time for a task on the Calendar, as many blocks as you like,
   shown in Week, Month, List and Today; drag, resize, keyboard moves and unschedule with

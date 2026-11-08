@@ -1360,3 +1360,108 @@ class PlanningCommandTable(Base):
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     results: Mapped[list[dict[str, str | int]]] = mapped_column(JSON, nullable=False)
     created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class MetricDefinitionTable(Base):
+    __tablename__ = "metric_definitions"
+    __table_args__ = (
+        CheckConstraint("length(public_id) = 36", name="public_id_length"),
+        CheckConstraint("length(name) BETWEEN 1 AND 120", name="name_length"),
+        CheckConstraint("length(unit) BETWEEN 1 AND 32", name="unit_length"),
+        CheckConstraint("kind IN ('amount','point_value')", name="kind_known"),
+        CheckConstraint("scale BETWEEN 0 AND 6", name="scale_valid"),
+        CheckConstraint("version = 1 AND revision >= 1", name="versions_valid"),
+        CheckConstraint("allow_negative IN (0,1) AND archived IN (0,1)", name="flags_valid"),
+    )
+    public_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scale: Mapped[int] = mapped_column(Integer, nullable=False)
+    allow_negative: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class MetricEntryTable(Base):
+    __tablename__ = "metric_entries"
+    __table_args__ = (
+        CheckConstraint("length(public_id) = 36", name="public_id_length"),
+        CheckConstraint("definition_version = 1 AND revision >= 1", name="versions_valid"),
+        CheckConstraint(
+            "typeof(value_scaled) = 'integer' AND "
+            "value_scaled BETWEEN -1000000000000000 AND 1000000000000000",
+            name="value_valid",
+        ),
+        Index("ix_metric_entries_definition_date", "definition_id", "local_date", "public_id"),
+    )
+    public_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    definition_id: Mapped[str] = mapped_column(
+        ForeignKey("metric_definitions.public_id", ondelete="RESTRICT")
+    )
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    value_scaled: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False)
+    zone: Mapped[str] = mapped_column(String(64), nullable=False)
+    project_public_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.public_id", ondelete="RESTRICT")
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class MetricEntryChangeTable(Base):
+    __tablename__ = "metric_entry_changes"
+    __table_args__ = (
+        UniqueConstraint("entry_id", "revision", name="uq_metric_entry_changes_revision"),
+        CheckConstraint("revision >= 1", name="revision_valid"),
+        CheckConstraint(
+            "operation IN ('create','edit','delete','restore','undo')", name="operation_known"
+        ),
+        CheckConstraint(
+            "corrects_revision IS NULL OR "
+            "(corrects_revision >= 1 AND corrects_revision < revision)",
+            name="correction_valid",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entry_id: Mapped[str] = mapped_column(
+        ForeignKey("metric_entries.public_id", ondelete="CASCADE")
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    state_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    corrects_revision: Mapped[int | None] = mapped_column(Integer)
+    recorded_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class MetricCommandTable(Base):
+    """Text-free receipts survive result purge; portable writing exports omit them."""
+
+    __tablename__ = "metric_commands"
+    __table_args__ = (
+        CheckConstraint("length(command_id) = 36", name="command_id_length"),
+        CheckConstraint(
+            "length(result_public_id) = 36 AND result_revision >= 1", name="result_valid"
+        ),
+        CheckConstraint("result_kind IN ('definition','entry')", name="result_kind_known"),
+        CheckConstraint(
+            "operation IN ('define','configure','create','edit','delete','restore','undo')",
+            name="operation_known",
+        ),
+        CheckConstraint(
+            "length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'", name="hash_valid"
+        ),
+    )
+    command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    result_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
