@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
@@ -32,7 +32,8 @@ def display(chart: ChartKind = ChartKind.LINE) -> MetricDisplay:
     )
 
 
-def test_keyboard_selection_enter_and_exact_table(qtbot: QtBot) -> None:
+@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
+def test_keyboard_selection_enter_and_exact_table(qtbot: QtBot, key: Qt.Key) -> None:
     card = MetricChartCard(display())
     qtbot.addWidget(card)
     card.resize(500, 480)
@@ -43,7 +44,7 @@ def test_keyboard_selection_enter_and_exact_table(qtbot: QtBot) -> None:
     assert "Tuesday: Unknown" in card.selection_label.text()
     QTest.keyClick(card.plot, Qt.Key.Key_End)
     with qtbot.waitSignal(card.activated) as signal:
-        QTest.keyClick(card.plot, Qt.Key.Key_Return)
+        QTest.keyClick(card.plot, key)
     assert signal.args == ["thu"]
     QTest.keyClick(card.plot, Qt.Key.Key_Home)
     assert "12.123456" in card.selection_label.text()
@@ -56,11 +57,27 @@ def test_keyboard_selection_enter_and_exact_table(qtbot: QtBot) -> None:
     assert model.data(model.index(1, 1)) == "Unknown"
     assert model.data(model.index(2, 1)) == "0"
     assert model.data(model.index(0, 1), Qt.ItemDataRole.AccessibleTextRole) == "12.123456"
-    with qtbot.waitSignal(card.activated) as signal:
-        QTest.keyClick(card.table, Qt.Key.Key_Return)
-    assert signal.args == ["mon"]
+    activated = QSignalSpy(card.activated)
+    QTest.keyClick(card.table, key)
+    assert activated.count() == 1
+    assert activated.at(0) == ["mon"]
+    QTest.keyClick(card.table, Qt.Key.Key_Down)
+    QTest.keyClick(card.table, key)
+    assert activated.count() == 2
+    assert activated.at(1) == ["tue"]
     card.view_data.click()
     assert not card.table.isVisible()
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
+def test_empty_data_table_does_not_activate(qtbot: QtBot, key: Qt.Key) -> None:
+    card = MetricChartCard(MetricDisplay(title="Empty", unit="minutes", chart=ChartKind.LINE))
+    qtbot.addWidget(card)
+    card.show()
+    card.view_data.click()
+    activated = QSignalSpy(card.activated)
+    QTest.keyClick(card.table, key)
+    assert activated.count() == 0
 
 
 def test_click_selects_bucket_and_number_card_keeps_explicit_total(qtbot: QtBot) -> None:

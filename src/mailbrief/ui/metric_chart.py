@@ -74,6 +74,19 @@ class MetricTableModel(QAbstractTableModel):
         return None
 
 
+class MetricDataTable(QTableView):
+    """Activate rows once with either Enter key, including on Cocoa."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            index = self.currentIndex()
+            if index.isValid():
+                self.activated.emit(index)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class MetricPlot(QWidget):
     selected = Signal(int)
     activated = Signal(str)
@@ -280,7 +293,7 @@ class MetricChartCard(HairlineFrame):
         self.view_data.setAccessibleName(f"View data for {data.title}")
         self.view_data.setCheckable(True)
         layout.addWidget(self.view_data)
-        self.table = QTableView(self)
+        self.table = MetricDataTable(self)
         self.table.setObjectName("metric-data-table")
         self.table.setAccessibleName(f"{data.title}: exact values in {data.unit}")
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
