@@ -132,9 +132,9 @@ validation still enforces them. Global dashboard dates start at the last seven l
 
 dates and follow day rollover until explicitly changed. Widget overrides are saved.
 
-Edit layout exposes Earlier/Later, Size and Remove. Removal and Reset offer Undo,
+Edit layout exposes Earlier/Later, Size and Remove. Removal and Reset offer Undo; a later layout change withdraws it, because the service
 
-which rejects subsequent layout edits. Whole-layout revisions reject stale editors
+rejects an undo of an older revision. Whole-layout revisions reject stale editors
 
 without losing typed input. Unknown layout schemas show a repair/reset message.
 
@@ -148,7 +148,9 @@ Repeating an acknowledged identical log creates a new observation; retrying an
 
 uncertain write reuses its command. Unsaved entry input cannot be replaced by another
 
-row selection. Discard input is explicit. Dialogs are scrollable in short windows;
+row selection. Discard input is explicit. Dialogs are scrollable in short windows and show what a button answered under the
+
+scrolled fields;
 
 quit checks unsaved inputs and shutdown drains in-flight saves.
 
@@ -164,9 +166,21 @@ rows disclose contributing spans, working windows, busy/buffer subtraction and r
 
 block identities rather than suggesting overlapping row values can simply be added.
 
-Task/group/calendar writes use the existing committed-view refresh path. Insights
+Task/group/calendar writes use the existing committed-view refresh path. Insights also refreshes when reopened, on its minute tick and on owner day/zone changes.
 
-also refreshes when reopened, on its minute tick and on owner day/zone changes.
+A refresh that changes neither the layout nor the mode puts the fresh values into the
+
+cards on screen: focus, an open data table, the selected value and the scroll position stay.
+
+A dashboard project or life-area filter reaches only the metrics that can take it; the
+
+others keep their whole value and say so in their caption. Planned workload starts today:
+
+on the dashboard's dates or a widget's own, the part of the range before today is left out.
+
+The date fields always hold an ordered range of at most 366 dates. Observations are listed
+
+newest first.
 
 Range changes retain the old cards while loading; obsolete reads cannot replace a
 
@@ -326,3 +340,38 @@ This supersedes the earlier increment's benchmark for the reviewed source. It
 remains a timer proxy and a three-run engineering measurement; fully loaded stress
 dashboards take about ten seconds. Further large-profile tuning, native macOS/Cocoa,
 real displays, assistive technology and owner acceptance remain open.
+
+## Independent review and macOS UI check
+
+An independent review of the merged P4 code and a UI check on macOS (2026-11-09) found
+fifteen defects. All are fixed, each with a regression. The findings, their resolutions
+and what was noted but left unchanged are in [p4-ui-review.md](p4-ui-review.md). No
+migration, dependency or stored format changed.
+
+Verification on 2026-11-10: macOS 27.2.1 (arm64), Python 3.13.15 and PySide6 6.11.2 in
+the locked environment, synthetic records only.
+
+- Ruff formatting and lint pass (732 files). Strict mypy passes for the native, Windows
+  and macOS targets (565 source and test files).
+- Full suite, offscreen with the Qt tests enabled: 5,532 passed, 7 platform skips and one
+  failure that is not P4's. `test_day_window_matches_the_window_of_any_moment_that_day`
+  for America/Havana expects a 25-hour day on 2026-11-01, and this machine's time-zone
+  data gives 24; it fails the same way on `main`. Combined statement/branch coverage is
+  94.64%, and every service passes its 90% gate.
+- 35 new tests: 17 in `tests/ui/test_insights_qa.py`, 14 in the chart tests, 2 domain
+  tests and 2 service tests.
+- Native Cocoa. On 2026-11-09, before the fixes, the 44 Insights and chart tests passed
+  there and the defects were reproduced there. On 2026-11-10 the desktop gave test
+  windows no keyboard focus, so tests that wait on `hasFocus()` timed out: across the
+  twelve affected UI test files, the same 28 failures and 17 errors on unchanged `main`
+  (`f10618c`) and on the fix branch, name for name. The 17 new UI tests pass on Cocoa in
+  that state, because they read each window's focus widget. CI's macOS job is the
+  reference for the Cocoa step.
+- The package's synthetic metric check (`check_metrics`) passes from source. No package
+  was built here; CI builds and checks it.
+- Light and dark renders of the dashboard, both editors and Contributing records were
+  inspected before and after the fixes, offscreen at 1x and on Cocoa at 2x.
+
+Not checked here: VoiceOver, a real display at a fractional scale, Windows and the owner's
+own records. Large-profile timing was not measured again: the in-place refresh removes the
+rebuild of the cards, not the cost of the queries.

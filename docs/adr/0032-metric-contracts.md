@@ -111,6 +111,17 @@ No account/provider is accessed by metrics, no processing permission changes and
 no dependency is added. The package check includes a separate synthetic metric
 profile with lifecycle, retry, aggregate, export and restore verification.
 
+Amended 2026-11-10 after the independent review ([p4-ui-review.md](../p4-ui-review.md)).
+Query validation is unchanged and still refuses an unsupported filter or a forward plan
+that starts in the past. What a widget inherits is decided before validation, by one
+resolver for the dashboard and the preview: a dashboard project or life-area filter
+reaches only a metric whose descriptor has that dimension, and the others say in their
+caption that it does not apply; a forward plan (planned workload) drops the part of its
+range before today in the range's zone. All widgets of one refresh are queried at one
+captured instant. The owner's observation list is newest first; aggregates and other
+readers keep the oldest-first order. A removal or reset Undo is withdrawn by the next
+saved layout change, since the service would refuse it.
+
 The renderer remains subject to platform package, assistive-technology and
 real-display checks. Offscreen painting and accessible names do not establish
 screen-reader acceptance. See `../p4-insights.md` for current verification.

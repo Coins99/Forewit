@@ -16,7 +16,10 @@ later use after Microsoft Entra access is resolved.
   Native macOS, real-display/assistive-technology and owner acceptance remain open.
   Implementation and automated/native engineering evidence are distinct from acceptance.
   The [dashboard author review](p4-dashboard-code-review.md) records ten resolved
-  findings and their regressions.
+  findings and their regressions. An [independent review and macOS UI
+  check](p4-ui-review.md) of the merged code found fifteen more, among them a dead
+  Archive button and a refresh that rebuilt every card each minute; all are fixed with
+  regressions.
 
 - P3-1 work blocks implemented, awaiting owner acceptance (ADR 0028, migration
   `20261105_0032`): set aside time for a task on the Calendar, as many blocks as you like,
