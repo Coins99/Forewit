@@ -4,6 +4,9 @@ No query, persistence or provider access happens here. Values remain exact in la
 and tables; only painter coordinates and approximate axis ticks use floats.
 """
 
+import math
+from typing import Final
+
 from PySide6.QtCore import (
     QAbstractTableModel,
     QModelIndex,
@@ -14,7 +17,15 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -37,12 +48,78 @@ from mailbrief.ui.theme import (
 
 type _Index = QModelIndex | QPersistentModelIndex
 _ROOT = QModelIndex()
+LABEL_GAP: Final = 10.0  # Between two labels under the plot.
+CATEGORY_LABEL_MAX: Final = 120.0
+CATEGORY_LABEL_MIN: Final = 34.0
+_COMPACT: Final = ((1e12, "T"), (1e9, "B"), (1e6, "M"))
+
+
+def nice_ticks(low: float, high: float, *, whole: bool = False) -> list[float]:
+    """Round tick values from ``low`` to ``high``: steps of 1, 2, 2.5 or 5 times a power
+    of ten, the first at or below ``low`` and the last at or above ``high``, so each
+    gridline sits where its label says. ``whole`` keeps them whole numbers, for counts."""
+    span = high - low
+    if not math.isfinite(span) or span <= 0:
+        return [low, low + 1.0]
+    rough = span / 4
+    magnitude = 10.0 ** math.floor(math.log10(rough))
+    step = 10 * magnitude
+    for factor in (1.0, 2.0, 2.5, 5.0):
+        candidate = factor * magnitude
+        if candidate >= rough and not (whole and candidate != round(candidate)):
+            step = candidate
+            break
+    if whole:
+        step = max(1.0, step)
+    first = math.floor(low / step + 1e-9) * step
+    count = max(1, math.ceil((high - first) / step - 1e-9))
+    return [first + index * step for index in range(count + 1)]
+
+
+def axis_label(value: float, step: float) -> str:
+    """A tick's value in plain digits: grouped thousands, the decimals its step needs, and
+    millions, billions and trillions as M, B and T. It approximates only the gridline;
+    exact values are in the labels and the table."""
+    if value == 0:
+        return "0"
+    size = abs(value)
+    if size >= 1e15:
+        return f"{value:.3g}"
+    for scale, suffix in _COMPACT:
+        if size >= scale:
+            scaled = value / scale
+            text = f"{scaled:.0f}" if abs(scaled) >= 100 else f"{scaled:.2f}".rstrip("0")
+            return text.rstrip(".") + suffix
+    decimals = next(
+        (places for places in range(7) if abs(round(step, places) - step) <= step * 1e-6), 6
+    )
+    return f"{value:,.{decimals}f}"
+
+
+def label_marks(count: int, slot: float, width: float) -> list[int]:
+    """Which of ``count`` marks, ``slot`` apart, carry a label ``width`` wide without two
+    labels touching: evenly spaced from the first, and always the last."""
+    if count <= 0:
+        return []
+    every = max(1, math.ceil((width + LABEL_GAP) / max(slot, 0.001)))
+    marks = list(range(0, count, every))
+    if marks[-1] != count - 1:
+        if len(marks) > 1:
+            marks[-1] = count - 1
+        else:
+            marks.append(count - 1)
+    return marks
 
 
 class MetricTableModel(QAbstractTableModel):
     def __init__(self, data: MetricDisplay, parent: QWidget) -> None:
         super().__init__(parent)
         self.display = data
+
+    def set_display(self, data: MetricDisplay) -> None:
+        self.beginResetModel()
+        self.display = data
+        self.endResetModel()
 
     def rowCount(self, parent: _Index = _ROOT) -> int:
         return 0 if parent.isValid() else len(self.display.samples)
@@ -105,6 +182,22 @@ class MetricPlot(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(420, 220)
 
+    def set_display(self, data: MetricDisplay) -> None:
+        """Show fresh values, keeping the selected sample where it is still there."""
+        old = self.display.samples
+        key = old[self.selection].key if 0 <= self.selection < len(old) else None
+        self.display = data
+        self.setAccessibleName(data.title)
+        keys = [sample.key for sample in data.samples]
+        if not keys:
+            self.selection = -1
+            self.setAccessibleDescription(
+                "Use arrow keys to select a value and Enter to inspect it."
+            )
+            self.update()
+            return
+        self.select(keys.index(key) if key in keys else max(self.selection, 0))
+
     def _area(self) -> QRectF:
         return QRectF(64, 24, max(1, self.width() - 78), max(1, self.height() - 58))
 
@@ -146,6 +239,29 @@ class MetricPlot(QWidget):
                 self.activated.emit(self.display.samples[self.selection].key)
         super().mousePressEvent(event)
 
+    def bottom_labels(self, metrics: QFontMetrics, area: QRectF) -> list[tuple[QRectF, str]]:
+        """Where each label under the plot goes, and its text. Categories are named at
+        every bar that has room, a long name cut to its bar; dates stay whole, so fewer of
+        them are shown. The first and the last are always there."""
+        labels = [sample.label for sample in self.display.samples]
+        if not labels:
+            return []
+        slot = area.width() / len(labels)
+        widest = float(max(metrics.horizontalAdvance(label) for label in labels))
+        if self.display.categorical:
+            width = min(widest, CATEGORY_LABEL_MAX, max(CATEGORY_LABEL_MIN, slot - 6))
+        else:
+            width = min(widest, max(20.0, area.width() / 2 - LABEL_GAP))
+        placed = []
+        for index in label_marks(len(labels), slot, width):
+            x = min(
+                max(area.left(), area.left() + (index + 0.5) * slot - width / 2),
+                area.right() - width,
+            )
+            text = metrics.elidedText(labels[index], Qt.TextElideMode.ElideRight, int(width) + 1)
+            placed.append((QRectF(x, area.bottom() + 8, width, 18), text))
+        return placed
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
@@ -160,28 +276,28 @@ class MetricPlot(QWidget):
         painter.setPen(QColor(tokens.text_secondary))
         painter.drawText(QRectF(0, 0, self.width(), 20), self.display.unit)
         area = self._area()
-        values = [
-            float(sample.value) for sample in self.display.samples if sample.value is not None
-        ]
-        if not values:
+        exact = [sample.value for sample in self.display.samples if sample.value is not None]
+        if not exact:
             painter.drawText(area, Qt.AlignmentFlag.AlignCenter, "No observations")
             return
         if self.display.daily_target is not None:
-            values.append(float(self.display.daily_target))
+            exact.append(self.display.daily_target)
+        whole = all(value == value.to_integral_value() for value in exact)
+        values = [float(value) for value in exact]
         if self.display.chart is ChartKind.BAR:
-            values.append(0.0)
+            values.append(0.0)  # Bars grow from zero, so zero is always a gridline.
         low, high = min(values), max(values)
         if low == high:
             padding = max(abs(low) * 0.1, 1.0)
-            low, high = low - padding, high + padding
+            # A flat line at zero or above sits on the axis: counts never dip below zero.
+            low, high = max(0.0, low - padding) if low >= 0 else low - padding, high + padding
+        ticks = nice_ticks(low, high, whole=whole)
+        # The axis runs between its end ticks; the data's own ends guard a float's last digit.
+        low, high = min(low, ticks[0]), max(high, ticks[-1])
 
         def y(value: float) -> float:
             return area.bottom() - (value - low) * area.height() / (high - low)
 
-        ticks = [low + (high - low) * tick / 4 for tick in range(5)]
-        if self.display.chart is ChartKind.BAR:
-            ticks = [value for value in ticks if abs(y(value) - y(0)) > 14]
-            ticks.append(0.0)
         for value in ticks:
             at = y(value)
             painter.setPen(hairline_pen(tokens.hairline))
@@ -190,7 +306,7 @@ class MetricPlot(QWidget):
             painter.drawText(
                 QRectF(0, at - 8, area.left() - 6, 16),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"{value:.3g}",
+                axis_label(value, ticks[1] - ticks[0]),
             )
         if self.display.daily_target is not None:
             pen = QPen(QColor(tokens.text_secondary), 1, Qt.PenStyle.DashLine)
@@ -229,21 +345,8 @@ class MetricPlot(QWidget):
                 painter.drawEllipse(point, 5, 5)
         painter.restore()
         painter.setPen(QColor(tokens.text_secondary))
-        tick_indices = {0, count - 1}
-        if area.width() >= 400:
-            tick_indices.add(count // 2)
-        for index in sorted(tick_indices):
-            width = min(120.0, max(20.0, area.width() / 3))
-            x = min(
-                max(area.left(), area.left() + (index + 0.5) * slot - width / 2),
-                area.right() - width,
-            )
-            text = painter.fontMetrics().elidedText(
-                self.display.samples[index].label, Qt.TextElideMode.ElideRight, int(width)
-            )
-            painter.drawText(
-                QRectF(x, area.bottom() + 8, width, 18), Qt.AlignmentFlag.AlignCenter, text
-            )
+        for place, text in self.bottom_labels(painter.fontMetrics(), area):
+            painter.drawText(place, Qt.AlignmentFlag.AlignCenter, text)
         if self.hasFocus():
             painter.setPen(hairline_pen(tokens.accent_fg))
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -264,52 +367,85 @@ class MetricChartCard(HairlineFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        title = wrap_label(data.title, px=TEXT_PX, semibold=True)
-        title.setObjectName("metric-chart-title")
-        title.setAccessibleName(data.title)
-        layout.addWidget(title)
-        self.total = wrap_label(f"{metric_number(data.total)} {data.unit}", px=TITLE_PX)
+        self.title_label = wrap_label("", px=TEXT_PX, semibold=True)
+        self.title_label.setObjectName("metric-chart-title")
+        layout.addWidget(self.title_label)
+        self.total = wrap_label("", px=TITLE_PX)
         self.total.setObjectName("metric-chart-total")
-        self.total.setAccessibleName(self.total.text())
         layout.addWidget(self.total)
         self.plot = MetricPlot(data, self)
-        self.plot.setVisible(data.chart is not ChartKind.NUMBER)
         self.plot.activated.connect(self.activated)
         layout.addWidget(self.plot)
         self.selection_label = wrap_label("", px=CAPTION_PX)
         self.selection_label.setObjectName("metric-chart-selection")
         self.selection_label.setAccessibleName("Selected value")
-        self.selection_label.setVisible(data.chart is not ChartKind.NUMBER)
         layout.addWidget(self.selection_label)
         self.plot.selected.connect(self._selected)
-        caption_text = data.caption
-        if data.daily_target is not None:
-            caption_text += f" Daily target: {metric_number(data.daily_target)} {data.unit}."
-        caption = wrap_label(caption_text, px=CAPTION_PX)
-        caption.setObjectName("metric-chart-caption")
-        caption.setAccessibleName("Metric definition and coverage")
-        layout.addWidget(caption)
+        self.caption = wrap_label("", px=CAPTION_PX)
+        self.caption.setObjectName("metric-chart-caption")
+        self.caption.setAccessibleName("Metric definition and coverage")
+        layout.addWidget(self.caption)
         self.view_data = outline_button("View data", "metric-view-data")
-        self.view_data.setAccessibleName(f"View data for {data.title}")
         self.view_data.setCheckable(True)
         layout.addWidget(self.view_data)
         self.table = MetricDataTable(self)
         self.table.setObjectName("metric-data-table")
-        self.table.setAccessibleName(f"{data.title}: exact values in {data.unit}")
+        self.table.setProperty("dataTable", True)  # The theme's table look (style.py).
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_model = MetricTableModel(data, self.table)
         self.table.setModel(self.table_model)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().hide()
+        # Date and value columns as wide as their content; the last one shown takes the rest.
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setStretchLastSection(True)
         self.table.setMinimumHeight(160)
         self.table.hide()
         self.table.activated.connect(self._activate_row)
         self.view_data.toggled.connect(self._show_data)
         layout.addWidget(self.table)
+        self._show(data)
         if data.samples:
             self.plot.select(0)
+
+    def _show(self, data: MetricDisplay) -> None:
+        """Every text and name that follows the data."""
+        self.setAccessibleName(data.title)
+        self.title_label.setText(data.title)
+        self.title_label.setAccessibleName(data.title)
+        self.total.setText(f"{metric_number(data.total)} {data.unit}")
+        self.total.setAccessibleName(self.total.text())
+        charted = data.chart is not ChartKind.NUMBER
+        self.plot.setVisible(charted)
+        self.selection_label.setVisible(charted)
+        caption = data.caption
+        if data.daily_target is not None:
+            caption += f" Daily target: {metric_number(data.daily_target)} {data.unit}."
+        self.caption.setText(caption)
+        self.view_data.setAccessibleName(f"View data for {data.title}")
+        self.table.setAccessibleName(f"{data.title}: exact values in {data.unit}")
+        # "About this value" is shown only when some value has something to say.
+        self.table.setColumnHidden(2, not any(sample.explanation for sample in data.samples))
+
+    def set_display(self, data: MetricDisplay) -> None:
+        """Show fresh values in place. The card, its focus, the selected value and an open
+        data table stay as the owner left them: a refresh must not move their place."""
+        row = self.table.currentIndex().row()
+        old = self.display.samples
+        key = old[row].key if 0 <= row < len(old) else None
+        self.display = data
+        self.table_model.set_display(data)
+        self.plot.set_display(data)
+        self._show(data)
+        keys = [sample.key for sample in data.samples]
+        if not keys:
+            self.selection_label.setText("")
+        elif key is not None:
+            self.table.selectRow(keys.index(key) if key in keys else 0)
 
     def _show_data(self, visible: bool) -> None:
         self.table.setVisible(visible)

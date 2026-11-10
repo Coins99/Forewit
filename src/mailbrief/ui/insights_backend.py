@@ -177,6 +177,7 @@ class InsightsBackend:
                 definition,
                 include_deleted=True,
                 after=after,
+                newest_first=True,
             )
         )
 

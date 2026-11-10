@@ -95,6 +95,11 @@ QListView#briefList, QListView#actionList, QListView#inboxList { background: $pa
 QScrollArea#briefDetail, QScrollArea#actionDetail, QScrollArea#inboxReaderScroll { background: $panel; border: none; }
 QListWidget::item { padding: ${item_pad_y}px ${item_pad_x}px; border: none; border-radius: ${radius}px; }
 QListWidget::item:selected, QListWidget::item:selected:!active { background: $selection; color: $text; }
+QTableView[dataTable="true"] { background: $panel; color: $text; border: 1px solid $hairline; border-radius: ${radius}px; gridline-color: $hairline; outline: 0; selection-background-color: $selection; selection-color: $text; }
+QTableView[dataTable="true"]::item { padding: 2px 6px; }
+QTableView[dataTable="true"]::item:selected, QTableView[dataTable="true"]::item:selected:!active { background: $selection; color: $text; }
+QTableView[dataTable="true"] QHeaderView { background: transparent; }
+QTableView[dataTable="true"] QHeaderView::section { background: $panel; color: $text_secondary; border: none; border-bottom: 1px solid $hairline; padding: 4px 6px; font-weight: 500; }
 QTabWidget::pane { border: none; }
 QTabBar::tab { background: transparent; color: $text_secondary; padding: 5px 12px; margin: 2px 2px; border: none; border-radius: ${tab_radius}px; }
 QTabBar::tab:hover { color: $text; }

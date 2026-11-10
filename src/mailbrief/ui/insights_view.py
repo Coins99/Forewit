@@ -5,11 +5,11 @@ from collections.abc import Coroutine
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QDate, Qt, QTimer, Signal
-from PySide6.QtGui import QResizeEvent, QShowEvent
+from PySide6.QtGui import QKeyEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
+    QDateEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -42,14 +42,31 @@ from mailbrief.ui.insights_editors import (
     InsightsDialog,
     MetricManager,
     WidgetEditor,
+    combo,
     comparison_caption,
     date_field,
     display_result,
+    filter_note,
+    keep_range,
     named,
+    unavailable_text,
 )
 from mailbrief.ui.labels import outline_button, wrap_label
 from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.metric_chart import MetricChartCard
+
+
+class RecordTable(QTableWidget):
+    """Return and Enter activate the current row once on every platform, as the app's
+    lists do: on macOS Qt only tries to edit a row on Return, and never activates it."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if (item := self.currentItem()) is not None:
+                self.itemActivated.emit(item)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class MetricDetails(InsightsDialog):
@@ -63,18 +80,28 @@ class MetricDetails(InsightsDialog):
         bucket: str | None,
         parent: QWidget,
     ) -> None:
-        super().__init__("Contributing records", parent)
+        super().__init__("Contributing records", parent, width=780)
         self.backend, self.query_result, self.bucket = backend, result, bucket
         self.rows: tuple[MetricContribution, ...] = ()
-        self.table = named(QTableWidget(0, 5), "Contributing records table")
+        self.table = named(RecordTable(0, 5), "Contributing records table")
+        self.table.setProperty("dataTable", True)  # The theme's table look (style.py).
         self.table.setHorizontalHeaderLabels(
             ["Date", "Record", result.descriptor.unit, "Revision", "Calculation and coverage"]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().hide()
+        self.table.setWordWrap(True)
+        # Short columns as wide as their content, the record's name a fixed share, and the
+        # explanation the rest, wrapped: it is what this dialog is opened to read.
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for column in (0, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.resizeSection(1, 190)
+        header.setStretchLastSection(True)
         self.body.addWidget(self.table)
         self.body.addWidget(
             wrap_label(
@@ -143,6 +170,7 @@ class MetricDetails(InsightsDialog):
                 )
             ):
                 self.table.setItem(index, column, QTableWidgetItem(value))
+        self.table.resizeRowsToContents()
         self.more.setEnabled(len(rows) == 100)
         if rows:
             self.table.selectRow(0)
@@ -186,6 +214,10 @@ class InsightsPage(QWidget):
         self.dialogs: list[InsightsDialog] = []
         self.cards: list[QWidget] = []
         self.rendered_widgets: tuple[WidgetSpec, ...] = ()
+        # What the cards on screen were built from, and each widget's result for its
+        # details: a refresh that changes neither widgets nor mode updates the cards in place.
+        self._shown: object = None
+        self._detail_results: dict[str, MetricQueryResult] = {}
         self._rendered_revision: int | None = None
         self._draining = False
         self.generation = 0
@@ -200,9 +232,9 @@ class InsightsPage(QWidget):
         today = utc_now().date()
         self.first = date_field(today - timedelta(days=6), "Dashboard first date")
         self.last = date_field(today, "Dashboard last date")
-        self.project = named(QComboBox(), "Dashboard project")
+        self.project = combo("Dashboard project")
         self.project.addItem("All projects", "")
-        self.area = named(QComboBox(), "Dashboard life area")
+        self.area = combo("Dashboard life area")
         self.area.addItem("All life areas", "")
         self.refresh_button = outline_button("Refresh", "insights-refresh")
         for control in (self.first, self.last, self.refresh_button):
@@ -234,6 +266,7 @@ class InsightsPage(QWidget):
         self.scroll_area = named(QScrollArea(), "Dashboard widgets")
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab goes to the cards.
         self.host = named(QWidget(), "Dashboard grid")
         self.grid = QGridLayout(self.host)
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -241,8 +274,8 @@ class InsightsPage(QWidget):
         self.scroll_area.setWidget(self.host)
         layout.addWidget(self.scroll_area)
         self.refresh_button.clicked.connect(self.refresh)
-        self.first.dateChanged.connect(self.refresh)
-        self.last.dateChanged.connect(self.refresh)
+        self.first.dateChanged.connect(lambda: self._range_edited(self.first))
+        self.last.dateChanged.connect(lambda: self._range_edited(self.last))
         self.project.currentIndexChanged.connect(self.refresh)
         self.area.currentIndexChanged.connect(self.refresh)
         self.edit_layout.toggled.connect(self.refresh)
@@ -271,6 +304,10 @@ class InsightsPage(QWidget):
             changed = True
         if changed:
             self.refresh()
+
+    def _range_edited(self, moved: QDateEdit) -> None:
+        keep_range(self.first, self.last, moved)
+        self.refresh()
 
     def dates(self) -> MetricDateRange:
         return MetricDateRange(
@@ -355,6 +392,11 @@ class InsightsPage(QWidget):
         assert backend is not None
         dates = self.dates()
         captured_at, self._next_capture = self._next_capture, None
+        # One instant for every widget: a forward plan's "today" is the same here and in
+        # its query, and the cards agree with each other.
+        captured_at = captured_at or backend.metrics.clock()
+        project = self.project.currentData() or None
+        area = self.area.currentData() or None
         self.status.setText("Loading Insights…")
         saved = await backend.load(dates)
         definitions = await backend.definitions()
@@ -364,8 +406,9 @@ class InsightsPage(QWidget):
             query = resolved_widget_query(
                 widget,
                 dates,
-                project_public_id=self.project.currentData() or None,
-                area_public_id=self.area.currentData() or None,
+                project_public_id=project,
+                area_public_id=area,
+                now=captured_at,
             )
             queries.append(query)
         # First use can show a cheap current-state card while retained history loads.
@@ -398,7 +441,7 @@ class InsightsPage(QWidget):
             # One unsupported widget/filter must not hide the other saved widgets.
             results = ()
         for index, (widget, query) in enumerate(zip(saved.layout.widgets, queries, strict=True)):
-            extra = ""
+            extra = filter_note(query, project, area)
             try:
                 result = (
                     results[index]
@@ -411,17 +454,10 @@ class InsightsPage(QWidget):
                 if widget.previous_period:
                     comparison = await backend.metrics.compare(query, captured_at=captured_at)
                     result = comparison.current
-                    extra = comparison_caption(comparison)
+                    extra = " ".join(filter(None, (comparison_caption(comparison), extra)))
                 prepared.append((widget, result, extra))
             except (ValueError, LookupError):
-                prepared.append(
-                    (
-                        widget,
-                        None,
-                        "Unavailable for these dates or filters. "
-                        "Edit this widget or change the dashboard filters.",
-                    )
-                )
+                prepared.append((widget, None, unavailable_text(query, captured_at)))
         if generation != self.generation:
             return
         self._publish(saved, definitions, prepared)
@@ -434,49 +470,103 @@ class InsightsPage(QWidget):
     ) -> None:
         self.saved, self.definitions = saved, definitions
         self._rendered_revision = saved.revision
+        if self._removed is not None and self._removed[1] != saved.revision:
+            # The layout has moved on since: that undo was for the one before it.
+            self._removed = None
+            self.undo.hide()
+        editing = self.edit_layout.isChecked()
+        shown = (
+            saved.revision,
+            editing,
+            tuple(
+                (widget, result is not None, "" if result is not None else extra)
+                for widget, result, extra in prepared
+            ),
+        )
+        if shown == self._shown and len(self.cards) == len(prepared):
+            # The same widgets as on screen (a timed or data refresh): the cards take the
+            # fresh values where they are. Rebuilding them would drop keyboard focus, close
+            # an open data table and move the page under the owner every minute.
+            for card, (widget, card_result, extra) in zip(self.cards, prepared, strict=True):
+                chart = card.findChild(MetricChartCard)
+                if card_result is not None and chart is not None:
+                    chart.set_display(display_result(card_result, widget, extra))
+                    self._detail_results[widget.public_id] = card_result.model_copy(
+                        update={"contributions": ()}
+                    )
+        else:
+            self._rebuild(saved, prepared, editing)
+            self._shown = shown
+        self.add.setEnabled(len(saved.layout.widgets) < 12)
+        if any(result is not None for _, result, _ in prepared):
+            self.data_ready.emit()
+        self.status.setText(
+            "Local records only. A dashboard filter applies where a widget has no override "
+            "and its metric can take it. Edit a widget to inspect its saved range and filters."
+        )
+
+    def _rebuild(
+        self,
+        saved: SavedDashboard,
+        prepared: list[tuple[WidgetSpec, MetricQueryResult | None, str]],
+        editing: bool,
+    ) -> None:
+        """New cards for a new layout, mode or set of available widgets."""
         for card in self.cards:
             take_widget(card)
             card.hide()
             card.deleteLater()
         self.cards = []
+        self._detail_results = {}
         self.rendered_widgets = saved.layout.widgets
         for widget, card_result, extra in prepared:
-            card = named(QWidget(), "Widget " + widget.public_id)
+            identity = widget.public_id
+            card = named(QWidget(), "Widget " + identity)
+            card.setAccessibleName(f"{widget.title} widget")
             box = QVBoxLayout(card)
             box.setContentsMargins(0, 0, 0, 0)
             if card_result is not None:
                 chart = MetricChartCard(display_result(card_result, widget, extra), card)
                 # Details revalidate from the query/fingerprint; do not retain hundreds
                 # of thousands of contributor models behind the chart's callback.
-                detail_result = card_result.model_copy(update={"contributions": ()})
-                chart.activated.connect(lambda bucket, r=detail_result: self._details(r, bucket))
+                self._detail_results[identity] = card_result.model_copy(
+                    update={"contributions": ()}
+                )
+                chart.activated.connect(
+                    lambda bucket, chosen=identity: self._inspect(chosen, bucket)
+                )
                 box.addWidget(chart)
                 inspect = outline_button(
-                    "Contributing records", "insights-contributors-" + widget.public_id
+                    "Contributing records",
+                    "insights-contributors-" + identity,
+                    accessible_name=f"Contributing records for {widget.title}",
                 )
                 inspect.clicked.connect(
-                    lambda _checked=False, r=detail_result: self._details(r, None)
+                    lambda _checked=False, chosen=identity: self._inspect(chosen, None)
                 )
                 box.addWidget(inspect)
             else:
                 box.addWidget(wrap_label(widget.title + ": " + extra))
-            if self.edit_layout.isChecked():
+            if editing:
                 controls = QHBoxLayout()
-                for label, operation in (
-                    ("Edit", "edit"),
-                    ("Earlier", "earlier"),
-                    ("Later", "later"),
-                    ("Size", "size"),
-                    ("Remove", "remove"),
+                for label, operation, spoken in (
+                    ("Edit", "edit", "Edit {}"),
+                    ("Earlier", "earlier", "Move {} earlier"),
+                    ("Later", "later", "Move {} later"),
+                    ("Size", "size", "Change the size of {}"),
+                    ("Remove", "remove", "Remove {}"),
                 ):
                     button = outline_button(
-                        label, f"insights-{operation}-{widget.public_id}", compact=True
+                        label,
+                        f"insights-{operation}-{identity}",
+                        compact=True,
+                        accessible_name=spoken.format(widget.title),
                     )
 
                     def change(
                         _checked: bool = False,
                         op: str = operation,
-                        identity: str = widget.public_id,
+                        identity: str = identity,
                         revision: int = saved.revision,
                     ) -> None:
                         self._change(identity, op, expected_revision=revision)
@@ -486,13 +576,6 @@ class InsightsPage(QWidget):
                 box.addLayout(controls)
             self.cards.append(card)
         self._pack()
-        self.add.setEnabled(len(saved.layout.widgets) < 12)
-        if any(result is not None for _, result, _ in prepared):
-            self.data_ready.emit()
-        self.status.setText(
-            "Local records only. Dashboard filters apply where a widget has no override. "
-            "Edit a widget to inspect its saved range and filters."
-        )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -577,6 +660,9 @@ class InsightsPage(QWidget):
         command = self._commands.setdefault(payload, new_public_id())
         saved = await self.backend.save(layout, revision, command)
         self.saved = saved
+        # Any saved change ends an earlier undo; a removal or reset then offers its own.
+        self._removed = None
+        self.undo.hide()
         self.refresh()
 
     def _change(
@@ -618,7 +704,7 @@ class InsightsPage(QWidget):
         async def write() -> None:
             await self._save(DashboardLayout(widgets=tuple(widgets)), saved.revision)
             if operation == "remove" and self.saved is not None:
-                self._removed = (saved.layout, saved.revision + 1)
+                self._removed = (saved.layout, self.saved.revision)
             self.undo.setVisible(self._removed is not None)
             if self._refresh_task:
                 await self._refresh_task
@@ -645,8 +731,8 @@ class InsightsPage(QWidget):
 
         async def reset() -> None:
             await self._save(starter_layout(self.dates()), revision)
-            if before is not None:
-                self._removed = (before.layout, revision + 1)
+            if before is not None and self.saved is not None:
+                self._removed = (before.layout, self.saved.revision)
             self.undo.setVisible(self._removed is not None)
 
         self._write_task = self.run(reset())
@@ -659,8 +745,6 @@ class InsightsPage(QWidget):
 
             async def undo() -> None:
                 await self._save(layout, revision)
-                self._removed = None
-                self.undo.hide()
 
             self._write_task = self.run(undo())
 
@@ -671,6 +755,11 @@ class InsightsPage(QWidget):
         dialog.changed.connect(self.refresh)
         self._dialog(dialog)
         dialog.run(dialog.reload())
+
+    def _inspect(self, identity: str, bucket: str | None) -> None:
+        """The contributing records of the widget ``identity``, as it was last refreshed."""
+        if (result := self._detail_results.get(identity)) is not None:
+            self._details(result, bucket)
 
     def _details(self, result: MetricQueryResult, bucket: str | None) -> None:
         assert self.backend is not None

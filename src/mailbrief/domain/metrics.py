@@ -180,11 +180,29 @@ BUILTIN_METRICS: Final[tuple[MetricDescriptor, ...]] = (
 )
 
 
+CUSTOM_DIMENSIONS: Final = (MetricDimension.PROJECT,)
+
+
 def builtin_metric(key: str) -> MetricDescriptor:
     for descriptor in BUILTIN_METRICS:
         if descriptor.key == key:
             return descriptor
     raise ValueError("The metric is unavailable or its definition is unsupported.")
+
+
+def metric_dimensions(key: str) -> tuple[MetricDimension, ...]:
+    """The filters and groupings the metric ``key`` names can take; none for an unknown key."""
+    if key.startswith("custom."):
+        return CUSTOM_DIMENSIONS
+    return next((item.dimensions for item in BUILTIN_METRICS if item.key == key), ())
+
+
+def is_forward_plan(key: str) -> bool:
+    """Whether ``key`` names a metric of today and later dates only (planned workload)."""
+    return any(
+        item.key == key and item.range_mode is MetricRangeMode.FORWARD_PLAN
+        for item in BUILTIN_METRICS
+    )
 
 
 def custom_metric(key: str, label: str, unit: str, kind: MeasurementKind) -> MetricDescriptor:
@@ -195,7 +213,7 @@ def custom_metric(key: str, label: str, unit: str, kind: MeasurementKind) -> Met
         unit=unit,
         reducer=MetricReducer.SUM if kind is MeasurementKind.AMOUNT else MetricReducer.LATEST,
         range_mode=MetricRangeMode.LOCAL_DATES,
-        dimensions=(MetricDimension.PROJECT,),
+        dimensions=CUSTOM_DIMENSIONS,
         explanation=(
             "Sum of valid recorded amounts. Missing observations are not measured zeros."
             if kind is MeasurementKind.AMOUNT

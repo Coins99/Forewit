@@ -284,3 +284,46 @@ async def test_packaged_metric_scenario_from_source(tmp_path: Path) -> None:
     from mailbrief.diagnostics.metric_smoke import check_metrics
 
     await check_metrics(tmp_path / "metric-package-scenario")
+
+
+async def test_a_saved_definition_is_archived_and_reactivated_as_it_was_read(
+    session: AsyncSession,
+) -> None:
+    """The desktop hands back the definition it read, which carries its identity, revision
+    and dates as well as the five fields of a spec."""
+    service = MetricEntryService(session, clock=Clock(NOW))
+    definition = await service.define(SPEC, command_id=command())
+    archived = await service.configure(
+        definition.public_id, definition.revision, definition, archived=True, command_id=command()
+    )
+    assert archived.archived and archived.revision == 2 and archived.name == SPEC.name
+    active = await service.configure(
+        archived.public_id, archived.revision, archived, archived=False, command_id=command()
+    )
+    assert not active.archived and active.revision == 3
+
+
+async def test_newest_first_pages_run_back_from_the_latest_date(session: AsyncSession) -> None:
+    service = MetricEntryService(session, clock=Clock(NOW))
+    definition = await service.define(SPEC, command_id=command())
+    made = [
+        await service.create(
+            definition.public_id,
+            INPUT.model_copy(update={"local_date": INPUT.local_date - timedelta(days=back)}),
+            command_id=command(),
+        )
+        for back in (3, 0, 2, 0, 1)
+    ]
+    expected = sorted(made, key=lambda entry: (entry.local_date, entry.public_id), reverse=True)
+    pages = []
+    after = None
+    while page := await service.entries(
+        definition.public_id, newest_first=True, limit=2, after=after
+    ):
+        pages.append(page)
+        after = (page[-1].local_date.isoformat(), page[-1].public_id)
+    assert [len(page) for page in pages] == [2, 2, 1]
+    assert [entry for page in pages for entry in page] == expected
+    assert pages[0][0].local_date == INPUT.local_date
+    # The default stays oldest first, for every other reader.
+    assert list(await service.entries(definition.public_id)) == expected[::-1]

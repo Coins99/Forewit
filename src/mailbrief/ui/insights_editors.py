@@ -2,12 +2,14 @@
 
 import asyncio
 from collections.abc import Coroutine
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Final
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QDate, Signal
-from PySide6.QtGui import QStandardItemModel
+from pydantic import ValidationError
+from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtGui import QGuiApplication, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QListWidgetItem,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -46,12 +49,14 @@ from mailbrief.domain.metric_queries import MetricComparison, MetricQueryResult
 from mailbrief.domain.metric_results import MetricDisplay, MetricSample, metric_number
 from mailbrief.domain.metrics import (
     BUILTIN_METRICS,
+    MAX_METRIC_DAYS,
     MetricDateRange,
     MetricDescriptor,
     MetricDimension,
     MetricQuery,
     MetricRangeMode,
     custom_metric,
+    is_forward_plan,
 )
 from mailbrief.domain.projects import LifeArea, Project
 from mailbrief.services.metric_entries import MetricConflictError
@@ -62,6 +67,15 @@ from mailbrief.ui.labels import outline_button, wrap_label
 from mailbrief.ui.lists import SafeList
 from mailbrief.ui.metric_chart import MetricChartCard
 
+GENERAL_REFUSAL: Final = "Choose compatible chart, grouping, dates and an exact target."
+UNAVAILABLE: Final = (
+    "Unavailable for these dates or filters. Edit this widget or change the dashboard filters."
+)
+
+
+class InputRefused(ValueError):
+    """What the owner has to change, in the app's own words: a dialog shows it as it is."""
+
 
 def named[T: QWidget](widget: T, name: str) -> T:
     widget.setObjectName("insights-" + name.lower().replace(" ", "-"))
@@ -69,12 +83,73 @@ def named[T: QWidget](widget: T, name: str) -> T:
     return widget
 
 
+def combo(name: str) -> QComboBox:
+    """A combo box that Tab reaches on macOS too. Qt gives a combo box there a policy that
+    Tab skips unless Full Keyboard Access is on; like the app's other forms, these take
+    Tab and a click, and the wheel can't focus them."""
+    box = named(QComboBox(), name)
+    box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    return box
+
+
 def date_field(day: date, name: str) -> QDateEdit:
     field = named(QDateEdit(QDate(day.year, day.month, day.day)), name)
     calendar_popup(field)
     field.setDisplayFormat("yyyy-MM-dd")
     field.setKeyboardTracking(False)
+    field.setMaximumDate(QDate(9999, 12, 29))  # A range keeps clear of the calendar's end.
     return field
+
+
+def keep_range(first: QDateEdit, last: QDateEdit, moved: QDateEdit) -> None:
+    """After ``moved`` changed, move the other end so the two stay an ordered range of at
+    most MAX_METRIC_DAYS dates: a range can never be one the queries refuse. The end that
+    is moved here sends no change signal."""
+    start, end = first.date(), last.date()
+    if start <= end and start.daysTo(end) < MAX_METRIC_DAYS:
+        return
+    other = last if moved is first else first
+    reach = (MAX_METRIC_DAYS - 1) * (1 if moved is first else -1)
+    other.blockSignals(True)
+    other.setDate(moved.date() if start > end else moved.date().addDays(reach))
+    other.blockSignals(False)
+
+
+def refusal_text(error: Exception) -> str:
+    """Why a widget's fields were refused: the app's own reason when there is one."""
+    if isinstance(error, InputRefused):
+        return str(error)
+    if isinstance(error, ValidationError):
+        for detail in error.errors(include_url=False, include_input=False):
+            reason = detail.get("ctx", {}).get("error")
+            if detail["type"] == "value_error" and isinstance(reason, ValueError):
+                text = str(reason)
+                return text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")
+    return GENERAL_REFUSAL
+
+
+def filter_note(query: MetricQuery, project: str | None, area: str | None) -> str:
+    """What to say on a widget whose metric can't take a dashboard filter that is set."""
+    skipped = [
+        name
+        for name, chosen, used in (
+            ("project", project, query.project_public_id),
+            ("life area", area, query.area_public_id),
+        )
+        if chosen and not used
+    ]
+    if not skipped:
+        return ""
+    words = "filters do" if len(skipped) > 1 else "filter does"
+    return f"The dashboard's {' and '.join(skipped)} {words} not apply to this metric."
+
+
+def unavailable_text(query: MetricQuery, now: datetime) -> str:
+    """Why ``query`` has no value, as far as the page can tell."""
+    today = now.astimezone(ZoneInfo(query.dates.zone)).date()
+    if is_forward_plan(query.metric_key) and query.dates.last < today:
+        return "Planned workload covers today and later. Choose dates that include today."
+    return UNAVAILABLE
 
 
 def custom_descriptor(definition: MetricDefinition) -> MetricDescriptor:
@@ -131,31 +206,42 @@ def display_result(result: MetricQueryResult, widget: WidgetSpec, extra: str = "
             if widget.target is not None and widget.target.scope is TargetScope.DAILY
             else None
         ),
+        categorical=result.query.group_by is not None,
     )
 
 
 class InsightsDialog(QDialog):
     changed = Signal()
 
-    def __init__(self, title: str, parent: QWidget) -> None:
+    def __init__(self, title: str, parent: QWidget, *, width: int = 560, height: int = 600) -> None:
         super().__init__(parent)
         named(self, title)
         self.setWindowTitle(title)
-        self.resize(560, 600)
+        screen = QGuiApplication.primaryScreen()
+        room = screen.availableGeometry().height() - 80 if screen is not None else height
+        self.resize(width, max(360, min(height, room)))
         outer = QVBoxLayout(self)
         scroll = named(QScrollArea(), title + " fields")
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab goes to the fields inside.
         content = named(QWidget(), title + " content")
         self.body = QVBoxLayout(content)
         scroll.setWidget(content)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
+        # Under the scrolled fields, never inside them: what a button answered is on
+        # screen wherever the owner has scrolled to. It lines up with the fields above.
         self.message = wrap_label("")
         named(self.message, "Editor status")
-        self.body.addWidget(self.message)
+        status_row = QHBoxLayout()
+        inset = self.body.contentsMargins()
+        status_row.setContentsMargins(inset.left(), 0, inset.right(), 0)
+        status_row.addWidget(self.message)
+        outer.addLayout(status_row)
         self.jobs: set[asyncio.Task[None]] = set()
         self._commands: dict[str, str] = {}
         self._saving = False
+        self._focus_after: QWidget | None = None
 
     def command(self, payload: str) -> str:
         return self._commands.setdefault(payload, new_public_id())
@@ -164,6 +250,8 @@ class InsightsDialog(QDialog):
         async def execute() -> None:
             try:
                 await operation
+            except InputRefused as refused:
+                self.message.setText(str(refused))
             except MetricConflictError:
                 self.message.setText(
                     "This record changed. Your input is kept; close and reopen "
@@ -180,6 +268,7 @@ class InsightsDialog(QDialog):
                 if writing:
                     self._saving = False
                     self.setEnabled(True)
+                    self._give_focus_back()
 
         task = asyncio.create_task(execute())
         self.jobs.add(task)
@@ -195,9 +284,22 @@ class InsightsDialog(QDialog):
             operation.close()
             return
         self._saving = True
+        # Disabling the dialog takes focus from its field; the write gives it back.
+        self._focus_after = self.focusWidget()
         self.setEnabled(False)
         self.before_write()
         self.run(operation, writing=True)
+
+    def _give_focus_back(self) -> None:
+        """Focus where it was before the write, or where the write asked for it."""
+        target, self._focus_after = self._focus_after, None
+        if target is None or not self.isVisible():
+            return
+        try:
+            if target.isEnabled() and target.isVisibleTo(self):
+                target.setFocus(Qt.FocusReason.OtherFocusReason)
+        except RuntimeError:  # Qt has deleted it since.
+            return
 
     def before_write(self) -> None:
         """Invalidate pending read generations before a subclass's write starts."""
@@ -229,7 +331,7 @@ class WidgetEditor(InsightsDialog):
         global_project: str | None = None,
         global_area: str | None = None,
     ) -> None:
-        super().__init__("Edit widget" if widget else "Add widget", parent)
+        super().__init__("Edit widget" if widget else "Add widget", parent, height=680)
         self.backend = backend
         self.dates = dates
         self.global_project, self.global_area = global_project, global_area
@@ -245,23 +347,30 @@ class WidgetEditor(InsightsDialog):
             ),
         )
         form = QFormLayout()
-        self.metric_choice = named(QComboBox(), "Metric")
+        self.metric_choice = combo("Metric")
         for descriptor in self.descriptors:
             self.metric_choice.addItem(descriptor.label, descriptor.key)
-        self.title = named(QLineEdit(widget.title if widget else ""), "Widget title")
+        # A title left blank is the metric's name. It was saved as that name, so it is
+        # shown blank again: the title then follows the metric when the owner changes it.
+        named_after = next(
+            (d.label for d in self.descriptors if widget and d.key == widget.query.metric_key),
+            None,
+        )
+        own_title = widget.title if widget and widget.title != named_after else ""
+        self.title = named(QLineEdit(own_title), "Widget title")
         self.title.setMaxLength(120)
-        self.chart = named(QComboBox(), "Chart")
+        self.chart = combo("Chart")
         for kind in ChartKind:
             self.chart.addItem(kind.value.title(), kind.value)
-        self.group = named(QComboBox(), "Group by")
+        self.group = combo("Group by")
         self.group.addItem("Daily / total", "")
         self.group.addItem("Project", "project")
         self.group.addItem("Life area", "area")
-        self.project = named(QComboBox(), "Project filter")
+        self.project = combo("Project filter")
         self.project.addItem("Use dashboard project", "")
         for project in projects:
             self.project.addItem(project.name, project.public_id)
-        self.area = named(QComboBox(), "Life area filter")
+        self.area = combo("Life area filter")
         self.area.addItem("Use dashboard life area", "")
         for area in areas:
             self.area.addItem(area.name, area.public_id)
@@ -271,12 +380,12 @@ class WidgetEditor(InsightsDialog):
         self.first = date_field(chosen.first, "First date")
         self.last = date_field(chosen.last, "Last date")
         self.zone_field = named(QLineEdit(chosen.zone), "Widget time zone")
-        self.size_choice = named(QComboBox(), "Widget size")
+        self.size_choice = combo("Widget size")
         for size in WidgetSize:
             self.size_choice.addItem(size.value.title(), size.value)
         self.target = named(QLineEdit(), "Target")
         self.target.setPlaceholderText("Optional exact decimal")
-        self.scope = named(QComboBox(), "Target period")
+        self.scope = combo("Target period")
         for scope in TargetScope:
             self.scope.addItem(scope.value.title(), scope.value)
         self.previous = named(QCheckBox("Compare with previous period"), "Previous period")
@@ -328,6 +437,8 @@ class WidgetEditor(InsightsDialog):
         self.metric_choice.currentIndexChanged.connect(self._metric_changed)
         self.group.currentIndexChanged.connect(self._metric_changed)
         self.global_range.toggled.connect(self._range_changed)
+        self.first.dateChanged.connect(lambda: keep_range(self.first, self.last, self.first))
+        self.last.dateChanged.connect(lambda: keep_range(self.first, self.last, self.last))
         self._metric_changed()
         if widget is not None:
             if (
@@ -362,7 +473,18 @@ class WidgetEditor(InsightsDialog):
         key = self.metric_choice.currentData()
         descriptor = next((d for d in self.descriptors if d.key == key), None)
         if descriptor is not None:
-            self.hint.setText(descriptor.explanation + " Unit: " + descriptor.unit + ".")
+            self.title.setPlaceholderText(descriptor.label)
+            self.hint.setText(
+                descriptor.explanation
+                + " Unit: "
+                + descriptor.unit
+                + "."
+                + (
+                    " Dates before today are left out."
+                    if descriptor.range_mode is MetricRangeMode.FORWARD_PLAN
+                    else ""
+                )
+            )
             for index in range(1, self.group.count()):
                 enabled = MetricDimension(self.group.itemData(index)) in descriptor.dimensions
                 model = self.group.model()
@@ -418,7 +540,16 @@ class WidgetEditor(InsightsDialog):
         return not self._saving and self._input() != self._initial
 
     def spec(self) -> WidgetSpec:
-        descriptor = next(d for d in self.descriptors if d.key == self.metric_choice.currentData())
+        descriptor = next(
+            (d for d in self.descriptors if d.key == self.metric_choice.currentData()), None
+        )
+        if descriptor is None:
+            raise InputRefused("Choose a metric for this widget.")
+        target = self.target.text().strip()
+        try:
+            target_value = Decimal(target) if target else None
+        except ArithmeticError:
+            raise InputRefused("Enter the target as a plain number, such as 8000 or 2.5.") from None
         dates = (
             self.dates
             if self.global_range.isChecked()
@@ -445,42 +576,56 @@ class WidgetEditor(InsightsDialog):
             size=WidgetSize(self.size_choice.currentData()),
             use_global_range=self.global_range.isChecked(),
             previous_period=self.previous.isChecked(),
-            target=WidgetTarget(
-                value=Decimal(self.target.text()), scope=TargetScope(self.scope.currentData())
-            )
-            if self.target.text().strip()
-            else None,
+            target=None
+            if target_value is None
+            else WidgetTarget(value=target_value, scope=TargetScope(self.scope.currentData())),
         )
         ValidatedWidget(widget=widget, descriptor=descriptor)
         return widget
 
-    def _save(self) -> None:
+    def _checked(self) -> WidgetSpec | None:
+        """The widget the fields describe, or None after saying what to change. Save and
+        Preview refuse the same input with the same words."""
         try:
-            self.saved.emit(self.spec())
-        except (ValueError, StopIteration, ArithmeticError):
-            self.message.setText("Choose compatible chart, grouping, dates and an exact target.")
+            return self.spec()
+        except (ValueError, ArithmeticError) as error:
+            self.message.setText(refusal_text(error))
+            return None
+
+    def _save(self) -> None:
+        if (widget := self._checked()) is not None:
+            self.saved.emit(widget)
 
     def _preview(self) -> None:
+        widget = self._checked()
+        if widget is None:
+            return
+
         async def preview() -> None:
-            widget = self.spec()
+            now = self.backend.metrics.clock()
             query = resolved_widget_query(
                 widget,
                 self.dates,
                 project_public_id=self.global_project,
                 area_public_id=self.global_area,
+                now=now,
             )
-            extra = ""
-            if widget.previous_period:
-                comparison = await self.backend.metrics.compare(query)
-                result = comparison.current
-                extra = comparison_caption(comparison)
-            else:
-                result = await self.backend.metrics.query(query)
+            extra = filter_note(query, self.global_project, self.global_area)
+            try:
+                if widget.previous_period:
+                    comparison = await self.backend.metrics.compare(query, captured_at=now)
+                    result = comparison.current
+                    extra = " ".join(filter(None, (comparison_caption(comparison), extra)))
+                else:
+                    result = await self.backend.metrics.query(query, captured_at=now)
+            except (ValueError, LookupError):
+                raise InputRefused(unavailable_text(query, now)) from None
             if self._input() != before:
                 return
             while self.preview_host.count():
                 item = self.preview_host.takeAt(0)
                 if item is not None and (old := item.widget()) is not None:
+                    old.hide()
                     old.deleteLater()
             self.preview_host.addWidget(
                 MetricChartCard(display_result(result, widget, extra), self)
@@ -495,7 +640,7 @@ class MetricManager(InsightsDialog):
     def __init__(
         self, backend: InsightsBackend, zone: str, projects: tuple[Project, ...], parent: QWidget
     ) -> None:
-        super().__init__("Manage metrics", parent)
+        super().__init__("Manage metrics", parent, height=800)
         self.backend, self.zone = backend, zone
         self.definitions: tuple[MetricDefinition, ...] = ()
         self.rows: tuple[MetricEntry, ...] = ()
@@ -504,12 +649,12 @@ class MetricManager(InsightsDialog):
         self._entry_generation = 0
         self._history_generation = 0
         self._shown_definition_id: str | None = None
-        self.metric_choice = named(QComboBox(), "Logged metric")
+        self.metric_choice = combo("Logged metric")
         self.body.addWidget(self.metric_choice)
         form = QFormLayout()
         self.name = named(QLineEdit(), "Metric name")
         self.unit = named(QLineEdit(), "Metric unit")
-        self.kind = named(QComboBox(), "Measurement kind")
+        self.kind = combo("Measurement kind")
         self.kind.addItem("Amount (add recorded values)", MeasurementKind.AMOUNT.value)
         self.kind.addItem("Point value (latest observation)", MeasurementKind.POINT_VALUE.value)
         self.scale = named(QSpinBox(), "Decimal places")
@@ -526,7 +671,7 @@ class MetricManager(InsightsDialog):
         self.body.addLayout(form)
         controls = QHBoxLayout()
         create = outline_button("Create metric", "insights-create-metric")
-        archive = outline_button("Archive / reactivate", "insights-archive-metric")
+        self.archive_button = archive = outline_button("Archive metric", "insights-archive-metric")
         controls.addWidget(create)
         controls.addWidget(archive)
         self.body.addLayout(controls)
@@ -541,7 +686,7 @@ class MetricManager(InsightsDialog):
         form = QFormLayout()
         self.value = named(QLineEdit(), "Exact value")
         self.day = date_field(utc_now().astimezone(ZoneInfo(zone)).date(), "Observation date")
-        self.project = named(QComboBox(), "Observation project")
+        self.project = combo("Observation project")
         self.project.addItem("Unassigned", "")
         for project in projects:
             self.project.addItem(project.name, project.public_id)
@@ -550,6 +695,7 @@ class MetricManager(InsightsDialog):
         form.addRow("Project", self.project)
         self.body.addLayout(form)
         controls = QHBoxLayout()
+        self.entry_buttons: dict[str, QPushButton] = {}
         for label, operation in (
             ("Log new value", "create"),
             ("Save correction", "edit"),
@@ -561,6 +707,7 @@ class MetricManager(InsightsDialog):
                 label, "insights-entry-" + operation, primary=operation == "create", compact=True
             )
             button.clicked.connect(lambda _checked=False, op=operation: self._mutate(op))
+            self.entry_buttons[operation] = button
             controls.addWidget(button)
         self.body.addLayout(controls)
         self.history_label = wrap_label("")
@@ -581,7 +728,29 @@ class MetricManager(InsightsDialog):
         reload_button.clicked.connect(lambda: self.run(self.reload()))
         self.metric_choice.currentIndexChanged.connect(self._metric_selected)
         self.entries_list.currentRowChanged.connect(self._select)
+        # Return in the value logs it, as the primary button does.
+        self.value.returnPressed.connect(lambda: self._mutate("create"))
         self._initial = self._input()
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        """Only what can act on the metric and the observation chosen is enabled, so no
+        button answers with a refusal the owner could not have foreseen."""
+        chosen = self.metric_choice.currentData()
+        current = next((d for d in self.definitions if d.public_id == chosen), None)
+        archived = current is not None and current.archived
+        self.archive_button.setEnabled(current is not None)
+        self.archive_button.setText("Reactivate metric" if archived else "Archive metric")
+        entry = self.selected
+        live = entry is not None and not entry.deleted
+        for operation, enabled in (
+            ("create", current is not None and not archived),
+            ("edit", live),
+            ("delete", live),
+            ("restore", entry is not None and entry.deleted),
+            ("undo", entry is not None),
+        ):
+            self.entry_buttons[operation].setEnabled(enabled)
 
     def _input(self) -> tuple[object, ...]:
         return (
@@ -635,12 +804,15 @@ class MetricManager(InsightsDialog):
         if index >= 0:
             self.metric_choice.setCurrentIndex(index)
         self.metric_choice.blockSignals(False)
+        self._sync_buttons()
         await self._entries()
 
     def definition(self) -> MetricDefinition:
         return next(d for d in self.definitions if d.public_id == self.metric_choice.currentData())
 
     async def _define(self) -> None:
+        if not self.name.text().strip() or not self.unit.text().strip():
+            raise InputRefused("Give the new metric a name and a unit.")
         spec = MetricDefinitionSpec(
             name=self.name.text(),
             unit=self.unit.text(),
@@ -653,10 +825,13 @@ class MetricManager(InsightsDialog):
         self.unit.clear()
         self._commands.clear()
         self._initial = self._input()
+        self._focus_after = self.value  # Next, its first value.
         self.changed.emit()
         await self._reload_after_save(select=saved.public_id)
 
     async def _archive(self) -> None:
+        if not self.metric_choice.currentData():
+            raise InputRefused("Create a metric first.")
         definition = self.definition()
         await self.backend.configure(
             definition,
@@ -701,6 +876,7 @@ class MetricManager(InsightsDialog):
         self.value.clear()
         self.history_label.clear()
         self._initial = self._input()
+        self._sync_buttons()
         try:
             rows = await self.backend.entries(identity, after)
         finally:
@@ -722,8 +898,11 @@ class MetricManager(InsightsDialog):
                 )
             )
         self.more.setEnabled(len(rows) == 100)
+        self._sync_buttons()
         self.message.setText(
-            f"{definition.unit}; {definition.scale} decimal places. "
+            "This metric is archived. Reactivate it to log new values."
+            if definition.archived
+            else f"{definition.unit}; {definition.scale} decimal places. Newest first. "
             "Dates stay on the date you record, even after travel."
         )
 
@@ -737,6 +916,7 @@ class MetricManager(InsightsDialog):
         self.entries_list.setCurrentRow(-1)
         self.entries_list.blockSignals(False)
         self._initial = self._input()
+        self._sync_buttons()
         self.message.setText("Unsaved input discarded.")
 
     def _select(self, index: int) -> None:
@@ -753,6 +933,7 @@ class MetricManager(InsightsDialog):
         self._history_generation += 1
         generation = self._history_generation
         self.selected = self.rows[index] if 0 <= index < len(self.rows) else None
+        self._sync_buttons()
         entry = self.selected
         if entry is None:
             return
@@ -783,14 +964,24 @@ class MetricManager(InsightsDialog):
 
     def _mutate(self, operation: str) -> None:
         async def save() -> None:
+            if not self.metric_choice.currentData():
+                raise InputRefused("Create a metric first, then log its values.")
             definition = self.definition()
             selected = self.selected
             if selected is not None and selected.definition_id != definition.public_id:
                 raise ValueError("Reload observations before editing another metric.")
+            if operation != "create" and selected is None:
+                raise InputRefused("Select an observation in the list first.")
+            if operation == "create" and definition.archived:
+                raise InputRefused("This metric is archived. Reactivate it to log new values.")
             entry = None
             if operation in {"create", "edit"}:
+                try:
+                    value = definition.parse_value(self.value.text())
+                except ValueError as refused:  # The parser's own fixed wording.
+                    raise InputRefused(str(refused)) from None
                 entry = MetricEntryInput(
-                    value_scaled=definition.parse_value(self.value.text()),
+                    value_scaled=value,
                     local_date=self.day.date().toPython(),
                     zone=selected.zone
                     if operation == "edit" and selected is not None
@@ -804,10 +995,10 @@ class MetricManager(InsightsDialog):
             if operation == "create":
                 assert entry is not None
                 await self.backend.create(definition.public_id, entry, command)
-            elif selected is not None:
-                await self.backend.mutate(selected, operation, command, entry)
+                self._focus_after = self.value  # Ready for the next value.
             else:
-                raise ValueError("Select an observation.")
+                assert selected is not None
+                await self.backend.mutate(selected, operation, command, entry)
             self.value.clear()
             self._commands.clear()
             self._initial = self._input()
