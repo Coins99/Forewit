@@ -1879,3 +1879,30 @@ def test_waiting_people_backfill_waits_from_creation_and_downgrade_keeps_tasks(
 
     assert _rows(path, kept) == before
     assert _schema(path) == _schema(fresh)
+
+
+def test_owner_records_have_no_account_key_and_receipts_no_key_to_what_they_made(
+    tmp_path: Path,
+) -> None:
+    """Owner records survive account deletion, and retry receipts survive the removal of the
+    record they created, so neither may hold a key to an account or to that record."""
+    path = tmp_path / "head.sqlite3"
+    upgrade_database(path)
+    receipts = ("task_commands", "note_commands", "metric_commands", "dashboard_commands")
+    for table in receipts:
+        assert _foreign_keys(path, table) == set(), table
+    assert _foreign_keys(path, "life_areas") == set()
+    assert _foreign_keys(path, "projects") == {
+        ("life_areas", "area_public_id", "public_id", "SET NULL")
+    }
+    assert _foreign_keys(path, "drafts") == {
+        ("actions", "action_id", "id", "SET NULL"),
+        ("projects", "project_public_id", "public_id", "SET NULL"),
+    }
+    assert _foreign_keys(path, "work_blocks") == {("actions", "action_id", "id", "CASCADE")}
+    with closing(sqlite3.connect(path)) as connection:
+        # Activity keeps project and area IDs as snapshots, with no key to either.
+        activity = {
+            str(row[2]) for row in connection.execute("PRAGMA foreign_key_list('action_activity')")
+        }
+    assert activity == {"actions"}
