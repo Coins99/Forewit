@@ -233,7 +233,8 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
     bad = tmp_path / "bad.py"
     bad.write_text(
         "import logging\nlogger = logging.getLogger('x')\n"
-        "def f(body, count, api_key):\n    logger.info('got %s', body)\n    logger.info('n=%d', count)\n"
+        "def f(body, count, api_key):\n    logger.info('got %s', body)\n"
+        "    logger.info('n=%d', count)\n"
         "    logger.info('k', extra={'k': api_key})\n",
         encoding="utf-8",
     )

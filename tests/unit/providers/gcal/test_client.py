@@ -19,7 +19,13 @@ from mailbrief.ports.errors import (
     ProviderResponseError,
 )
 from mailbrief.providers.gcal.auth import CALENDAR_LIST_URL
-from mailbrief.providers.gcal.client import CalendarClient, events_url, rfc3339
+from mailbrief.providers.gcal.client import (
+    CALENDAR_FIELDS,
+    EVENT_FIELDS,
+    CalendarClient,
+    events_url,
+    rfc3339,
+)
 from mailbrief.providers.gcal.reader import MAX_CALENDARS, GoogleCalendarReader
 from mailbrief.providers.gmail.auth import GmailAuth
 from mailbrief.providers.gmail.oauth import (
@@ -302,3 +308,11 @@ def test_google_models_refuse_mixed_shapes() -> None:
     )
     assert coverage.covers(date(2026, 10, 5), date(2026, 12, 13))
     assert not coverage.covers(date(2026, 10, 4), date(2026, 10, 10))
+
+
+def test_no_field_list_asks_for_descriptions_locations_guests_or_conferences() -> None:
+    """Both requests name their fields, and none is one AGENTS.md says is never fetched."""
+    for fields in (CALENDAR_FIELDS, EVENT_FIELDS):
+        assert fields.startswith("items(") and "nextPageToken" in fields
+        for never in ("description", "location", "attendees", "conferenceData", "organizer"):
+            assert never not in fields
