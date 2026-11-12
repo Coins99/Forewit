@@ -434,6 +434,8 @@ class MetricChartCard(HairlineFrame):
     def set_display(self, data: MetricDisplay) -> None:
         """Show fresh values in place. The card, its focus, the selected value and an open
         data table stay as the owner left them: a refresh must not move their place."""
+        vertical, horizontal = self.table.verticalScrollBar(), self.table.horizontalScrollBar()
+        scroll = (vertical.value(), horizontal.value())
         row = self.table.currentIndex().row()
         old = self.display.samples
         key = old[row].key if 0 <= row < len(old) else None
@@ -446,6 +448,11 @@ class MetricChartCard(HairlineFrame):
             self.selection_label.setText("")
         elif key is not None:
             self.table.selectRow(keys.index(key) if key in keys else 0)
+        # Reselecting scrolls to the current row, which the owner may have scrolled away
+        # from. Lay out the new rows before restoring the viewport, clamped to its range.
+        self.table.doItemsLayout()
+        vertical.setValue(scroll[0])
+        horizontal.setValue(scroll[1])
 
     def _show_data(self, visible: bool) -> None:
         self.table.setVisible(visible)

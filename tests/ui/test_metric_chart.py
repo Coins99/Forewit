@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.dashboards import ChartKind
@@ -284,6 +284,52 @@ def test_fresh_values_arrive_in_place_and_keep_the_owners_place(qtbot: QtBot) ->
     card.set_display(MetricDisplay(title="Reading minutes", unit="minutes", chart=ChartKind.BAR))
     assert card.plot.selection == -1 and card.selection_label.text() == ""
     assert card.table_model.rowCount() == 0
+
+
+@pytest.mark.parametrize(
+    "scroll_mode",
+    [QAbstractItemView.ScrollMode.ScrollPerItem, QAbstractItemView.ScrollMode.ScrollPerPixel],
+)
+def test_refresh_preserves_the_data_table_viewport(
+    qtbot: QtBot, qapp: QApplication, scroll_mode: QAbstractItemView.ScrollMode
+) -> None:
+    data = MetricDisplay(
+        title="Observations",
+        unit="units",
+        chart=ChartKind.NUMBER,
+        samples=tuple(
+            MetricSample(
+                key=str(i), label=f"Observation {i}: " + "long label " * 12, value=Decimal(i)
+            )
+            for i in range(366)
+        ),
+    )
+    card = MetricChartCard(data)
+    qtbot.addWidget(card)
+    card.resize(500, 400)
+    card.show()
+    card.view_data.click()
+    table = card.table
+    table.setVerticalScrollMode(scroll_mode)
+    table.setHorizontalScrollMode(scroll_mode)
+    qapp.processEvents()
+    vertical, horizontal = table.verticalScrollBar(), table.horizontalScrollBar()
+    assert vertical.maximum() > 0 and horizontal.maximum() > 0
+    # Scroll away from the selected first row without changing that selection.
+    vertical.setValue(vertical.maximum() // 2)
+    horizontal.setValue(horizontal.maximum())
+    before = (vertical.value(), horizontal.value(), table.rowAt(1))
+    assert before[0] > 0 and before[2] > 0
+    card.set_display(data.model_copy(update={"total": Decimal(99)}))
+    qapp.processEvents()  # Include the model reset's deferred layout work.
+    assert table.currentIndex().row() == 0
+    assert table.selectionModel().selectedRows()[0].row() == 0
+    assert card.focusWidget() is table and table.isVisible()
+    assert (vertical.value(), horizontal.value(), table.rowAt(1)) == before
+    # A shorter result clamps the old position to its new scrollable extent.
+    card.set_display(data.model_copy(update={"samples": data.samples[:1]}))
+    qapp.processEvents()
+    assert vertical.value() == 0 and table.currentIndex().row() == 0
 
 
 def test_the_about_column_shows_only_when_a_value_has_something_to_say(qtbot: QtBot) -> None:
