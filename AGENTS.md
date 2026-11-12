@@ -621,6 +621,7 @@ Agents run checks through `python scripts/qa.py changed` after a change and `pyt
 scripts/qa.py full` before a push (`area <test paths>` for chosen tests). `qa.py hotspots`
 lists the least-covered modules. A bare `pytest <path>` prints the whole coverage table and
 fails the 80% gate, so direct calls need `-q --no-cov`. Rules and ledger: `docs/qa.md`.
+
 CI runs on pull requests and on pushes to main; a push to a branch without a pull request runs
 nothing.
 

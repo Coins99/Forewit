@@ -23,8 +23,7 @@ tests are 89,000. Reading both once is about two million tokens, and a session h
    effort, never max.
 3. Run tests, lint and types only through `scripts/qa.py`: `changed` after a change, `full`
    before a push, `hotspots` for the least-covered modules. A bare `pytest <path>` prints
-   the coverage table for every file and fails the 80% gate; until the script exists, add
-   `-q --no-cov`.
+   the coverage table for every file and fails the 80% gate, so a direct call needs `-q --no-cov`.
 4. Grep, then read a range. Give Glob a folder (`src`, `tests`, `docs`), never the
    repository root. Never read these whole: `src/mailbrief/ui/main_window.py`,
    `src/mailbrief/diagnostics/gmail.py`, `.claude/skills/mailbrief-ui/references/spec.md`,
