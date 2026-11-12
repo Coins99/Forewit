@@ -104,7 +104,8 @@ def test_click_selects_bucket_and_number_card_keeps_explicit_total(qtbot: QtBot)
 
 @pytest.mark.parametrize("mode", [ThemeMode.LIGHT, ThemeMode.DARK])
 @pytest.mark.parametrize(
-    "case", ["line", "bar", "number", "empty", "missing", "constant", "dense", "long", "extreme"]
+    "case",
+    ["line", "bar", "number", "empty", "missing", "constant", "dense", "long", "extreme", "micro"],
 )
 def test_chart_gallery(
     qtbot: QtBot, qapp: QApplication, themed: None, mode: ThemeMode, case: str
@@ -119,6 +120,16 @@ def test_chart_gallery(
             unit="minutes",
             chart=ChartKind.LINE,
             samples=() if case == "empty" else (MetricSample(key="a", label="Monday"),),
+        )
+    if case == "micro":
+        data = MetricDisplay(
+            title="Six-decimal observations",
+            unit="units",
+            chart=ChartKind.LINE,
+            samples=(
+                MetricSample(key="a", label="Monday", value=Decimal("0.000001")),
+                MetricSample(key="b", label="Tuesday", value=Decimal("0.000002")),
+            ),
         )
     if case in {"constant", "dense", "long", "extreme"}:
         count = 366 if case == "dense" else 7
@@ -178,6 +189,25 @@ def test_axis_ticks_are_round_values_in_plain_digits(
     assert [axis_label(value, step) for value in ticks] == labels
     # Every gridline sits where its label says: the label is the tick, not a rounding of it.
     assert all(abs(b - a - step) <= fuzz for a, b in zip(ticks, ticks[1:], strict=False))
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "labels"),
+    [
+        (1e-6, 2e-6, ["1e-06", "1.25e-06", "1.5e-06", "1.75e-06", "2e-06"]),
+        (-2e-6, -1e-6, ["-2e-06", "-1.75e-06", "-1.5e-06", "-1.25e-06", "-1e-06"]),
+        (0, 1e-6, ["0", "2.5e-07", "5e-07", "7.5e-07", "1e-06"]),
+    ],
+)
+def test_six_decimal_observations_have_distinct_accurate_axis_labels(
+    low: float, high: float, labels: list[str]
+) -> None:
+    ticks = nice_ticks(low, high)
+    step = ticks[1] - ticks[0]
+    actual = [axis_label(value, step) for value in ticks]
+    assert actual == labels and len(set(actual)) == len(ticks)
+    for label, tick in zip(actual, ticks, strict=True):
+        assert float(Decimal(label)) == pytest.approx(tick, rel=0, abs=step * 1e-9)
 
 
 def test_axis_labels_at_the_edges_of_what_a_metric_can_hold() -> None:

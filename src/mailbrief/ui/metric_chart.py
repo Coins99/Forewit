@@ -78,8 +78,8 @@ def nice_ticks(low: float, high: float, *, whole: bool = False) -> list[float]:
 
 def axis_label(value: float, step: float) -> str:
     """A tick's value in plain digits: grouped thousands, the decimals its step needs, and
-    millions, billions and trillions as M, B and T. It approximates only the gridline;
-    exact values are in the labels and the table."""
+    millions, billions and trillions as M, B and T. Tiny ticks use scientific notation
+    to fit without losing their precision. Exact observations stay in labels and tables."""
     if value == 0:
         return "0"
     size = abs(value)
@@ -90,9 +90,25 @@ def axis_label(value: float, step: float) -> str:
             scaled = value / scale
             text = f"{scaled:.0f}" if abs(scaled) >= 100 else f"{scaled:.2f}".rstrip("0")
             return text.rstrip(".") + suffix
-    decimals = next(
-        (places for places in range(7) if abs(round(step, places) - step) <= step * 1e-6), 6
+    # A 2.5 step needs one more decimal than its power of ten. Tick steps can be
+    # finer than an observation's six decimal places, so derive the bound from the step.
+    max_places = (
+        max(0, -math.floor(math.log10(step))) + 1 if math.isfinite(step) and step > 0 else 0
     )
+    decimals = next(
+        (
+            places
+            for places in range(max_places + 1)
+            if abs(round(step, places) - step) <= step * 1e-6
+        ),
+        max_places,
+    )
+    if decimals > 6 and size < 1e-4:
+        places = max(0, decimals + math.floor(math.log10(size)))
+        mantissa, exponent = f"{value:.{places}e}".split("e")
+        if "." in mantissa:
+            mantissa = mantissa.rstrip("0").rstrip(".")
+        return mantissa + "e" + exponent
     return f"{value:,.{decimals}f}"
 
 
