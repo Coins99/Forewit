@@ -142,7 +142,9 @@ def logging_calls_with_private_names(files: Iterable[Path]) -> list[str]:
                 and node.func.value.id in {"logger", "log", "logging", "_logger", "LOGGER"}
             ):
                 continue
-            arguments = [*node.args[1:], *(keyword.value for keyword in node.keywords)]
+            first = node.args[:1]
+            message = [] if first and isinstance(first[0], ast.Constant) else first
+            arguments = [*message, *node.args[1:], *(keyword.value for keyword in node.keywords)]
             names = {
                 inner.id if isinstance(inner, ast.Name) else inner.attr
                 for argument in arguments
@@ -235,11 +237,12 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
         "import logging\nlogger = logging.getLogger('x')\n"
         "def f(body, count, api_key):\n    logger.info('got %s', body)\n"
         "    logger.info('n=%d', count)\n"
+        "    logger.info(f'x {body}')\n"
         "    logger.info('k', extra={'k': api_key})\n",
         encoding="utf-8",
     )
     found = logging_calls_with_private_names([bad])
-    assert len(found) == 2
+    assert len(found) == 3
     assert HTTP_WRITE.search("await client.post(url)")
     assert not HTTP_WRITE.search("posted = 1")
     assert NAIVE_CLOCK.search("datetime.now()")
