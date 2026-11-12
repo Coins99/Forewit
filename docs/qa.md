@@ -75,7 +75,7 @@ Defaults; the owner changes them here.
 | `scripts/qa.py` with `tests/unit/test_qa_script.py` | Done 2026-11-12 |
 | Baseline: `qa.py full` twice, `hotspots`, and the output size of a bare single-file `pytest` run against `qa.py changed` | Done 2026-11-12 |
 | AGENTS.md: this file in the docs table, `qa.py` under Commands | Done 2026-11-12 |
-| Optional, own pull request: move AGENTS.md's UI-only paragraphs into the `/mailbrief-ui` skill | Owner's call |
+| AGENTS.md: UI-only detail moved into `.claude/skills/mailbrief-ui/references/layout-and-rules.md` (48,138 → 41,312 bytes) | Done 2026-11-12, in this pull request |
 
 ### `scripts/qa.py`
 
@@ -108,8 +108,10 @@ Measured 2026-11-12 on `chore/qa-tooling` (main at `24f6216` plus the runner), W
   (`test_installed_commands_outside_checkout[forewit-forewit]`,
   `[forewit-gmail-diagnostic-...]`, `[forewit-ms-diagnostic-...]` and
   `test_gmail_aliases_show_the_same_synthetic_preferences`) raise `FileNotFoundError`
-  because this `.venv` has only the `mailbrief*` console scripts. A reinstall of the
-  project would fix them; CI is unaffected.
+  because this `.venv` had only the `mailbrief*` console scripts. After `uv sync --locked
+  --all-groups` created the `forewit*` commands, `qa.py area tests/unit/test_branding.py`
+  passes (10 tests), so the full run would now be clean; it was not repeated. CI was
+  never affected. `uv` is not on PATH here: run it as `<python 3.13> -m uv`.
 - Output of one file, `tests/unit/domain/test_intervals.py`: a bare `pytest` prints
   25,157 characters (the coverage table for every file); `qa.py area` prints 28.
 - The 15 least-covered modules (combined statements and branches, `qa.py hotspots`):
