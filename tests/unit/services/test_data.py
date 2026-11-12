@@ -354,6 +354,12 @@ async def test_nonrevisioned_cache_changes_invalidate_preview(owner_database: Da
 
 def test_the_writing_export_names_no_mail_or_google_calendar_table() -> None:
     """An export holds only what the owner wrote; mail and the Google Calendar cache stay out."""
-    cache = {"messages", "analyses", "digests", "digest_items", "accounts", "sync_runs"}
-    assert not cache & set(data.EXPORT_TABLES)
-    assert not {name for name in data.EXPORT_TABLES if name.startswith("google_")}
+    owner_tables = {
+        "day_plans", "day_plan_items", "life_areas", "projects", "actions", "action_activity",
+        "action_steps", "action_tags", "action_series", "action_sources", "action_proposals",
+        "drafts", "draft_versions", "draft_sources", "draft_generations", "calendar_events",
+        "work_blocks", "working_hours", "metric_definitions", "metric_entries",
+        "metric_entry_changes", "dashboards",
+    }  # fmt: skip
+    # A table added to the export must be added here on purpose, after checking it holds no mail.
+    assert set(data.EXPORT_TABLES) == owner_tables

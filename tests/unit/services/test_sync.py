@@ -915,7 +915,7 @@ async def test_browsing_a_page_never_advances_the_daily_brief_watermark(
     async_session: AsyncSession, test_account: int
 ) -> None:
     """Only a sync of today's window moves the account's last complete sync, never a page
-    the owner browsed, and a browsed page asks the reader for metadata and nothing else."""
+    the owner browsed; the page is requested once with the owner's size and query."""
     account = await async_session.get(AccountTable, test_account)
     assert account is not None
     before = account.last_sync_at_utc
