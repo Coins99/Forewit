@@ -79,6 +79,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   | P2 navigation, capture, focus, notes, workspace | `p2-navigation.md`, `p2-capture.md`, `p2-focus.md`, `p2-notes.md`, `p2-workspace.md` | 0025–0027 |
   | Desktop UI look | `ui/studio.md`, `ui/liquid-glass.md`, `.claude/skills/mailbrief-ui/` | |
   | QA sweep: rules, budget, slices, findings | `qa.md` | |
+| Owner acceptance run-sheet (one checklist for the real app) | `acceptance-runsheet.md` | |
 
 - The diagnostic CLI is `forewit-gmail-diagnostic` (subcommands such as `sync`,
   `bodies`, `brief`, `actions`, `drafts`, `preferences show`, `ai-consent`,
