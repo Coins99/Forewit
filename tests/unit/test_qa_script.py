@@ -148,7 +148,8 @@ def test_cap() -> None:
     assert qa.cap(lines[:5]) == lines[:5]
 
 
-def test_full_steps_cover_every_platform() -> None:
+def test_full_steps_cover_every_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(qa, "PLATFORM", "win32")
     names = [step.name for step in qa.full_steps()]
     assert names == [
         "ruff format",
