@@ -67,20 +67,13 @@ before any change under `src/mailbrief/ui`; AGENTS.md's invariants still win.
 
 ## Rules
 
-- Render the screenshot gallery with
-  `MAILBRIEF_UI_SHOTS=scratch/ui-shots uv run pytest tests/ui/test_workspace.py -q --no-cov`
-  and compare its layout with `docs/ui/mockup-three-pane-dark.png` (Graphite's colours).
-  Every colour scheme must pass the contrast tests in `tests/ui/theme/` in both modes.
+- Every colour scheme must pass the contrast tests in `tests/ui/theme/` in both modes. The
+  screenshot review loop is in `SKILL.md`.
 - Cards and glass rims snap their 1-device-pixel lines to the pixel grid with
   `hairline.crisp_rect()`, so they stay crisp at 125% and 150%.
 - Wrap work that makes Qt walk every widget (setting the style, palette or stylesheet,
   repainting all) in `paused_collection()`: Qt visits a copied list of widgets and runs
   Python code for each, and a garbage collection there could free one it still visits.
-- Make list widgets from `lists.SafeList` (an `ActivatingList` is one), never `QListWidget`
-  itself: Qt's `clear()` deletes the items inside its model reset, and a garbage collection
-  of their Python wrappers or data there can crash on Cocoa (CI's macOS UI step).
-  `SafeList.clear()` is `lists.clear_list()`, which takes each item out with collection
-  paused and changes the current row once, as Qt's `clear()` does.
 - Before another layout (or another cell of the same grid) takes a widget, call
   `layouts.take_widget(widget)`, and never `setParent` a widget out of a layout added to
   another with `addLayout` or `insertLayout` after it was filled. PySide wraps that

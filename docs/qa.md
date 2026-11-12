@@ -75,7 +75,7 @@ Defaults; the owner changes them here.
 | `scripts/qa.py` with `tests/unit/test_qa_script.py` | Done 2026-11-12 |
 | Baseline: `qa.py full` twice, `hotspots`, and the output size of a bare single-file `pytest` run against `qa.py changed` | Done 2026-11-12 |
 | AGENTS.md: this file in the docs table, `qa.py` under Commands | Done 2026-11-12 |
-| AGENTS.md: UI-only detail moved into `.claude/skills/mailbrief-ui/references/layout-and-rules.md` (48,138 → 41,312 bytes) | Done 2026-11-12, in this pull request |
+| AGENTS.md: UI-only detail moved into `.claude/skills/mailbrief-ui/references/layout-and-rules.md` (47,505 → 41,312 bytes) | Done 2026-11-12, in PR #112 |
 
 ### `scripts/qa.py`
 
@@ -110,8 +110,8 @@ Measured 2026-11-12 on `chore/qa-tooling` (main at `24f6216` plus the runner), W
   `test_gmail_aliases_show_the_same_synthetic_preferences`) raise `FileNotFoundError`
   because this `.venv` had only the `mailbrief*` console scripts. After `uv sync --locked
   --all-groups` created the `forewit*` commands, `qa.py area tests/unit/test_branding.py`
-  passes (10 tests), so the full run would now be clean; it was not repeated. CI was
-  never affected. `uv` is not on PATH here: run it as `<python 3.13> -m uv`.
+  passes (10 tests), so the full run is expected to be clean; it was not repeated. CI was
+  never affected.
 - Output of one file, `tests/unit/domain/test_intervals.py`: a bare `pytest` prints
   25,157 characters (the coverage table for every file); `qa.py area` prints 28.
 - The 15 least-covered modules (combined statements and branches, `qa.py hotspots`):
@@ -168,8 +168,7 @@ native macOS checks.
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
 loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or docs).
 
-R-1 | R | low | `p4-insights.md` cites "eight owner scenarios in the implementation guide", which is not in the repository; INS steps come from its behaviour text | open, owner question 1
-R-2 | R | low | `today.md` and `p2-focus.md` put Your day above the brief; `p2-workspace.md` says the full brief lives in Mail | open, owner question 3
-R-3 | R | low | `search.md` and `p2-navigation.md` lists omit Notes, Projects and Insights (older than the sidebar change) | open, owner question 4
-R-4 | R | low | P3 calendar acceptance sections name migrations 0032 and 0033 by branch; add-ons add 0034 to 0036; `p3-scheduling-addons.md` has no numbered steps | open, owner questions 5 and 6
-R-5 | R | low | P2 capture, focus and navigation docs have no numbered acceptance steps; P1 docs say "Actions" for Tasks; steps may predate flat buttons (#108) | open, owner questions 2, 7 and 9
+- R-1 | R | low | `p4-insights.md` cites "eight owner scenarios in the implementation guide", which is not in the repository; the Insights steps come from its behaviour text | open, owner question 1
+- R-2 | R | low | `today.md` and `p2-focus.md` put Your day above the brief; `p2-workspace.md` says the full brief lives in Mail | open, owner question 3
+- R-3 | R | low | P3 calendar acceptance sections name migrations 0032 and 0033 by branch; the add-ons add 0034 to 0036; `p3-scheduling-addons.md` has no numbered steps | open, owner questions 4 and 5
+- R-4 | R | low | P1 estimates and the P2 capture, focus and navigation docs have no numbered acceptance steps; P1 docs say "Actions" for Tasks; steps may predate flat buttons (#108) | open, owner questions 2, 6, 8 and 9

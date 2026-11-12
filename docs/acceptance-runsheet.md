@@ -8,7 +8,7 @@ them in the sidebar, with duplicates merged. Each step links to the section it c
 
 - Tick a step that works.
 - For one that fails, send back its ID and one line saying what you saw (a screenshot helps),
-  for example: `TASK-07: the next task kept the old title`.
+  for example: `TASK-09: tomorrow's task came back with its steps ticked`.
 - Ticking is your act. Nothing in this file, and no agent or test run, marks a feature
   accepted; the docs keep saying "pending" until you decide otherwise.
 - Use a test profile for anything that deletes, restores or changes data. Gmail stays
@@ -25,7 +25,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 - [ ] **SETUP-01** Start the app with a test profile and Gmail disconnected. Confirm the sidebar
   shows Today, Tasks, Projects, Calendar, Notes, Insights and Mail, and that Ctrl/Cmd+1 to 8 still
   open Today, Inbox, Tasks, Waiting, Mail drafts, brief history, Calendar and Notes.
-  Source: [p2-navigation](p2-navigation.md#implemented-behavior), [AGENTS.md](../AGENTS.md). (?)
+  Source: [p2-workspace](p2-workspace.md#owner-workflow), [AGENTS.md](../AGENTS.md).
 - [ ] **SETUP-02** The first run on a database from before the calendar work applies its
   migrations without an error. Source:
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) (P3-1 step 0). (?)
@@ -38,35 +38,36 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   [p2-workspace](p2-workspace.md#owner-workflow). (?)
 - [ ] **TODAY-02** Choose **Plan today**. Search for open tasks, add two, and reorder them with
   Move up and Move down and with Alt+Up and Alt+Down. Choose **Remove** on one: only the
-  selection goes, the task stays. Source: [p2-focus](p2-focus.md#workflow).
+  selection goes, the task stays. Source: [p2-focus](p2-focus.md#workflow). (?)
 - [ ] **TODAY-03** Complete and reopen a selected task from here, then Undo. Completed selections
   stay visible. A waiting task can be selected as a follow-up and its estimate is not counted as
-  your time. Source: [p2-focus](p2-focus.md#workflow).
+  your time. Source: [p2-focus](p2-focus.md#workflow). (?)
 - [ ] **TODAY-04** Use the date picker and **Go to today** in Plan today. A date you browsed to
   stays after a refresh. **Carry** or **Move** selections to another day: you get a preview, copy
   keeps the source, move changes both, and no task date or deadline changes. Source:
-  [p2-workspace](p2-workspace.md#owner-workflow).
+  [p2-workspace](p2-workspace.md#owner-workflow). (?)
 - [ ] **TODAY-05** Choose **Your day**. Three cards show: Needs attention (overdue, due today,
   planned for today, planned earlier; each task once), Today's agenda (all-day events first),
   and New replies. Double-click a row, or press Return on it, to open it. Source:
   [today](today.md). (?)
-- [ ] **TODAY-06** With a task due today, check its row says "Due 17:00" (or "Due today" for a
-  date) and an overdue one says "Overdue". Complete or edit a task and see the cards follow.
-  Source: [today](today.md), [p1-deadlines](p1-deadlines.md#owner-acceptance) step 2.
+- [ ] **TODAY-06** With a task due today, its row says "Due 17:00" (or "Due today" for a date) and
+  an overdue one says "Overdue". Complete or edit a task and the cards follow. Source:
+  [today](today.md).
 - [ ] **TODAY-07** The agenda shows up to two appointments with long titles shortened;
   **Agenda** opens today's full calendar. Source: [p2-focus](p2-focus.md#workflow).
-- [ ] **TODAY-08** Today's focus says how much time is free today. Source:
+- [ ] **TODAY-08** Today's focus says how much time is free today. Upcoming shows seven dates and
+  can expand to thirty; a task's target and deadline reasons share one row, and events stay
+  separate. Upcoming points to the Calendar for free time, and does not claim to plan capacity.
+  Source: [p2-workspace](p2-workspace.md#owner-workflow),
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 7.
-- [ ] **TODAY-09** Upcoming shows seven dates and can expand to thirty; a task's target and
-  deadline reasons share one row, and events stay separate. Upcoming points to the Calendar for
-  free time, and does not claim to plan capacity. Source:
-  [p2-workspace](p2-workspace.md#owner-workflow),
-  [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 7.
-
 ## Tasks
 
 - [ ] **TASK-01** On Tasks, create a task with notes, two steps and a target date. Edit its
   title and tick a step. Source: [p1-manual-tasks](p1-manual-tasks.md#acceptance) steps 1-2.
+- [ ] **TASK-01A** In the editor, type an **Estimate** as `90`, `1.5h`, `1h 30` and `1:30`: each
+  reads "Estimate 1 hr 30 mins". The arrow keys step by a quarter hour; clearing it gives **Not
+  set**; half-typed text is refused with the reason. Source:
+  [p1-manual-tasks](p1-manual-tasks.md#estimates). (?)
 - [ ] **TASK-02** Complete the task, then reopen it. Activity still shows the completion and the
   reopening times. Undo the reopen: the original completion time returns. Reopen once more.
   Source: [p1-manual-tasks](p1-manual-tasks.md#acceptance) steps 2-4.
@@ -89,7 +90,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   it: the status line names tomorrow, and a new open task is dated tomorrow with the same title,
   unticked steps and the same tags. **Undo complete**: the first is open and tomorrow's is gone.
   Source: [p1-recurring-tasks](p1-recurring-tasks.md#owner-acceptance) steps 1-3.
-- [ ] **TASK-10** Skip it: it is in neither Open nor Completed, and tomorrow's says "Follows ... .
+- [ ] **TASK-10** Skip it: it is in neither Open nor Completed, and tomorrow's says "Follows … ·
   Skipped". Undo the skip. Source: [p1-recurring-tasks](p1-recurring-tasks.md#owner-acceptance)
   step 4.
 - [ ] **TASK-11** Edit it: rename, untick **Change later repeats too**, move the target date two
@@ -106,54 +107,60 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   the series' steps, unticked, without the added one. Source:
   [p1-checklists](p1-checklists.md#owner-acceptance) step 9.
 - [ ] **TASK-15** Create a task with **Due by** next Friday at 17:00. **Suggested** names
-  Thursday, no target is ticked for you, and the detail says "Due Fri ..., 17:00 . Set by you".
+  Thursday, no target is ticked for you, and the detail says "Due Fri …, 17:00 · Set by you".
   Source: [p1-deadlines](p1-deadlines.md#owner-acceptance) step 1.
 - [ ] **TASK-16** Tick a target on Wednesday, then move the deadline to the Monday after: the
   target stays Wednesday. In the time field press Up on 16:59: it becomes 17:00. Untick **Due by**
   and save: no deadline, target kept. Source: [p1-deadlines](p1-deadlines.md#owner-acceptance)
   steps 3-4.
-- [ ] **TASK-17** The deadline shows on the Calendar and, on the day, in Your day. Source:
+- [ ] **TASK-17** The deadline shows on the Calendar and, on the day, in Your day. Moving a block
+  or an event never moves it. Source:
   [p1-deadlines](p1-deadlines.md#owner-acceptance) step 2.
 - [ ] **TASK-18** (Gmail connected) Accept a suggestion with a dated deadline. The editor says "The
-  email says ..." and has no **Use the email's**. Move the deadline and save: "You set this
-  deadline. The email said ...", then **Use the email's** and save brings the email's back.
+  email says …" and has no **Use the email's**. Move the deadline and save: "You set this
+  deadline. The email said …", then **Use the email's** and save brings the email's back.
   Source: [p1-deadlines](p1-deadlines.md#owner-acceptance) steps 6-7.
 - [ ] **TASK-19** (Gmail connected) When a reply proposes a new deadline over one you set, it says
-  "Replace your deadline with ..."; apply it, then Undo: your deadline is back. Source:
+  "Replace your deadline with …"; apply it, then Undo: your deadline is back. Source:
   [p1-deadlines](p1-deadlines.md#owner-acceptance) step 8.
 - [ ] **TASK-20** (Gmail connected) Accept a suggestion whose deadline is words alone ("ASAP"):
   **Clear deadline**, save, and the task has none. Reopen the editor, **Use the email's**, save:
   "ASAP" is back. Source: [p1-deadlines](p1-deadlines.md#owner-acceptance) step 9.
 - [ ] **TASK-21** On Waiting, choose **New task**. **Whose** is **Waiting for someone** and the
   rows read **Waiting on** and **Follow up**. Name Alex, follow-up today, save. The row says
-  "Alex . since today" with the avatar "A", the detail "Waiting on Alex . open" with the prompt
-  "Follow up with Alex", and Your day "Follow up today . waiting on Alex". Source:
+  "Alex · since today" with the avatar "A", the detail "Waiting on Alex · open" with the prompt
+  "Follow up with Alex", and Your day "Follow up today · waiting on Alex". Source:
   [p1-waiting](p1-waiting.md#owner-acceptance) steps 1-2.
-- [ ] **TASK-22** Edit a task of yours, name Sam under **For** and save: "Yours, for Sam . open",
+- [ ] **TASK-22** Edit a task of yours, name Sam under **For** and save: "Yours, for Sam · open",
   and the filter "Person: Sam" lists it. Change a waiting task's **Whose** to **Mine** and back:
   **Waiting since** restarts today. Source: [p1-waiting](p1-waiting.md#owner-acceptance) steps 3-4.
 - [ ] **TASK-23** (Gmail connected) Accept a suggestion that waits for someone: it names no one
   and waits since today. In the editor **Use sender** gives the sender's name. When the person
   replies in the thread the prompt reads "{sender} replied", then **Mark received**. Source:
   [p1-waiting](p1-waiting.md#owner-acceptance) steps 7-8.
-- [ ] **TASK-24** On a task with two steps, tick the first in the detail pane. Status "1 of 2 steps
-  done", heading "Plan . 1 of 2 done", the step muted, the row "1/2 steps". Click the second step's
-  words: it ticks, status "Every step done", the task stays open with **Complete** the main
-  button. Untick: "1 of 2 steps done". Source: [p1-checklists](p1-checklists.md#owner-acceptance)
-  steps 1-3.
+- [ ] **TASK-24** On a new task with two steps (not the one from TASK-01), tick the first in the
+  detail pane. Status "1 of 2 steps done", heading "Plan · 1 of 2 done", the step muted, the row
+  "1/2 steps". Click the second step's words: it ticks, status "Every step done", the task stays
+  open with **Complete** the main button. Untick: "1 of 2 steps done". Source:
+  [p1-checklists](p1-checklists.md#owner-acceptance) steps 1-3.
 - [ ] **TASK-25** Type "Call the caterer" in **Add a step**, press Return: it is last and unticked,
-  the field is empty, and Activity says "Edited 4 times". Source:
+  the field is empty, and Activity says "Edited 4 times" (this holds only for a new task
+  with no earlier edits). Source:
   [p1-checklists](p1-checklists.md#owner-acceptance) step 4.
 - [ ] **TASK-26** Press Tab from **Delete**: focus runs through the boxes to the field. Space on a
   box ticks it and keeps focus. Source: [p1-checklists](p1-checklists.md#owner-acceptance) step 5.
-- [ ] **TASK-27** Complete the task: the plan shows check and circle marks and no field. Reopen:
+- [ ] **TASK-27** Complete the task: the plan shows "✓" and "○" and no field. Reopen:
   the boxes return. In the editor rename and reorder steps: the detail follows. Source:
   [p1-checklists](p1-checklists.md#owner-acceptance) steps 6-7.
 - [ ] **TASK-28** (Gmail connected) Accept a suggestion with steps and tick one: its source email,
   deadline and target date do not change. Source:
   [p1-checklists](p1-checklists.md#owner-acceptance) step 10.
-- [ ] **TASK-29** Quit and restart: the task, edits, steps, ticks, added step, activity, series
-  and skipped occurrence persist. Source: [p1-manual-tasks](p1-manual-tasks.md#acceptance) step 5,
+- [ ] **TASK-29** Quit and restart: the task, edits, steps, ticks, added step, activity, series and
+  skipped occurrence persist, and so do the priority, tags, deadline, estimate and waiting person.
+  Source: [p1-priorities-tags](p1-priorities-tags.md#owner-acceptance) step 7,
+  [p1-deadlines](p1-deadlines.md#owner-acceptance) step 5,
+  [p1-waiting](p1-waiting.md#owner-acceptance) step 6,
+  [p1-manual-tasks](p1-manual-tasks.md#acceptance) step 5,
   [p1-checklists](p1-checklists.md#owner-acceptance) step 8,
   [p1-recurring-tasks](p1-recurring-tasks.md#owner-acceptance) step 9.
 - [ ] **TASK-30** Search (Ctrl+K) for "alex": the waiting task is found. Source:
@@ -197,7 +204,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 - [ ] **CAL-06** Drag another task onto Wednesday 10:15 in Week view: it is scheduled there; press
   **Undo schedule**. A block at 07:00 says it is outside your working hours. Source:
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) steps 7-8.
-- [ ] **CAL-07** Give a task a 2-hour estimate. **Schedule time...** suggests 2 hours. Save: the
+- [ ] **CAL-07** Give a task a 2-hour estimate. **Schedule time…** suggests 2 hours. Save: the
   block shows in Week, Month, List and Today, and the detail says 2 hrs. Add a second block on
   another day. Source: [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) steps 1-2.
 - [ ] **CAL-08** Drag a block to another day and time, **Undo move**. Resize it by its bottom
@@ -218,7 +225,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   explains the sum. Remove one task's estimate: the day becomes provisional ("Over by 1h+", "at
   least"). Source: [p3-calendar](p3-calendar.md#owner-acceptance-desktop) steps 1-2.
 - [ ] **CAL-14** With a 10-minute buffer, put a block 5 minutes after a meeting: it has a conflict
-  mark, choosing it says "within the buffer of ...", and saving said so too. Source:
+  mark, choosing it says "within the buffer of …", and saving said so too. Source:
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 3.
 - [ ] **CAL-15** Overlap two blocks, put one on a day off, one after its task's deadline, and set
   more time aside than a task's estimate: each says why. Make the meeting Free: its conflict and
@@ -227,16 +234,14 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   provisional; after Refresh, not. Past days show figures but no flags. Source:
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop) steps 6 and 8.
 - [ ] **CAL-17** In Plan with AI with Google times ticked, the preview counts only busy Google
-  events and shows no blocks. A proposed change onto a block warns "Task . ...". Source:
+  events and shows no blocks. A proposed change onto a block warns "Task · …". Source:
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) step 9,
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) step 11.
 - [ ] **CAL-18** One ordinary week: split working hours, a dated day off, Busy and Free events, a
-  locked block, a stale review, batch Undo. The scheduling add-ons have no numbered steps, so judge
+  locked block, a stale review (regenerate it), an uncertain save and Retry save, batch Undo,
+  and a backup and restore round trip. The scheduling add-ons have no numbered steps, so judge
   each against its description. Source:
   [p3-scheduling-addons](p3-scheduling-addons.md#hands-on-acceptance-still-required). (?)
-- [ ] **CAL-19** A task's deadline and target date show on the Calendar, and moving a block never
-  moves them. Source: [p1-deadlines](p1-deadlines.md#owner-acceptance) step 2,
-  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) step 8.
 
 ## Notes
 
@@ -246,7 +251,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 - [ ] **NOTE-02** New note: type a title and text, pick Home under Project. Filter Notes by Home and
   No project: the note moves between them. Work is not offered. Source:
   [p2-notes](p2-notes.md#owner-acceptance) step 3.
-- [ ] **NOTE-03** **Link to task...**, search for a task and link it, then Unlink: the task itself
+- [ ] **NOTE-03** **Link to task…**, search for a task and link it, then Unlink: the task itself
   is unchanged. Source: [p2-notes](p2-notes.md#owner-acceptance) step 4.
 - [ ] **NOTE-04** Open the note from Ctrl+K and from Capture's **Open**: both show the Notes view.
   Source: [p2-notes](p2-notes.md#owner-acceptance) step 5.
@@ -259,7 +264,7 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 
 - [ ] **INS-01** Insights is in the sidebar and the palette, and opens offline with no sign-in.
   Ctrl/Cmd+1 to 8 keep their meanings. Source: [p4-insights](p4-insights.md#current-increment),
-  [AGENTS.md](../AGENTS.md). (?)
+  [AGENTS.md](../AGENTS.md).
 - [ ] **INS-02** Choose **Manage metrics** and create an amount metric and a point-value metric.
   Log entries with exact decimal input, a date and a project. Edit, delete, restore and Undo one.
   Repeating an identical log makes a new observation. Source:
@@ -294,22 +299,23 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 
 - [ ] **CAP-01** Choose **Capture** from any page, press Ctrl+Shift+N (Cmd+Shift+N), and pick
   **Capture task or note** in the palette. A task needs only a title; **Add notes** expands the
-  notes. Source: [p2-capture](p2-capture.md#owner-workflow).
+  notes. Source: [p2-capture](p2-capture.md#owner-workflow). (?)
 - [ ] **CAP-02** Save a task. **Open** goes to it, **Capture another** starts fresh, **Done**
   returns to the page, and **Add to today** puts it in My focus without changing its dates or
   creating it twice. A note may hold a title, text or both. Source:
-  [p2-capture](p2-capture.md#owner-workflow), [p2-focus](p2-focus.md#workflow).
+  [p2-capture](p2-capture.md#owner-workflow), [p2-focus](p2-focus.md#workflow). (?)
 - [ ] **CAP-03** Type into Capture and close it: it offers saving or **Discard and close**. An empty
   cancel creates nothing. Quitting the app with an unsaved capture asks first. Source:
-  [p2-capture](p2-capture.md#owner-workflow).
+  [p2-capture](p2-capture.md#owner-workflow). (?)
 - [ ] **CAP-04** Tick **Review later** on a capture: it lands in the review inbox. Tasks and Notes
   have review views and a combined one; **Keep as is** needs no project, date or estimate.
-  Unticking it keeps the record at once. Source: [p2-workspace](p2-workspace.md#owner-workflow).
+  Unticking it keeps the record at once. Source: [p2-workspace](p2-workspace.md#owner-workflow). (?)
 - [ ] **CAP-05** New task (Ctrl/Cmd+N) and New note keep working beside Capture. Source:
-  [p2-capture](p2-capture.md#owner-workflow).
-- [ ] **CAP-06** Press Ctrl+K with the field empty: the commands list shows Go to each page, New
-  task, New event today, New note, Sync and review, Open saved mail, Open data and recovery and
-  Open settings. Source: [search](search.md#commands). (?)
+  [p2-capture](p2-capture.md#owner-workflow). (?)
+- [ ] **CAP-06** Press Ctrl+K with the field empty: the commands list shows Go to each sidebar page
+  (Today, Tasks, Projects, Calendar, Notes, Insights, Mail), New task, New event today, New note,
+  Sync and review, Open saved mail, Open data and recovery and Open settings. Source:
+  [search](search.md#commands), [AGENTS.md](../AGENTS.md).
 - [ ] **CAP-07** Search two or more letters. Each section shows at most 8 matches and says when
   there are more. Opening a task, draft or note, event, Google event or mail result goes to the
   right page with it selected; a task hidden by a filter is revealed. Source:
@@ -322,9 +328,12 @@ Questions where two docs disagree, or a step may describe an older screen, are a
 
 ## Settings
 
-- [ ] **SET-01** Choose the system's light mode, then dark. Today, Tasks, Calendar, Notes and
-  Insights read clearly in both. Settings > Appearance can keep one mode. Source:
-  [AGENTS.md](../AGENTS.md), steps ending "light and dark" in the sources above.
+- [ ] **SET-01** Set the system to light mode, then dark. On every page (Today, Tasks, Projects,
+  Calendar, Notes, Insights, Mail) and in Capture, Working hours, the block editor, Plan with AI and
+  the Insights dialogs, text, shading and warnings read clearly in both. Settings > Appearance can
+  keep one mode. Source: [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 8,
+  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) step 10,
+  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) step 12, [studio look](ui/studio.md).
 - [ ] **SET-02** Working hours, the Day view choice and the Tasks-to-schedule panel survive a
   restart. Source: [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) step 10.
 
@@ -335,17 +344,27 @@ Do these in a test profile, after the pages above have records to restore.
 - [ ] **DATA-01** Create a backup and a writing export in Data. Source:
   [p1-manual-tasks](p1-manual-tasks.md#acceptance) step 6.
 - [ ] **DATA-02** Restore the backup into a test profile: the same tasks, activity, projects, areas,
-  tags, series, steps, notes with their links, and Insights layouts return. Organization and
+  tags, priorities, deadlines, estimates, the waiting person, series, steps, notes with their
+  links, and Insights layouts return. Organization and
   historical grouping survive. Source: [p1-manual-tasks](p1-manual-tasks.md#acceptance) step 6,
   [p1-projects-life-areas](p1-projects-life-areas.md#owner-acceptance) step 7,
-  [p2-notes](p2-notes.md#owner-acceptance) step 7.
+  [p2-notes](p2-notes.md#owner-acceptance) step 7,
+  [p1-priorities-tags](p1-priorities-tags.md#owner-acceptance) step 7,
+  [p1-deadlines](p1-deadlines.md#owner-acceptance) step 5,
+  [p1-waiting](p1-waiting.md#owner-acceptance) step 6.
 - [ ] **DATA-03** The writing export contains `action_activity`, `action_tags`, `action_series`,
   `action_steps` (with `done` and `done_at_utc`), the deadline and `deadline_origin`, and the
-  person with `waiting_since_utc`. Source: the P1 sections above.
-- [ ] **DATA-04** After restore, work hours, Busy/Free choices, blocks and the panel choice remain.
-  Source: [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) step 10,
-  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) step 12.
-
+  person with `waiting_since_utc`. Source: [p1-manual-tasks](p1-manual-tasks.md#acceptance) step 6,
+  [p1-priorities-tags](p1-priorities-tags.md#owner-acceptance) step 7,
+  [p1-recurring-tasks](p1-recurring-tasks.md#owner-acceptance) step 9,
+  [p1-deadlines](p1-deadlines.md#owner-acceptance) step 5,
+  [p1-waiting](p1-waiting.md#owner-acceptance) step 6,
+  [p1-checklists](p1-checklists.md#owner-acceptance) step 8.
+- [ ] **DATA-04** After restore (and the scheduling add-ons' dated hours, buffers and locks), work
+  hours, Busy/Free choices, blocks and the panel choice remain. Source:
+  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-1) step 10,
+  [p3-calendar](p3-calendar.md#owner-acceptance-desktop-2) step 12,
+  [p3-scheduling-addons](p3-scheduling-addons.md#hands-on-acceptance-still-required).
 ## Platform checks
 
 Only you can do these; list the ones you have no machine for as skipped.
@@ -387,17 +406,16 @@ These need your real accounts and are not rewritten here. Follow each document's
 3. **Today's layout.** `today.md` and `p2-focus.md` describe **Your day** as three cards above
    the brief; `p2-workspace.md` says the full brief lives in Mail. TODAY-01 and TODAY-05 follow
    both. Which is current?
-4. **Palette and sidebar lists.** `search.md` lists Go to for Today, Inbox, Actions, Waiting,
-   Drafts, Briefs and Calendar only, and `p2-navigation.md` shows the sidebar without Insights.
-   Are Notes, Projects and Insights in the palette (SETUP-01, CAP-06, INS-01)?
-5. **Calendar docs were written for three different branches.** P3-1 says the first run applies
+4. **Calendar docs were written for three different branches.** P3-1 says the first run applies
    migration 0032 and P3-2 says 0033, and the scheduling add-ons then add 0034 to 0036. SETUP-02
    asks only that every migration applies. Which database are you testing against?
-6. **P3 scheduling add-ons** (`p3-scheduling-addons.md`) has a list of what is still to be done by
+5. **P3 scheduling add-ons** (`p3-scheduling-addons.md`) has a list of what is still to be done by
    hand but no steps for dated hours, buffers, locks or Apply and Undo. CAL-18 is a loose check.
-7. **P2 capture, focus and navigation** have no numbered acceptance steps. TODAY-02 to TODAY-04
+6. **P2 capture, focus and navigation** have no numbered acceptance steps. TODAY-02 to TODAY-04
    and CAP-01 to CAP-05 come from their "workflow" sections.
-8. **NOTE-05.** The source says an archived project's note "can't move back once moved out".
+7. **NOTE-05.** The source says an archived project's note "can't move back once moved out".
    Does that mean it cannot be re-selected from the project menu?
-9. **Flat buttons (#108).** Steps that say "choose" a button or a date field were written
+8. **Flat buttons (#108).** Steps that say "choose" a button or a date field were written
    before that change. Anything that now looks different is a finding, not a failure.
+9. **P1 estimates.** Estimates await owner acceptance, but `p1-manual-tasks.md` has no
+    numbered steps for them. TASK-01A is written from its Estimates section.
