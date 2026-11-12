@@ -380,3 +380,18 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert [line.rsplit(" ", 1)[1] for line in unguarded_url_opens([opens])] == ["unguarded"]
+
+
+BULK_OWNER_WRITE: Final = re.compile(
+    r"\b(?:update|delete|insert)\(\s*(?:Action|ActionStep|ActionSeries|Draft|DraftVersion|Project|"
+    r"LifeArea|WorkBlock|Preferences|Event|SuggestionDecision|WorkingHours)Table\b"
+)
+
+
+def test_owner_records_change_only_through_orm_objects() -> None:
+    """A bulk UPDATE or DELETE leaves loaded rows stale and skips the revision, so none may
+    target an owner-record table. Statements spelled other ways are not seen."""
+    assert offending_lines((SOURCE / "storage").rglob("*.py"), BULK_OWNER_WRITE) == []
+    assert offending_lines((SOURCE / "services").rglob("*.py"), BULK_OWNER_WRITE) == []
+    assert BULK_OWNER_WRITE.search("delete(ActionTable).where(x)")
+    assert not BULK_OWNER_WRITE.search("delete(ActionSuggestionTable).where(x)")

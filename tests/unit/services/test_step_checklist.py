@@ -380,3 +380,26 @@ async def test_ticks_and_added_steps_survive_restart_and_the_writing_export(
         "edited",
         "edited",
     ]
+
+
+async def test_ticking_the_last_step_never_completes_the_task(service: ActionService) -> None:
+    created = await service.create(TASK, new_steps("Book the venue"))
+
+    ticked = await service.set_step_done(created.public_id, 1, created.steps[0].step_id, True)
+
+    assert ticked.steps[0].done
+    assert (ticked.status, ticked.completed_at_utc) == (ActionStatus.OPEN, None)
+
+
+async def test_a_tick_that_changes_nothing_makes_no_revision(
+    session: AsyncSession, service: ActionService
+) -> None:
+    created = await service.create(TASK, new_steps("Book the venue"))
+    step_id = created.steps[0].step_id
+    ticked = await service.set_step_done(created.public_id, 1, step_id, True)
+    count = await history_count(session)
+
+    again = await service.set_step_done(created.public_id, ticked.revision, step_id, True)
+
+    assert again.revision == ticked.revision
+    assert await history_count(session) == count

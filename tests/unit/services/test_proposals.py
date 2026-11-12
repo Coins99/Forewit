@@ -12,6 +12,7 @@ from mailbrief.domain.actions import (
     Action,
     ActionEdit,
     ActionFilter,
+    ActionPriority,
     ActionStatus,
     DeadlineOrigin,
     ProposalState,
@@ -953,3 +954,35 @@ async def test_undoing_an_apply_saved_before_owner_deadlines_infers_the_email_s_
 
     assert undone.deadline_origin is (DeadlineOrigin.EMAIL if dated else None)
     assert undone.deadline_date == (date(2026, 10, 2) if dated else None)
+
+
+@pytest.mark.parametrize("kind", [FollowUpKind.NEW_DEADLINE, FollowUpKind.CANCELLED])
+async def test_applying_and_undoing_leave_the_owner_s_own_fields_alone(
+    session: AsyncSession, service: ProposalService, kind: FollowUpKind
+) -> None:
+    """A proposal changes only the deadline, target date and status: never the title, notes,
+    steps, ownership, person or priority."""
+    _, public_id, _ = await scene(
+        session, service, kind, priority="high", person="Sam", person_key="sam"
+    )
+    actions = ActionService(session)
+    before = await actions.get(public_id)
+    assert before is not None
+    proposal_id = await only(service)
+
+    applied = await service.apply(proposal_id, before.revision)
+    undone = await service.undo_apply(proposal_id, applied.revision)
+
+    def own(action: Action) -> tuple[object, ...]:
+        return (
+            action.title,
+            action.notes,
+            action.ownership,
+            action.person,
+            action.priority,
+            action.tags,
+            [(step.text, step.done) for step in action.steps],
+        )
+
+    assert own(applied) == own(before) == own(undone)
+    assert (before.person, before.priority) == ("Sam", ActionPriority.HIGH)
