@@ -153,7 +153,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Not started |
-| B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Not started |
+| B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
 | C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Not started |
 | D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Not started |
 | E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Not started |
@@ -230,6 +230,31 @@ Same method as B1. Tests marked `scan` are in `tests/unit/test_source_rules.py`.
 
 Four tests and one scan were new; nothing failed, so there is no B2 finding. The names
 were read for coverage, not the assertions behind each one beyond the ones listed as new.
+
+## Slice B3: mail and automation invariants
+
+Same method as B1 and B2.
+
+| Invariant | Enforcing test | State |
+| --- | --- | --- |
+| Ranking is local, deterministic, explained; learns only from the owner's choices | `test_deterministic_sorting_and_tie_breaking`, `test_every_new_reason_reads_as_words`, `test_an_important_sender_ignores_what_was_learned`, `test_a_pick_that_was_not_suggested_is_remembered_and_lifts_its_sender`, `test_include_ids_count_as_a_pick_but_an_automatic_choice_does_not` | covered |
+| Exclusion, decline and limit beat important senders | `test_an_exclusion_wins_over_an_important_address_in_its_domain`, `test_a_decline_after_a_pick_takes_the_wanted_mark_back`, `test_the_limit_caps_automatic_and_reviewed_selection` | covered |
+| Only whether `List-Id`, `List-Unsubscribe`, `Precedence` mark bulk mail is kept | `test_mapper.py` cases with a secret-token value; `test_the_thread_request_asks_for_metadata_only` | covered |
+| Brief date: today and seven days back, bounds checked before Gmail, only today's window moves the watermark | `test_today_and_the_previous_seven_days_can_be_briefed`, `test_an_out_of_range_date_fails_before_gmail_or_the_database`, `test_seven_days_back_is_allowed`, the `last_sync` assertion in the past-day brief test | covered |
+| Browsing reads one metadata page, never reconciles, never advances the watermark or downloads bodies | `test_one_page_and_metadata_only` (50 and 100), `test_bounded_browsing_preserves_unobserved_cache_and_cancellation`, `test_browsing_a_page_never_advances_the_daily_brief_watermark`; the reader port has no body method | gap closed for the watermark |
+| Thread tracking: metadata only, at most 25 threads and 20 messages, today's sync only, Trash and Spam forgotten | `test_the_thread_request_asks_for_metadata_only`, `test_threads_are_deduplicated_most_urgent_first_and_capped`, `test_only_later_messages_are_cached_newest_twenty_with_sent_flagged`, `test_a_past_day_never_checks_threads`, `test_a_cached_reply_gmail_discards_is_forgotten_and_comes_back_if_restored`, `test_a_failed_sync_never_checks_threads` | covered. That no folder or label is listed is true of the code (grep: `labelIds` only filters Inbox browsing) but no test or scan pins it |
+| A reply never changes an action; only the owner moves the watermark | `test_a_thread_check_never_changes_the_action`, `test_marking_seen_moves_the_watermark_once` | covered |
+| Proposals: at most three per email, none from the owner's own mail, dismissed never return, only the owner applies | B2's proposal tests; `test_at_most_three_actions_most_urgent_first`, `test_the_cap_is_exact_across_apply_dismiss_and_closing`, `test_the_owner_s_own_messages_propose_nothing`, `test_deriving_again_changes_nothing_and_dismissed_proposals_never_return` | covered |
+| Outside replies: only today's run, at most three, never the owner's or an excluded sender's, no Gmail call | `test_archived_and_earlier_replies_are_found_newest_first_at_most_three`, `test_the_owner_s_own_mail_is_never_found`, `test_senders_the_owner_excluded_never_use_up_the_three`, `test_only_threads_this_run_read_are_drawn_on` | covered |
+| Runs are cumulative: carried messages, drop rules, "ready" counts new ones | the `test_carried.py` set (drops for archived, blocked, declined; ready counts only new) | covered |
+| Automatic runs: send nothing without permission, cap, one account, today only, no review, silent-only | `test_without_permission_an_automatic_run_only_checks_and_reports`, `test_it_never_sends_more_than_the_permission_or_messages_per_brief`, `test_granting_one_account_clears_the_other`, `test_an_automatic_run_never_briefs_a_past_day_and_never_contacts_gmail_first`, `test_an_automatic_run_takes_no_review_and_no_choices`, `test_automatic_cli.py` (`--automatic` implies `--silent-only`) | covered |
+| Desktop runs coalesce, open no panels, wait during dialogs and other operations | `test_a_refresh_never_opens_a_review_a_consent_panel_or_a_dialog`, `test_a_refresh_waits_while_the_owner_is_in_a_dialog`, `test_a_refresh_waits_a_minute_while_another_operation_runs` | covered |
+| Gmail read-only, only the three scopes | B1 | covered |
+| Google Calendar: shown calendars only, unticked go with their events, cache out of exports and the cleanup fingerprint | `test_unticked_calendars_go_with_their_events`, `test_a_calendar_sync_between_preview_and_cleanup_keeps_the_preview`, `test_nonrevisioned_cache_changes_invalidate_preview`, `test_the_writing_export_names_no_mail_or_google_calendar_table` | gap closed for the export |
+| Calendar failures never prove free time | `test_failed_and_unavailable_calendars_keep_busy_cache_without_proving_free_time` | covered |
+
+Two tests were new; nothing failed, so there is no B3 finding. The daily run's logic
+(`brief.py`, `proposals.py`, `threads.py`, `sync.py`) still gets its deep read in C5.
 
 ## Findings
 

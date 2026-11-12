@@ -350,3 +350,10 @@ async def test_nonrevisioned_cache_changes_invalidate_preview(owner_database: Da
         message.body_preview = "Changed after review"
     with pytest.raises(CleanupChangedError):
         await apply_cleanup(owner_database, preview)
+
+
+def test_the_writing_export_names_no_mail_or_google_calendar_table() -> None:
+    """An export holds only what the owner wrote; mail and the Google Calendar cache stay out."""
+    cache = {"messages", "analyses", "digests", "digest_items", "accounts", "sync_runs"}
+    assert not cache & set(data.EXPORT_TABLES)
+    assert not {name for name in data.EXPORT_TABLES if name.startswith("google_")}
