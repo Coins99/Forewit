@@ -47,9 +47,11 @@ Defaults; the owner changes them here.
 - Stop and hand off (commit, and a "next" note in the slice's row) when the slice has used
   25 points of the 5-hour window or the session passes 250,000 tokens of context.
 - QA takes at most half of a week's limit, so feature work still fits.
-- Measured cost of B1: 3 points of the 5-hour window (9 to 12), about 135,000 tokens of context.
-- After slices R and B1, write the measured cost of a slice here and project the rest. If
-  the sweep won't fit, drop E, then C5, then C4.
+- Measured on Sonnet at medium effort: Phase 0 cost 3 points of the 5-hour window, slice R
+  2 and slice B1 3, each ending near 130,000 tokens of context. The five Sonnet slices left
+  (B2, B3, D, E and fix sessions) project to about 15 points in all, so they fit.
+- The Fable deep reads are not measured yet. Measure C1 and write its cost here before
+  starting C2; if a deep read costs more than 25 points, drop E, then C5, then C4.
 
 ## Fixing as we go
 
@@ -146,14 +148,14 @@ In this order: privacy, then data, then durability, then the newest code.
 | --- | --- | --- | --- | --- | --- |
 | R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, draft PR stacked on #112; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR stacked on #113. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
-| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py` | About 2,800 lines | Fable | Not started |
+| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Not started |
 | C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Not started |
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Not started |
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Not started |
 | C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Not started |
-| D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Not started |
+| D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Not started |
 | E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Not started |
 
 Anything else (the Gmail and Calendar adapters, `domain/`, the repositories, `text/`,
@@ -172,15 +174,15 @@ name was not enough. "Gap closed" means a test was added; tests marked `scan` ar
 
 | Invariant | Enforcing test | State |
 | --- | --- | --- |
-| No log line carries a token, key, body, draft, query or prompt | `test_no_log_call_passes_a_token_key_body_query_or_prompt` (scan, AST over every logging call) | gap closed |
-| Search logs only counts, never the query | `test_a_search_logs_nothing_of_the_query_or_what_it_found` (`test_search.py`) | gap closed |
-| Gmail read-only; only the three read-only scopes | `test_the_source_names_only_the_read_only_google_scopes` (scan); `test_a_grant_wider_than_read_only_is_refused_and_never_saved` | gap closed |
-| No mailbox or calendar write from the adapters | `test_google_adapters_make_no_writing_request` (scan); `test_metadata_request_is_read_only` | gap closed |
-| Timestamps never naive | `test_timestamps_are_never_naive` (scan) | gap closed |
-| Provider JSON stays in adapters | `test_only_adapters_and_local_setup_import_a_network_library` (scan) | gap closed |
+| No log line carries a token, key, headers, body, draft, query, prompt or sender rules | `test_no_log_call_passes_a_token_key_body_query_or_prompt` (scan, AST over every logging call; `len()` of a private name and count-style names pass) | gap closed for named values; an exception's text and a private value under a plain name are not seen |
+| Search logs only counts, never the query | `test_a_search_logs_nothing_of_the_query_or_the_titles_it_found` (`test_search.py`; also the refused-limit error) | gap closed |
+| Gmail read-only; only the three read-only scopes | `test_the_source_names_only_the_read_only_google_scopes` (scan; also pins `SIGN_IN_SCOPES` and refuses Gmail's full-access scope); `test_a_grant_wider_than_read_only_is_refused_and_never_saved` | gap closed |
+| No mailbox or calendar write from the adapters | `test_google_adapters_make_no_writing_request` (scan of the adapters and the shared request code, by method and by verb); `test_metadata_request_is_read_only` | gap closed |
+| Timestamps never naive | `test_timestamps_are_never_naive` (scan) | partly: the common `datetime` spellings. A naive `datetime(...)` literal is not looked for, and `date.today()` in `ui/inbox_reader.py` and `ui/action_editor.py` uses the system day: to slice D |
+| Provider JSON stays in adapters | `test_core_packages_import_no_network_library` (scan) | partly: no network library outside the adapters. That a service never reads raw provider JSON is not checked: to C1 |
 | Forbidden dependencies absent | `test_no_forbidden_dependency_is_declared` (scan) | gap closed |
-| Only `mail.google.com` links open | `test_open_in_gmail_only_for_gmail_https_links`, `test_open_in_gmail_opens_only_gmail_links`, `test_an_unlinked_draft_says_so_and_only_gmail_links_open`; `test_every_url_open_is_behind_a_link_check` (scan) | covered, scan added |
-| Calendar names its `fields`; no descriptions, locations, guests, conferences | `test_events_request_names_its_fields_and_follows_pages`; `test_no_field_list_asks_for_descriptions_locations_guests_or_conferences` (calendar list) | gap closed |
+| Only `mail.google.com` links open | `test_open_in_gmail_only_for_gmail_https_links`, `test_open_in_gmail_opens_only_gmail_links`, `test_an_unlinked_draft_says_so_and_only_gmail_links_open`; `test_every_url_open_is_behind_a_link_check` (scan, per function; only the sign-in imports `webbrowser`) | covered, scan added |
+| Calendar names its `fields`; no descriptions, locations, guests, conferences | `test_events_request_names_its_fields_and_follows_pages`, `test_calendar_list_request_names_its_fields`; `test_the_field_lists_are_exactly_what_forewit_reads` pins both lists | gap closed |
 | Groq sends the seven minimized fields; no response storage | `test_groq_provider.py` (`REQUEST_KEYS`, `"store" not in body`, message keys); `test_analysis_request_enforces_minimized_body_limit`; `test_redirect_cannot_forward_key_or_mail` | covered |
 | Drafting sends only ticked parts, with a sized preview and consent first | `test_no_parts_sends_only_the_always_sent_fields`, `test_the_preview_shows_each_chosen_part_and_its_exact_size`, `test_consent_is_recorded_before_the_call` | covered |
 | Calendar planning sends only busy Google times, titles and times | `test_only_busy_google_times_are_sent_or_warned_about`, `test_what_is_previewed_and_sent_is_what_the_dialog_shows` | covered |
@@ -196,8 +198,9 @@ name was not enough. "Gap closed" means a test was added; tests marked `scan` ar
 | Mail content never authorizes an action; plain-text widgets | Not mapped by name. The `ui` code sets `PlainText` on its labels (grep); no test asserts that every label over mail text does | not checked: to C1 and slice D |
 | Draft text never in logs | Covered by the log scan above for drafting's own calls; `test_a_failed_check_after_cancel_is_only_logged` for the UI path | covered |
 
-Only the scans, one search test and one calendar test were new. Nothing failed, so there
-is no B1 finding. The log scan reads the message argument too, so an f-string that interpolates a private
+Only the scans, one search test and two calendar tests were new. Nothing failed, so there
+is no B1 finding. A review of the slice tightened the scans; the Briefs page's Open in Gmail
+now checks the link in the function that opens it. The log scan reads the message argument too, so an f-string that interpolates a private
 name is caught. It checks calls through `logger`, `log`, `logging`, `_logger` and `LOGGER`;
 a logger held under another name is not, and a name that hides what it holds is not.
 

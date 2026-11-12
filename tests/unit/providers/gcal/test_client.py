@@ -310,9 +310,39 @@ def test_google_models_refuse_mixed_shapes() -> None:
     assert not coverage.covers(date(2026, 10, 4), date(2026, 10, 10))
 
 
-def test_no_field_list_asks_for_descriptions_locations_guests_or_conferences() -> None:
-    """Both requests name their fields, and none is one AGENTS.md says is never fetched."""
-    for fields in (CALENDAR_FIELDS, EVENT_FIELDS):
-        assert fields.startswith("items(") and "nextPageToken" in fields
-        for never in ("description", "location", "attendees", "conferenceData", "organizer"):
-            assert never not in fields
+def item_fields(fields: str) -> set[str]:
+    assert fields.startswith("items(") and fields.endswith("),nextPageToken")
+    return set(fields.removeprefix("items(").removesuffix("),nextPageToken").split(","))
+
+
+def test_the_field_lists_are_exactly_what_forewit_reads() -> None:
+    """Descriptions, locations, guests and conference details are never fetched (AGENTS.md):
+    a field added to either request has to be added here on purpose."""
+    assert item_fields(CALENDAR_FIELDS) == {
+        "id",
+        "summary",
+        "summaryOverride",
+        "accessRole",
+        "primary",
+        "selected",
+        "hidden",
+        "deleted",
+    }
+    assert item_fields(EVENT_FIELDS) == {
+        "id",
+        "status",
+        "summary",
+        "htmlLink",
+        "start",
+        "end",
+        "transparency",
+    }
+
+
+@respx.mock
+async def test_calendar_list_request_names_its_fields() -> None:
+    route = respx.get(CALENDAR_LIST_URL).mock(return_value=primary_list())
+    async with httpx.AsyncClient() as http:
+        await CalendarClient(http, Tokens(), no_sleep).calendars()
+    sent = parse_qs(urlsplit(str(route.calls[0].request.url)).query)
+    assert sent["fields"] == [CALENDAR_FIELDS]

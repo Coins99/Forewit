@@ -137,6 +137,9 @@ collection, `SafeList`, `take_widget`).
   line, on a hex colour under `ui` outside `ui/theme/tokens.py`, on a `QListWidget` made or
   subclassed under `ui` outside `ui/lists.py`, and on a strftime directive that follows the
   system language (`%a`, `%A`, `%b`, `%B`, `%p`, `%c`, `%x`) anywhere in `src/mailbrief`.
+  It also fails on a function that calls `QDesktopServices.openUrl` without checking the
+  link in that same function (`is_gmail_link`, `is_calendar_link`, `gmail_source`,
+  `gmail_link` or the host comparison); AGENTS.md lists its other privacy scans.
 
 ## Screenshot review loop
 1. Render the gallery at 1x and 2x (PowerShell: set `$env:MAILBRIEF_UI_SHOTS` instead; on

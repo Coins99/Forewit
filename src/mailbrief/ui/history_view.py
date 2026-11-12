@@ -230,7 +230,7 @@ class BriefHistoryPanel(QWidget):
         self.source_button.setVisible(self._source_url is not None)
 
     def _open_source(self) -> None:
-        if self._source_url is not None:
+        if self._source_url is not None and is_gmail_link(self._source_url):
             QDesktopServices.openUrl(QUrl(self._source_url))
 
     def configure(

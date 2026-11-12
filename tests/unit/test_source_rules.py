@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
+from mailbrief.providers.gmail.oauth import SIGN_IN_SCOPES
+
 ROOT: Final = Path(__file__).resolve().parents[2]
 SOURCE: Final = ROOT / "src" / "mailbrief"
 UI: Final = SOURCE / "ui"
@@ -84,17 +86,22 @@ def test_the_rules_find_what_they_are_for() -> None:
 
 # --- Privacy and boundary rules (QA slice B1) ---------------------------------------------
 
-# A name that holds something private: a token, key, secret, password, an email's text, the
-# owner's writing or search text, or a prompt that carries them.
+# A name that holds something private: a token, key, secret, password, a request's headers,
+# an email's text, the owner's writing, search text or sender rules, or a prompt.
 SENSITIVE_NAME: Final = re.compile(
-    r"(token|secret|password|passwd|api_?key|credential|body|snippet|query|prompt|"
-    r"draft_?text|content|payload)",
+    r"(token|secret|password|passwd|api_?key|credential|authorization|headers|body|snippet|"
+    r"query|prompt|draft_?text|content|payload|subject|instructions|notes|evidence|senders|"
+    r"sender_rules|(?:^|_)text$)",
     re.IGNORECASE,
+)
+# A name that is a size, a limit or a flag, not the private thing itself.
+COUNT_NAME: Final = re.compile(
+    r"(?:^max_|^total_|_(?:count|tokens|chars|length|size|limit|truncated|type)$)", re.IGNORECASE
 )
 LOG_METHODS: Final = frozenset(
     {"debug", "info", "warning", "warn", "error", "exception", "critical", "log"}
 )
-# The only OAuth scopes the source may name: Gmail read-only and two read-only Calendar ones.
+# The only OAuth scopes the sign-in may ask for: Gmail read-only and two read-only Calendar ones.
 ALLOWED_SCOPES: Final = frozenset(
     {
         "https://www.googleapis.com/auth/gmail.readonly",
@@ -102,15 +109,35 @@ ALLOWED_SCOPES: Final = frozenset(
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     }
 )
-GOOGLE_SCOPE: Final = re.compile(r"https://www\.googleapis\.com/auth/[A-Za-z0-9_.\-/]+")
-HTTP_WRITE: Final = re.compile(r"\.(?:post|put|patch|delete)\(")
+GOOGLE_SCOPE: Final = re.compile(
+    r"https://www\.googleapis\.com/auth/[A-Za-z0-9_.\-/]*[A-Za-z0-9_/]"
+)
+# Gmail's full-access scope is the one Google scope that is not under googleapis.com/auth.
+FULL_MAIL_SCOPE: Final = re.compile(r"""["']https://mail\.google\.com/["']""")
+# A writing request, as a client method or as the verb handed to request() or stream().
+HTTP_WRITE: Final = re.compile(
+    r"""\.(?:post|put|patch|delete)\(|["'](?:POST|PUT|PATCH|DELETE)["']"""
+)
 GMAIL_WRITE_PATH: Final = re.compile(
     r"/(?:send|modify|trash|untrash|batchModify|batchDelete|insert|import)\b"
 )
-NAIVE_CLOCK: Final = re.compile(r"\bdatetime\.utcnow\(|\.utcfromtimestamp\(|\bdatetime\.now\(\s*\)")
+NAIVE_CLOCK: Final = re.compile(
+    r"\bdatetime\.utcnow\(|\.utcfromtimestamp\(|\bdatetime\.now\(\s*(?:\)|$|tz=None)|"
+    r"\bdatetime\.fromtimestamp\([^,()]*\)|\bdatetime\.today\(|\bdatetime\.strptime\(|"
+    r"\bdt\.now\(\s*\)"
+)
 # Network libraries belong to the adapters, never to the domain, storage or text helpers.
-NETWORK_IMPORT: Final = re.compile(r"^\s*(?:from|import)\s+(?:httpx|requests|aiohttp)\b")
-# The dependencies the project forbids (AGENTS.md "Dependencies").
+NETWORK_IMPORT: Final = re.compile(
+    r"^\s*(?:from|import)\s+(?:[\w.]+\s*,\s*)*"
+    r"(?:httpx|requests|aiohttp|urllib\.request|http\.client|socket)\b"
+)
+# What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
+LINK_GUARD: Final = re.compile(
+    r"is_gmail_link\(|is_calendar_link\(|gmail_source\(|gmail_link\(|"
+    r"host == \"mail\.google\.com\""
+)
+# The dependencies the project forbids (AGENTS.md "Dependencies"), as name prefixes, so
+# "msgraph" also refuses "msgraph-sdk" and "google-auth" refuses "google-auth-oauthlib".
 FORBIDDEN_DEPENDENCIES: Final = (
     "google-api-python-client",
     "google-auth",
@@ -120,6 +147,7 @@ FORBIDDEN_DEPENDENCIES: Final = (
     "backoff",
     "retrying",
     "beautifulsoup4",
+    "bs4",
     "lxml",
     "html5lib",
     "llama-cpp-python",
@@ -128,8 +156,23 @@ FORBIDDEN_DEPENDENCIES: Final = (
 )
 
 
+def logged_names(node: ast.AST) -> set[str]:
+    """The names an expression would put in a log line. What ``len()`` only measures is left
+    out: a log line may carry counts."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "len":
+        return set()
+    names: set[str] = set()
+    if isinstance(node, ast.Name):
+        names.add(node.id)
+    elif isinstance(node, ast.Attribute):
+        names.add(node.attr)
+    for child in ast.iter_child_nodes(node):
+        names |= logged_names(child)
+    return names
+
+
 def logging_calls_with_private_names(files: Iterable[Path]) -> list[str]:
-    """Logging calls whose arguments (after the message) name something private."""
+    """Logging calls whose message or arguments name something private."""
     found: list[str] = []
     for path in sorted(files):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -145,27 +188,56 @@ def logging_calls_with_private_names(files: Iterable[Path]) -> list[str]:
             first = node.args[:1]
             message = [] if first and isinstance(first[0], ast.Constant) else first
             arguments = [*message, *node.args[1:], *(keyword.value for keyword in node.keywords)]
-            names = {
-                inner.id if isinstance(inner, ast.Name) else inner.attr
-                for argument in arguments
-                for inner in ast.walk(argument)
-                if isinstance(inner, ast.Name | ast.Attribute)
-            }
-            if any(SENSITIVE_NAME.search(name) for name in names):
+            names = set[str]().union(*(logged_names(argument) for argument in arguments))
+            private = sorted(
+                name
+                for name in names
+                if SENSITIVE_NAME.search(name) and not COUNT_NAME.search(name)
+            )
+            if private:
                 shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
-                where = f"{shown.as_posix()}:{node.lineno}"
-                found.append(f"{where}: logs {sorted(names)}")
+                found.append(f"{shown.as_posix()}:{node.lineno}: logs {private}")
+    return found
+
+
+def forbidden_dependencies(pyproject: str) -> list[str]:
+    """The forbidden libraries a ``pyproject.toml`` declares, whatever follows the name."""
+    text = pyproject.lower().replace("_", "-")
+    return [
+        name
+        for name in FORBIDDEN_DEPENDENCIES
+        if re.search(rf'"{re.escape(name)}(?![a-z0-9])', text)
+    ]
+
+
+def unguarded_url_opens(files: Iterable[Path]) -> list[str]:
+    """Functions that open a URL without checking, in the same function, whose it is."""
+    found: list[str] = []
+    for path in sorted(files):
+        text = path.read_text(encoding="utf-8")
+        if "QDesktopServices.openUrl(" not in text:
+            continue
+        for node in ast.walk(ast.parse(text)):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            body = ast.get_source_segment(text, node) or ""
+            if "QDesktopServices.openUrl(" in body and not LINK_GUARD.search(body):
+                shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+                found.append(f"{shown.as_posix()}:{node.lineno}: {node.name}")
     return found
 
 
 def test_no_log_call_passes_a_token_key_body_query_or_prompt() -> None:
-    """Tokens, keys, bodies, drafts and search text never reach a log line; a log line gets
-    codes and counts (AGENTS.md invariants)."""
+    """Tokens, keys, headers, bodies, drafts, sender rules and search text never reach a log
+    line; a log line gets codes and counts (AGENTS.md invariants). The scan goes by name, so
+    it cannot see an exception's text or a private value under a plain name."""
     assert logging_calls_with_private_names(SOURCE.rglob("*.py")) == []
 
 
 def test_the_source_names_only_the_read_only_google_scopes() -> None:
-    """Gmail is ``gmail.readonly``; Calendar adds two read-only scopes and nothing wider."""
+    """Gmail is ``gmail.readonly``; Calendar adds two read-only scopes and nothing wider. The
+    sign-in asks for exactly these, and no adapter names Gmail's full-access scope."""
+    assert set(SIGN_IN_SCOPES) == ALLOWED_SCOPES
     named: list[str] = []
     for path in sorted(SOURCE.rglob("*.py")):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -175,28 +247,34 @@ def test_the_source_names_only_the_read_only_google_scopes() -> None:
                 if scope not in ALLOWED_SCOPES
             ]
     assert named == []
+    assert offending_lines((SOURCE / "providers").rglob("*.py"), FULL_MAIL_SCOPE) == []
 
 
 def test_google_adapters_make_no_writing_request() -> None:
-    """Gmail and Google Calendar adapters only read: no POST, PUT, PATCH or DELETE, and no
-    send, modify or trash path. The token endpoint (``providers/google/tokens.py``) is the one
-    POST, and it is outside these folders."""
+    """The Gmail and Google Calendar adapters and the request code they share only read: no
+    POST, PUT, PATCH or DELETE, by method or by verb, and no send, modify or trash path. The
+    token endpoint (``providers/google/tokens.py``) is the one POST."""
     files = [
-        *(SOURCE / "providers" / "gmail").glob("*.py"),
-        *(SOURCE / "providers" / "gcal").glob("*.py"),
+        path
+        for folder in ("gmail", "gcal", "google")
+        for path in (SOURCE / "providers" / folder).glob("*.py")
+        if path != SOURCE / "providers" / "google" / "tokens.py"
     ]
     assert offending_lines(files, HTTP_WRITE) == []
     assert offending_lines(files, GMAIL_WRITE_PATH) == []
 
 
 def test_timestamps_are_never_naive() -> None:
-    """No ``datetime.utcnow()``, ``utcfromtimestamp`` or zone-less ``datetime.now()``."""
+    """No ``utcnow``, ``utcfromtimestamp``, ``today``, ``strptime``, zone-less ``now()`` or
+    one-argument ``fromtimestamp`` on ``datetime``. A naive ``datetime(...)`` literal and
+    ``date.today()`` are not looked for."""
     assert offending_lines(SOURCE.rglob("*.py"), NAIVE_CLOCK) == []
 
 
-def test_only_adapters_and_local_setup_import_a_network_library() -> None:
-    """Provider JSON stays inside its adapter: the domain, storage and text packages and the
-    services (but local setup's download) never import an HTTP library."""
+def test_core_packages_import_no_network_library() -> None:
+    """The domain, storage, text and ports packages and the services (but local setup's
+    download) import no network library. That keeps requests in the adapters; it does not
+    by itself show that provider JSON stays there."""
     allowed = {SOURCE / "services" / "local_setup.py"}
     files = [
         path
@@ -209,25 +287,19 @@ def test_only_adapters_and_local_setup_import_a_network_library() -> None:
 
 def test_no_forbidden_dependency_is_declared() -> None:
     """``pyproject.toml`` declares none of the libraries AGENTS.md rules out."""
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
-    declared = [
-        name for name in FORBIDDEN_DEPENDENCIES if re.search(rf'"{re.escape(name)}[<>=\[ ",]', text)
-    ]
-    assert declared == []
+    assert forbidden_dependencies((ROOT / "pyproject.toml").read_text(encoding="utf-8")) == []
 
 
 def test_every_url_open_is_behind_a_link_check() -> None:
-    """A file under ``ui`` that opens a URL also checks it against Gmail's or Calendar's host."""
-    unguarded = [
-        path.relative_to(ROOT).as_posix()
-        for path in sorted(UI.rglob("*.py"))
-        if "QDesktopServices.openUrl(" in path.read_text(encoding="utf-8")
-        and not re.search(
-            r"is_gmail_link|is_calendar_link|mail\.google\.com",
-            path.read_text(encoding="utf-8"),
-        )
+    """A function that opens a URL checks it against Gmail's or Calendar's host itself, and
+    only the Google sign-in opens the system browser another way."""
+    assert unguarded_url_opens(SOURCE.rglob("*.py")) == []
+    browser = [
+        path.relative_to(SOURCE).as_posix()
+        for path in sorted(SOURCE.rglob("*.py"))
+        if re.search(r"^\s*import webbrowser\b", path.read_text(encoding="utf-8"), re.MULTILINE)
     ]
-    assert unguarded == []
+    assert browser == ["providers/gmail/oauth.py"]
 
 
 def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
@@ -235,15 +307,76 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
     bad = tmp_path / "bad.py"
     bad.write_text(
         "import logging\nlogger = logging.getLogger('x')\n"
-        "def f(body, count, api_key):\n    logger.info('got %s', body)\n"
+        "def f(body, count, api_key, excluded_senders, headers, usage):\n"
+        "    logger.info('got %s', body)\n"
         "    logger.info('n=%d', count)\n"
         "    logger.info(f'x {body}')\n"
-        "    logger.info('k', extra={'k': api_key})\n",
+        "    logger.info('k', extra={'k': api_key})\n"
+        "    logger.info('%d characters', len(body))\n"
+        "    logger.info('%d tokens', usage.total_tokens)\n"
+        "    logger.info('rules %s', excluded_senders)\n"
+        "    logger.debug('%s', headers)\n",
         encoding="utf-8",
     )
     found = logging_calls_with_private_names([bad])
-    assert len(found) == 3
-    assert HTTP_WRITE.search("await client.post(url)")
-    assert not HTTP_WRITE.search("posted = 1")
-    assert NAIVE_CLOCK.search("datetime.now()")
-    assert not NAIVE_CLOCK.search("datetime.now(UTC)")
+    assert [line.split(": logs")[0].rsplit(":", 1)[1] for line in found] == [
+        "4",
+        "6",
+        "7",
+        "10",
+        "11",
+    ]
+
+    for line in ("await client.post(url)", 'http.stream("POST", url)', "request('PATCH', url)"):
+        assert HTTP_WRITE.search(line), line
+    for line in ("posted = 1", 'http.stream("GET", url)'):
+        assert not HTTP_WRITE.search(line), line
+    assert GMAIL_WRITE_PATH.search('f"{BASE}/messages/{id}/trash"')
+    assert not GMAIL_WRITE_PATH.search('f"{BASE}/messages/{id}"')
+
+    for line in (
+        "datetime.now()",
+        "datetime.now(",
+        "datetime.now(tz=None)",
+        "datetime.utcnow()",
+        "datetime.fromtimestamp(stamp)",
+        "datetime.today()",
+        "datetime.strptime(text, FORMAT)",
+    ):
+        assert NAIVE_CLOCK.search(line), line
+    for line in ("datetime.now(UTC)", "datetime.fromtimestamp(stamp, UTC)", "date.today()"):
+        assert not NAIVE_CLOCK.search(line), line
+
+    scope = "https://www.googleapis.com/auth/gmail.readonly"
+    assert GOOGLE_SCOPE.findall(f"Asks for {scope}.") == [scope]
+    assert GOOGLE_SCOPE.findall('"https://www.googleapis.com/auth/gmail.modify"')
+    assert FULL_MAIL_SCOPE.search('SCOPE = "https://mail.google.com/"')
+    assert not FULL_MAIL_SCOPE.search('url.startswith("https://mail.google.com/mail/")')
+
+    for line in ("import httpx", "from httpx import Client", "import os, httpx", "import socket"):
+        assert NETWORK_IMPORT.search(line), line
+    for line in (
+        "from urllib.parse import quote",
+        "from mailbrief.providers.google.requests import x",
+    ):
+        assert not NETWORK_IMPORT.search(line), line
+
+    for declared in (
+        '"msgraph-sdk>=1.0"',
+        '"google-auth-oauthlib>=1"',
+        '"tenacity~=8.2"',
+        "\"lxml; sys_platform == 'win32'\"",
+        '"python_dotenv>=1"',
+        '"bs4"',
+    ):
+        assert forbidden_dependencies(f"dependencies = [{declared}]"), declared
+    assert forbidden_dependencies('dependencies = ["httpx>=0.28", "msal>=1.38"]') == []
+
+    opens = tmp_path / "opens.py"
+    opens.write_text(
+        "def guarded(url):\n    if is_gmail_link(url):\n"
+        "        QDesktopServices.openUrl(QUrl(url))\n"
+        "def unguarded(url):\n    QDesktopServices.openUrl(QUrl(url))\n",
+        encoding="utf-8",
+    )
+    assert [line.rsplit(" ", 1)[1] for line in unguarded_url_opens([opens])] == ["unguarded"]
