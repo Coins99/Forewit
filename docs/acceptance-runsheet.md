@@ -13,7 +13,7 @@ them in the sidebar, with duplicates merged. Each step links to the section it c
   accepted; the docs keep saying "pending" until you decide otherwise.
 - Use a test profile for anything that deletes, restores or changes data. Gmail stays
   disconnected unless a step says "Gmail connected".
-- Steps that say "light and dark" mean: look again with the system in each mode.
+- Light and dark mode are checked once for every page and dialog, in SET-01.
 - Where the source says a step is for a macOS or fractional-scale display, it is listed under
   [Platform checks](#platform-checks).
 
