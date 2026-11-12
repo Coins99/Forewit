@@ -16,6 +16,22 @@ SERVICES = tuple(
 )
 
 
+def combined_counts(module: ET.Element) -> tuple[int, int]:
+    """Covered and total statements plus branches of one coverage.xml ``class``."""
+    covered = total = 0
+    for line in module.iter("line"):
+        total += 1
+        covered += int(int(line.attrib["hits"]) > 0)
+        condition = line.attrib.get("condition-coverage", "")
+        if condition:
+            match = re.fullmatch(r"\d+% \((\d+)/(\d+)\)", condition)
+            if match is None:
+                raise ValueError("Unexpected coverage branch format.")
+            covered += int(match[1])
+            total += int(match[2])
+    return covered, total
+
+
 def check(report: Path) -> list[str]:
     classes = tuple(ET.parse(report).iter("class"))
     failures = []
@@ -27,17 +43,7 @@ def check(report: Path) -> list[str]:
         if len(matches) != 1:
             failures.append(f"{suffix}: coverage missing or ambiguous")
             continue
-        covered = total = 0
-        for line in matches[0].iter("line"):
-            total += 1
-            covered += int(int(line.attrib["hits"]) > 0)
-            condition = line.attrib.get("condition-coverage", "")
-            if condition:
-                match = re.fullmatch(r"\d+% \((\d+)/(\d+)\)", condition)
-                if match is None:
-                    raise ValueError("Unexpected coverage branch format.")
-                covered += int(match[1])
-                total += int(match[2])
+        covered, total = combined_counts(matches[0])
         if total == 0 or covered / total < 0.9:
             failures.append(f"{suffix}: {100 * covered / max(total, 1):.2f}% below 90%")
     return failures
