@@ -51,6 +51,14 @@ class MetricStorageError(RuntimeError):
         super().__init__("The metric change could not be saved. Retry the same command or reload.")
 
 
+def _own_fields(spec: MetricDefinitionSpec) -> MetricDefinitionSpec:
+    """``spec`` revalidated from its definition fields alone. A saved ``MetricDefinition``
+    is a spec too, and its identity, revision and dates are not part of one."""
+    return MetricDefinitionSpec.model_validate(
+        spec.model_dump(include=set(MetricDefinitionSpec.model_fields))
+    )
+
+
 class MetricEntryService:
     """Use a dedicated service-owned session; each mutation reserves and commits once."""
 
@@ -94,8 +102,11 @@ class MetricEntryService:
         include_deleted: bool = False,
         after: tuple[str, str] | None = None,
         limit: int = 100,
+        newest_first: bool = False,
     ) -> tuple[MetricEntry, ...]:
-        """Bounded owner list. Aggregates use their own uncapped source reader."""
+        """Bounded owner list, oldest date first, or the latest first with ``newest_first``;
+        ``after`` is the last row of the page before. Aggregates use their own uncapped
+        source reader."""
         from datetime import date
 
         from sqlalchemy import or_
@@ -111,15 +122,24 @@ class MetricEntryService:
                 day = date.fromisoformat(after[0])
             except ValueError:
                 raise ValueError("The metric list cursor is invalid.") from None
+            same_day = MetricEntryTable.local_date == day
             statement = statement.where(
                 or_(
+                    MetricEntryTable.local_date < day,
+                    same_day & (MetricEntryTable.public_id < after[1]),
+                )
+                if newest_first
+                else or_(
                     MetricEntryTable.local_date > day,
-                    (MetricEntryTable.local_date == day) & (MetricEntryTable.public_id > after[1]),
+                    same_day & (MetricEntryTable.public_id > after[1]),
                 )
             )
-        rows = await self.session.scalars(
-            statement.order_by(MetricEntryTable.local_date, MetricEntryTable.public_id).limit(limit)
+        order = (
+            (MetricEntryTable.local_date.desc(), MetricEntryTable.public_id.desc())
+            if newest_first
+            else (MetricEntryTable.local_date, MetricEntryTable.public_id)
         )
+        rows = await self.session.scalars(statement.order_by(*order).limit(limit))
         return tuple(entry_from_row(row, definition) for row in rows)
 
     async def _command(
@@ -180,7 +200,7 @@ class MetricEntryService:
             raise MetricStorageError() from None
 
     async def define(self, spec: MetricDefinitionSpec, *, command_id: str) -> MetricDefinition:
-        spec = MetricDefinitionSpec.model_validate(spec.model_dump())
+        spec = _own_fields(spec)
 
         async def change(now: datetime) -> str:
             row = MetricDefinitionTable(
@@ -211,7 +231,7 @@ class MetricEntryService:
         archived: bool,
         command_id: str,
     ) -> MetricDefinition:
-        spec = MetricDefinitionSpec.model_validate(spec.model_dump())
+        spec = _own_fields(spec)
 
         async def change(now: datetime) -> str:
             row = await self._definition(public_id)

@@ -1,8 +1,10 @@
 """Versioned dashboard configuration. Results are never saved in a layout."""
 
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Final, Self
+from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -11,8 +13,11 @@ from mailbrief.domain.metric_entries import exact_decimal_input
 from mailbrief.domain.metrics import (
     MetricDateRange,
     MetricDescriptor,
+    MetricDimension,
     MetricQuery,
     MetricRangeMode,
+    is_forward_plan,
+    metric_dimensions,
     validate_metric_query,
 )
 
@@ -85,14 +90,30 @@ def resolved_widget_query(
     *,
     project_public_id: str | None = None,
     area_public_id: str | None = None,
+    now: datetime | None = None,
 ) -> MetricQuery:
-    """One inheritance rule for the editor preview and the saved dashboard."""
+    """One inheritance rule for the editor preview and the saved dashboard.
+
+    A dashboard filter reaches only a metric that can take it: the others keep their
+    whole value instead of being refused. With ``now``, a forward plan (planned workload)
+    drops the part of its range before today in the range's zone, so a widget on the
+    dashboard's dates, or on its own, stays valid as days pass.
+    """
+    key = widget.query.metric_key
+    dimensions = metric_dimensions(key)
+    chosen = dates if widget.use_global_range else widget.query.dates
+    if now is not None and is_forward_plan(key):
+        today = now.astimezone(ZoneInfo(chosen.zone)).date()
+        if chosen.first < today <= chosen.last:
+            chosen = MetricDateRange(first=today, last=chosen.last, zone=chosen.zone)
     return MetricQuery.model_validate(
         {
             **widget.query.model_dump(),
-            "dates": dates if widget.use_global_range else widget.query.dates,
-            "project_public_id": widget.query.project_public_id or project_public_id,
-            "area_public_id": widget.query.area_public_id or area_public_id,
+            "dates": chosen,
+            "project_public_id": widget.query.project_public_id
+            or (project_public_id if MetricDimension.PROJECT in dimensions else None),
+            "area_public_id": widget.query.area_public_id
+            or (area_public_id if MetricDimension.AREA in dimensions else None),
         }
     )
 

@@ -52,6 +52,12 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   sidebar and palette. Source/native verification and remaining acceptance gates are
   recorded in `docs/p4-insights.md` and ADR 0032. Native macOS, assistive-technology,
   real-display and owner acceptance remain open; do not claim P4 accepted.
+  An independent review and macOS UI check fixed fifteen defects (`docs/p4-ui-review.md`).
+  Keep what it settled: a refresh updates the cards in place (`MetricChartCard.set_display`),
+  never rebuilds them for the same layout; widget queries go through
+  `resolved_widget_query` (dashboard filters only where the metric takes them, forward
+  plans from today); Insights combo boxes come from `combo()` and its tables carry the
+  theme's `dataTable` property; a dialog's status line stays outside its scrolled fields.
 
 - Where each feature is specified (behavior, acceptance steps and limits):
 

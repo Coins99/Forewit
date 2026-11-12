@@ -1,6 +1,6 @@
 """P4 contracts: exact measurements, honest ranges and supported widget queries."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, localcontext
 from uuid import uuid4
 
@@ -14,6 +14,7 @@ from mailbrief.domain.dashboards import (
     ValidatedWidget,
     WidgetSpec,
     WidgetTarget,
+    resolved_widget_query,
 )
 from mailbrief.domain.metric_entries import (
     MAX_SCALED_VALUE,
@@ -33,6 +34,8 @@ from mailbrief.domain.metrics import (
     MetricReducer,
     builtin_metric,
     custom_metric,
+    is_forward_plan,
+    metric_dimensions,
     validate_metric_query,
 )
 
@@ -266,3 +269,71 @@ def test_owner_values_are_hidden_from_repr_and_validation_errors() -> None:
             {"key": "a", "label": "private label", "value": "private-invalid"}
         )
     assert "private-invalid" not in str(error.value)
+
+
+def test_a_dashboard_filter_reaches_only_a_metric_that_can_take_it() -> None:
+    project, area = str(uuid4()), str(uuid4())
+    dates = query().dates
+
+    def resolve(spec: WidgetSpec) -> MetricQuery:
+        return resolved_widget_query(spec, dates, project_public_id=project, area_public_id=area)
+
+    tasks = resolve(widget("tasks.completions"))
+    assert (tasks.project_public_id, tasks.area_public_id) == (project, area)
+    # Time metrics take neither filter: they keep their whole value and stay valid.
+    capacity = resolve(widget("capacity.available"))
+    assert (capacity.project_public_id, capacity.area_public_id) == (None, None)
+    validate_metric_query(capacity, builtin_metric("capacity.available"))
+    # A custom metric takes a project and has no life area.
+    key = f"custom.{uuid4()}.amount"
+    custom = WidgetSpec(
+        public_id=str(uuid4()),
+        title="Mine",
+        chart=ChartKind.BAR,
+        query=query().model_copy(update={"metric_key": key, "reducer": MetricReducer.SUM}),
+    )
+    resolved = resolve(custom)
+    assert (resolved.project_public_id, resolved.area_public_id) == (project, None)
+    # A widget's own filter is saved with it and never replaced by the dashboard's.
+    own = str(uuid4())
+    kept = widget().model_copy(
+        update={"query": query().model_copy(update={"project_public_id": own})}
+    )
+    assert resolve(kept).project_public_id == own
+    assert metric_dimensions("tasks.created") == (MetricDimension.PROJECT, MetricDimension.AREA)
+    assert metric_dimensions(key) == (MetricDimension.PROJECT,)
+    assert metric_dimensions("unknown.metric") == ()
+
+
+def test_a_forward_plan_starts_today_and_other_metrics_keep_their_dates() -> None:
+    zone = "America/Toronto"
+    dates = MetricDateRange(first=date(2026, 11, 3), last=date(2026, 11, 9), zone=zone)
+    now = datetime(2026, 11, 9, 15, tzinfo=UTC)  # 10:00 on the 9th in Toronto.
+    planned = widget("workload.planned")
+    today = MetricDateRange(first=date(2026, 11, 9), last=date(2026, 11, 9), zone=zone)
+    assert resolved_widget_query(planned, dates, now=now).dates == today
+    # The range's zone decides today: 03:30 UTC on the 10th is still the 9th in Toronto.
+    late = datetime(2026, 11, 10, 3, 30, tzinfo=UTC)
+    assert resolved_widget_query(planned, dates, now=late).dates == today
+    # No clock, a range wholly past or one that starts later: nothing is moved, and the
+    # query service still refuses a past start.
+    past = MetricDateRange(first=date(2026, 11, 1), last=date(2026, 11, 8), zone=zone)
+    ahead = MetricDateRange(first=date(2026, 11, 12), last=date(2026, 11, 14), zone=zone)
+    assert resolved_widget_query(planned, dates).dates == dates
+    assert resolved_widget_query(planned, past, now=now).dates == past
+    assert resolved_widget_query(planned, ahead, now=now).dates == ahead
+    # A widget's own range shrinks from today in the same way, so it outlives the day
+    # it was saved on.
+    own = MetricDateRange(first=date(2026, 11, 8), last=date(2026, 11, 14), zone=zone)
+    saved = planned.model_copy(
+        update={
+            "use_global_range": False,
+            "query": planned.query.model_copy(update={"dates": own}),
+        }
+    )
+    assert resolved_widget_query(saved, dates, now=now).dates == MetricDateRange(
+        first=date(2026, 11, 9), last=date(2026, 11, 14), zone=zone
+    )
+    assert resolved_widget_query(widget(), dates, now=now).dates == dates
+    assert is_forward_plan("workload.planned")
+    assert not is_forward_plan("tasks.created") and not is_forward_plan("custom.x.amount")

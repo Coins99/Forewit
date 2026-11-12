@@ -44,6 +44,8 @@ class MetricDisplay(DomainModel):
     daily_target: Decimal | None = Field(
         default=None, allow_inf_nan=False, ge=-(10**30), le=10**30, repr=False
     )
+    # Samples are groups (projects, life areas), not dates: every bar needs its name.
+    categorical: bool = False
 
     _exact_values = field_validator("total", "daily_target", mode="before")(exact_decimal_input)
 
