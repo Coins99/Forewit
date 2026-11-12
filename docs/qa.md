@@ -73,9 +73,9 @@ Defaults; the owner changes them here.
 | Step | State |
 | --- | --- |
 | Checkout on current `main`, branch `chore/qa-tooling`, this file | Done 2026-11-12 |
-| `scripts/qa.py` with `tests/unit/test_qa_script.py` | Not started |
-| Baseline: `qa.py full` twice, `hotspots`, and the output size of a bare single-file `pytest` run against `qa.py changed` | Not started |
-| AGENTS.md: this file in the docs table, `qa.py` under Commands | Not started |
+| `scripts/qa.py` with `tests/unit/test_qa_script.py` | Done 2026-11-12 |
+| Baseline: `qa.py full` twice, `hotspots`, and the output size of a bare single-file `pytest` run against `qa.py changed` | Done 2026-11-12 |
+| AGENTS.md: this file in the docs table, `qa.py` under Commands | Done 2026-11-12 |
 | Optional, own pull request: move AGENTS.md's UI-only paragraphs into the `/mailbrief-ui` skill | Owner's call |
 
 ### `scripts/qa.py`
@@ -99,7 +99,42 @@ the service gate share one function for the combined statement and branch count.
 
 ### Baseline
 
-Not run yet.
+Measured 2026-11-12 on `chore/qa-tooling` (main at `24f6216` plus the runner), Windows,
+`.venv` without the `forewit*` console scripts.
+
+- `qa.py full`: Ruff, mypy (this platform, `win32`, `darwin`) and the service gate pass.
+  5,559 tests in about 300 s (309 s and 302 s on two runs), 4 failures, the same 4 both
+  times; no flaky test. Report size: 14 lines when four tests fail, 7 when none do.
+- The 4 failures are environmental, not findings: `tests/unit/test_branding.py`
+  (`test_installed_commands_outside_checkout[forewit-forewit]`,
+  `[forewit-gmail-diagnostic-...]`, `[forewit-ms-diagnostic-...]` and
+  `test_gmail_aliases_show_the_same_synthetic_preferences`) raise `FileNotFoundError`
+  because this `.venv` has only the `mailbrief*` console scripts. A reinstall of the
+  project would fix them; CI is unaffected.
+- Output of one file, `tests/unit/domain/test_intervals.py`: a bare `pytest` prints
+  25,157 characters (the coverage table for every file); `qa.py area` prints 28.
+- The 15 least-covered modules (combined statements and branches, `qa.py hotspots`):
+
+| Coverage | Module |
+| --- | --- |
+| 63.9% | `ui/glass/system.py` |
+| 66.4% | `ui/calendar_preview.py` |
+| 76.1% | `ui/smoke.py` |
+| 78.8% | `ui/project_page.py` |
+| 81.0% | `diagnostics/metric_smoke.py` |
+| 81.4% | `storage/dashboard_validation.py` |
+| 82.2% | `providers/local/device.py` |
+| 83.0% | `ui/scheduling_view.py` |
+| 83.7% | `ui/block_editor.py` |
+| 84.1% | `providers/microsoft/cache.py` |
+| 84.6% | `ui/upcoming_view.py` |
+| 85.1% | `app.py` |
+| 86.2% | `storage/types.py` |
+| 86.5% | `ui/main_window.py` (695 lines missed) |
+| 86.9% | `ui/list_rows.py` |
+
+All services modules meet 90%. Nothing here is below the 80% gate, so slice D, not
+new tests, should target the UI modules at the top.
 
 ## Slices
 

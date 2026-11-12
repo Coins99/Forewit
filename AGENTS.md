@@ -78,6 +78,7 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   | Today, search and the palette | `today.md`, `search.md` | |
   | P2 navigation, capture, focus, notes, workspace | `p2-navigation.md`, `p2-capture.md`, `p2-focus.md`, `p2-notes.md`, `p2-workspace.md` | 0025–0027 |
   | Desktop UI look | `ui/studio.md`, `ui/liquid-glass.md`, `.claude/skills/mailbrief-ui/` | |
+  | QA sweep: rules, budget, slices, findings | `qa.md` | |
 
 - The diagnostic CLI is `forewit-gmail-diagnostic` (subcommands such as `sync`,
   `bodies`, `brief`, `actions`, `drafts`, `preferences show`, `ai-consent`,
@@ -615,6 +616,11 @@ uv run pytest
 ```
 
 CI type-checks on both Windows and macOS, so run mypy for both platforms before pushing.
+
+Agents run checks through `python scripts/qa.py changed` after a change and `python
+scripts/qa.py full` before a push (`area <test paths>` for chosen tests). `qa.py hotspots`
+lists the least-covered modules. A bare `pytest <path>` prints the whole coverage table and
+fails the 80% gate, so direct calls need `-q --no-cov`. Rules and ledger: `docs/qa.md`.
 CI runs on pull requests and on pushes to main; a push to a branch without a pull request runs
 nothing.
 
