@@ -1,6 +1,7 @@
 """Searching the owner's local records: actions, writing, events, Google events and the
 connected account's cached mail metadata."""
 
+import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -293,3 +294,17 @@ async def test_a_short_query_reads_nothing(session: AsyncSession) -> None:
     await add_task(session, "a")
     found = await SearchService(session).search(" a ")
     assert found.hits == () and found.more == frozenset()
+
+
+async def test_a_search_logs_nothing_of_the_query_or_the_titles_it_found(
+    session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    await add_task(session, "Secretword budget")
+    with caplog.at_level(logging.DEBUG):
+        found = await SearchService(session).search("secretword")
+        with pytest.raises(ValueError, match="limit") as refused:
+            await SearchService(session).search("secretword", limit=0)
+    assert found.hits
+    ours = [r.getMessage().lower() for r in caplog.records if r.name.startswith("mailbrief")]
+    assert ours and not any("secretword" in message or "budget" in message for message in ours)
+    assert "secretword" not in str(refused.value).lower()

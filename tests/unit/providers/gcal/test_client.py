@@ -19,7 +19,13 @@ from mailbrief.ports.errors import (
     ProviderResponseError,
 )
 from mailbrief.providers.gcal.auth import CALENDAR_LIST_URL
-from mailbrief.providers.gcal.client import CalendarClient, events_url, rfc3339
+from mailbrief.providers.gcal.client import (
+    CALENDAR_FIELDS,
+    EVENT_FIELDS,
+    CalendarClient,
+    events_url,
+    rfc3339,
+)
 from mailbrief.providers.gcal.reader import MAX_CALENDARS, GoogleCalendarReader
 from mailbrief.providers.gmail.auth import GmailAuth
 from mailbrief.providers.gmail.oauth import (
@@ -302,3 +308,41 @@ def test_google_models_refuse_mixed_shapes() -> None:
     )
     assert coverage.covers(date(2026, 10, 5), date(2026, 12, 13))
     assert not coverage.covers(date(2026, 10, 4), date(2026, 10, 10))
+
+
+def item_fields(fields: str) -> set[str]:
+    assert fields.startswith("items(") and fields.endswith("),nextPageToken")
+    return set(fields.removeprefix("items(").removesuffix("),nextPageToken").split(","))
+
+
+def test_the_field_lists_are_exactly_what_forewit_reads() -> None:
+    """Descriptions, locations, guests and conference details are never fetched (AGENTS.md):
+    a field added to either request has to be added here on purpose."""
+    assert item_fields(CALENDAR_FIELDS) == {
+        "id",
+        "summary",
+        "summaryOverride",
+        "accessRole",
+        "primary",
+        "selected",
+        "hidden",
+        "deleted",
+    }
+    assert item_fields(EVENT_FIELDS) == {
+        "id",
+        "status",
+        "summary",
+        "htmlLink",
+        "start",
+        "end",
+        "transparency",
+    }
+
+
+@respx.mock
+async def test_calendar_list_request_names_its_fields() -> None:
+    route = respx.get(CALENDAR_LIST_URL).mock(return_value=primary_list())
+    async with httpx.AsyncClient() as http:
+        await CalendarClient(http, Tokens(), no_sleep).calendars()
+    sent = parse_qs(urlsplit(str(route.calls[0].request.url)).query)
+    assert sent["fields"] == [CALENDAR_FIELDS]

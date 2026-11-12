@@ -510,7 +510,13 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `%p`, `%c`, `%x`) anywhere in `src/mailbrief`, since weekday and month names come from
   `ui/deadline_text.py`; no hex colour literal in `src/mailbrief/ui` outside
   `ui/theme/tokens.py`; and no `QListWidget` made or subclassed in `src/mailbrief/ui`
-  outside `ui/lists.py`.
+  outside `ui/lists.py`. It also scans for privacy and boundary slips: a log call that
+  passes a private name (a token, key, headers, body, query, prompt, sender rules; `len()`
+  of one and `*_count`-style names are fine); a Google scope other than the three read-only
+  ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
+  `datetime` clock; a network library imported by `domain`, `storage`, `text`, `services`
+  or `ports`; a forbidden dependency in `pyproject.toml`; and a function that opens a URL
+  without checking it is Gmail's or Calendar's in that same function.
 
 ## UI work
 
