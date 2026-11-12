@@ -14,6 +14,10 @@ shadows), in the system's light or dark mode. Its approved renders are
 `docs/ui/mockup-three-pane-dark.png`. Pages ported to the Today template use its compact
 list, body and meta sizes (`docs/ui-redesign.md`).
 
+Before any UI change, read `references/layout-and-rules.md`: the file map of
+`src/mailbrief/ui` and the rules moved out of AGENTS.md (gallery, pixel snapping, paused
+collection, `SafeList`, `take_widget`).
+
 ## Rules
 - Colours come only from `ui/theme/tokens.py`. Widgets read `current_tokens()` at paint
   time, or keep a colour (a tinted icon) only through `follow_theme()`, so it changes with

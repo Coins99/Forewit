@@ -75,7 +75,7 @@ Defaults; the owner changes them here.
 | `scripts/qa.py` with `tests/unit/test_qa_script.py` | Done 2026-11-12 |
 | Baseline: `qa.py full` twice, `hotspots`, and the output size of a bare single-file `pytest` run against `qa.py changed` | Done 2026-11-12 |
 | AGENTS.md: this file in the docs table, `qa.py` under Commands | Done 2026-11-12 |
-| Optional, own pull request: move AGENTS.md's UI-only paragraphs into the `/mailbrief-ui` skill | Owner's call |
+| AGENTS.md: UI-only detail moved into `.claude/skills/mailbrief-ui/references/layout-and-rules.md` (47,505 → 41,407 bytes) | Done 2026-11-12, in PR #113 |
 
 ### `scripts/qa.py`
 
@@ -108,8 +108,10 @@ Measured 2026-11-12 on `chore/qa-tooling` (main at `24f6216` plus the runner), W
   (`test_installed_commands_outside_checkout[forewit-forewit]`,
   `[forewit-gmail-diagnostic-...]`, `[forewit-ms-diagnostic-...]` and
   `test_gmail_aliases_show_the_same_synthetic_preferences`) raise `FileNotFoundError`
-  because this `.venv` has only the `mailbrief*` console scripts. A reinstall of the
-  project would fix them; CI is unaffected.
+  because this `.venv` had only the `mailbrief*` console scripts. After `uv sync --locked
+  --all-groups` created the `forewit*` commands, `qa.py area tests/unit/test_branding.py`
+  passes (10 tests), so the full run is expected to be clean; it was not repeated. CI was
+  never affected.
 - Output of one file, `tests/unit/domain/test_intervals.py`: a bare `pytest` prints
   25,157 characters (the coverage table for every file); `qa.py area` prints 28.
 - The 15 least-covered modules (combined statements and branches, `qa.py hotspots`):
@@ -141,7 +143,7 @@ In this order: privacy, then data, then durability, then the newest code.
 
 | # | Slice | Method | Reads | Model | State |
 | --- | --- | --- | --- | --- | --- |
-| R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Not started |
+| R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, PR #113; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Not started |
 | C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py` | About 2,800 lines | Fable | Not started |
 | C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
@@ -166,4 +168,7 @@ native macOS checks.
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
 loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or docs).
 
-None yet.
+- R-1 | R | low | `p4-insights.md` cites "eight owner scenarios in the implementation guide", which is not in the repository; the Insights steps come from its behaviour text | open, owner question 1
+- R-2 | R | low | `today.md` and `p2-focus.md` put Your day above the brief; `p2-workspace.md` says the full brief lives in Mail | open, owner question 3
+- R-3 | R | low | P3 calendar acceptance sections name migrations 0032 and 0033 by branch; the add-ons add 0034 to 0036; `p3-scheduling-addons.md` has no numbered steps | open, owner questions 4 and 5
+- R-4 | R | low | P1 estimates and the P2 capture, focus and navigation docs have no numbered acceptance steps; P1 docs say "Actions" for Tasks; steps may predate flat buttons (#108) | open, owner questions 2, 6, 8 and 9
