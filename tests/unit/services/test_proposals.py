@@ -981,6 +981,9 @@ async def test_applying_and_undoing_leave_the_owner_s_own_fields_alone(
             action.person,
             action.priority,
             action.tags,
+            action.waiting_since_utc,
+            action.repeat,
+            action.effort,
             [(step.text, step.done) for step in action.steps],
         )
 

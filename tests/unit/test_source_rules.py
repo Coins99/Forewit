@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Final
 
 from mailbrief.providers.gmail.oauth import SIGN_IN_SCOPES
+from mailbrief.storage import tables
 
 ROOT: Final = Path(__file__).resolve().parents[2]
 SOURCE: Final = ROOT / "src" / "mailbrief"
@@ -382,9 +383,39 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
     assert [line.rsplit(" ", 1)[1] for line in unguarded_url_opens([opens])] == ["unguarded"]
 
 
+OWNER_TABLES: Final = [
+    "Action",
+    "ActionTag",
+    "ActionActivity",
+    "ActionStep",
+    "ActionSource",
+    "ActionSeries",
+    "ActionProposal",
+    "SuggestionDecision",
+    "Draft",
+    "DraftVersion",
+    "DraftSource",
+    "Project",
+    "LifeArea",
+    "OwnerPreferences",
+    "CalendarEvent",
+    "WorkBlock",
+    "WorkingHours",
+    "DayPlan",
+    "DayPlanItem",
+    "MetricDefinition",
+    "MetricEntry",
+    "MetricEntryChange",
+    "Dashboard",
+    "TaskCommand",
+    "NoteCommand",
+    "BlockCommand",
+    "PlanningCommand",
+    "MetricCommand",
+    "DashboardCommand",
+]
 BULK_OWNER_WRITE: Final = re.compile(
-    r"\b(?:update|delete|insert)\(\s*(?:Action|ActionStep|ActionSeries|Draft|DraftVersion|Project|"
-    r"LifeArea|WorkBlock|Preferences|Event|SuggestionDecision|WorkingHours)Table\b"
+    rf"(?:update|delete|insert)\(\s*(?:{'|'.join(OWNER_TABLES)})Table\b"
 )
 
 
@@ -393,5 +424,8 @@ def test_owner_records_change_only_through_orm_objects() -> None:
     target an owner-record table. Statements spelled other ways are not seen."""
     assert offending_lines((SOURCE / "storage").rglob("*.py"), BULK_OWNER_WRITE) == []
     assert offending_lines((SOURCE / "services").rglob("*.py"), BULK_OWNER_WRITE) == []
-    assert BULK_OWNER_WRITE.search("delete(ActionTable).where(x)")
+    assert all(hasattr(tables, f"{name}Table") for name in OWNER_TABLES)
+    for statement in ("delete(ActionTable)", "sqlite_insert(CalendarEventTable)"):
+        assert BULK_OWNER_WRITE.search(statement)
+    assert BULK_OWNER_WRITE.search("update(OwnerPreferencesTable).values(")
     assert not BULK_OWNER_WRITE.search("delete(ActionSuggestionTable).where(x)")
