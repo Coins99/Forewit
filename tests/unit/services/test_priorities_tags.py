@@ -114,6 +114,26 @@ async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSes
     assert await service.list_tags() == ("diy", "Home")
 
 
+async def test_accepting_again_restores_tags_as_live_tasks_spell_them(
+    session: AsyncSession,
+) -> None:
+    """Accepting a suggestion whose action was deleted brings that action back, so its tags
+    read as live tasks spell them now, as restore()'s do."""
+    service = ActionService(session, clock=Clock(START))
+    seeded = await seed(session)
+    accepted = await service.accept(seeded.suggestion_ids[0])
+    gone = await service.save(accepted.public_id, accepted.revision, task(tags=("home",)))
+    other = await service.create(task(title="Other", tags=("home",)))
+    await service.delete(gone.public_id, gone.revision)
+    await service.save(other.public_id, other.revision, task(title="Other", tags=("Home",)))
+
+    restored = await service.accept(seeded.suggestion_ids[0])
+
+    assert restored.public_id == gone.public_id
+    assert restored.tags == ("Home",)
+    assert [row[0] for row in await tag_rows(session)] == ["Home", "Home"]
+
+
 async def test_tags_filter_and_list_only_live_tasks(session: AsyncSession) -> None:
     service = ActionService(session, clock=Clock(START))
     home = await service.create(task(title="Groceries", tags=("Home",)))

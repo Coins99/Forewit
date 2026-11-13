@@ -566,11 +566,7 @@ class ActionService:
                 existing = await self._repository.get_action_by_id(accepted_id)
                 if existing is not None:
                     if existing.deleted_at_utc is not None:
-                        existing.deleted_at_utc = None
-                        touch(existing, now)
-                        await self._repository.record_activity(
-                            existing, ActionActivityKind.RESTORED, now
-                        )
+                        await self._restore_deleted(existing, now)
                     return await self._load(existing)
             row = await self._repository.add_action(
                 ActionTable(
