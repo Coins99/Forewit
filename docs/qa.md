@@ -54,6 +54,11 @@ Defaults; the owner changes them here.
   Fable week, ending at 228,000 tokens of context. That is over the 25-point stop. The owner
   decided on 2026-11-12 to keep E, C5 and C4 all the same. So a deep read starts in a fresh
   5-hour window, reads only its slice's files whole, and greps the helpers they lean on.
+- C2, read that way, cost 33 points of the 5-hour window and 9 of the Fable week, ending
+  at 210,000 tokens of context: over the 25-point stop again. It stood at 19 points when
+  both fixes were committed; the other 14 came across the five-minute wait for `qa.py full`
+  and the turns after it, each of which re-reads the whole session. So a deep read should
+  start `qa.py full` in a fresh session, or end before it and leave the run to CI.
 
 ## Fixing as we go
 
@@ -151,7 +156,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, merged in #113; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR #114. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
 | C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Done 2026-11-12, draft PR #118 on `qa/c1-ai-boundary`. Two findings fixed, one open. Next: C2, in a fresh 5-hour window |
-| C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
+| C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Done 2026-11-12, draft PR on `qa/c2-owner-writes` (stacked on C1). Two findings fixed, two open. Next: C3, in a fresh 5-hour window |
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Not started |
@@ -279,6 +284,30 @@ the two consent repositories).
 Not read: `brief.py` (where exclusions and analysis consent are enforced), `infra/tasks.py`,
 `infra/http_retry.py`, the local provider, and the UI gates.
 
+## Slice C2: owner-record writes
+
+Read whole: `services/actions.py`, `storage/actions.py`, `services/recurrence.py`,
+`services/writes.py`. Grepped, with short ranges read: the session factory, the foreign keys
+into `actions` in `storage/tables.py`, `remove_task_references`, the tag, person and waiting
+helpers and `ActionEdit` in `domain/actions.py`, and the work-block service's entry points.
+
+| Checked | Result |
+| --- | --- |
+| Every change needs the revision the caller saw and bumps it once | Confirmed by reading: each mutating method goes through `_live` or its own check, then one `touch`. The exceptions are the documented ones: restore, a repeated `accept` or `accept_into`, and a tick that changes nothing. `actions` and `action_series` are also versioned rows, so a stale flush fails. Its message blames the repeat: C2-3 |
+| ORM objects only | Confirmed: the four files hold no `update()`, `delete()` or `insert()` statement; decisions, steps, tags and sources are deleted row by row |
+| A failed write rolls back completely | Confirmed: every write goes through `commit_once`, which rolls back on any exception, cancellation included |
+| Retry receipts | Confirmed: the receipt is added in the creating transaction, holds a hash and IDs only, and a replay returns the current record or refuses a removed one. A concurrent duplicate is recognised only by the receipt key's own constraint |
+| Repeats: one next occurrence, from the template, in the closing transaction | Confirmed by reading `follow`: template fields only, one per series and date (deleted ones count), none while a live next one exists |
+| Repeats: withdrawn only while untouched | A next occurrence with a work block counted as untouched: C2-1, fixed. Proposal undo withdraws through the same function |
+| Deadlines, waiting, checklists | Confirmed by reading `_apply_deadline`, `_set_ownership`, `set_step_done` and `add_step`; nothing but an `ActionEdit` sets the person, and accepting a suggestion sets no priority, tags or person |
+| Tags change only through `set_tags` and `respell_tag` | Confirmed (grep). Accepting again a suggestion whose task was deleted skipped the respelling that `restore()` does: C2-2, fixed |
+| `history()` is uncapped and includes soft-deleted tasks | Confirmed: `history_rows` has no limit and no deleted filter, and reads the revision as a scalar |
+
+Not read: `services/proposals.py` (it calls `follow` and `withdraw`; to C5), `domain/recurrence.py`
+(the date arithmetic), `domain/task_history.py`, `services/deadlines.py`, the rest of
+`domain/actions.py` and `storage/tables.py`, the work-block, day-plan, draft and project
+services, and the desktop's callers. Test files were read only around the tests added.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -291,3 +320,7 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C1-1 | C1 | low | Evidence, follow-up and suggestion quotes are matched with spacing ignored, so a quote could be stored with carriage returns and separator characters the model wrote between words | fixed in `ada4425`; quotes cached before that are cleaned when read
 - C1-2 | C1 | low | A Groq reply that could not be decoded (`httpx.DecodingError`) escaped as an unexpected exception. It is now an unreadable reply, raised at once: Groq has answered, so a retry would only send the mail again | fixed in `488edc6` and its follow-up
 - C1-3 | C1 | low | The three Groq prompts tell the model to ignore text claiming to come from "MailBrief"; the product is now Forewit. Changing a prompt means a new prompt version, which empties the analysis cache | open, owner decision
+- C2-1 | C2 | high | Reopening a repeating task, or undoing its completion or skip, removed the next occurrence outright while it had no activity, draft or focus place. One the owner had scheduled a work block for still counted, so the block (unscheduled ones too) was deleted with it | fixed in `8d43698`
+- C2-2 | C2 | medium | Accepting again a suggestion whose task was deleted restored the task without the tag respelling `restore()` does, so one tag could read two ways on live tasks. It now restores through the same function, so its history records an undo of the deletion as `restore()`'s does | fixed in `6a50a50`
+- C2-3 | C2 | low | `ActionService._write` reports every stale flush as "The repeat changed since it was loaded", though `actions` rows are versioned too: two overlapping writes to one task would blame its repeat. Not reproduced; the write is refused either way | open
+- C2-4 | C2 | low | `undo_accept_into` checks the revision and the decision but not that the latest change was the addition. Called with the current revision of a task first accepted from that suggestion, it would make the suggestion pending and record an undo of the creation. The desktop only passes what `accept_into` returned. Read, not reproduced | open
