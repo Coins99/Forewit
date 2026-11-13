@@ -717,6 +717,11 @@ class GroqProvider:
                 error = ProviderTimeoutError(TIMEOUT_MESSAGE, client_request_id=request_id)
                 delay = BACKOFF_SECONDS[attempt] if attempt < MAX_RETRIES else None
                 reason = "timeout"
+            except httpx.DecodingError:
+                # Groq answered, so sending again would only send the mail again.
+                raise ProviderUnavailableError(
+                    UNREADABLE_MESSAGE, client_request_id=request_id
+                ) from None
             except httpx.TransportError:
                 error = ProviderError(CONNECTION_MESSAGE, client_request_id=request_id)
                 delay = BACKOFF_SECONDS[attempt] if attempt < MAX_RETRIES else None

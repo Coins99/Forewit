@@ -83,6 +83,21 @@ def test_the_rules_find_what_they_are_for() -> None:
         assert not PLAIN_LIST.search(line), line
     assert CALENDAR_POPUP.search("self.day.setCalendarPopup(True)")
     assert not CALENDAR_POPUP.search("calendar_popup(self.day)")
+    for line in (
+        "from mailbrief.providers.groq.provider import _usage",
+        "    import mailbrief.providers.gmail.mapper as mapper",
+        "from mailbrief import config, providers",
+        "from ..providers.groq import provider",
+        "from .. import providers",
+        'module = importlib.import_module("mailbrief.providers.groq")',
+    ):
+        assert ADAPTER_IMPORT.search(line), line
+    for line in (
+        "from mailbrief.ports.ai_provider import AIProvider",
+        "from mailbrief.services.brief import provider_display_name",
+        "from mailbrief.domain import messages",
+    ):
+        assert not ADAPTER_IMPORT.search(line), line
 
 
 # --- Privacy and boundary rules (QA slice B1) ---------------------------------------------
@@ -131,6 +146,13 @@ NAIVE_CLOCK: Final = re.compile(
 NETWORK_IMPORT: Final = re.compile(
     r"^\s*(?:from|import)\s+(?:[\w.]+\s*,\s*)*"
     r"(?:httpx|requests|aiohttp|urllib\.request|http\.client|socket)\b"
+)
+# An import of a provider adapter, capturing which one ("gmail.mapper", "local.manifest").
+ADAPTER_IMPORT: Final = re.compile(
+    r"^\s*(?:from|import)\s+(?:mailbrief\.|\.+)providers\b\.?([\w.]*)"
+    r"|^\s*from\s+(?:mailbrief|\.+)\s+import\s[^#\n]*\bproviders\b"
+    r"|import_module\(\s*[\"']mailbrief\.providers\b",
+    re.MULTILINE,
 )
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(
@@ -284,6 +306,22 @@ def test_core_packages_import_no_network_library() -> None:
         if path not in allowed
     ]
     assert offending_lines(files, NETWORK_IMPORT) == []
+
+
+def test_core_packages_import_no_adapter() -> None:
+    """Provider JSON stays in its adapter because nothing in the domain, storage, text, ports
+    or services packages imports one: they see domain models through the ports. Local setup
+    alone reads the local adapter's pinned manifest and its download guard, never a reply."""
+    setup = SOURCE / "services" / "local_setup.py"
+    files = [
+        path
+        for folder in ("domain", "storage", "text", "services", "ports")
+        for path in (SOURCE / folder).rglob("*.py")
+        if path != setup
+    ]
+    assert offending_lines(files, ADAPTER_IMPORT) == []
+    imported = ADAPTER_IMPORT.findall(setup.read_text(encoding="utf-8"))
+    assert sorted(imported) == ["local.manifest", "local.transport"]
 
 
 def test_no_forbidden_dependency_is_declared() -> None:

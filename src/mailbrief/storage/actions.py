@@ -67,6 +67,7 @@ from mailbrief.storage.tables import (
     deadline_values,
 )
 from mailbrief.storage.work_blocks import WorkBlockRepository, block_from_row
+from mailbrief.text.prepare import clean_generated_text
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ def suggestion_from_row(row: ActionSuggestionTable) -> ActionSuggestion:
         suggested_target_date=row.suggested_target_date,
         target_reason=None if row.target_reason is None else TargetReason(row.target_reason),
         steps=tuple(row.steps_json),
-        evidence=row.evidence,
+        evidence=row.evidence and clean_generated_text(row.evidence),
         fingerprint=row.fingerprint,
     )
 

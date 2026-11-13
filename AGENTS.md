@@ -219,7 +219,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   characters leaves room under 80% for one character at most, too little for a quote, so
   it stores no evidence, for itself or its suggestions, and is still analyzed.
 - Text the AI writes itself (summary, action text, suggestion titles and steps) and
-  deadline phrases are stripped of control and format characters before they are stored.
+  deadline phrases are stripped of control and format characters before they are stored;
+  an evidence quote is cleaned the same way once it has matched the email.
   Mail and AI text reaches the UI only through plain-text widgets or escaped HTML, and only
   `https://mail.google.com` message links are ever opened.
 - Accepted actions belong to the owner: AI runs never write to them, and they survive
@@ -514,8 +515,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passes a private name (a token, key, headers, body, query, prompt, sender rules; `len()`
   of one and `*_count`-style names are fine); a Google scope other than the three read-only
   ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
-  `datetime` clock; a network library imported by `domain`, `storage`, `text`, `services`
-  or `ports`; a forbidden dependency in `pyproject.toml`; and a function that opens a URL
+  `datetime` clock; a network library, or a provider adapter, imported by `domain`,
+  `storage`, `text`, `services` or `ports` (local setup alone reads the local adapter's
+  manifest and download guard); a forbidden dependency in `pyproject.toml`; and a function that opens a URL
   without checking it is Gmail's or Calendar's in that same function.
 
 ## UI work

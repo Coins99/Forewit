@@ -633,6 +633,21 @@ async def test_transport_failures_are_retried_then_raised(
     assert sleeps.delays == [1.0, 2.0, 4.0]
 
 
+async def test_an_undecodable_reply_is_unreadable_and_never_sent_again(
+    respx_mock: respx.MockRouter, provider: GroqProvider, sleeps: RecordedSleeps
+) -> None:
+    """Groq answered, so a retry would only send the same mail again."""
+    route = respx_mock.post(CHAT_URL).mock(side_effect=httpx.DecodingError("bad gzip"))
+
+    with pytest.raises(ProviderUnavailableError) as caught:
+        await provider.analyze([make_request()])
+
+    assert str(caught.value) == UNREADABLE_MESSAGE
+    assert caught.value.__cause__ is None
+    assert route.call_count == 1
+    assert sleeps.delays == []
+
+
 async def test_groq_error_text_never_reaches_exceptions_or_logs(
     respx_mock: respx.MockRouter, provider: GroqProvider, caplog: pytest.LogCaptureFixture
 ) -> None:

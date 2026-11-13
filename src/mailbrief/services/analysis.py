@@ -114,6 +114,19 @@ def _trim_evidence(evidence: str) -> str:
     return text
 
 
+def _quote(evidence: str, request: AnalysisRequest) -> str | None:
+    """The provider's quote as it may be stored, or None when it does not quote the email.
+
+    Matching ignores how words are spaced, so a quote that matches can still carry line
+    breaks and separator characters the model wrote between them. It is cleaned like the
+    model's other text once it has matched: one line, single spaces.
+    """
+    trimmed = _trim_evidence(evidence)
+    if not appears_in(trimmed, request.subject, request.body_text):
+        return None
+    return clean_generated_text(trimmed) or None
+
+
 def _fit(text: str, limit: int) -> str:
     """Text within ``limit`` characters; longer text is cut at a word break and ends in "…"."""
     if len(text) <= limit:
@@ -151,8 +164,8 @@ def validate_candidate(candidate: AnalysisCandidate, request: AnalysisRequest) -
     """
     if candidate.message_key != request.message_key:
         raise ValueError("the candidate key does not match its request")
-    evidence = _trim_evidence(candidate.evidence)
-    if not appears_in(evidence, request.subject, request.body_text):
+    evidence = _quote(candidate.evidence, request)
+    if evidence is None:
         raise ValueError("evidence must quote the email")
     # Strictly under the share: a 100-character body stores at most 79 characters.
     share_cap = math.ceil(len(request.body_text) * EVIDENCE_BODY_SHARE) - 1
@@ -201,10 +214,10 @@ def _follow_up(
     kind = candidate.follow_up
     if kind is FollowUpKind.NONE or candidate.follow_up_evidence is None:
         return FollowUpKind.NONE, None
-    quote = _trim_evidence(candidate.follow_up_evidence)
+    quote = _quote(candidate.follow_up_evidence, request)
     if (
-        not 2 <= len(quote) <= min(FOLLOW_UP_EVIDENCE_CHARS, evidence_budget)
-        or not appears_in(quote, request.subject, request.body_text)
+        quote is None
+        or not 2 <= len(quote) <= min(FOLLOW_UP_EVIDENCE_CHARS, evidence_budget)
         or (kind is FollowUpKind.NEW_DEADLINE and deadline.precision is DeadlinePrecision.NONE)
     ):
         return FollowUpKind.NONE, None
@@ -232,8 +245,8 @@ def _suggestions(
             fingerprint = suggestion_fingerprint(title)
         except ValueError:
             continue
-        evidence = _trim_evidence(action.evidence)
-        if fingerprint in used or not appears_in(evidence, request.subject, request.body_text):
+        evidence = _quote(action.evidence, request)
+        if fingerprint in used or evidence is None:
             continue
         try:
             deadline = resolve_deadline_fields(

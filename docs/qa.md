@@ -50,8 +50,10 @@ Defaults; the owner changes them here.
 - Measured on Sonnet at medium effort: Phase 0 cost 3 points of the 5-hour window, slice R
   2 and slice B1 3, each ending near 130,000 tokens of context. The five Sonnet slices left
   (B2, B3, D, E and fix sessions) project to about 15 points in all, so they fit.
-- The Fable deep reads are not measured yet. Measure C1 and write its cost here before
-  starting C2; if a deep read costs more than 25 points, drop E, then C5, then C4.
+- Measured on Fable at high effort: C1 cost 35 points of the 5-hour window and 9 of the
+  Fable week, ending at 228,000 tokens of context. That is over the 25-point stop. The owner
+  decided on 2026-11-12 to keep E, C5 and C4 all the same. So a deep read starts in a fresh
+  5-hour window, reads only its slice's files whole, and greps the helpers they lean on.
 
 ## Fixing as we go
 
@@ -148,7 +150,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | --- | --- | --- | --- | --- | --- |
 | R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, merged in #113; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR #114. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
-| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Not started |
+| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Done 2026-11-12, draft PR #118 on `qa/c1-ai-boundary`. Two findings fixed, one open. Next: C2, in a fresh 5-hour window |
 | C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
@@ -179,7 +181,7 @@ name was not enough. "Gap closed" means a test was added; tests marked `scan` ar
 | Gmail read-only; only the three read-only scopes | `test_the_source_names_only_the_read_only_google_scopes` (scan; also pins `SIGN_IN_SCOPES` and refuses Gmail's full-access scope); `test_a_grant_wider_than_read_only_is_refused_and_never_saved` | gap closed |
 | No mailbox or calendar write from the adapters | `test_google_adapters_make_no_writing_request` (scan of the adapters and the shared request code, by method and by verb); `test_metadata_request_is_read_only` | gap closed |
 | Timestamps never naive | `test_timestamps_are_never_naive` (scan) | partly: the common `datetime` spellings. A naive `datetime(...)` literal is not looked for, and `date.today()` in `ui/inbox_reader.py` and `ui/action_editor.py` uses the system day: to slice D |
-| Provider JSON stays in adapters | `test_core_packages_import_no_network_library` (scan) | partly: no network library outside the adapters. That a service never reads raw provider JSON is not checked: to C1 |
+| Provider JSON stays in adapters | `test_core_packages_import_no_network_library` (scan) | partly: no network library outside the adapters. C1 added `test_core_packages_import_no_adapter`: no core package imports an adapter |
 | Forbidden dependencies absent | `test_no_forbidden_dependency_is_declared` (scan) | gap closed |
 | Only `mail.google.com` links open | `test_open_in_gmail_only_for_gmail_https_links`, `test_open_in_gmail_opens_only_gmail_links`, `test_an_unlinked_draft_says_so_and_only_gmail_links_open`; `test_every_url_open_is_behind_a_link_check` (scan, per function; only the sign-in imports `webbrowser`) | covered, scan added |
 | Calendar names its `fields`; no descriptions, locations, guests, conferences | `test_events_request_names_its_fields_and_follows_pages`, `test_calendar_list_request_names_its_fields`; `test_the_field_lists_are_exactly_what_forewit_reads` pins both lists | gap closed |
@@ -188,14 +190,14 @@ name was not enough. "Gap closed" means a test was added; tests marked `scan` ar
 | Calendar planning sends only busy Google times, titles and times | `test_only_busy_google_times_are_sent_or_warned_about`, `test_what_is_previewed_and_sent_is_what_the_dialog_shows` | covered |
 | Evidence at most 300 and under 80% of the body; none for a one-or-two-character body | `test_validate_candidate_stores_long_evidence_at_most_300_characters`, `..._strictly_under_80_percent`, `test_a_body_too_short_to_quote_stores_no_evidence` | covered |
 | No body outside the evidence reaches disk, output or logs | `test_the_body_outside_the_evidence_never_reaches_disk_output_or_logs` | covered |
-| AI text stripped of control and format characters | `test_brief_show_prints_no_terminal_control_characters_the_ai_wrote`, `test_a_deadline_phrase_keeps_no_control_character_that_could_move_a_terminal`, `test_normalize_removes_invisible_and_control_characters` | covered for output, phrases and email text; the storage-side strip of summary, action and suggestion text was not confirmed in 30 lines: to C1 |
+| AI text stripped of control and format characters | `test_brief_show_prints_no_terminal_control_characters_the_ai_wrote`, `test_a_deadline_phrase_keeps_no_control_character_that_could_move_a_terminal`, `test_normalize_removes_invisible_and_control_characters` | covered for output, phrases and email text; C1 confirmed the storage-side strip (`test_validate_candidate_cleans_text_the_model_wrote_itself`) and added evidence quotes |
 | Local mode never falls back to cloud; flag off fails closed | `test_unavailable_local_never_constructs_cloud_or_starts_model`, `test_local_mode_never_enters_cloud_brief_path`, `test_local_twenty_message_brief_never_enters_cloud_and_reuses_cache`, `test_local_ai_requires_explicit_feature_flag`, `test_local_setup_requires_feature_flag` | covered |
 | Local setup: HTTPS and listed hosts on every redirect, size and SHA-256, unsafe archive paths | `test_the_download_client_refuses_plain_http_and_unlisted_hosts`, `test_a_redirect_to_an_unlisted_host_stops_setup_before_reaching_it`, `test_wrong_bytes_are_deleted_and_reported_as_a_mismatch`, `test_a_body_longer_than_the_pin_is_a_mismatch`, zip and tar parent-path cases; `test_every_pinned_url_is_https_to_a_listed_host` | covered |
 | Local consent separate from cloud; revoke needs no vault | `test_a_grant_is_account_scoped_and_independent_of_cloud`, `test_revoke_needs_no_vault_or_prompt` | covered |
 | Sender exclusions enforced by services | `test_excluded_senders_are_never_selected_read_or_sent`, `test_an_excluded_sender_s_email_is_never_offered_or_downloaded` | covered |
 | Unreadable preferences fail closed | `test_unreadable_preferences_stop_a_brief_before_gmail_or_groq`, `test_unreadable_preferences_exit_3` | covered |
 | Credentials only in the OS vault; keys never printed | `test_the_default_store_uses_the_os_vault`, `test_ai_key_commands_never_print_the_key`, `test_reports_never_keep_the_servers_key_or_the_owners_folders` | covered |
-| Mail content never authorizes an action; plain-text widgets | Not mapped by name. The `ui` code sets `PlainText` on its labels (grep); no test asserts that every label over mail text does | not checked: to C1 and slice D |
+| Mail content never authorizes an action; plain-text widgets | Not mapped by name. The `ui` code sets `PlainText` on its labels (grep); no test asserts that every label over mail text does | the model's side is pinned by C1 (`test_an_answer_that_obeys_the_email_still_writes_only_the_analysis_cache`); the plain-text widgets are not checked: to slice D |
 | Draft text never in logs | Covered by the log scan above for drafting's own calls; `test_a_failed_check_after_cancel_is_only_logged` for the UI path | covered |
 
 Only the scans, one search test and two calendar tests were new. Nothing failed, so there
@@ -256,6 +258,27 @@ Same method as B1 and B2.
 Two tests were new; nothing failed, so there is no B3 finding. The daily run's logic
 (`brief.py`, `proposals.py`, `threads.py`, `sync.py`) still gets its deep read in C5.
 
+## Slice C1: what leaves the machine
+
+Read whole: `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`,
+`providers/groq/provider.py`, and the helpers they lean on (`text/matching.py`,
+`domain/analysis.py`, `domain/calendar_planning.py`, the request models of
+`domain/drafting.py`, the cleaning functions of `text/prepare.py`, deadline resolution, and
+the two consent repositories).
+
+| Checked | Result |
+| --- | --- |
+| Analysis sends the seven fields, drafting only ticked parts, planning only what the preview lists | Confirmed by reading; each request is built from a model with exactly those fields. Drafting sends the sender's name through `display_name`, which gives none when the name is, or holds, an address |
+| Consent is recorded before the call; a decline or cancel sends nothing | Confirmed for drafting and planning. Analysis consent is in `brief.py`: to C5 |
+| From B1: summary, action and suggestion text stripped before storage | Covered already by `test_validate_candidate_cleans_text_the_model_wrote_itself`. Evidence quotes were not cleaned: C1-1, fixed |
+| From B1: mail content cannot authorize an action | The request has no tools and a reply with tool calls is refused (`test_groq_provider.py`). New: `test_an_answer_that_obeys_the_email_still_writes_only_the_analysis_cache` compares every row of every table around a run, with a task and a consent in place |
+| From B1: provider JSON stays in the adapters | New scan `test_core_packages_import_no_adapter`: only local setup imports an adapter module, its manifest and download guard |
+| Errors and logs carry codes, counts and request IDs only | Confirmed by reading; Groq's text never reaches an exception |
+| The model's calendar changes are checked one by one; notes, Busy/Free and Google events untouched | Confirmed by reading `validate_plan` and `_edit` |
+
+Not read: `brief.py` (where exclusions and analysis consent are enforced), `infra/tasks.py`,
+`infra/http_retry.py`, the local provider, and the UI gates.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -265,3 +288,6 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - R-2 | R | low | `today.md` and `p2-focus.md` put Your day above the brief; `p2-workspace.md` says the full brief lives in Mail | open, owner question 3
 - R-3 | R | low | P3 calendar acceptance sections name migrations 0032 and 0033 by branch; the add-ons add 0034 to 0036; `p3-scheduling-addons.md` has no numbered steps | open, owner questions 4 and 5
 - R-4 | R | low | P1 estimates and the P2 capture, focus and navigation docs have no numbered acceptance steps; P1 docs say "Actions" for Tasks; steps may predate flat buttons (#108) | open, owner questions 2, 6, 8 and 9
+- C1-1 | C1 | low | Evidence, follow-up and suggestion quotes are matched with spacing ignored, so a quote could be stored with carriage returns and separator characters the model wrote between words | fixed in `ada4425`; quotes cached before that are cleaned when read
+- C1-2 | C1 | low | A Groq reply that could not be decoded (`httpx.DecodingError`) escaped as an unexpected exception. It is now an unreadable reply, raised at once: Groq has answered, so a retry would only send the mail again | fixed in `488edc6` and its follow-up
+- C1-3 | C1 | low | The three Groq prompts tell the model to ignore text claiming to come from "MailBrief"; the product is now Forewit. Changing a prompt means a new prompt version, which empties the analysis cache | open, owner decision

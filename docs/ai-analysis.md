@@ -233,7 +233,8 @@ end of that day), then the rest by rank.
 - **empty**: nothing to brief today.
 
 A summary longer than 240 characters, or an action longer than 1,000, is cut at a word
-and ends in "…". The evidence quote must appear in the email, and is never stored as the
+and ends in "…". The evidence quote must appear in the email (spacing aside; it is stored on
+one line, without control characters), and is never stored as the
 whole body: it is kept to at most 300 characters and strictly under 80% of the body, cut at a word
 and ending in "…" when longer. A body of one or two characters, such as "ok", leaves room under
 that share for one character at most, too little for a quote: the quote is still checked, no
