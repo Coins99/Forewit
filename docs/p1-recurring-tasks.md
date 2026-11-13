@@ -57,7 +57,8 @@ unassigned.
 
 - **Undo complete** or **Undo skip** reopens the occurrence and removes the next one, while
   that one is untouched: open, live, with no activity of its own since it was made (another
-  task respelling a tag it shares doesn't count) and no draft linked to it.
+  task respelling a tag it shares doesn't count), no draft linked to it, no place in a day's
+  focus and no work block, scheduled or unscheduled.
 - **Reopen** does the same. An untouched next occurrence has no owner input, so it is removed,
   not soft-deleted. Completing again makes it again.
 - A next occurrence the owner has changed, or drafted from, is theirs and stays. Then closing

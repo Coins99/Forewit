@@ -64,6 +64,7 @@ from mailbrief.storage.tables import (
     MessageTable,
     ProjectTable,
     SuggestionDecisionTable,
+    WorkBlockTable,
     deadline_values,
 )
 from mailbrief.storage.work_blocks import WorkBlockRepository, block_from_row
@@ -746,6 +747,13 @@ class ActionRepository:
         """Whether any draft, deleted or not, links to the action."""
         found = await self._session.scalar(
             select(DraftTable.id).where(DraftTable.action_id == action_id).limit(1)
+        )
+        return found is not None
+
+    async def scheduled(self, action_id: int) -> bool:
+        """Whether any work block, unscheduled or not, is for the action."""
+        found = await self._session.scalar(
+            select(WorkBlockTable.id).where(WorkBlockTable.action_id == action_id).limit(1)
         )
         return found is not None
 
