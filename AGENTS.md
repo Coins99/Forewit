@@ -518,7 +518,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
   `datetime` clock; a network library, or a provider adapter, imported by `domain`,
   `storage`, `text`, `services` or `ports` (local setup alone reads the local adapter's
-  manifest and download guard); a forbidden dependency in `pyproject.toml`; and a function that opens a URL
+  manifest and download guard); workload, free time or scheduling imported by a provider
+  adapter, a port or a module that builds an AI request; a forbidden dependency in `pyproject.toml`; and a function that opens a URL
   without checking it is Gmail's or Calendar's in that same function.
 
 ## UI work

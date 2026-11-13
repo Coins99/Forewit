@@ -154,6 +154,25 @@ ADAPTER_IMPORT: Final = re.compile(
     r"|import_module\(\s*[\"']mailbrief\.providers\b",
     re.MULTILINE,
 )
+# Workload, free time and local suggestions (ADRs 0029 to 0031): worked out locally, never sent.
+PLANNING_IMPORT: Final = re.compile(
+    r"^\s*(?:from|import)\s+mailbrief\.(?:"
+    r"domain\.(?:workload|scheduling\w*|availability|planning_intervals)"
+    r"|services\.(?:scheduling|availability))\b"
+    r"|^\s*from\s+mailbrief\.(?:domain|services)\s+import\s[^#\n]*"
+    r"\b(?:workload|scheduling\w*|availability|planning_intervals)\b",
+    re.MULTILINE,
+)
+# The modules that build what an AI is sent, beside every provider adapter and port.
+AI_FACING: Final = (
+    "domain/analysis.py",
+    "domain/calendar_planning.py",
+    "domain/drafting.py",
+    "services/analysis.py",
+    "services/brief.py",
+    "services/calendar_planning.py",
+    "services/drafting.py",
+)
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(
     r"is_gmail_link\(|is_calendar_link\(|gmail_source\(|gmail_link\(|"
@@ -322,6 +341,21 @@ def test_core_packages_import_no_adapter() -> None:
     assert offending_lines(files, ADAPTER_IMPORT) == []
     imported = ADAPTER_IMPORT.findall(setup.read_text(encoding="utf-8"))
     assert sorted(imported) == ["local.manifest", "local.transport"]
+
+
+def test_nothing_sent_to_an_ai_or_provider_reads_workload_or_scheduling() -> None:
+    """Workload, free time and local suggestions never leave the machine because no provider
+    adapter, no port and no module that builds an AI request imports them. An import through
+    another module is not seen."""
+    files = [
+        *(SOURCE / "providers").rglob("*.py"),
+        *(SOURCE / "ports").rglob("*.py"),
+        *(SOURCE / name for name in AI_FACING),
+    ]
+    assert offending_lines(files, PLANNING_IMPORT) == []
+    assert PLANNING_IMPORT.search("from mailbrief.domain.workload import workload")
+    assert PLANNING_IMPORT.search("from mailbrief.services import scheduling")
+    assert not PLANNING_IMPORT.search("from mailbrief.domain.events import ScheduledBlock")
 
 
 def test_no_forbidden_dependency_is_declared() -> None:
