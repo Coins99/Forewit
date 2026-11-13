@@ -391,7 +391,7 @@ message was cached. A traceback in a log line (`logger.exception`) is not scanne
 ## Slice E: performance
 
 `python -m scripts.benchmark_insights` (10,000 tasks, 100,000 activity rows, 50,000
-observations, twelve widgets), run 2026-11-13 on `main` at `62b41d0`'s successor, on an
+observations, twelve widgets), run 2026-11-13 on `origin/main`, on an
 Apple M2 (macOS, Python 3.13.15). The recorded numbers in `p4-insights.md` are from a
 Windows 11 machine, so this is a different-hardware check, not a like-for-like one.
 
