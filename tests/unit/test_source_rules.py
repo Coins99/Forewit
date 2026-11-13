@@ -155,24 +155,66 @@ ADAPTER_IMPORT: Final = re.compile(
     re.MULTILINE,
 )
 # Workload, free time and local suggestions (ADRs 0029 to 0031): worked out locally, never sent.
-PLANNING_IMPORT: Final = re.compile(
-    r"^\s*(?:from|import)\s+mailbrief\.(?:"
-    r"domain\.(?:workload|scheduling\w*|availability|planning_intervals)"
-    r"|services\.(?:scheduling|availability))\b"
-    r"|^\s*from\s+mailbrief\.(?:domain|services)\s+import\s[^#\n]*"
-    r"\b(?:workload|scheduling\w*|availability|planning_intervals)\b",
-    re.MULTILINE,
+PLANNING_MODULES: Final = frozenset(
+    {
+        "mailbrief.domain.availability",
+        "mailbrief.domain.planning_intervals",
+        "mailbrief.domain.scheduling",
+        "mailbrief.domain.scheduling_time",
+        "mailbrief.domain.workload",
+        "mailbrief.services.availability",
+        "mailbrief.services.scheduling",
+    }
 )
-# The modules that build what an AI is sent, beside every provider adapter and port.
-AI_FACING: Final = (
-    "domain/analysis.py",
-    "domain/calendar_planning.py",
-    "domain/drafting.py",
-    "services/analysis.py",
-    "services/brief.py",
-    "services/calendar_planning.py",
-    "services/drafting.py",
+# The only modules outside the desktop that read them: local planning, calendar and Insights
+# code. None is a provider adapter, a port or a builder of an AI request.
+PLANNING_READERS: Final = frozenset(
+    {
+        "domain/availability.py",
+        "domain/scheduling.py",
+        "domain/scheduling_time.py",
+        "domain/workload.py",
+        "services/availability.py",
+        "services/metric_calculations.py",
+        "services/scheduling.py",
+        "services/work_blocks.py",
+        "storage/metric_sources.py",
+    }
 )
+
+
+def imported_modules(source: str, package: tuple[str, ...]) -> set[str]:
+    """Every module ``source`` imports, by full name, for a file in ``package``: plain and
+    ``from`` imports however they are wrapped (each imported name is also tried as a
+    submodule), relative ones, and import_module() of a literal."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else ()
+            module = ".".join((*base, *filter(None, [node.module])))
+            found.add(module)
+            found.update(f"{module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args:
+            called = node.func
+            name = (
+                called.attr
+                if isinstance(called, ast.Attribute)
+                else called.id
+                if isinstance(called, ast.Name)
+                else ""
+            )
+            first = node.args[0]
+            if (
+                name == "import_module"
+                and isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+            ):
+                found.add(first.value)
+    return found
+
+
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(
     r"is_gmail_link\(|is_calendar_link\(|gmail_source\(|gmail_link\(|"
@@ -343,19 +385,31 @@ def test_core_packages_import_no_adapter() -> None:
     assert sorted(imported) == ["local.manifest", "local.transport"]
 
 
-def test_nothing_sent_to_an_ai_or_provider_reads_workload_or_scheduling() -> None:
-    """Workload, free time and local suggestions never leave the machine because no provider
-    adapter, no port and no module that builds an AI request imports them. An import through
-    another module is not seen."""
-    files = [
-        *(SOURCE / "providers").rglob("*.py"),
-        *(SOURCE / "ports").rglob("*.py"),
-        *(SOURCE / name for name in AI_FACING),
-    ]
-    assert offending_lines(files, PLANNING_IMPORT) == []
-    assert PLANNING_IMPORT.search("from mailbrief.domain.workload import workload")
-    assert PLANNING_IMPORT.search("from mailbrief.services import scheduling")
-    assert not PLANNING_IMPORT.search("from mailbrief.domain.events import ScheduledBlock")
+def test_only_local_planning_code_reads_workload_or_scheduling() -> None:
+    """Workload, free time and local suggestions never leave the machine: outside the desktop
+    only the listed local modules import them, so no adapter, port or builder of an AI request
+    does. A new reader has to be listed here on purpose. What a module reaches through another
+    module is not followed."""
+    readers = set()
+    for path in SOURCE.rglob("*.py"):
+        parts = path.relative_to(SOURCE).parts
+        modules = imported_modules(path.read_text(encoding="utf-8"), ("mailbrief", *parts[:-1]))
+        if parts[0] != "ui" and modules & PLANNING_MODULES:
+            readers.add("/".join(parts))
+    assert readers == PLANNING_READERS
+    assert not any(name.startswith(("providers/", "ports/")) for name in PLANNING_READERS)
+    wrapped = (
+        "from mailbrief.domain import (\n    events,\n    workload,\n)\n"
+        "from ..domain import scheduling\n"
+        "from . import availability\n"
+        "import_module('mailbrief.domain.planning_intervals')\n"
+    )
+    assert imported_modules(wrapped, ("mailbrief", "services")) >= {
+        "mailbrief.domain.workload",
+        "mailbrief.domain.scheduling",
+        "mailbrief.services.availability",
+        "mailbrief.domain.planning_intervals",
+    }
 
 
 def test_no_forbidden_dependency_is_declared() -> None:
