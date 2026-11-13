@@ -220,7 +220,7 @@ class SyncService:
                     )
                 )
             except Exception as exc:
-                logger.warning("Progress callback raised an exception: %s", exc)
+                logger.warning("Progress callback raised an exception: %s", type(exc).__name__)
 
         async def finish(status: SyncStatus, error_code: str | None) -> SyncResult:
             if scans and (status is SyncStatus.COMPLETE or continuation is None):

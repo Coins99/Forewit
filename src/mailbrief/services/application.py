@@ -343,7 +343,10 @@ class ApplicationService:
                     )
                 )
             except Exception as exc:
-                logger.warning("Progress callback raised an exception during ranking: %s", exc)
+                logger.warning(
+                    "Progress callback raised an exception during ranking: %s",
+                    type(exc).__name__,
+                )
 
         # 3. Deterministic local ranking; later messages in the threads of open actions
         # rank higher (ADR 0016).

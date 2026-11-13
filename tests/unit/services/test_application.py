@@ -2,8 +2,10 @@
 fails the sync."""
 
 import asyncio
+import logging
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.digests import SyncProgress, SyncStage, SyncStatus
@@ -180,6 +182,25 @@ async def test_a_broken_progress_callback_doesn_t_stop_the_check(
     )
 
     assert threads.checked and result.threads_checked == 1
+
+
+async def test_a_broken_progress_callback_is_logged_by_type_only(
+    session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    stages: list[SyncStage] = []
+
+    def broken(progress: SyncProgress) -> None:
+        stages.append(progress.stage)
+        raise RuntimeError("words the callback was showing")
+
+    with caplog.at_level(logging.WARNING):
+        service = application(session, RecordingThreads(session, ThreadCheck()))
+        result, _ = await service.prepare_daily_shortlist(tz_key=ZONE, now_utc=NOW, progress=broken)
+
+    assert result.status is SyncStatus.COMPLETE
+    assert {SyncStage.FETCHING, SyncStage.THREADS, SyncStage.RANKING} <= set(stages)
+    assert "RuntimeError" in caplog.text
+    assert "words the callback was showing" not in caplog.text
 
 
 class FixedTracking(RecordingThreads):
