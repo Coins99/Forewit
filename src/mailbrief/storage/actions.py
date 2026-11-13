@@ -64,7 +64,6 @@ from mailbrief.storage.tables import (
     MessageTable,
     ProjectTable,
     SuggestionDecisionTable,
-    WorkBlockTable,
     deadline_values,
 )
 from mailbrief.storage.work_blocks import WorkBlockRepository, block_from_row
@@ -433,6 +432,12 @@ def _activity(
     )
 
 
+# The tables that are a task itself; a row anywhere else is something made for it.
+_OWN_PARTS = frozenset(
+    {"actions", "action_activity", "action_sources", "action_steps", "action_tags"}
+)
+
+
 class ActionRepository:
     """Accepted actions, their steps and sources, and the owner's decisions on suggestions.
 
@@ -750,12 +755,23 @@ class ActionRepository:
         )
         return found is not None
 
-    async def scheduled(self, action_id: int) -> bool:
-        """Whether any work block, unscheduled or not, is for the action."""
-        found = await self._session.scalar(
-            select(WorkBlockTable.id).where(WorkBlockTable.action_id == action_id).limit(1)
-        )
-        return found is not None
+    async def referenced(self, row: ActionTable) -> bool:
+        """Whether any row outside the task's own parts points at it: a draft, a place in a
+        day's focus, a work block, a proposal, a decision, deleted or not. Read from the
+        schema's foreign keys, so a table added later counts without being named here."""
+        for table in ActionTable.metadata.sorted_tables:
+            if table.name in _OWN_PARTS:
+                continue
+            for key in table.foreign_keys:
+                if key.column.table.name != ActionTable.__tablename__:
+                    continue
+                value = getattr(row, key.column.key)
+                found = await self._session.scalar(
+                    select(key.parent).where(key.parent == value).limit(1)
+                )
+                if found is not None:
+                    return True
+        return False
 
     async def _repeats(self, rows: Sequence[ActionTable]) -> dict[int, ActionRepeat]:
         """Each occurrence's repeat, with the live occurrences it follows and made. The
