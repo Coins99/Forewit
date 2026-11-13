@@ -221,6 +221,8 @@ def conflicts_for(
     """What ``block`` clashes with among ``events`` and the other ``blocks``, in the order of
     what it clashes with, then its own. The caller passes the entries near the block; a task's
     time set aside counts only when ``block.upcoming_minutes`` was read."""
+    if not block.open:  # A done task's block takes no time, so it clashes with nothing.
+        return ()
     start, end = block.block.interval
     first_day, last_day = block.days(zone)
     before = timedelta(minutes=hours.before_minutes)

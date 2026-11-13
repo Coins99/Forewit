@@ -1,6 +1,7 @@
 """AI calendar proposals: what is sent, consent, and the checks every change must pass."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.domain.actions import ActionStatus
 from mailbrief.domain.calendar_planning import (
     CalendarPlanningRequest,
     ChangeCandidate,
@@ -733,6 +735,18 @@ async def test_work_blocks_warn_locally_and_are_never_sent(
         plan,
     )
     assert checked.proposals[0].overlaps == ("Task · Write the summary",)
+    finished = replace(
+        plan,
+        blocks=tuple(
+            block.model_copy(update={"action_status": ActionStatus.COMPLETED})
+            for block in plan.blocks
+        ),
+    )
+    candidate = PlanningCandidate(
+        changes=(change(event_key="e2", start_date="2026-10-16", start_time="10:30"),)
+    )
+    # A done task's block takes no time.
+    assert validate_plan(candidate, finished).proposals[0].overlaps == ()
 
 
 class MixedReader(Reader):

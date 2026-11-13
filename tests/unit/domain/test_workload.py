@@ -296,3 +296,6 @@ def test_only_open_blocks_from_today_on_are_checked() -> None:
     found = block_conflicts(week, TORONTO, at(TUESDAY, 8))
     assert set(found) == {ahead.public_id}
     assert found[ahead.public_id] == ()  # A done task's block takes no time.
+    # Asked about directly, as the suggester asks of a selected task's blocks.
+    alone = conflicts_for(done, TORONTO, events=[], blocks=[ahead], hours=NINE_TO_FIVE)
+    assert alone == ()

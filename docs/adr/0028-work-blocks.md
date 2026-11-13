@@ -59,7 +59,8 @@ block never counts as a change to the task.
 - **Warnings never block.** A save says which timed entries the block overlaps:
   - the owner's events;
   - Google's timed events, every one counting as busy until P3-2 caches free or busy;
-  - other blocks, the same task's included.
+  - other open tasks' blocks, the same task's included (a done task's block takes no
+    time; decided 2026-11-13, ADR 0030).
 
   It also says when the block ends after the task's deadline. At most three overlaps are
   named. They are computed locally.

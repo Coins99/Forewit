@@ -407,7 +407,8 @@ def _overlaps(
         f"{google.title} ({google.calendar_name})" for google in plan.google if overlapped(google)
     ]
     for block in plan.blocks:
-        if block.starts_at_utc < end and block.ends_at_utc > start:
+        # A done task's block takes no time, as conflicts_for counts it (ADR 0030).
+        if block.open and block.starts_at_utc < end and block.ends_at_utc > start:
             found.append(f"Task · {block.title}")
     return tuple(found[:MAX_OVERLAPS])
 
