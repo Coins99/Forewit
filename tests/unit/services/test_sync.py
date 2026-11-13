@@ -714,6 +714,50 @@ async def test_inbox_scan_resumes_after_restart(
         assert account is not None and account.last_sync_at_utc is None
 
 
+async def test_a_resumed_scan_keeps_mail_cached_since_it_began(
+    async_session: AsyncSession, test_account: int
+) -> None:
+    """A scan finished from a checkpoint never listed the mail that arrived after it began,
+    so a message a later sync cached keeps its place in the Inbox. One cached before the
+    scan and not seen by it still leaves."""
+    repo = MessageRepository(async_session)
+    await repo.upsert_messages(test_account, [make_message(provider_message_id="archived")])
+    await async_session.commit()
+    first = make_message(provider_message_id="first")
+    older = make_message(provider_message_id="older")
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            if continuation is None:
+                yield MessagePage(page_number=1, messages=(first,), continuation="older-page")
+                raise ProviderResponseError("synthetic network failure")
+            yield MessagePage(page_number=2, messages=(older,))
+
+    service = SyncService(
+        provider=FakeEmailProvider(),
+        message_repo=repo,
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+    )
+    paused = await service.sync_inbox(
+        reader=Reader(), account_id=test_account, account_identity="user@example.com"
+    )
+    assert paused.status is SyncStatus.PARTIAL
+    # The day's sync caches a message that arrived while the scan was paused.
+    await repo.upsert_messages(test_account, [make_message(provider_message_id="arrived")])
+    await async_session.commit()
+
+    finished = await service.sync_inbox(
+        reader=Reader(), account_id=test_account, account_identity="user@example.com"
+    )
+
+    assert finished.status is SyncStatus.COMPLETE
+    rows, _ = await repo.get_inbox_page(test_account)
+    assert {row.provider_message_id for row in rows} == {"first", "older", "arrived"}
+
+
 @pytest.mark.parametrize("invalidate", ["expired", "deleted", "clear", "oversized"])
 async def test_inbox_invalid_checkpoints_restart_without_reconciliation(
     async_session: AsyncSession,

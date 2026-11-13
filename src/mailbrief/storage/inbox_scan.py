@@ -1,6 +1,7 @@
 """Account-scoped, transient Inbox scan checkpoints; no OAuth tokens or bodies."""
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
@@ -16,6 +17,7 @@ class InboxScan:
     pages: int
     failed: int
     seen_ids: frozenset[str]
+    started_at_utc: datetime
 
 
 class InboxScanRepository:
@@ -51,7 +53,9 @@ class InboxScanRepository:
         row.status = "started"
         row.completed_at_utc = None
         row.sanitized_error_code = None
-        return InboxScan(row.id, token, row.page_count, row.failed_message_count, seen)
+        return InboxScan(
+            row.id, token, row.page_count, row.failed_message_count, seen, row.started_at_utc
+        )
 
     async def remember(
         self, run_id: int, account_id: int, identifiers: set[str], continuation: str | None

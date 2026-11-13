@@ -392,15 +392,30 @@ class MessageRepository:
         return before or 0
 
     async def reconcile_inbox(
-        self, account_id: int, start_utc: datetime, end_utc: datetime, seen_ids: set[str]
+        self,
+        account_id: int,
+        start_utc: datetime,
+        end_utc: datetime,
+        seen_ids: set[str],
+        *,
+        began_utc: datetime,
     ) -> None:
-        """Call only after complete enumeration; preserve cached content and references."""
+        """Call only after complete enumeration; preserve cached content and references.
+
+        ``began_utc`` is when the enumeration began. A message cached after that and not
+        listed keeps its place: mail that arrived since is on no later page, the more so
+        when a scan finishes from a checkpoint, so its absence says nothing.
+        """
         window = (
             MessageTable.account_id == account_id,
             MessageTable.received_at_utc >= normalize_utc(start_utc),
             MessageTable.received_at_utc < normalize_utc(end_utc),
         )
-        await self._session.execute(update(MessageTable).where(*window).values(is_in_inbox=False))
+        await self._session.execute(
+            update(MessageTable)
+            .where(*window, MessageTable.synced_at_utc <= normalize_utc(began_utc))
+            .values(is_in_inbox=False)
+        )
         for chunk in sorted_batches(seen_ids):
             await self._session.execute(
                 update(MessageTable)

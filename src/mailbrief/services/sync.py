@@ -101,10 +101,11 @@ class SyncService:
     ) -> SyncResult:
         """Fetch every page for the local-day window, committing each page as it arrives.
 
-        Only a complete, error-free enumeration reconciles Inbox membership, as it is now,
-        and, when ``record_last_sync`` is true (today's window), advances the account's
-        last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are
-        honored by resuming from the last committed page.
+        Only a complete, error-free enumeration reconciles Inbox membership, as it is now
+        (a message cached after the run began keeps its place), and, when
+        ``record_last_sync`` is true (today's window), advances the account's last-sync
+        time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are honored by
+        resuming from the last committed page.
         """
 
         def pages(continuation: str | None) -> AsyncIterator[MessagePage]:
@@ -181,10 +182,10 @@ class SyncService:
         )
         await self._commit()
         if saved:
-            sync_run_id = saved.run_id
+            sync_run_id, began = saved.run_id, saved.started_at_utc
         else:
             assert sync_run is not None
-            sync_run_id = sync_run.id
+            sync_run_id, began = sync_run.id, sync_run.started_at_utc
 
         pages_count = saved.pages if saved else 0
         seen_ids: set[str] = set(saved.seen_ids) if saved else set()
@@ -329,7 +330,7 @@ class SyncService:
             return await finish(SyncStatus.PARTIAL, METADATA_ITEMS_FAILED)
 
         await self._message_repo.reconcile_inbox(
-            account_id, window.start_utc, window.end_utc, seen_ids
+            account_id, window.start_utc, window.end_utc, seen_ids, began_utc=began
         )
         if record_last_sync:
             await self._account_repo.update_last_sync(account_id, datetime.now(UTC))
