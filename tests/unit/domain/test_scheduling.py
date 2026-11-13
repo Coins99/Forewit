@@ -141,7 +141,7 @@ def test_proposal_limit_does_not_publish_half_a_task() -> None:
 
 
 @pytest.mark.parametrize(
-    "kind", ["locked", "early", "busy", "duration", "outside", "identity", "range"]
+    "kind", ["locked", "early", "busy", "held", "duration", "outside", "identity", "range"]
 )
 def test_independent_verifier_rejects_tampering(kind: str) -> None:
     state = snapshot((demand(),))
@@ -154,6 +154,8 @@ def test_independent_verifier_rejects_tampering(kind: str) -> None:
         changes.update(starts_at_utc=NOW - timedelta(hours=1), ends_at_utc=NOW)
     elif kind == "busy":
         state = state.model_copy(update={"busy": (span(1, 2),)})
+    elif kind == "held":  # A done task's block.
+        state = state.model_copy(update={"held": (span(1, 2),)})
     elif kind == "duration":
         changes["ends_at_utc"] = block.ends_at_utc + timedelta(minutes=1)
     elif kind == "outside":

@@ -189,6 +189,30 @@ async def test_valid_outside_horizon_credit_and_invalid_booking_repair(
     assert not proposal.blocks and proposal.unplaced[0].reason == "Needs schedule repair"
 
 
+async def test_a_suggestion_never_lands_on_a_done_task_s_block(session: AsyncSession) -> None:
+    """The shared conflict rule counts an overlap with a done task's block, so a suggestion
+    placed on one needed repair as soon as it was applied."""
+    from mailbrief.services.work_blocks import WorkBlockService
+
+    service, task = await setup(session)
+    actions = ActionService(session)
+    done = await actions.create(EDIT.model_copy(update={"title": "Finished"}))
+    await WorkBlockService(session).schedule(done.public_id, edit(done.public_id))
+    await actions.complete(done.public_id, done.revision)
+    review = await service.review(request(task))
+    (block,) = review.proposal.blocks
+    assert block.starts_at_utc == START + timedelta(hours=1)
+    assert review.workload.scheduled_minutes == 0  # A done task's block is not planned work,
+    assert review.workload.free_minutes == 420  # but nothing can be suggested over it.
+    with pytest.raises(SchedulingKnowledgeError) as caught:
+        await service.apply(review.proposal, (task,), command_id())
+    await service.apply(
+        review.proposal, (task,), command_id(), acknowledged_knowledge=caught.value.token
+    )
+    after = await service.snapshot(request(task))
+    assert not after.conflicts and not after.demands[0].needs_repair
+
+
 async def test_failed_batch_commit_rolls_back_every_block_and_receipt(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
