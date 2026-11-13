@@ -16,6 +16,7 @@ from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
 from mailbrief.services.today import needs_attention
+from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
@@ -131,6 +132,13 @@ async def test_accepting_again_restores_tags_as_live_tasks_spell_them(
 
     assert restored.public_id == gone.public_id
     assert restored.tags == ("Home",)
+    # It restores as restore() does: the deletion is undone, not followed by a restore.
+    repository = ActionRepository(session)
+    row = await repository.get_action(restored.public_id)
+    assert row is not None
+    latest = await repository.latest_activity(row.id)
+    assert latest is not None and latest.kind == Kind.UNDO.value
+    assert latest.undo_of_revision == restored.revision - 1
     assert [row[0] for row in await tag_rows(session)] == ["Home", "Home"]
 
 
