@@ -59,8 +59,6 @@ from mailbrief.storage.tables import (
     ActionTable,
     ActionTagTable,
     AnalysisTable,
-    DayPlanItemTable,
-    DraftTable,
     MessageTable,
     ProjectTable,
     SuggestionDecisionTable,
@@ -605,16 +603,6 @@ class ActionRepository:
         await remove_task_references(self._session, [row.public_id], now)
         await self._session.delete(row)
 
-    async def planned(self, public_id: str) -> bool:
-        return (
-            await self._session.scalar(
-                select(DayPlanItemTable.id)
-                .where(DayPlanItemTable.task_public_id == public_id)
-                .limit(1)
-            )
-            is not None
-        )
-
     async def step_rows(self, action_id: int) -> list[ActionStepTable]:
         result = await self._session.scalars(
             select(ActionStepTable)
@@ -747,13 +735,6 @@ class ActionRepository:
             .execution_options(populate_existing=True)
         )
         return list(result)
-
-    async def drafted(self, action_id: int) -> bool:
-        """Whether any draft, deleted or not, links to the action."""
-        found = await self._session.scalar(
-            select(DraftTable.id).where(DraftTable.action_id == action_id).limit(1)
-        )
-        return found is not None
 
     async def referenced(self, row: ActionTable) -> bool:
         """Whether any row outside the task's own parts points at it: a draft, a place in a
