@@ -62,6 +62,10 @@ Defaults; the owner changes them here.
 - C4, ended that way, stood at 22 points of the 5-hour window, 6 of the Fable week and
   218,000 tokens of context when its fix and scan were committed. `qa.py changed` ran
   twice (about a minute each); `qa.py full` was left to CI.
+- C5, ended the same way, stood at 21 points of the 5-hour window, 6 of the Fable week
+  and 210,000 tokens of context when its fix was committed. `qa.py changed` ran once,
+  against a local `main` that was behind, so it chose 38 test paths and took two and a
+  half minutes: pass `--base origin/main` when the local `main` hasn't been pulled.
 
 ## Fixing as we go
 
@@ -164,7 +168,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Done 2026-11-13, draft PR on `qa/c4-scheduling`. Three findings fixed, three open. It branches from `qa/c1-ai-boundary`, which holds C2: #119 was merged into that branch after #118 reached `main`, so C2 reaches `main` with this pull request. Next: C3 or C5, in a fresh 5-hour window |
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
-| C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Not started |
+| C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Done 2026-11-13, draft PR on `qa/c5-daily-run`, from `main`. One finding fixed, three open. Next: C3, in a fresh 5-hour window |
 | D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Started 2026-11-13, draft PR #121: the two items B1 handed on (the system's day, plain-text labels). Open: the gallery, the empty, one, many and long-text cases, and the run-sheet fixes |
 | E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Not started |
 
@@ -347,6 +351,31 @@ removing a task that a row still points at would break that row. Also not taken:
 working out the referencing tables once at import (it runs only on reopen and undo,
 and reading the schema late sees every table), and one import's placement.
 
+## Slice C5: the daily run
+
+Read whole: `services/brief.py`, `proposals.py`, `threads.py`, `sync.py`, and the helpers
+they lean on: `ApplicationService` (`services/application.py`), `DigestService`,
+`storage/proposals.py`, `storage/inbox_scan.py`. Read in ranges: `review_shortlist`,
+`AnalysisPlan.defer_after`, the follow-up check in `services/analysis.py`,
+`ActionService._close`, and `upsert_messages`, `reconcile_inbox` and
+`get_by_provider_ids` in `storage/repositories.py`.
+
+| Checked | Result |
+| --- | --- |
+| A brief's date is checked before Gmail is contacted or anything is written | Confirmed: `check_brief_date` runs before the account is connected. Local mode reads the preferences row first, which contacts nothing |
+| From C1: analysis consent is recorded before the call; a decline sends nothing; an automatic run never asks | Confirmed: `_consented` grants and commits first-use consent before `execute`; a decline returns before it. An automatic run reads the permission on the active consent for the current disclosure version, and with none returns before any body is downloaded |
+| Sender exclusions are enforced in the services | Confirmed: every caller passes the saved rules (grep), local mode reads them from the row itself, and they are applied to the selection, to a review's answer, to outside replies and to carried outside replies |
+| Runs through a day are cumulative | Confirmed: carried messages lead the selection and drop out only when blocked, declined, uncached or archived. A manual run can still save a brief without a carried message whose refresh failed, as ADR 0017 says; an automatic or local run saves nothing then |
+| A sync commits each page, reconciles only after a complete, error-free enumeration, and only today's window moves the watermark | Confirmed. A full scan finished from a checkpoint also took the Inbox mark off mail cached since it began: C5-1, fixed |
+| Thread tracking: metadata only, the caps, Trash and Spam forgotten, a failure never fails the sync | Confirmed: `ApplicationService._check_threads` catches every failure and rolls back; rows are deleted through the session; outside replies come only from `read_ids` |
+| Outside replies: today's run only, at most three, never the owner's or a blocked sender's | Confirmed by reading `outside_replies` and its caller |
+| Proposals: deriving changes no action; at most three actions per email ever; nothing from the owner's own mail; the same kind never returns | Confirmed by reading `derive`. A new deadline with no deadline is turned into no signal before it is stored (`services/analysis.py`), so a proposal can't clear one |
+| From C2: a completing proposal moves a repeating task on as Complete does, and Undo withdraws it | Confirmed: `apply` does what `ActionService._close` does (status, time, one revision, activity, `follow`), and `undo_apply` needs the action exactly at the applied revision |
+
+Not read: the rest of `services/ranking.py`, `services/bodies.py`, `services/history.py`,
+`storage/digests.py`, the Gmail adapter's thread reader, the desktop's callers, and the
+test files beyond the scan tests in `test_sync.py`. `qa.py full` was not run.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -369,3 +398,7 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C4-4 | C4 | low | Without working hours a selected task's future blocks earn no credit (`hours.is_set` in `_snapshot`), so the review counts its whole estimate as uncovered and Suggest time lists fully scheduled tasks as needing time. Nothing can be suggested without hours, so only the figures and the list are affected. Reproduced | open
 - C4-5 | C4 | low | `verify_proposal` counts each whole day of a piece as 43,200 seconds, not 86,400. Unreachable while a block lasts at most 12 hours; it would refuse correct proposals if that limit were raised. Read, not reproduced | open
 - C4-6 | C4 | medium | After C4-2 the rule that a done task's block takes no time held on one side only: Plan with AI's overlap warnings still named a done task's block, and a done task's own block was still given conflicts, so a selected done task read as needing repair. Found by the review of #120 | fixed: `conflicts_for` gives a done task's block no conflicts, and Plan with AI counts only open tasks' blocks
+- C5-1 | C5 | medium | A full Inbox scan that finished from a saved checkpoint marked every cached message it had not listed as out of the Inbox. Mail that arrived after the scan began is on none of its later pages, so a message the day's sync had cached in the meantime left the Inbox page until something cached it again. Reproduced | fixed in `40981d3`: the reconcile leaves alone a message cached after the run began, for the day's sync as well. A message the scan listed and the owner archived before it finished still reads as in the Inbox until the next scan, as `google-signin-inbox.md` says of any change during enumeration
+- C5-2 | C5 | low | A sync that honours a provider's rate-limit wait (up to 60 seconds) sleeps without watching Stop: the cancel is seen only when the next page arrives. Read, not reproduced | open
+- C5-3 | C5 | low | A local-mode automatic run without local consent reports `ready` as the whole selection, carried messages included, where every other path counts only new ones (`brief.py`, the `locally_allowed` branch). Local AI is experimental. Read, not reproduced | open
+- C5-4 | C5 | low | Two handlers of a failing progress callback log the exception's text (`sync.py` `emit_progress`, and `application.py` before ranking); the third logs its type. The callbacks are the desktop's own and are handed counts only, so no mail text is known to reach the log | open
