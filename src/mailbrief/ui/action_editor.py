@@ -56,7 +56,7 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
-from mailbrief.domain.common import new_public_id
+from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.projects import Project
 from mailbrief.domain.recurrence import (
     ENDS_FIRST,
@@ -357,7 +357,7 @@ class ActionEditor(QDialog):
         self.embedded = False
         self._action: Action | None = None
         self._original: list[tuple[int | None, str, bool]] = []
-        self._today = date.today()  # Replaced by the owner's day whenever the editor opens.
+        self._today = utc_now().date()  # Replaced by the owner's day whenever the editor opens.
         self._later_offered = False  # The task repeats, so its edit can go to later repeats.
         self._busy = False  # Another operation is running, so Save waits.
         self._saving = False  # This dialog's save is running, so nothing can change.

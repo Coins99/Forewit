@@ -67,6 +67,45 @@ def test_date_fields_use_the_date_picker() -> None:
     assert offending_lines(files, CALENDAR_POPUP) == []
 
 
+def unplain_labels(files: Iterable[Path]) -> list[str]:
+    """Each ``QLabel(...)`` made in a function that neither sets ``PlainText`` nor draws a
+    pixmap: Qt would read HTML-looking text in it as rich text."""
+    found: list[str] = []
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        for function in ast.walk(ast.parse(source)):
+            if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            body = ast.get_source_segment(source, function) or ""
+            if "PlainText" in body or "setPixmap" in body:
+                continue
+            for node in ast.walk(function):
+                if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "QLabel":
+                    found.append(f"{path.name}:{node.lineno}")
+    return found
+
+
+def test_every_label_in_the_ui_is_plain_text_or_an_icon() -> None:
+    """Mail and AI text reaches the screen through plain-text labels only. A ``QLabel``
+    made in a function that sets no ``PlainText`` and draws no icon fails, naming the line.
+    Only the function is looked at, not which label is meant: one that sets plain text for
+    another label and not for itself passes."""
+    assert unplain_labels(UI.rglob("*.py")) == []
+
+
+def test_the_label_rule_finds_what_it_is_for(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.py"
+    bad.write_text("def make(text):\n    return QLabel(text)\n", encoding="utf-8")
+    good = tmp_path / "good.py"
+    good.write_text(
+        "def make(text):\n    label = QLabel(text)\n"
+        "    label.setTextFormat(Qt.TextFormat.PlainText)\n    return label\n",
+        encoding="utf-8",
+    )
+    assert unplain_labels([bad]) == ["bad.py:2"]
+    assert unplain_labels([good]) == []
+
+
 def test_the_rules_find_what_they_are_for() -> None:
     """The patterns catch the slips they exist for, and pass what only looks like them."""
     for line in ('f"{day:%b} {day.day}"', 'when.strftime("%a %d %B")', '"%I:%M %p"', '"%x"'):
@@ -140,7 +179,7 @@ GMAIL_WRITE_PATH: Final = re.compile(
 NAIVE_CLOCK: Final = re.compile(
     r"\bdatetime\.utcnow\(|\.utcfromtimestamp\(|\bdatetime\.now\(\s*(?:\)|$|tz=None)|"
     r"\bdatetime\.fromtimestamp\([^,()]*\)|\bdatetime\.today\(|\bdatetime\.strptime\(|"
-    r"\bdt\.now\(\s*\)"
+    r"\bdt\.now\(\s*\)|\bdate\.today\("
 )
 # Network libraries belong to the adapters, never to the domain, storage or text helpers.
 NETWORK_IMPORT: Final = re.compile(
@@ -350,8 +389,8 @@ def test_google_adapters_make_no_writing_request() -> None:
 
 def test_timestamps_are_never_naive() -> None:
     """No ``utcnow``, ``utcfromtimestamp``, ``today``, ``strptime``, zone-less ``now()`` or
-    one-argument ``fromtimestamp`` on ``datetime``. A naive ``datetime(...)`` literal and
-    ``date.today()`` are not looked for."""
+    one-argument ``fromtimestamp`` on ``datetime``, and no ``date.today()``, which is the
+    system's day, not the owner's. A naive ``datetime(...)`` literal is not looked for."""
     assert offending_lines(SOURCE.rglob("*.py"), NAIVE_CLOCK) == []
 
 
@@ -469,9 +508,14 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
         "datetime.fromtimestamp(stamp)",
         "datetime.today()",
         "datetime.strptime(text, FORMAT)",
+        "date.today()",
     ):
         assert NAIVE_CLOCK.search(line), line
-    for line in ("datetime.now(UTC)", "datetime.fromtimestamp(stamp, UTC)", "date.today()"):
+    for line in (
+        "datetime.now(UTC)",
+        "datetime.fromtimestamp(stamp, UTC)",
+        "datetime.now(zone).date()",
+    ):
         assert not NAIVE_CLOCK.search(line), line
 
     scope = "https://www.googleapis.com/auth/gmail.readonly"
