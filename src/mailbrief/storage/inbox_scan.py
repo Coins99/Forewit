@@ -1,13 +1,18 @@
 """Account-scoped, transient Inbox scan checkpoints; no OAuth tokens or bodies."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Final
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mailbrief.domain.common import normalize_utc, utc_now
 from mailbrief.storage.tables import InboxScanMessageTable, MessageTable, SyncRunTable
+
+# A scan resumed long after it began says little about the Inbox as it is now.
+MAX_CHECKPOINT_AGE: Final = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -47,7 +52,8 @@ class InboxScanRepository:
             )
         )
         token = row.inbox_continuation
-        if not token or len(token) > 4096 or len(seen) != row.message_count:
+        old = utc_now() - normalize_utc(row.started_at_utc) > MAX_CHECKPOINT_AGE
+        if not token or len(token) > 4096 or len(seen) != row.message_count or old:
             await self.discard(row.id)
             return None
         row.status = "started"

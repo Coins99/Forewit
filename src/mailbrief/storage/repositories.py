@@ -398,24 +398,23 @@ class MessageRepository:
         end_utc: datetime,
         seen_ids: set[str],
         *,
-        began_utc: datetime,
+        began_utc: datetime | None = None,
     ) -> None:
         """Call only after complete enumeration; preserve cached content and references.
 
-        ``began_utc`` is when the enumeration began. A message cached after that and not
-        listed keeps its place: mail that arrived since is on no later page, the more so
-        when a scan finishes from a checkpoint, so its absence says nothing.
+        ``began_utc`` is when an enumeration that can pause and resume began (the full
+        scan). What was cached after that is newer than what the scan knows, so it is
+        left as it is: mail that arrived since is on no later page, and a message the
+        scan listed may have left the Inbox since.
         """
-        window = (
+        window = [
             MessageTable.account_id == account_id,
             MessageTable.received_at_utc >= normalize_utc(start_utc),
             MessageTable.received_at_utc < normalize_utc(end_utc),
-        )
-        await self._session.execute(
-            update(MessageTable)
-            .where(*window, MessageTable.synced_at_utc <= normalize_utc(began_utc))
-            .values(is_in_inbox=False)
-        )
+        ]
+        if began_utc is not None:
+            window.append(MessageTable.synced_at_utc <= normalize_utc(began_utc))
+        await self._session.execute(update(MessageTable).where(*window).values(is_in_inbox=False))
         for chunk in sorted_batches(seen_ids):
             await self._session.execute(
                 update(MessageTable)

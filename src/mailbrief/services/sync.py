@@ -65,11 +65,8 @@ def sanitize_error_code(exc: Exception) -> str:
 
 async def _stopped_while_waiting(seconds: float, cancel: asyncio.Event | None) -> bool:
     """Wait out a provider's rate limit; True when ``cancel`` was set before it ended."""
-    if cancel is None:
-        await asyncio.sleep(seconds)
-        return False
     try:
-        await asyncio.wait_for(cancel.wait(), seconds)
+        await asyncio.wait_for((cancel or asyncio.Event()).wait(), seconds)
     except TimeoutError:
         return False
     return True
@@ -113,10 +110,9 @@ class SyncService:
     ) -> SyncResult:
         """Fetch every page for the local-day window, committing each page as it arrives.
 
-        Only a complete, error-free enumeration reconciles Inbox membership, as it is now
-        (a message cached after the run began keeps its place), and, when
-        ``record_last_sync`` is true (today's window), advances the account's last-sync
-        time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are honored by
+        Only a complete, error-free enumeration reconciles Inbox membership, as it is now,
+        and, when ``record_last_sync`` is true (today's window), advances the account's
+        last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are honored by
         resuming from the last committed page; a cancel ends the wait at once.
         """
 
@@ -148,7 +144,8 @@ class SyncService:
     ) -> SyncResult:
         """Sync all current Inbox metadata; reconcile only after complete enumeration.
 
-        This does not advance the daily-brief watermark or download bodies.
+        This does not advance the daily-brief watermark or download bodies. A scan may
+        finish from a checkpoint, so what was cached after it began is left as it is.
         """
         now = datetime.now(UTC)
         window = DayWindow(
@@ -343,7 +340,11 @@ class SyncService:
             return await finish(SyncStatus.PARTIAL, METADATA_ITEMS_FAILED)
 
         await self._message_repo.reconcile_inbox(
-            account_id, window.start_utc, window.end_utc, seen_ids, began_utc=began
+            account_id,
+            window.start_utc,
+            window.end_utc,
+            seen_ids,
+            began_utc=began if scans else None,
         )
         if record_last_sync:
             await self._account_repo.update_last_sync(account_id, datetime.now(UTC))

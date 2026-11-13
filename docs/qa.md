@@ -381,6 +381,13 @@ the Gmail adapter (its thread reader, and where a body in Trash or Spam is refus
 desktop's callers, and the test files beyond the tests added and their helpers.
 `qa.py changed --base origin/main` passed after the last fix; `qa.py full` was not run.
 
+A review of #122 at medium effort gave eight findings, all taken. The first fix of C5-1
+guarded only mail the scan had not listed, applied to the day's sync too, where a clock
+set back could shield a message, and left a scan free to resume days later; it is now
+as the C5-1 line says. The rate-limit wait has one path, and its tests replace the wait
+instead of running a timer. Still by wall clock: the scan's start against the time a
+message was cached. A traceback in a log line (`logger.exception`) is not scanned for.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -403,8 +410,8 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C4-4 | C4 | low | Without working hours a selected task's future blocks earn no credit (`hours.is_set` in `_snapshot`), so the review counts its whole estimate as uncovered and Suggest time lists fully scheduled tasks as needing time. Nothing can be suggested without hours, so only the figures and the list are affected. Reproduced | open
 - C4-5 | C4 | low | `verify_proposal` counts each whole day of a piece as 43,200 seconds, not 86,400. Unreachable while a block lasts at most 12 hours; it would refuse correct proposals if that limit were raised. Read, not reproduced | open
 - C4-6 | C4 | medium | After C4-2 the rule that a done task's block takes no time held on one side only: Plan with AI's overlap warnings still named a done task's block, and a done task's own block was still given conflicts, so a selected done task read as needing repair. Found by the review of #120 | fixed: `conflicts_for` gives a done task's block no conflicts, and Plan with AI counts only open tasks' blocks
-- C5-1 | C5 | medium | A full Inbox scan that finished from a saved checkpoint marked every cached message it had not listed as out of the Inbox. Mail that arrived after the scan began is on none of its later pages, so a message the day's sync had cached in the meantime left the Inbox page until something cached it again. Reproduced | fixed in `40981d3`: the reconcile leaves alone a message cached after the run began, for the day's sync as well. A message the scan listed and the owner archived before it finished still reads as in the Inbox until the next scan, as `google-signin-inbox.md` says of any change during enumeration
+- C5-1 | C5 | medium | A full Inbox scan that finished from a saved checkpoint marked every cached message it had not listed as out of the Inbox. Mail that arrived after the scan began is on none of its later pages, so a message the day's sync had cached in the meantime left the Inbox page until something cached it again. Reproduced | fixed in `40981d3`: a finished scan changes only what was cached before it began, in both directions, so a message a later sync saw arrive or leave keeps what that sync found, and a checkpoint over a day old is not resumed. The day's sync, which cannot pause, reconciles as before
 - C5-2 | C5 | low | A sync that honours a provider's rate-limit wait (up to 60 seconds) sleeps without watching Stop: the cancel is seen only when the next page arrives. Reproduced | fixed in `4881bb6`: the wait ends as soon as the cancel is set
 - C5-3 | C5 | low | A local-mode automatic run without local consent reports `ready` as the whole selection, carried messages included, where every other path counts only new ones (`brief.py`, the `locally_allowed` branch). Local AI is experimental. Reproduced | fixed in `cc3bea1`
-- C5-4 | C5 | low | Two handlers of a failing progress callback log the exception's text (`sync.py` `emit_progress`, and `application.py` before ranking); the third logs its type. The callbacks are the desktop's own and are handed counts only, so no mail text is known to have reached the log | fixed in `e523b99`: all three log the type
+- C5-4 | C5 | low | Two handlers of a failing progress callback log the exception's text (`sync.py` `emit_progress`, and `application.py` before ranking); the third logs its type. The callbacks are the desktop's own and are handed counts only, so no mail text is known to have reached the log | fixed in `e523b99`: all three log the type. A scan now refuses an exception passed to a log call in its own `except` block (`test_no_log_call_passes_an_exception_s_text`); the two other places that did it log the type too
 - C5-5 | C5 | low | A run whose sync was partial and left nothing to select saves no brief, which is right, but reports `ANALYSIS_FAILED` with the code `ANALYSIS_FAILED`: the owner reads "No message could be analyzed. Review your selection and AI settings." when nothing was sent and the sync's own error code says why. Read, not reproduced | open

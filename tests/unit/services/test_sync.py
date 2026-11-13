@@ -2,10 +2,11 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from mailbrief.domain.bodies import BodySource, MessageBody
@@ -39,7 +40,7 @@ from mailbrief.storage.repositories import (
     MessageRepository,
     SyncRunRepository,
 )
-from mailbrief.storage.tables import AccountTable, Base
+from mailbrief.storage.tables import AccountTable, Base, SyncRunTable
 from tests.factories import make_message
 
 TEST_WINDOW = DayWindow(
@@ -559,7 +560,9 @@ async def test_sync_day_rate_limit_honored_within_cap_resumes_pagination(
     )
 
     progress_events: list[SyncProgress] = []
-    with patch("mailbrief.services.sync.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch(
+        "mailbrief.services.sync._stopped_while_waiting", AsyncMock(return_value=False)
+    ) as mock_sleep:
         result = await sync_service.sync_day(
             account_id=test_account,
             account_identity="user@example.com",
@@ -570,13 +573,15 @@ async def test_sync_day_rate_limit_honored_within_cap_resumes_pagination(
     assert result.status == SyncStatus.COMPLETE
     assert result.page_count == 2
     assert result.message_count == 2
-    mock_sleep.assert_awaited_once_with(5.0)
+    mock_sleep.assert_awaited_once_with(5.0, None)
     assert len(progress_events) >= 3
 
 
 async def test_stop_during_a_rate_limit_wait_ends_the_sync_at_once(
     async_session: AsyncSession, test_account: int
 ) -> None:
+    from unittest.mock import AsyncMock, patch
+
     provider = FakeEmailProvider(
         pages=[
             [make_message(provider_message_id="msg-1")],
@@ -586,14 +591,6 @@ async def test_stop_during_a_rate_limit_wait_ends_the_sync_at_once(
     provider.fail_at_page = 2
     provider.failure_exception = ProviderRateLimitError("throttled", retry_after_seconds=30.0)
     cancel = asyncio.Event()
-    after_first_page = 0
-
-    def progress(value: SyncProgress) -> None:
-        nonlocal after_first_page
-        after_first_page += value.pages_fetched
-        if after_first_page == 2:  # The second report with one page: the wait is starting.
-            asyncio.get_running_loop().call_later(0.02, cancel.set)
-
     service = SyncService(
         provider=provider,
         message_repo=MessageRepository(async_session),
@@ -602,19 +599,27 @@ async def test_stop_during_a_rate_limit_wait_ends_the_sync_at_once(
         session=async_session,
     )
 
-    result = await asyncio.wait_for(
-        service.sync_day(
+    with patch(
+        "mailbrief.services.sync._stopped_while_waiting", AsyncMock(return_value=True)
+    ) as wait:
+        result = await service.sync_day(
             account_id=test_account,
             account_identity="user@example.com",
             window=TEST_WINDOW,
-            progress=progress,
             cancel=cancel,
-        ),
-        timeout=5,
-    )
+        )
 
+    wait.assert_awaited_once_with(30.0, cancel)
     assert result.status is SyncStatus.CANCELLED
     assert result.page_count == 1
+
+
+async def test_the_rate_limit_wait_ends_when_stop_is_set_or_its_time_is_up() -> None:
+    stop = asyncio.Event()
+    assert await sync_module._stopped_while_waiting(0, stop) is False
+    assert await sync_module._stopped_while_waiting(0, None) is False
+    stop.set()
+    assert await sync_module._stopped_while_waiting(3600, stop) is True
 
 
 async def test_sync_work_budget_is_enforced_between_pages(
@@ -764,7 +769,9 @@ async def test_a_resumed_scan_keeps_mail_cached_since_it_began(
     so a message a later sync cached keeps its place in the Inbox. One cached before the
     scan and not seen by it still leaves."""
     repo = MessageRepository(async_session)
-    await repo.upsert_messages(test_account, [make_message(provider_message_id="archived")])
+    stale = await repo.upsert_messages(test_account, [make_message(provider_message_id="archived")])
+    # Set, not left to the clock: cached well before the scan begins.
+    stale[0].synced_at_utc = datetime.now(UTC) - timedelta(minutes=1)
     await async_session.commit()
     first = make_message(provider_message_id="first")
     older = make_message(provider_message_id="older")
@@ -789,7 +796,16 @@ async def test_a_resumed_scan_keeps_mail_cached_since_it_began(
     )
     assert paused.status is SyncStatus.PARTIAL
     # The day's sync caches a message that arrived while the scan was paused.
-    await repo.upsert_messages(test_account, [make_message(provider_message_id="arrived")])
+    # It also saw "first" leave the Inbox, which the scan listed before it paused.
+    fresh = await repo.upsert_messages(
+        test_account,
+        [
+            make_message(provider_message_id="arrived"),
+            make_message(provider_message_id="first", is_in_inbox=False),
+        ],
+    )
+    for row in fresh:
+        row.synced_at_utc = datetime.now(UTC) + timedelta(minutes=1)
     await async_session.commit()
 
     finished = await service.sync_inbox(
@@ -798,7 +814,47 @@ async def test_a_resumed_scan_keeps_mail_cached_since_it_began(
 
     assert finished.status is SyncStatus.COMPLETE
     rows, _ = await repo.get_inbox_page(test_account)
-    assert {row.provider_message_id for row in rows} == {"first", "older", "arrived"}
+    assert {row.provider_message_id for row in rows} == {"older", "arrived"}
+
+
+async def test_a_checkpoint_over_a_day_old_is_not_resumed(
+    async_session: AsyncSession, test_account: int
+) -> None:
+    calls: list[str | None] = []
+
+    class Reader:
+        async def iter_inbox_pages(
+            self, continuation: str | None = None
+        ) -> AsyncIterator[MessagePage]:
+            calls.append(continuation)
+            first = make_message(provider_message_id="first")
+            yield MessagePage(page_number=1, messages=(first,), continuation="older-page")
+            if len(calls) == 1:
+                raise ProviderResponseError("synthetic network failure")
+            yield MessagePage(page_number=2, messages=())
+
+    service = SyncService(
+        provider=FakeEmailProvider(),
+        message_repo=MessageRepository(async_session),
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+    )
+    await service.sync_inbox(
+        reader=Reader(), account_id=test_account, account_identity="user@example.com"
+    )
+    run = await async_session.scalar(
+        select(SyncRunTable).where(SyncRunTable.inbox_continuation.is_not(None))
+    )
+    assert run is not None
+    run.started_at_utc -= timedelta(days=2)
+    await async_session.commit()
+
+    finished = await service.sync_inbox(
+        reader=Reader(), account_id=test_account, account_identity="user@example.com"
+    )
+
+    assert calls == [None, None]  # It began again, not from the old page.
+    assert finished.status is SyncStatus.COMPLETE
 
 
 @pytest.mark.parametrize("invalidate", ["expired", "deleted", "clear", "oversized"])
