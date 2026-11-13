@@ -44,7 +44,10 @@ def resolve_timezone(tz_key: str | None = None) -> ZoneInfo:
         # process, so a laptop that changes zone (travel) would keep the old day until restart.
         return tzlocal.reload_localzone()
     except Exception as exc:
-        logger.warning("Failed to discover system local timezone (%s); falling back to UTC", exc)
+        logger.warning(
+            "Failed to discover system local timezone (%s); falling back to UTC",
+            type(exc).__name__,
+        )
         return ZoneInfo("UTC")
 
 
