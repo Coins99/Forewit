@@ -3,9 +3,10 @@
 import asyncio
 import os
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
-from sqlalchemy import Connection, pool
+from sqlalchemy import Connection, event, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from mailbrief.storage.migration_forks import compatible_plan
@@ -71,6 +72,14 @@ def run_sync_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
+def _leave_transactions_to_sqlalchemy(dbapi_connection: Any, _record: Any) -> None:
+    dbapi_connection.isolation_level = None
+
+
+def _begin(connection: Connection) -> None:
+    connection.exec_driver_sql("BEGIN")
+
+
 async def run_async_migrations() -> None:
     """Create the async engine and execute migrations."""
     configuration = config.get_section(config.config_ini_section, {})
@@ -80,6 +89,13 @@ async def run_async_migrations() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    # SQLite's driver begins a transaction only before it changes rows, so a revision's
+    # schema statements were committed one by one: an upgrade that stopped inside a
+    # revision left columns and tables its recorded version did not have, and every retry
+    # failed on them. Begin the transaction here, so a revision and its version are
+    # committed together or not at all.
+    event.listen(connectable.sync_engine, "connect", _leave_transactions_to_sqlalchemy)
+    event.listen(connectable.sync_engine, "begin", _begin)
 
     async with connectable.connect() as connection:
         await connection.run_sync(run_sync_migrations)

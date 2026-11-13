@@ -17,7 +17,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from mailbrief.storage.database import Database, sqlite_url
-from mailbrief.storage.migrate import migrated_database, upgrade_database
+from mailbrief.storage.migrate import migrated_database, migration_config, upgrade_database
 
 
 def test_packaged_migrations_work_away_from_checkout(
@@ -321,6 +321,52 @@ def test_backup_failure_prevents_upgrade(tmp_path: Path, monkeypatch: pytest.Mon
     with pytest.raises(OSError):
         upgrade_database(path)
     upgrade.assert_not_called()
+
+
+def _version(path: Path) -> list[str]:
+    with closing(sqlite3.connect(path)) as connection:
+        rows = connection.execute("SELECT version_num FROM alembic_version").fetchall()
+    return [str(row[0]) for row in rows]
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "20260925_0002",  # adds columns
+        "20260925_0004",  # rebuilds a table through a temporary one
+        "20261104_0029",  # one of the two revisions that add the same note column
+    ],
+)
+def test_an_upgrade_that_stops_inside_a_revision_leaves_nothing_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str
+) -> None:
+    from alembic.runtime.migration import HeadMaintainer, RevisionStep, StampStep
+
+    from mailbrief.storage.recovery import validate_snapshot
+
+    path = tmp_path / "mailbrief.sqlite3"
+    before = tmp_path / "before.sqlite3"
+    scripts = ScriptDirectory.from_config(migration_config(path))
+    parent = scripts.get_revision(revision).down_revision
+    assert isinstance(parent, str)
+    command.upgrade(migration_config(before), parent)
+    record = HeadMaintainer.update_to_step
+
+    def stop_before_recording(maintainer: HeadMaintainer, step: RevisionStep | StampStep) -> None:
+        if revision in step.to_revisions:
+            raise RuntimeError("stopped")
+        record(maintainer, step)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(HeadMaintainer, "update_to_step", stop_before_recording)
+        with pytest.raises(RuntimeError, match="stopped"):
+            command.upgrade(migration_config(path), revision)
+    # Every revision before it is kept; of the one that stopped, nothing is.
+    assert _version(path) == [parent]
+    assert _schema(path) == _schema(before)
+    assert table_names(path) == table_names(before)
+    upgrade_database(path)
+    assert validate_snapshot(path, current_schema=True) == tuple(scripts.get_heads())
 
 
 _ACTION_TABLES = {
