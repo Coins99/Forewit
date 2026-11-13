@@ -23,12 +23,14 @@ from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.domain.projects import ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatFrequency, RepeatRule
+from mailbrief.domain.work_blocks import BlockTime
 from mailbrief.services.actions import ActionConflictError, ActionRepeatError, ActionService
 from mailbrief.services.calendar import resolve_timezone
 from mailbrief.services.data import export_writing
 from mailbrief.services.drafts import DraftService
 from mailbrief.services.preferences import PreferencesService
 from mailbrief.services.projects import ProjectService
+from mailbrief.services.work_blocks import WorkBlockService
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import migration_config, upgrade_database
@@ -514,6 +516,38 @@ async def test_a_next_occurrence_a_note_was_linked_to_later_is_kept(
 
     assert following.public_id in {a.public_id for a in await open_tasks(actions)}
     assert (await drafts.get(note.public_id)).action_public_id == following.public_id
+
+
+@pytest.mark.parametrize("unscheduled", [False, True])
+async def test_a_next_occurrence_with_scheduled_time_is_kept(
+    session: AsyncSession, unscheduled: bool
+) -> None:
+    """A work block (ADR 0028) never changes its task, but it is the owner's plan for it, and
+    removing the task would delete the block with it; an unscheduled one can still come back."""
+    clock = Clock(START)
+    actions = service(session, clock)
+    blocks = WorkBlockService(session, clock=clock)
+    first = await actions.create(task(), (), DAILY)
+    done = await actions.complete(first.public_id, first.revision)
+    following = await only_open(actions)
+    block = (
+        await blocks.schedule(
+            following.public_id,
+            BlockTime(
+                starts_at_utc=datetime(2026, 10, 16, 14, 0, tzinfo=UTC),
+                ends_at_utc=datetime(2026, 10, 16, 15, 0, tzinfo=UTC),
+                time_zone="America/Toronto",
+            ),
+        )
+    ).block
+    if unscheduled:
+        await blocks.unschedule(block.public_id, block.revision)
+
+    await actions.undo_status(first.public_id, done.revision)
+
+    assert following.public_id in {a.public_id for a in await open_tasks(actions)}
+    kept_block = (await blocks.restore(block.public_id)).block
+    assert kept_block.action_public_id == following.public_id
 
 
 async def test_a_tag_respelt_elsewhere_leaves_the_next_untouched(session: AsyncSession) -> None:

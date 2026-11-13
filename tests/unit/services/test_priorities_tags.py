@@ -16,6 +16,7 @@ from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.services.actions import ActionConflictError, ActionService
 from mailbrief.services.data import export_writing
 from mailbrief.services.today import needs_attention
+from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.backup import create_backup
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
@@ -112,6 +113,33 @@ async def test_respelling_a_tag_respells_it_on_every_live_task(session: AsyncSes
     restored = await service.restore(gone.public_id)
     assert restored.tags == ("Home",)
     assert await service.list_tags() == ("diy", "Home")
+
+
+async def test_accepting_again_restores_tags_as_live_tasks_spell_them(
+    session: AsyncSession,
+) -> None:
+    """Accepting a suggestion whose action was deleted brings that action back, so its tags
+    read as live tasks spell them now, as restore()'s do."""
+    service = ActionService(session, clock=Clock(START))
+    seeded = await seed(session)
+    accepted = await service.accept(seeded.suggestion_ids[0])
+    gone = await service.save(accepted.public_id, accepted.revision, task(tags=("home",)))
+    other = await service.create(task(title="Other", tags=("home",)))
+    await service.delete(gone.public_id, gone.revision)
+    await service.save(other.public_id, other.revision, task(title="Other", tags=("Home",)))
+
+    restored = await service.accept(seeded.suggestion_ids[0])
+
+    assert restored.public_id == gone.public_id
+    assert restored.tags == ("Home",)
+    # It restores as restore() does: the deletion is undone, not followed by a restore.
+    repository = ActionRepository(session)
+    row = await repository.get_action(restored.public_id)
+    assert row is not None
+    latest = await repository.latest_activity(row.id)
+    assert latest is not None and latest.kind == Kind.UNDO.value
+    assert latest.undo_of_revision == restored.revision - 1
+    assert [row[0] for row in await tag_rows(session)] == ["Home", "Home"]
 
 
 async def test_tags_filter_and_list_only_live_tasks(session: AsyncSession) -> None:
