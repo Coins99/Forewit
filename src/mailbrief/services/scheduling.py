@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.actions import PRIORITY_RANK, ActionPriority
 from mailbrief.domain.availability import busy_spans, working_spans
 from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
-from mailbrief.domain.events import CalendarEvent, ScheduledBlock
+from mailbrief.domain.events import CalendarEvent
 from mailbrief.domain.google_calendar import GoogleEvent
 from mailbrief.domain.planning_intervals import (
     UtcInterval,
@@ -293,13 +293,6 @@ class SchedulingService:
             for block in blocks.values()
             if block.starts_at_utc < horizon.end and block.ends_at_utc > horizon.start
         )
-
-        def clipped(block: ScheduledBlock) -> UtcInterval:
-            return UtcInterval(
-                start=max(block.starts_at_utc, horizon.start),
-                end=min(block.ends_at_utc, horizon.end),
-            )
-
         return SchedulingSnapshot(
             fingerprint=fingerprint(payload),
             captured_at_utc=now,
@@ -325,8 +318,14 @@ class SchedulingService:
                 and event.days(zone)[1] >= first
                 for event in fixed
             ),
-            reserved=tuple(clipped(block) for block in in_range if block.open),
-            held=tuple(clipped(block) for block in in_range if not block.open),
+            reserved=tuple(
+                UtcInterval(
+                    start=max(block.starts_at_utc, horizon.start),
+                    end=min(block.ends_at_utc, horizon.end),
+                )
+                for block in in_range
+                if block.open
+            ),
             blocks=tuple(block.block for block in in_range),
             demands=tuple(demands),
             conflicts=tuple(conflicts),

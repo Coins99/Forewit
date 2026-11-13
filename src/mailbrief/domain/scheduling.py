@@ -86,9 +86,6 @@ class SchedulingSnapshot(DomainModel):
     timed_busy: tuple[UtcInterval, ...] = ()
     all_day_commitments: int = 0
     reserved: tuple[UtcInterval, ...]
-    # Done tasks' blocks: not planned work, but the shared conflict rule (ADR 0030) still
-    # counts an overlap with one, so nothing is suggested over them.
-    held: tuple[UtcInterval, ...] = ()
     blocks: tuple[WorkBlock, ...]
     demands: tuple[TaskDemand, ...]
     conflicts: tuple[ScheduleConflict, ...]
@@ -173,7 +170,7 @@ def free_slots(snapshot: SchedulingSnapshot) -> tuple[UtcInterval, ...] | None:
         for window in snapshot.working
         if window.end > snapshot.captured_at_utc
     )
-    return subtract_intervals(future, (*snapshot.busy, *snapshot.reserved, *snapshot.held))
+    return subtract_intervals(future, (*snapshot.busy, *snapshot.reserved))
 
 
 def workload(snapshot: SchedulingSnapshot) -> Workload:
@@ -373,8 +370,7 @@ def verify_proposal(snapshot: SchedulingSnapshot, proposal: SchedulingProposal) 
             or (demand.deadline_utc is not None and interval.end > demand.deadline_utc)
             or subtract_intervals((interval,), snapshot.working or ())
             or any(
-                interval.overlaps(busy)
-                for busy in (*snapshot.busy, *snapshot.reserved, *snapshot.held, *intervals)
+                interval.overlaps(busy) for busy in (*snapshot.busy, *snapshot.reserved, *intervals)
             )
         ):
             raise ValueError("A proposed block violates scheduling constraints.")

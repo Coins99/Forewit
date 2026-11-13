@@ -54,7 +54,8 @@ estimate. Without Google Calendar, the owner's own events are the whole calendar
   provisional or in conflict, and only open tasks' blocks that end after the start of
   today are checked.
 - **Conflicts** (`conflicts_for`): a block overlapping a busy event; sitting in a busy
-  event's buffer without overlapping it; overlapping another block; on a day off; partly
+  event's buffer without overlapping it; overlapping another open task's block (a done task's block takes no time, as free
+  time counts it; decided 2026-11-13); on a day off; partly
   outside the working hours; ending after its task's deadline; or its task having more
   time set aside from today on than its estimate, marked on the task's latest block shown
   only. Free events never conflict. Saving a
