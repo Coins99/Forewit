@@ -172,7 +172,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
 | C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Done 2026-11-13, draft PR on `qa/c5-daily-run`, from `main` (#122). Four findings fixed, one open. Next: C3, in a fresh 5-hour window |
 | D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Started 2026-11-13, draft PR #121: the two items B1 handed on (the system's day, plain-text labels). Open: the gallery, the empty, one, many and long-text cases, and the run-sheet fixes |
-| E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Not started |
+| E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Done 2026-11-13 for the Insights benchmark, on a Mac: no regression, see [Slice E](#slice-e-performance). The p2 probe has no script, so it was not re-run |
 
 Anything else (the Gmail and Calendar adapters, `domain/`, the repositories, `text/`,
 `infra/`) gets a deep read only if `hotspots` or a finding points at it.
@@ -387,6 +387,30 @@ set back could shield a message, and left a scan free to resume days later; it i
 as the C5-1 line says. The rate-limit wait has one path, and its tests replace the wait
 instead of running a timer. Still by wall clock: the scan's start against the time a
 message was cached. A traceback in a log line (`logger.exception`) is not scanned for.
+
+## Slice E: performance
+
+`python -m scripts.benchmark_insights` (10,000 tasks, 100,000 activity rows, 50,000
+observations, twelve widgets), run 2026-11-13 on `origin/main`, on an
+Apple M2 (macOS, Python 3.13.15). The recorded numbers in `p4-insights.md` are from a
+Windows 11 machine, so this is a different-hardware check, not a like-for-like one.
+
+| Measure | Recorded (Windows) | Now (M2) |
+| --- | ---: | ---: |
+| First usable card | 0.155 s | 0.082 s |
+| Twelve-widget cold dashboard | 9.446 s | 4.378 s |
+| Warm median / worst | 9.087 / 9.541 s | 4.393 / 4.433 s |
+| First detail page | 2.794 s | 1.653 s |
+| Peak process memory | 655.7 MB | 735.5 MB |
+| Qt timer p95 / worst | 0.056 / 0.652 s | 0.082 / 0.484 s |
+
+No regression: time is about half the recorded figure. Memory is 12% higher and the timer
+p95 is higher, which fits a different OS allocator and a 10 ms timer on a busy machine, but
+only a Windows re-run can settle it. The three samples still do not make a stable p95.
+
+Not done: the large-profile probe in `p2-workspace.md` (Today summary, search, note
+commit). It has no script in the repository, only recorded results, so it cannot be
+re-run until one is written. That is a small follow-up.
 
 ## Findings
 
