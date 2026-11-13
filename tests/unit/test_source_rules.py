@@ -132,6 +132,10 @@ NETWORK_IMPORT: Final = re.compile(
     r"^\s*(?:from|import)\s+(?:[\w.]+\s*,\s*)*"
     r"(?:httpx|requests|aiohttp|urllib\.request|http\.client|socket)\b"
 )
+# An import of a provider adapter, capturing which one ("gmail.mapper", "local.manifest").
+ADAPTER_IMPORT: Final = re.compile(
+    r"^\s*(?:from|import)\s+mailbrief\.providers\b\.?([\w.]*)", re.MULTILINE
+)
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(
     r"is_gmail_link\(|is_calendar_link\(|gmail_source\(|gmail_link\(|"
@@ -284,6 +288,22 @@ def test_core_packages_import_no_network_library() -> None:
         if path not in allowed
     ]
     assert offending_lines(files, NETWORK_IMPORT) == []
+
+
+def test_core_packages_import_no_adapter() -> None:
+    """Provider JSON stays in its adapter because nothing in the domain, storage, text, ports
+    or services packages imports one: they see domain models through the ports. Local setup
+    alone reads the local adapter's pinned manifest and its download guard, never a reply."""
+    setup = SOURCE / "services" / "local_setup.py"
+    files = [
+        path
+        for folder in ("domain", "storage", "text", "services", "ports")
+        for path in (SOURCE / folder).rglob("*.py")
+        if path != setup
+    ]
+    assert offending_lines(files, ADAPTER_IMPORT) == []
+    imported = ADAPTER_IMPORT.findall(setup.read_text(encoding="utf-8"))
+    assert sorted(imported) == ["local.manifest", "local.transport"]
 
 
 def test_no_forbidden_dependency_is_declared() -> None:
