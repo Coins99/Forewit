@@ -78,7 +78,7 @@ def _safe_on_retry(
         try:
             callback(attempt, delay)
         except Exception as exc:
-            logger.warning("on_retry callback raised an exception: %s", exc)
+            logger.warning("on_retry callback raised an exception: %s", type(exc).__name__)
 
 
 class GraphClient:

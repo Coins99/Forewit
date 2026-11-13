@@ -63,6 +63,15 @@ def sanitize_error_code(exc: Exception) -> str:
     return "UNKNOWN_ERROR"
 
 
+async def _stopped_while_waiting(seconds: float, cancel: asyncio.Event | None) -> bool:
+    """Wait out a provider's rate limit; True when ``cancel`` was set before it ended."""
+    try:
+        await asyncio.wait_for((cancel or asyncio.Event()).wait(), seconds)
+    except TimeoutError:
+        return False
+    return True
+
+
 class SyncService:
     """Coordinates email retrieval from EmailProvider and atomic SQLite storage."""
 
@@ -103,8 +112,8 @@ class SyncService:
 
         Only a complete, error-free enumeration reconciles Inbox membership, as it is now,
         and, when ``record_last_sync`` is true (today's window), advances the account's
-        last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are
-        honored by resuming from the last committed page.
+        last-sync time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are honored by
+        resuming from the last committed page; a cancel ends the wait at once.
         """
 
         def pages(continuation: str | None) -> AsyncIterator[MessagePage]:
@@ -135,7 +144,8 @@ class SyncService:
     ) -> SyncResult:
         """Sync all current Inbox metadata; reconcile only after complete enumeration.
 
-        This does not advance the daily-brief watermark or download bodies.
+        This does not advance the daily-brief watermark or download bodies. A scan may
+        finish from a checkpoint, so what was cached after it began is left as it is.
         """
         now = datetime.now(UTC)
         window = DayWindow(
@@ -181,10 +191,10 @@ class SyncService:
         )
         await self._commit()
         if saved:
-            sync_run_id = saved.run_id
+            sync_run_id, began = saved.run_id, saved.started_at_utc
         else:
             assert sync_run is not None
-            sync_run_id = sync_run.id
+            sync_run_id, began = sync_run.id, sync_run.started_at_utc
 
         pages_count = saved.pages if saved else 0
         seen_ids: set[str] = set(saved.seen_ids) if saved else set()
@@ -207,7 +217,7 @@ class SyncService:
                     )
                 )
             except Exception as exc:
-                logger.warning("Progress callback raised an exception: %s", exc)
+                logger.warning("Progress callback raised an exception: %s", type(exc).__name__)
 
         async def finish(status: SyncStatus, error_code: str | None) -> SyncResult:
             if scans and (status is SyncStatus.COMPLETE or continuation is None):
@@ -303,7 +313,8 @@ class SyncService:
 
                     logger.info("Honoring provider rate-limit wait of %.1fs", wait_delay)
                     emit_progress()
-                    await asyncio.sleep(wait_delay)
+                    if await _stopped_while_waiting(wait_delay, cancel):
+                        return await finish(SyncStatus.CANCELLED, None)
                     local_wait_seconds += wait_delay
                     # The loop resumes from `continuation`, the last committed page.
 
@@ -329,7 +340,11 @@ class SyncService:
             return await finish(SyncStatus.PARTIAL, METADATA_ITEMS_FAILED)
 
         await self._message_repo.reconcile_inbox(
-            account_id, window.start_utc, window.end_utc, seen_ids
+            account_id,
+            window.start_utc,
+            window.end_utc,
+            seen_ids,
+            began_utc=began if scans else None,
         )
         if record_last_sync:
             await self._account_repo.update_last_sync(account_id, datetime.now(UTC))

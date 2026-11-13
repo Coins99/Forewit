@@ -397,6 +397,9 @@ FORBIDDEN_DEPENDENCIES: Final = (
 )
 
 
+LOGGER_NAMES = {"logger", "log", "logging", "_logger", "LOGGER"}
+
+
 def logged_names(node: ast.AST) -> set[str]:
     """The names an expression would put in a log line. What ``len()`` only measures is left
     out: a log line may carry counts."""
@@ -423,7 +426,7 @@ def logging_calls_with_private_names(files: Iterable[Path]) -> list[str]:
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr in LOG_METHODS
                 and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in {"logger", "log", "logging", "_logger", "LOGGER"}
+                and node.func.value.id in LOGGER_NAMES
             ):
                 continue
             first = node.args[:1]
@@ -438,6 +441,43 @@ def logging_calls_with_private_names(files: Iterable[Path]) -> list[str]:
             if private:
                 shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
                 found.append(f"{shown.as_posix()}:{node.lineno}: logs {private}")
+    return found
+
+
+def _is_text_of(node: ast.AST, name: str) -> bool:
+    """Whether ``node`` puts the text of the exception called ``name`` in a log line: the
+    exception itself, ``str()`` or ``repr()`` of it, or an f-string that formats it."""
+    if isinstance(node, ast.Name):
+        return node.id == name
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in {"str", "repr"} and any(_is_text_of(a, name) for a in node.args)
+    if isinstance(node, ast.JoinedStr):
+        return any(
+            isinstance(part, ast.FormattedValue) and _is_text_of(part.value, name)
+            for part in node.values
+        )
+    return False
+
+
+def logging_calls_with_exception_text(files: Iterable[Path]) -> list[str]:
+    """Logging calls in an ``except ... as name`` block that log the exception's text."""
+    found: list[str] = []
+    for path in sorted(files):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for handler in ast.walk(tree):
+            if not isinstance(handler, ast.ExceptHandler) or handler.name is None:
+                continue
+            for node in ast.walk(handler):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in LOG_METHODS
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in LOGGER_NAMES
+                    and any(_is_text_of(argument, handler.name) for argument in node.args)
+                ):
+                    shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+                    found.append(f"{shown.as_posix()}:{node.lineno}: logs {handler.name}")
     return found
 
 
@@ -473,6 +513,25 @@ def test_no_log_call_passes_a_token_key_body_query_or_prompt() -> None:
     line; a log line gets codes and counts (AGENTS.md invariants). The scan goes by name, so
     it cannot see an exception's text or a private value under a plain name."""
     assert logging_calls_with_private_names(SOURCE.rglob("*.py")) == []
+
+
+def test_no_log_call_passes_an_exception_s_text(tmp_path: Path) -> None:
+    """An exception's text can hold whatever raised it was handling, so a log line names its
+    type or a code, never the exception itself. The scan sees an exception passed as it is,
+    through ``str()`` or ``repr()``, or in an f-string, in its own ``except`` block; a
+    traceback (``logger.exception``, ``exc_info``) is not looked for."""
+    assert logging_calls_with_exception_text(SOURCE.rglob("*.py")) == []
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "try:\n    pass\nexcept ValueError as exc:\n"
+        "    logger.warning('failed: %s', exc)\n"
+        "    logger.warning(f'failed: {exc}')\n"
+        "    logger.warning('failed: %s', str(exc))\n"
+        "    logger.warning('failed: %s', type(exc).__name__)\n",
+        encoding="utf-8",
+    )
+    found = logging_calls_with_exception_text([sample])
+    assert [line.rsplit(":", 2)[1] for line in found] == ["4", "5", "6"]
 
 
 def test_the_source_names_only_the_read_only_google_scopes() -> None:
