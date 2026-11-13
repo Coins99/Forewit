@@ -79,6 +79,26 @@ async def test_automatic_local_run_does_not_ask_without_grant(session: AsyncSess
     assert not gate.previews
 
 
+async def test_automatic_local_run_without_grant_counts_only_new_mail(
+    session: AsyncSession,
+) -> None:
+    await enable(session)
+    provider = LocalAI([answer_all(), answer_all()])
+    gate = RecordingGate(answer=True)
+    saved = await build(session, provider, gate, batch_size=1).generate(tz_key=ZONE)
+    assert saved.status is BriefStatus.SAVED  # m0 and m1 are in the day's brief.
+    await ConsentRepository(session).revoke_all(await account_id_of(session), "local", NOW)
+    await session.commit()
+
+    result = await build(session, provider, gate, messages=inbox(3), batch_size=1).generate(
+        tz_key=ZONE, automatic=True
+    )
+
+    assert result.status is BriefStatus.READY_FOR_REVIEW
+    assert result.ready == 1  # m2; the carried two don't count.
+    assert provider.calls == 2
+
+
 async def test_automatic_local_run_rechecks_cache_identity_without_new_mail(
     session: AsyncSession,
 ) -> None:

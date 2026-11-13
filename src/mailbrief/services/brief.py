@@ -327,11 +327,10 @@ class BriefService:
             current = await PreferencesService(self._session).get()
             if local_preferences is None or current.revision != local_preferences.revision:
                 return BriefRunResult(status=BriefStatus.CANCELLED, sync=sync)
+        new = sum(item.message.provider_message_id not in carried for item in shortlist)
         if local and not await locally_allowed():
             if automatic or not shortlist:
-                return BriefRunResult(
-                    status=BriefStatus.READY_FOR_REVIEW, sync=sync, ready=len(shortlist)
-                )
+                return BriefRunResult(status=BriefStatus.READY_FOR_REVIEW, sync=sync, ready=new)
             preview = TransmissionPreview(
                 provider_name=LOCAL_CONSENT_PROVIDER,
                 account_email=account.email_address,
@@ -356,7 +355,6 @@ class BriefService:
             if automatic
             else 0
         )
-        new = sum(item.message.provider_message_id not in carried for item in shortlist)
         if automatic and (send_limit == 0 or (new == 0 and not local)):
             # Nothing may be sent, or nothing is new: report, and leave the saved brief.
             logger.info("Automatic run: %d new messages ready, nothing sent", new)
