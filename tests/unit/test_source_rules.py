@@ -83,6 +83,21 @@ def test_the_rules_find_what_they_are_for() -> None:
         assert not PLAIN_LIST.search(line), line
     assert CALENDAR_POPUP.search("self.day.setCalendarPopup(True)")
     assert not CALENDAR_POPUP.search("calendar_popup(self.day)")
+    for line in (
+        "from mailbrief.providers.groq.provider import _usage",
+        "    import mailbrief.providers.gmail.mapper as mapper",
+        "from mailbrief import config, providers",
+        "from ..providers.groq import provider",
+        "from .. import providers",
+        'module = importlib.import_module("mailbrief.providers.groq")',
+    ):
+        assert ADAPTER_IMPORT.search(line), line
+    for line in (
+        "from mailbrief.ports.ai_provider import AIProvider",
+        "from mailbrief.services.brief import provider_display_name",
+        "from mailbrief.domain import messages",
+    ):
+        assert not ADAPTER_IMPORT.search(line), line
 
 
 # --- Privacy and boundary rules (QA slice B1) ---------------------------------------------
@@ -134,7 +149,10 @@ NETWORK_IMPORT: Final = re.compile(
 )
 # An import of a provider adapter, capturing which one ("gmail.mapper", "local.manifest").
 ADAPTER_IMPORT: Final = re.compile(
-    r"^\s*(?:from|import)\s+mailbrief\.providers\b\.?([\w.]*)", re.MULTILINE
+    r"^\s*(?:from|import)\s+(?:mailbrief\.|\.+)providers\b\.?([\w.]*)"
+    r"|^\s*from\s+(?:mailbrief|\.+)\s+import\s[^#\n]*\bproviders\b"
+    r"|import_module\(\s*[\"']mailbrief\.providers\b",
+    re.MULTILINE,
 )
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(

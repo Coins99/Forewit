@@ -515,8 +515,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passes a private name (a token, key, headers, body, query, prompt, sender rules; `len()`
   of one and `*_count`-style names are fine); a Google scope other than the three read-only
   ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
-  `datetime` clock; a network library imported by `domain`, `storage`, `text`, `services`
-  or `ports`; a forbidden dependency in `pyproject.toml`; and a function that opens a URL
+  `datetime` clock; a network library, or a provider adapter, imported by `domain`,
+  `storage`, `text`, `services` or `ports` (local setup alone reads the local adapter's
+  manifest and download guard); a forbidden dependency in `pyproject.toml`; and a function that opens a URL
   without checking it is Gmail's or Calendar's in that same function.
 
 ## UI work
