@@ -23,9 +23,10 @@ explained.
   provisional or in conflict.
 
 A block's **conflicts** say what it clashes with: a busy event it overlaps, or one whose
-buffer it sits in; another block; a day off; the time outside the working hours; its task's
-deadline; or more time set aside for its task than the task's estimate. Free events never
-conflict. Saving a block warns from the same definition (``WorkBlockService``).
+buffer it sits in; another open task's block; a day off; the time outside the working
+hours; its task's deadline; or more time set aside for its task than the task's estimate.
+Free events and done tasks' blocks never conflict. Saving a block warns from the same
+definition (``WorkBlockService``).
 """
 
 from collections.abc import Mapping, Sequence
@@ -60,7 +61,7 @@ class ConflictKind(StrEnum):
 
     BUSY = "busy"  # It overlaps a busy event.
     BUFFER = "buffer"  # It sits in the buffer kept clear around a busy event.
-    BLOCK = "block"  # It overlaps another block.
+    BLOCK = "block"  # It overlaps another open task's block.
     DAY_OFF = "day_off"  # It is on a day an all-day busy event takes.
     OUTSIDE_HOURS = "outside_hours"  # Some of it falls outside the working hours.
     AFTER_DEADLINE = "after_deadline"  # It ends after its task's deadline.
@@ -220,6 +221,8 @@ def conflicts_for(
     """What ``block`` clashes with among ``events`` and the other ``blocks``, in the order of
     what it clashes with, then its own. The caller passes the entries near the block; a task's
     time set aside counts only when ``block.upcoming_minutes`` was read."""
+    if not block.open:  # A done task's block takes no time, so it clashes with nothing.
+        return ()
     start, end = block.block.interval
     first_day, last_day = block.days(zone)
     before = timedelta(minutes=hours.before_minutes)
@@ -246,7 +249,11 @@ def conflicts_for(
         elif (before or after) and overlaps((start, end), (span[0] - before, span[1] + after)):
             found.append(Conflict(kind=ConflictKind.BUFFER, at=span[0], label=label))
     for other in blocks:
-        if other.public_id != block.public_id and overlaps((start, end), other.block.interval):
+        if (
+            other.open  # A done task's block takes no time, as free time counts it.
+            and other.public_id != block.public_id
+            and overlaps((start, end), other.block.interval)
+        ):
             label = f"Task · {other.title}"
             found.append(Conflict(kind=ConflictKind.BLOCK, at=other.starts_at_utc, label=label))
     found.sort(key=lambda conflict: conflict.at)

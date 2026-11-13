@@ -154,6 +154,67 @@ ADAPTER_IMPORT: Final = re.compile(
     r"|import_module\(\s*[\"']mailbrief\.providers\b",
     re.MULTILINE,
 )
+# Workload, free time and local suggestions (ADRs 0029 to 0031): worked out locally, never sent.
+PLANNING_MODULES: Final = frozenset(
+    {
+        "mailbrief.domain.availability",
+        "mailbrief.domain.planning_intervals",
+        "mailbrief.domain.scheduling",
+        "mailbrief.domain.scheduling_time",
+        "mailbrief.domain.workload",
+        "mailbrief.services.availability",
+        "mailbrief.services.scheduling",
+    }
+)
+# The only modules outside the desktop that read them: local planning, calendar and Insights
+# code. None is a provider adapter, a port or a builder of an AI request.
+PLANNING_READERS: Final = frozenset(
+    {
+        "domain/availability.py",
+        "domain/scheduling.py",
+        "domain/scheduling_time.py",
+        "domain/workload.py",
+        "services/availability.py",
+        "services/metric_calculations.py",
+        "services/scheduling.py",
+        "services/work_blocks.py",
+        "storage/metric_sources.py",
+    }
+)
+
+
+def imported_modules(source: str, package: tuple[str, ...]) -> set[str]:
+    """Every module ``source`` imports, by full name, for a file in ``package``: plain and
+    ``from`` imports however they are wrapped (each imported name is also tried as a
+    submodule), relative ones, and import_module() of a literal."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else ()
+            module = ".".join((*base, *filter(None, [node.module])))
+            found.add(module)
+            found.update(f"{module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args:
+            called = node.func
+            name = (
+                called.attr
+                if isinstance(called, ast.Attribute)
+                else called.id
+                if isinstance(called, ast.Name)
+                else ""
+            )
+            first = node.args[0]
+            if (
+                name == "import_module"
+                and isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+            ):
+                found.add(first.value)
+    return found
+
+
 # What makes a link safe to open: Gmail's or Calendar's host, checked in the same function.
 LINK_GUARD: Final = re.compile(
     r"is_gmail_link\(|is_calendar_link\(|gmail_source\(|gmail_link\(|"
@@ -322,6 +383,33 @@ def test_core_packages_import_no_adapter() -> None:
     assert offending_lines(files, ADAPTER_IMPORT) == []
     imported = ADAPTER_IMPORT.findall(setup.read_text(encoding="utf-8"))
     assert sorted(imported) == ["local.manifest", "local.transport"]
+
+
+def test_only_local_planning_code_reads_workload_or_scheduling() -> None:
+    """Workload, free time and local suggestions never leave the machine: outside the desktop
+    only the listed local modules import them, so no adapter, port or builder of an AI request
+    does. A new reader has to be listed here on purpose. What a module reaches through another
+    module is not followed."""
+    readers = set()
+    for path in SOURCE.rglob("*.py"):
+        parts = path.relative_to(SOURCE).parts
+        modules = imported_modules(path.read_text(encoding="utf-8"), ("mailbrief", *parts[:-1]))
+        if parts[0] != "ui" and modules & PLANNING_MODULES:
+            readers.add("/".join(parts))
+    assert readers == PLANNING_READERS
+    assert not any(name.startswith(("providers/", "ports/")) for name in PLANNING_READERS)
+    wrapped = (
+        "from mailbrief.domain import (\n    events,\n    workload,\n)\n"
+        "from ..domain import scheduling\n"
+        "from . import availability\n"
+        "import_module('mailbrief.domain.planning_intervals')\n"
+    )
+    assert imported_modules(wrapped, ("mailbrief", "services")) >= {
+        "mailbrief.domain.workload",
+        "mailbrief.domain.scheduling",
+        "mailbrief.services.availability",
+        "mailbrief.domain.planning_intervals",
+    }
 
 
 def test_no_forbidden_dependency_is_declared() -> None:

@@ -164,7 +164,7 @@ nothing is sent anywhere, and nothing changes a task, a block or an event.
   Google Calendar connected, its saved copy doesn't hold the day or is over a day old. They
   read "≤ 3h spare" or "Over by 1h+". Refresh fixes the second.
 - **A block in conflict** has a small mark in its top right corner, and "· conflict" in the
-  List view: it overlaps a busy event or another block, sits in a busy event's buffer, is on
+  List view: it overlaps a busy event or another open task's block, sits in a busy event's buffer, is on
   a day off, falls outside your working hours, ends after its task's deadline, or its task
   has more time set aside from today on than its estimate. Free events never conflict.
   Saving a block says the same, except for the estimate.
@@ -203,7 +203,7 @@ deadline or target date never moves a block.
   blocks move: a done task keeps its blocks, greyed, until you unschedule them or reopen
   it, and trying to move one says so. The task editor shows the scheduled time beside the
   estimate; blocks change on the Calendar, not there.
-- Forewit says when a block overlaps a busy event, a Google event or another block, when it
+- Forewit says when a block overlaps a busy event, a Google event or another open task's block, when it
   ends after the task's deadline, and when it is outside your working hours. These are
   warnings: the block is still saved.
 - Deleting a task hides its blocks, and restoring it brings them back. Blocks are kept in

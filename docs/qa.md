@@ -54,6 +54,14 @@ Defaults; the owner changes them here.
   Fable week, ending at 228,000 tokens of context. That is over the 25-point stop. The owner
   decided on 2026-11-12 to keep E, C5 and C4 all the same. So a deep read starts in a fresh
   5-hour window, reads only its slice's files whole, and greps the helpers they lean on.
+- C2, read that way, cost 33 points of the 5-hour window and 9 of the Fable week, ending
+  at 210,000 tokens of context: over the 25-point stop again. It stood at 19 points when
+  both fixes were committed; the other 14 came across the five-minute wait for `qa.py full`
+  and the turns after it, each of which re-reads the whole session. So a deep read should
+  start `qa.py full` in a fresh session, or end before it and leave the run to CI.
+- C4, ended that way, stood at 22 points of the 5-hour window, 6 of the Fable week and
+  218,000 tokens of context when its fix and scan were committed. `qa.py changed` ran
+  twice (about a minute each); `qa.py full` was left to CI.
 
 ## Fixing as we go
 
@@ -151,10 +159,10 @@ In this order: privacy, then data, then durability, then the newest code.
 | R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, merged in #113; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR #114. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
 | C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Done 2026-11-12, draft PR #118 on `qa/c1-ai-boundary`. Two findings fixed, one open. Next: C2, in a fresh 5-hour window |
-| C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
+| C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Done 2026-11-12, draft PR #119 on `qa/c2-owner-writes`. Two findings fixed, two open. Next: C3, in a fresh 5-hour window |
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
-| C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Not started |
+| C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Done 2026-11-13, draft PR on `qa/c4-scheduling`. Three findings fixed, three open. It branches from `qa/c1-ai-boundary`, which holds C2: #119 was merged into that branch after #118 reached `main`, so C2 reaches `main` with this pull request. Next: C3 or C5, in a fresh 5-hour window |
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
 | C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Not started |
 | D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Not started |
@@ -226,7 +234,7 @@ Same method as B1. Tests marked `scan` are in `tests/unit/test_source_rules.py`.
 | Work blocks: never write the task, only live open tasks, overlaps and late deadline only warn | `test_schedule_move_and_unschedule_never_touch_the_task`, `test_only_open_tasks_take_new_or_moved_blocks`, `test_a_block_after_the_deadline_warns_and_moves_nothing`, `test_errors_never_carry_the_task_title`; head schema: blocks key only to actions | covered |
 | Busy/Free: shape default, AI keeps it unless the shape changes, all-day busy is a day off | `test_busy_follows_the_shape_unless_chosen`, `test_a_planned_change_keeps_busy_or_free_unless_the_shape_changes`, `test_free_events_never_overlap_and_days_off_always_do`; B1 for what is sent | covered |
 | Working hours: one row, unreadable counts as none | `test_unreadable_hours_count_as_none_and_can_be_replaced`, `test_hours_start_unset_and_save_with_their_revision` | covered |
-| Workload: read model, no table, not sent to AI | `test_a_day_planned_past_its_time_is_overfilled_until_it_has_passed`, `test_google_makes_a_day_provisional_only_while_it_is_on`. Nothing asserts that it is never sent or stored | not checked: to C4 |
+| Workload: read model, no table, not sent to AI | `test_a_day_planned_past_its_time_is_overfilled_until_it_has_passed`, `test_google_makes_a_day_provisional_only_while_it_is_on`. C4 added `test_only_local_planning_code_reads_workload_or_scheduling` (scan: outside the desktop, the readers are exactly a listed set of local modules) | gap closed for what is sent. That nothing stores it is by reading: no table, and the module has no I/O |
 | Scheduling: one transaction with receipt, retry-safe apply, Undo only while unchanged, locks | `test_failed_batch_commit_rolls_back_every_block_and_receipt`, `test_tampering_elapsed_and_changed_undo_are_refused`, `test_locked_blocks_refuse_move_unschedule_and_batch_undo` | covered |
 | Insights: logs, corrections, revisioned layouts, atomic failures | `test_completion_episodes_event_grouping_and_out_of_range_correction`, `test_starter_retry_revision_and_conflicting_editors`, `test_failed_save_leaves_layout_and_receipt_atomic` | covered; recorded reviews, not re-read |
 
@@ -279,6 +287,66 @@ the two consent repositories).
 Not read: `brief.py` (where exclusions and analysis consent are enforced), `infra/tasks.py`,
 `infra/http_retry.py`, the local provider, and the UI gates.
 
+## Slice C2: owner-record writes
+
+Read whole: `services/actions.py`, `storage/actions.py`, `services/recurrence.py`,
+`services/writes.py`. Grepped, with short ranges read: the session factory, the foreign keys
+into `actions` in `storage/tables.py`, `remove_task_references`, the tag, person and waiting
+helpers and `ActionEdit` in `domain/actions.py`, and the work-block service's entry points.
+
+| Checked | Result |
+| --- | --- |
+| Every change needs the revision the caller saw and bumps it once | Confirmed by reading: each mutating method goes through `_live` or its own check, then one `touch`. The exceptions are the documented ones: restore, a repeated `accept` or `accept_into`, and a tick that changes nothing. `actions` and `action_series` are also versioned rows, so a stale flush fails. Its message blames the repeat: C2-3 |
+| ORM objects only | Confirmed: the four files hold no `update()`, `delete()` or `insert()` statement; decisions, steps, tags and sources are deleted row by row |
+| A failed write rolls back completely | Confirmed: every write goes through `commit_once`, which rolls back on any exception, cancellation included |
+| Retry receipts | Confirmed: the receipt is added in the creating transaction, holds a hash and IDs only, and a replay returns the current record or refuses a removed one. A concurrent duplicate is recognised only by the receipt key's own constraint |
+| Repeats: one next occurrence, from the template, in the closing transaction | Confirmed by reading `follow`: template fields only, one per series and date (deleted ones count), none while a live next one exists |
+| Repeats: withdrawn only while untouched | A next occurrence with a work block counted as untouched: C2-1, fixed. Proposal undo withdraws through the same function |
+| Deadlines, waiting, checklists | Confirmed by reading `_apply_deadline`, `_set_ownership`, `set_step_done` and `add_step`; nothing but an `ActionEdit` sets the person, and accepting a suggestion sets no priority, tags or person |
+| Tags change only through `set_tags` and `respell_tag` | Confirmed (grep). Accepting again a suggestion whose task was deleted skipped the respelling that `restore()` does: C2-2, fixed |
+| `history()` is uncapped and includes soft-deleted tasks | Confirmed: `history_rows` has no limit and no deleted filter, and reads the revision as a scalar |
+
+Not read: `services/proposals.py` (it calls `follow` and `withdraw`; to C5), `domain/recurrence.py`
+(the date arithmetic), `domain/task_history.py`, `services/deadlines.py`, the rest of
+`domain/actions.py` and `storage/tables.py`, the work-block, day-plan, draft and project
+services, and the desktop's callers. Test files were read only around the tests added.
+
+## Slice C4: scheduling and workload
+
+Read whole: `services/scheduling.py`, `domain/scheduling.py`, `domain/scheduling_time.py`,
+`domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py`, and the
+helpers they lean on: `domain/availability.py`, `domain/work_blocks.py`,
+`domain/working_hours.py`, `storage/work_blocks.py`, ADR 0031 and the add-ons register.
+Read in ranges: `EventService.list_range`, `ScheduledBlock` and `CalendarRange`,
+`WorkBlockService._saved`, the conflict section of ADR 0030.
+
+| Checked | Result |
+| --- | --- |
+| A suggestion never breaks a rule the shared conflict function flags | Confirmed by reading for busy events, buffers, days off, working hours and deadlines: the suggester's obstacles and `conflicts_for` use the same spans. Not for blocks: the suggester left a done task's block out and the conflict rule counted it. C4-1, fixed with C4-2 |
+| `conflicts_for` is the one definition | Confirmed: the Calendar (`block_conflicts`), a save's warnings (`WorkBlockService._saved`) and the suggester's repair check all call it. Free time used a different rule for done tasks' blocks: C4-2, fixed |
+| Apply: writer reservation, reread, fingerprint, independent check, clock, receipt in the same transaction | Confirmed by reading. The fingerprint covers the request, the zone, every range read (events, blocks with their tasks' state, hours, Google coverage) and each task's revision. The receipt holds IDs, revisions and a hash |
+| Undo: bound to its apply receipt and every result's revision; refuses a locked, changed or removed block | Confirmed by reading |
+| Replay returns the current blocks or refuses; never recreates | Confirmed by reading `_replay` and `_stored_states` |
+| Interval algebra and DST-safe working windows | Read; no finding. `working_window_intervals` inverts wall time per offset period, so a repeated hour counts twice and a skipped one not at all |
+| Durations are conserved to the microsecond | Confirmed for blocks up to 12 hours; the verifier's arithmetic is wrong past a day: C4-5 |
+| From B2: workload and free time are a read model, never stored, never sent | Confirmed: `domain/workload.py` and `domain/availability.py` do no I/O, no table holds them, and no AI-facing module, adapter or port imports them. New scan in `test_source_rules.py` |
+| Working hours save with their revision; the tasks to schedule leave out waiting and done tasks | Confirmed by reading `AvailabilityService` |
+
+Not read: `ui/scheduling_view.py` and the runtime's callers, `storage/working_hours.py`,
+`storage/google_calendar.py` (where the knowledge status is worked out),
+`storage/day_plans.py`, the rest of `services/work_blocks.py` and `services/events.py`, and
+the test files beyond their helpers and the tests named here. `qa.py full` was not run.
+
+A review of #120 at medium effort gave nine findings. Taken: the two places the new
+rule for done tasks' blocks had not reached (C4-6); the scan, which read lines and a
+hand-kept list of seven files, now parses every module's imports and pins the readers;
+two repository methods C2 left without a caller are removed; ADR 0028 says "open
+tasks' blocks". Not taken: that `referenced()` should ignore rows the owner never made,
+such as a proposal. AGENTS.md lists a proposal among what keeps a next occurrence, and
+removing a task that a row still points at would break that row. Also not taken:
+working out the referencing tables once at import (it runs only on reopen and undo,
+and reading the schema late sees every table), and one import's placement.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -291,3 +359,13 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C1-1 | C1 | low | Evidence, follow-up and suggestion quotes are matched with spacing ignored, so a quote could be stored with carriage returns and separator characters the model wrote between words | fixed in `ada4425`; quotes cached before that are cleaned when read
 - C1-2 | C1 | low | A Groq reply that could not be decoded (`httpx.DecodingError`) escaped as an unexpected exception. It is now an unreadable reply, raised at once: Groq has answered, so a retry would only send the mail again | fixed in `488edc6` and its follow-up
 - C1-3 | C1 | low | The three Groq prompts tell the model to ignore text claiming to come from "MailBrief"; the product is now Forewit. Changing a prompt means a new prompt version, which empties the analysis cache | open, owner decision
+- C2-1 | C2 | high | Reopening a repeating task, or undoing its completion or skip, removed the next occurrence outright while it had no activity, draft or focus place. One the owner had scheduled a work block for still counted, so the block (unscheduled ones too) was deleted with it | fixed in `8d43698`; the check now reads every table that points at a task
+- C2-2 | C2 | medium | Accepting again a suggestion whose task was deleted restored the task without the tag respelling `restore()` does, so one tag could read two ways on live tasks. It now restores through the same function, so its history records an undo of the deletion as `restore()`'s does | fixed in `6a50a50`
+- C2-3 | C2 | low | `ActionService._write` reports every stale flush as "The repeat changed since it was loaded", though `actions` rows are versioned too: two overlapping writes to one task would blame its repeat. Not reproduced; the write is refused either way | open
+- C2-4 | C2 | low | `undo_accept_into` checks the revision and the decision but not that the latest change was the addition. Called with the current revision of a task first accepted from that suggestion, it would make the suggestion pending and record an undo of the creation. The desktop only passes what `accept_into` returned. Read, not reproduced | open
+- C4-1 | C4 | medium | Suggest time reserved only open tasks' blocks, while the shared conflict rule counts an overlap with any block. A suggestion could land on a done task's block; once applied it was flagged, and the task read "Needs schedule repair" until one of the two was moved | fixed with C4-2: the suggester is as it was, and the overlap is no longer a conflict (`d0148da`, which made the block an obstacle instead, was taken back out)
+- C4-2 | C4 | low | Free time and conflicts disagree about a done task's block. The free line and the next free time leave it out ("less the time set aside for open tasks", `calendar.md`), so Schedule time… can start on one; the save then warns "Overlaps Task · …", as `test_only_open_blocks_from_today_on_are_checked` pins ("A done task's block still takes its time"). Reproduced. | fixed: the owner decided on 2026-11-13 that a done task's block takes no time, so `conflicts_for` now counts only open tasks' blocks, for the Calendar's marks, a save's warnings and the suggester's repair check alike
+- C4-3 | C4 | low | A suggestion starts exactly five minutes after the clock, to the microsecond: reviewed at 09:03:27, it proposes 09:08:27. ADR 0031 asks for "at least five minutes" and `test_today_suggestion_leaves_time_for_review_before_apply` pins the exact start; the Calendar's own next free time steps to the quarter hour. Reproduced | open, owner decision
+- C4-4 | C4 | low | Without working hours a selected task's future blocks earn no credit (`hours.is_set` in `_snapshot`), so the review counts its whole estimate as uncovered and Suggest time lists fully scheduled tasks as needing time. Nothing can be suggested without hours, so only the figures and the list are affected. Reproduced | open
+- C4-5 | C4 | low | `verify_proposal` counts each whole day of a piece as 43,200 seconds, not 86,400. Unreachable while a block lasts at most 12 hours; it would refuse correct proposals if that limit were raised. Read, not reproduced | open
+- C4-6 | C4 | medium | After C4-2 the rule that a done task's block takes no time held on one side only: Plan with AI's overlap warnings still named a done task's block, and a done task's own block was still given conflicts, so a selected done task read as needing repair. Found by the review of #120 | fixed: `conflicts_for` gives a done task's block no conflicts, and Plan with AI counts only open tasks' blocks

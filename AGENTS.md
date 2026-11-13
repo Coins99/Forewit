@@ -248,7 +248,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   first date after both its occurrence date and today in the owner's zone, so missed dates
   are never created. There is at most one per series and date, and at most one live next
   occurrence per occurrence. Reopen and undo remove a next occurrence only while it is
-  untouched (open, live, revision 1). The target date reschedules an occurrence; the
+  untouched (open, live, revision 1, and nothing made for it: no draft, focus place, work
+  block or proposal). The target date reschedules an occurrence; the
   occurrence date never changes. AI runs never touch a series; a proposal that completes an
   occurrence makes its next one, as completing it would.
 - Deadlines (B06, ADR 0021): the `deadline_*` columns hold the current deadline whoever set
@@ -517,7 +518,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
   `datetime` clock; a network library, or a provider adapter, imported by `domain`,
   `storage`, `text`, `services` or `ports` (local setup alone reads the local adapter's
-  manifest and download guard); a forbidden dependency in `pyproject.toml`; and a function that opens a URL
+  manifest and download guard); workload, free time or scheduling imported, outside the
+  desktop, by a module the scan doesn't list as local planning code; a forbidden dependency in `pyproject.toml`; and a function that opens a URL
   without checking it is Gmail's or Calendar's in that same function.
 
 ## UI work
