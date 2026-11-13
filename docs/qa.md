@@ -51,9 +51,9 @@ Defaults; the owner changes them here.
   2 and slice B1 3, each ending near 130,000 tokens of context. The five Sonnet slices left
   (B2, B3, D, E and fix sessions) project to about 15 points in all, so they fit.
 - Measured on Fable at high effort: C1 cost 35 points of the 5-hour window and 9 of the
-  Fable week, ending at 228,000 tokens of context. That is over the 25-point stop, so by
-  the rule above E, then C5, then C4 are dropped unless the owner says otherwise. A deep
-  read should start in a fresh window and read fewer helper files whole.
+  Fable week, ending at 228,000 tokens of context. That is over the 25-point stop. The owner
+  decided on 2026-11-12 to keep E, C5 and C4 all the same. So a deep read starts in a fresh
+  5-hour window, reads only its slice's files whole, and greps the helpers they lean on.
 
 ## Fixing as we go
 
