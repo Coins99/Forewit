@@ -717,7 +717,7 @@ class GroqProvider:
                 error = ProviderTimeoutError(TIMEOUT_MESSAGE, client_request_id=request_id)
                 delay = BACKOFF_SECONDS[attempt] if attempt < MAX_RETRIES else None
                 reason = "timeout"
-            except httpx.TransportError:
+            except httpx.RequestError:  # Refused, cut off or undecodable.
                 error = ProviderError(CONNECTION_MESSAGE, client_request_id=request_id)
                 delay = BACKOFF_SECONDS[attempt] if attempt < MAX_RETRIES else None
                 reason = "connection error"

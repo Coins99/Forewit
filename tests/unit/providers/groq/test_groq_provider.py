@@ -611,8 +611,10 @@ async def test_server_errors_are_retried_three_times_then_unavailable(
     [
         (httpx.ConnectError("unreachable"), ProviderError, "Could not reach Groq."),
         (httpx.ReadTimeout("slow"), ProviderTimeoutError, "Groq did not respond in time."),
+        # A reply that can't be decompressed is not a TransportError, but it is no answer.
+        (httpx.DecodingError("bad gzip"), ProviderError, "Could not reach Groq."),
     ],
-    ids=["connection", "timeout"],
+    ids=["connection", "timeout", "undecodable"],
 )
 async def test_transport_failures_are_retried_then_raised(
     respx_mock: respx.MockRouter,
