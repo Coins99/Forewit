@@ -63,6 +63,18 @@ def sanitize_error_code(exc: Exception) -> str:
     return "UNKNOWN_ERROR"
 
 
+async def _stopped_while_waiting(seconds: float, cancel: asyncio.Event | None) -> bool:
+    """Wait out a provider's rate limit; True when ``cancel`` was set before it ended."""
+    if cancel is None:
+        await asyncio.sleep(seconds)
+        return False
+    try:
+        await asyncio.wait_for(cancel.wait(), seconds)
+    except TimeoutError:
+        return False
+    return True
+
+
 class SyncService:
     """Coordinates email retrieval from EmailProvider and atomic SQLite storage."""
 
@@ -105,7 +117,7 @@ class SyncService:
         (a message cached after the run began keeps its place), and, when
         ``record_last_sync`` is true (today's window), advances the account's last-sync
         time. Provider rate-limit waits of up to MAX_SINGLE_WAIT_SECONDS are honored by
-        resuming from the last committed page.
+        resuming from the last committed page; a cancel ends the wait at once.
         """
 
         def pages(continuation: str | None) -> AsyncIterator[MessagePage]:
@@ -304,7 +316,8 @@ class SyncService:
 
                     logger.info("Honoring provider rate-limit wait of %.1fs", wait_delay)
                     emit_progress()
-                    await asyncio.sleep(wait_delay)
+                    if await _stopped_while_waiting(wait_delay, cancel):
+                        return await finish(SyncStatus.CANCELLED, None)
                     local_wait_seconds += wait_delay
                     # The loop resumes from `continuation`, the last committed page.
 

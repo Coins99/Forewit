@@ -574,6 +574,49 @@ async def test_sync_day_rate_limit_honored_within_cap_resumes_pagination(
     assert len(progress_events) >= 3
 
 
+async def test_stop_during_a_rate_limit_wait_ends_the_sync_at_once(
+    async_session: AsyncSession, test_account: int
+) -> None:
+    provider = FakeEmailProvider(
+        pages=[
+            [make_message(provider_message_id="msg-1")],
+            [make_message(provider_message_id="msg-2")],
+        ]
+    )
+    provider.fail_at_page = 2
+    provider.failure_exception = ProviderRateLimitError("throttled", retry_after_seconds=30.0)
+    cancel = asyncio.Event()
+    after_first_page = 0
+
+    def progress(value: SyncProgress) -> None:
+        nonlocal after_first_page
+        after_first_page += value.pages_fetched
+        if after_first_page == 2:  # The second report with one page: the wait is starting.
+            asyncio.get_running_loop().call_later(0.02, cancel.set)
+
+    service = SyncService(
+        provider=provider,
+        message_repo=MessageRepository(async_session),
+        sync_run_repo=SyncRunRepository(async_session),
+        account_repo=AccountRepository(async_session),
+        session=async_session,
+    )
+
+    result = await asyncio.wait_for(
+        service.sync_day(
+            account_id=test_account,
+            account_identity="user@example.com",
+            window=TEST_WINDOW,
+            progress=progress,
+            cancel=cancel,
+        ),
+        timeout=5,
+    )
+
+    assert result.status is SyncStatus.CANCELLED
+    assert result.page_count == 1
+
+
 async def test_sync_work_budget_is_enforced_between_pages(
     async_session: AsyncSession, test_account: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
