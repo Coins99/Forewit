@@ -50,8 +50,10 @@ Defaults; the owner changes them here.
 - Measured on Sonnet at medium effort: Phase 0 cost 3 points of the 5-hour window, slice R
   2 and slice B1 3, each ending near 130,000 tokens of context. The five Sonnet slices left
   (B2, B3, D, E and fix sessions) project to about 15 points in all, so they fit.
-- The Fable deep reads are not measured yet. Measure C1 and write its cost here before
-  starting C2; if a deep read costs more than 25 points, drop E, then C5, then C4.
+- Measured on Fable at high effort: C1 cost 35 points of the 5-hour window and 9 of the
+  Fable week, ending at 228,000 tokens of context. That is over the 25-point stop, so by
+  the rule above E, then C5, then C4 are dropped unless the owner says otherwise. A deep
+  read should start in a fresh window and read fewer helper files whole.
 
 ## Fixing as we go
 
@@ -148,7 +150,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | --- | --- | --- | --- | --- | --- |
 | R | The owner's run-sheet | One page-by-page checklist, `docs/acceptance-runsheet.md`, from the "Owner acceptance" sections of `p1-*.md`, `p2-*.md`, `p3-calendar.md`, `p3-scheduling-addons.md` and `p4-insights.md`. Each step has an ID and a link back; the live Gmail and Groq checklists are linked, not rewritten. The owner walks it in the real app and sends back failed IDs with one line each | About 15 doc sections | Sonnet | Written 2026-11-12, merged in #113; awaiting the owner's walk. Next: B1 |
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR #114. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
-| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Not started |
+| C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Done 2026-11-12, branch `qa/c1-ai-boundary` (stacked on B3). Two findings fixed, one open. Next: C2, in a fresh 5-hour window |
 | C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Not started |
 | C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
@@ -256,6 +258,27 @@ Same method as B1 and B2.
 Two tests were new; nothing failed, so there is no B3 finding. The daily run's logic
 (`brief.py`, `proposals.py`, `threads.py`, `sync.py`) still gets its deep read in C5.
 
+## Slice C1: what leaves the machine
+
+Read whole: `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`,
+`providers/groq/provider.py`, and the helpers they lean on (`text/matching.py`,
+`domain/analysis.py`, `domain/calendar_planning.py`, the request models of
+`domain/drafting.py`, the cleaning functions of `text/prepare.py`, deadline resolution, and
+the two consent repositories).
+
+| Checked | Result |
+| --- | --- |
+| Analysis sends the seven fields, drafting only ticked parts, planning only what the preview lists | Confirmed by reading; each request is built from a model with exactly those fields. Drafting sends the sender's name through `display_name`, which gives none when the name is, or holds, an address |
+| Consent is recorded before the call; a decline or cancel sends nothing | Confirmed for drafting and planning. Analysis consent is in `brief.py`: to C5 |
+| From B1: summary, action and suggestion text stripped before storage | Covered already by `test_validate_candidate_cleans_text_the_model_wrote_itself`. Evidence quotes were not cleaned: C1-1, fixed |
+| From B1: mail content cannot authorize an action | The request has no tools and a reply with tool calls is refused (`test_groq_provider.py`). New: `test_an_answer_that_obeys_the_email_still_writes_only_the_analysis_cache` counts every table's rows around a run |
+| From B1: provider JSON stays in the adapters | New scan `test_core_packages_import_no_adapter`: only local setup imports an adapter module, its manifest and download guard |
+| Errors and logs carry codes, counts and request IDs only | Confirmed by reading; Groq's text never reaches an exception |
+| The model's calendar changes are checked one by one; notes, Busy/Free and Google events untouched | Confirmed by reading `validate_plan` and `_edit` |
+
+Not read: `brief.py` (where exclusions and analysis consent are enforced), `infra/tasks.py`,
+`infra/http_retry.py`, the local provider, and the UI gates.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -265,3 +288,6 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - R-2 | R | low | `today.md` and `p2-focus.md` put Your day above the brief; `p2-workspace.md` says the full brief lives in Mail | open, owner question 3
 - R-3 | R | low | P3 calendar acceptance sections name migrations 0032 and 0033 by branch; the add-ons add 0034 to 0036; `p3-scheduling-addons.md` has no numbered steps | open, owner questions 4 and 5
 - R-4 | R | low | P1 estimates and the P2 capture, focus and navigation docs have no numbered acceptance steps; P1 docs say "Actions" for Tasks; steps may predate flat buttons (#108) | open, owner questions 2, 6, 8 and 9
+- C1-1 | C1 | low | Evidence, follow-up and suggestion quotes are matched with spacing ignored, so a quote could be stored with carriage returns and separator characters the model wrote between words | fixed in `ada4425`
+- C1-2 | C1 | low | A Groq reply that could not be decoded (`httpx.DecodingError`) escaped as an unexpected exception instead of a retried connection failure | fixed in `488edc6`
+- C1-3 | C1 | low | The three Groq prompts tell the model to ignore text claiming to come from "MailBrief"; the product is now Forewit. Changing a prompt means a new prompt version, which empties the analysis cache | open, owner decision

@@ -219,7 +219,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   characters leaves room under 80% for one character at most, too little for a quote, so
   it stores no evidence, for itself or its suggestions, and is still analyzed.
 - Text the AI writes itself (summary, action text, suggestion titles and steps) and
-  deadline phrases are stripped of control and format characters before they are stored.
+  deadline phrases are stripped of control and format characters before they are stored;
+  an evidence quote is cleaned the same way once it has matched the email.
   Mail and AI text reaches the UI only through plain-text widgets or escaped HTML, and only
   `https://mail.google.com` message links are ever opened.
 - Accepted actions belong to the owner: AI runs never write to them, and they survive
