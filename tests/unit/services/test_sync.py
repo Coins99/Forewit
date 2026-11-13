@@ -39,7 +39,7 @@ from mailbrief.storage.repositories import (
     MessageRepository,
     SyncRunRepository,
 )
-from mailbrief.storage.tables import Base
+from mailbrief.storage.tables import AccountTable, Base
 from tests.factories import make_message
 
 TEST_WINDOW = DayWindow(
@@ -909,3 +909,34 @@ async def test_bounded_browsing_timeout_preserves_cache(
         await InboxService(async_session, Reader()).load_page(test_account, asyncio.Event())
     rows, _ = await repo.get_inbox_page(test_account)
     assert len(rows) == 1
+
+
+async def test_browsing_a_page_never_advances_the_daily_brief_watermark(
+    async_session: AsyncSession, test_account: int
+) -> None:
+    """Only a sync of today's window moves the account's last complete sync, never a page
+    the owner browsed; the page is requested once with the owner's size and query."""
+    account = await async_session.get(AccountTable, test_account)
+    assert account is not None
+    before = account.last_sync_at_utc
+    asked: list[tuple[str | None, int, str]] = []
+
+    class Reader:
+        async def fetch_mailbox_page(
+            self, *, continuation: str | None = None, page_size: int = 50, query: str = ""
+        ) -> MailboxPage:
+            asked.append((continuation, page_size, query))
+            return MailboxPage(
+                messages=(make_message(provider_message_id="seen"),),
+                attempted=1,
+                discarded_ids=frozenset(),
+                continuation=None,
+            )
+
+    await InboxService(async_session, Reader()).load_page(
+        test_account, asyncio.Event(), page_size=100
+    )
+
+    await async_session.refresh(account)
+    assert account.last_sync_at_utc == before
+    assert asked == [(None, 100, "")]
