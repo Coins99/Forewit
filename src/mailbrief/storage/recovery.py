@@ -260,11 +260,12 @@ def _prepare_restored_database(database: Path) -> None:
         connection.execute(
             "UPDATE ai_consents SET auto_send_limit=0, auto_send_granted_at_utc=NULL"
         )
-        # Local consent allows unattended body reads too; restored grants are inert.
+        # Local consent allows unattended body reads too; restored grants are inert. The
+        # time is written as SQLAlchemy stores every other one: UTC, a space, no offset.
         connection.execute(
             "UPDATE ai_consents SET revoked_at_utc=? WHERE provider='local' "
             "AND revoked_at_utc IS NULL",
-            (utc_now().isoformat(),),
+            (utc_now().replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds"),),
         )
         # Pagination checkpoints belong to a live scan, never restored history.
         connection.execute("UPDATE sync_runs SET inbox_continuation=NULL")
