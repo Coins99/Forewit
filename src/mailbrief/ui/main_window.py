@@ -252,6 +252,7 @@ from mailbrief.ui.calendar_view import REFRESH as REFRESH_CALENDAR
 from mailbrief.ui.capture_inbox import CaptureInbox
 from mailbrief.ui.capture_view import CaptureDialog
 from mailbrief.ui.data_view import DataDialog
+from mailbrief.ui.date_picker import set_owner_zone
 from mailbrief.ui.deadline_text import day_text, moment_text, month_day
 from mailbrief.ui.diagnostics import (
     configuration_guidance,
@@ -905,6 +906,7 @@ class MainWindow(QMainWindow):
         # Carryover and overdue labels use the owner's local day.
         self.now: Callable[[], datetime] = utc_now
         self.zone = resolve_timezone(None)
+        set_owner_zone(self.zone)
         self._system_zone = False  # No zone saved: the owner's zone follows the system's.
         if self.data_dialog is not None:
             self.data_dialog.today = weak_method(self._local_today)
@@ -1838,6 +1840,7 @@ class MainWindow(QMainWindow):
         if zone.key == self.zone.key:
             return False
         self.zone = zone
+        set_owner_zone(zone)
         self.inbox_panel.set_zone(zone)
         self._set_dialog_zones()
         return True
@@ -4948,6 +4951,7 @@ class MainWindow(QMainWindow):
     def _apply_owner_preferences(self, preferences: OwnerPreferences) -> None:
         """The owner's zone for every local day and time shown, and the drafting defaults."""
         self.zone = owner_zone(preferences)
+        set_owner_zone(self.zone)
         self.insights_page.follow_day(self._local_today(), self.zone.key)
         self._email_analysis_mode = preferences.analysis_mode
         self.generate_button.setText(

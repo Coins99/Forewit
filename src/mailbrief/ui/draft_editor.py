@@ -206,6 +206,7 @@ class DraftEditor(QDialog):
         self.recipient_warning = _plain()
         form.addRow("", self.recipient_warning)
         self.title_label = QLabel("&Subject")
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         self.title_edit = QLineEdit()
         self.title_edit.setObjectName("draftSubject")
         self.title_edit.setMaxLength(DRAFT_TITLE_MAX_CHARS)
@@ -220,6 +221,7 @@ class DraftEditor(QDialog):
         self.body.setAccessibleName("Body")
         self.body.setTabChangesFocus(True)
         self.body_label = QLabel("&Body")
+        self.body_label.setTextFormat(Qt.TextFormat.PlainText)
         self.body_label.setBuddy(self.body)
         self.counter = _plain()
         self.placeholder_line = _plain()
@@ -234,6 +236,7 @@ class DraftEditor(QDialog):
         links.setHorizontalSpacing(10)
         links.setVerticalSpacing(6)
         self.project_label = QLabel("Pro&ject")
+        self.project_label.setTextFormat(Qt.TextFormat.PlainText)
         self.project_label.setObjectName("noteProjectLabel")
         self.project_label.setAccessibleName("Project")
         # Saved as soon as it is chosen, so only a choice in its popup changes it.
@@ -247,6 +250,7 @@ class DraftEditor(QDialog):
         )
         self.project_label.setBuddy(self.project_choice)
         self.task_label = QLabel("Task")
+        self.task_label.setTextFormat(Qt.TextFormat.PlainText)
         self.task_label.setObjectName("noteTaskLabel")
         self.task_label.setAccessibleName("Task")
         # A task's title can be an email's words: wrap_label breaks a long unbroken token.

@@ -5,6 +5,7 @@ import ast
 import re
 from collections.abc import Iterable
 from pathlib import Path
+from textwrap import dedent
 from typing import Final
 
 from mailbrief.providers.gmail.oauth import SIGN_IN_SCOPES
@@ -65,6 +66,158 @@ def test_date_fields_use_the_date_picker() -> None:
     ``calendar_popup()`` in ``ui/date_picker.py``."""
     files = (path for path in UI.rglob("*.py") if path != DATE_PICKER)
     assert offending_lines(files, CALENDAR_POPUP) == []
+
+
+def plain_receivers(scope: ast.AST) -> set[str]:
+    """What, under ``scope``, is promised to hold no rich text: the receivers of
+    ``setTextFormat(...PlainText)``, which keep what they show plain, and of ``setPixmap``,
+    and the widgets handed to ``follow_theme``, which paints their tinted icon. As source
+    text: ``label``, ``self.glyph``."""
+    found: set[str] = set()
+    for node in ast.walk(scope):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if isinstance(function, ast.Attribute) and (
+            function.attr == "setPixmap"
+            or (
+                function.attr == "setTextFormat"
+                and node.args
+                and ast.unparse(node.args[0]).endswith("PlainText")
+            )
+        ):
+            found.add(ast.unparse(function.value))
+        elif isinstance(function, ast.Name) and function.id == "follow_theme" and node.args:
+            found.add(ast.unparse(node.args[0]))
+    return found
+
+
+def label_slips(path: Path, root: Path) -> list[str]:
+    """The ``QLabel`` constructions and subclasses of ``path`` with no such promise, as
+    "path:line"."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    promised: dict[ast.AST, set[str]] = {}
+
+    def promises(scope: ast.AST) -> set[str]:
+        if scope not in promised:
+            promised[scope] = plain_receivers(scope)
+        return promised[scope]
+
+    def enclosing(node: ast.AST, kinds: tuple[type[ast.AST], ...]) -> ast.AST:
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, kinds):
+                return node
+        return tree
+
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and any(
+            ast.unparse(base).split(".")[-1] == "QLabel" for base in node.bases
+        ):
+            if "self" not in promises(node):
+                lines.append(node.lineno)
+        elif isinstance(node, ast.Call) and ast.unparse(node.func).split(".")[-1] == "QLabel":
+            parent = parents[node]
+            if isinstance(parent, ast.Assign) and len(parent.targets) == 1:
+                target = ast.unparse(parent.targets[0])
+            elif isinstance(parent, ast.AnnAssign):
+                target = ast.unparse(parent.target)
+            else:
+                lines.append(node.lineno)  # Held in no variable: nothing can promise for it.
+                continue
+            # A name is promised in its function, an attribute of self anywhere in its class.
+            kinds: tuple[type[ast.AST], ...] = (
+                (ast.ClassDef,)
+                if target.startswith("self.")
+                else (ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            if target not in promises(enclosing(node, kinds)):
+                lines.append(node.lineno)
+    return [f"{path.relative_to(root).as_posix()}:{line}" for line in sorted(lines)]
+
+
+def unplain_labels(files: Iterable[Path], root: Path = ROOT) -> list[str]:
+    """Every ``QLabel`` built without a promise that it shows plain text or only an icon,
+    as "path:line". A ``QLabel(...)`` (bare or as ``module.QLabel``) is held in a variable
+    that, in its function (a ``self.`` attribute: in its class), gets ``setTextFormat`` with
+    ``PlainText``, ``setPixmap`` or ``follow_theme``; a subclass of ``QLabel`` does the
+    same to ``self``. Labels are found by the name ``QLabel``, so one imported under another
+    name is not, and neither are other widgets that read rich text (a message box, a text
+    browser)."""
+    return [slip for path in sorted(files) for slip in label_slips(path, root)]
+
+
+def test_every_label_in_the_ui_is_plain_text_or_an_icon() -> None:
+    """Mail and AI text reaches the screen through plain-text labels only: every ``QLabel``
+    under ``ui`` is promised plain (or an icon) for its own variable, naming the line
+    otherwise. A variable reused for two labels is promised once for both."""
+    assert unplain_labels(UI.rglob("*.py")) == []
+
+
+def test_the_label_rule_finds_what_it_is_for(tmp_path: Path) -> None:
+    def slips(source: str) -> list[str]:
+        (tmp_path / "widget.py").write_text(dedent(source), encoding="utf-8")
+        return unplain_labels([tmp_path / "widget.py"], root=tmp_path)
+
+    assert slips("def make(t):\n    return QLabel(t)\n") == ["widget.py:2"]
+    assert slips("def make(t):\n    return QtWidgets.QLabel(t)\n") == ["widget.py:2"]
+    assert slips("LABEL = QLabel('<b>x</b>')\n") == ["widget.py:1"]
+    assert slips("class Row(QLabel):\n    pass\n") == ["widget.py:1"]
+    # Plain text set on another label, or only written in a comment, promises nothing.
+    assert slips(
+        """\
+        def make(a, b):
+            one = QLabel(a)
+            two = QLabel(b)
+            one.setTextFormat(Qt.TextFormat.PlainText)
+        """
+    ) == ["widget.py:3"]
+    assert slips("def make(t):\n    label = QLabel(t)  # PlainText\n    return label\n") == [
+        "widget.py:2"
+    ]
+    # A label in a nested function is reported once.
+    assert slips(
+        """\
+        def outer():
+            def inner(t):
+                return QLabel(t)
+            return inner
+        """
+    ) == ["widget.py:3"]
+    for promise in (
+        "label.setTextFormat(Qt.TextFormat.PlainText)",
+        "label.setPixmap(pixmap)",
+        "follow_theme(label, paint)",
+    ):
+        assert (
+            slips(f"def make(t):\n    label = QLabel(t)\n    {promise}\n    return label\n") == []
+        )
+    assert (
+        slips(
+            """\
+        class Row(QWidget):
+            def __init__(self):
+                self.title = QLabel()
+
+            def show(self):
+                self.title.setTextFormat(Qt.TextFormat.PlainText)
+        """
+        )
+        == []
+    )
+    assert (
+        slips(
+            """\
+        class Row(QLabel):
+            def __init__(self):
+                super().__init__()
+                self.setTextFormat(Qt.TextFormat.PlainText)
+        """
+        )
+        == []
+    )
 
 
 def test_the_rules_find_what_they_are_for() -> None:
@@ -140,7 +293,11 @@ GMAIL_WRITE_PATH: Final = re.compile(
 NAIVE_CLOCK: Final = re.compile(
     r"\bdatetime\.utcnow\(|\.utcfromtimestamp\(|\bdatetime\.now\(\s*(?:\)|$|tz=None)|"
     r"\bdatetime\.fromtimestamp\([^,()]*\)|\bdatetime\.today\(|\bdatetime\.strptime\(|"
-    r"\bdt\.now\(\s*\)"
+    r"\bdt\.now\(\s*\)|"
+    # The system's day: date.today, called or handed over (default_factory=date.today), a
+    # date imported under another name, which hides it, and Qt's own clock.
+    r"\bdate\.today\b|\bimport\b[^#\n]*\bdate\s+as\b|"
+    r"\bQDate\.currentDate\(|\bQDateTime\.currentDateTime\(|\bQTime\.currentTime\("
 )
 # Network libraries belong to the adapters, never to the domain, storage or text helpers.
 NETWORK_IMPORT: Final = re.compile(
@@ -350,8 +507,10 @@ def test_google_adapters_make_no_writing_request() -> None:
 
 def test_timestamps_are_never_naive() -> None:
     """No ``utcnow``, ``utcfromtimestamp``, ``today``, ``strptime``, zone-less ``now()`` or
-    one-argument ``fromtimestamp`` on ``datetime``. A naive ``datetime(...)`` literal and
-    ``date.today()`` are not looked for."""
+    one-argument ``fromtimestamp`` on ``datetime``, and none of the system's day, which is
+    not the owner's: ``date.today`` (called or not), ``date`` imported under another name,
+    and Qt's ``currentDate``, ``currentDateTime`` and ``currentTime``. A naive
+    ``datetime(...)`` literal is not looked for."""
     assert offending_lines(SOURCE.rglob("*.py"), NAIVE_CLOCK) == []
 
 
@@ -469,9 +628,27 @@ def test_the_privacy_rules_find_what_they_are_for(tmp_path: Path) -> None:
         "datetime.fromtimestamp(stamp)",
         "datetime.today()",
         "datetime.strptime(text, FORMAT)",
+        "date.today()",
+        "datetime.date.today()",
+        "created: date = Field(default_factory=date.today)",
+        "from datetime import date as d",
+        "from datetime import UTC, date as day, datetime",
+        "QDate.currentDate()",
+        "QDateTime.currentDateTime()",
+        "QTime.currentTime()",
     ):
         assert NAIVE_CLOCK.search(line), line
-    for line in ("datetime.now(UTC)", "datetime.fromtimestamp(stamp, UTC)", "date.today()"):
+    for line in (
+        "datetime.now(UTC)",
+        "datetime.fromtimestamp(stamp, UTC)",
+        "datetime.now(zone).date()",
+        "from datetime import UTC, date, datetime",
+        "# the date as the owner reads it",
+        "today = self.today()",
+        "if target <= details.today:",
+        '"today": request.today.isoformat(),',
+        "QDate(day.year, day.month, day.day)",
+    ):
         assert not NAIVE_CLOCK.search(line), line
 
     scope = "https://www.googleapis.com/auth/gmail.readonly"

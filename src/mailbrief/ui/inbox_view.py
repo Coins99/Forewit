@@ -387,6 +387,7 @@ class InboxPanel(QWidget):
         row.setContentsMargins(16, 0, 10, 0)
         row.setSpacing(12)
         self.range = QLabel()
+        self.range.setTextFormat(Qt.TextFormat.PlainText)
         self.range.setObjectName("inboxRange")
         self.range.setProperty("tone", "secondary")
         self.range.setFont(ui_font(SMALL_PX, tabular=True))

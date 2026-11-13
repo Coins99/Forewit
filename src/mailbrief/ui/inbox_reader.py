@@ -7,7 +7,7 @@ the width of a wide window. Mail text reaches the screen only through ``wrap_lab
 the monogram's ``drawText``: plain text, never a link or a tooltip.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -264,7 +264,9 @@ class InboxReader(QWidget):
             self.wanted_card.hide()
         else:
             zone = zone or ZoneInfo("UTC")
-            when = moment_text(message.received_at_utc, zone, today=today or date.today())
+            when = moment_text(
+                message.received_at_utc, zone, today=today or datetime.now(zone).date()
+            )
             self.subject.setText(message.subject or NO_SUBJECT)
             name = shown_name(message.sender)
             address = message.sender.address

@@ -4,8 +4,9 @@ across the page, the list beside the reading pane, and the reading pane alone.""
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
+from typing import Self
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -24,9 +25,10 @@ from mailbrief.errors import ConfigurationError
 from mailbrief.ports.errors import AuthenticationRequiredError
 from mailbrief.providers.gmail.client import MESSAGES_URL, GmailClient
 from mailbrief.providers.gmail.provider import GmailProvider
-from mailbrief.ui import runtime
+from mailbrief.ui import inbox_reader, runtime
 from mailbrief.ui.brief_list import ROW_ROLE
 from mailbrief.ui.inbox_list import Density, InboxRow
+from mailbrief.ui.inbox_reader import InboxReader
 from mailbrief.ui.inbox_view import (
     INCOMPLETE,
     LIST_MIN,
@@ -688,6 +690,29 @@ def test_safe_sender_lines_in_the_reader(qtbot: QtBot) -> None:
     assert panel.reader.from_line.text() == "mallory@example.com"
     assert panel.reader.meta.text() == "Mon Aug 31, 10:30"
     assert "Gmail has no preview" in panel.reader.preview.text()
+
+
+class NewYearInTokyo(datetime):
+    """``datetime`` whose ``now`` is 20:30 UTC on 31 December 2026: already 2027 in Tokyo."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(datetime(2026, 12, 31, 20, 30, tzinfo=UTC).timestamp(), tz)
+
+
+def test_the_reader_dates_a_message_on_the_owner_s_day_when_given_none(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(inbox_reader, "datetime", NewYearInTokyo)
+    reader = InboxReader()
+    qtbot.addWidget(reader)
+    message = make_message(received_at_utc=datetime(2026, 12, 31, 20, 0, tzinfo=UTC))
+    reader.show_message(message, zone=ZoneInfo("Asia/Tokyo"))
+    # Today is 1 January 2027 in the owner's zone, so the year is left out; a fallback to the
+    # UTC or the computer's day would say "Fri Jan 1, 2027, 05:00".
+    assert reader.meta.text() == "alex@example.com · Fri Jan 1, 05:00"
+    reader.show_message(message, zone=ZoneInfo("Asia/Tokyo"), today=date(2026, 12, 31))
+    assert reader.meta.text() == "alex@example.com · Fri Jan 1, 2027, 05:00"  # A given day wins.
 
 
 def test_inbox_rows_name_the_day_and_their_marks(qtbot: QtBot) -> None:

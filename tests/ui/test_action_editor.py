@@ -25,6 +25,7 @@ from mailbrief.domain.analysis import (
     DeadlinePrecision,
     TargetReason,
 )
+from mailbrief.ui import action_editor as editor_module
 from mailbrief.ui.action_editor import BAD_ESTIMATE, ActionEditor, parse_tags
 from tests.factories import make_action
 
@@ -642,3 +643,14 @@ def test_the_tag_completer_completes_only_the_tag_being_typed(editor: ActionEdit
 def test_parse_tags_splits_on_commas() -> None:
     assert parse_tags("") == ()
     assert parse_tags(" a , B,a ") == ("a", "B")
+
+
+def test_a_new_editor_starts_from_the_utc_day_until_it_is_opened(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        editor_module, "utc_now", lambda: datetime(2026, 12, 31, 23, 30, tzinfo=UTC)
+    )
+    parent = QWidget()  # Held by this frame: qtbot keeps widgets only weakly.
+    qtbot.addWidget(parent)
+    assert ActionEditor(parent)._today == date(2026, 12, 31)

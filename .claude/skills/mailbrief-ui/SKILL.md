@@ -50,7 +50,8 @@ collection, `SafeList`, `take_widget`).
   mnemonic (`mnemonic=True`); long mail-derived text uses `shorten=True`.
 - Make every date field's drop-down calendar with `calendar_popup(field)`
   (`ui/date_picker.py`): a flat `DatePicker`, never Qt's own (the source rules refuse
-  `setCalendarPopup` elsewhere).
+  `setCalendarPopup` elsewhere). It rings today in the owner's zone (`set_owner_zone`,
+  which the main window sets), never the computer's day: no `QDate.currentDate()`.
 - Text is the bundled DM Sans (`FONT_FAMILY`), through `ui_font(px, medium=...,
   semibold=...)`; `tabular=True` gives Inter's equal-width figures for times and counts
   in columns. Medium is for emphasis in text, Semibold for titles; sizes are in pixels,
@@ -139,7 +140,10 @@ collection, `SafeList`, `take_widget`).
   system language (`%a`, `%A`, `%b`, `%B`, `%p`, `%c`, `%x`) anywhere in `src/mailbrief`.
   It also fails on a function that calls `QDesktopServices.openUrl` without checking the
   link in that same function (`is_gmail_link`, `is_calendar_link`, `gmail_source`,
-  `gmail_link` or the host comparison); AGENTS.md lists its other privacy scans.
+  `gmail_link` or the host comparison), and on a `QLabel` not promised plain text or an
+  icon: its own variable gets `setTextFormat(Qt.TextFormat.PlainText)`, `setPixmap` or
+  `follow_theme` (or build it with `plain_label` or `wrap_label`); AGENTS.md lists its
+  other privacy scans.
 
 ## Screenshot review loop
 1. Render the gallery at 1x and 2x (PowerShell: set `$env:MAILBRIEF_UI_SHOTS` instead; on
