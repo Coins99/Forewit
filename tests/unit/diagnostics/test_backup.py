@@ -1,11 +1,15 @@
 """Explicit CLI modes, redacted failures and recovery locking."""
 
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+from alembic import command
 
 from mailbrief.diagnostics import backup, gmail
 from mailbrief.infra.data_lock import data_directory_lock
+from mailbrief.storage.migrate import migration_config
 from tests.unit.storage.test_recovery import sample_database
 
 
@@ -32,6 +36,25 @@ def test_failure_does_not_print_archive_or_exception_data(
     monkeypatch.setattr(backup, "create_backup", fail)
     assert backup.main([str(tmp_path / "source"), str(tmp_path / "archive")]) == 1
     assert "private owner writing" not in capsys.readouterr().out
+
+
+def test_an_old_backup_that_cannot_be_upgraded_fails_with_the_fixed_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    database = tmp_path / "source.sqlite3"
+    archive = tmp_path / "backup.zip"
+    restored = tmp_path / "restored" / "forewit.sqlite3"
+    command.upgrade(migration_config(database), "20261103_0028")
+    with closing(sqlite3.connect(database)) as connection:
+        # A note column that isn't the released one: the staged upgrade refuses to adopt it.
+        connection.execute("ALTER TABLE drafts ADD COLUMN project_public_id VARCHAR(10)")
+    assert backup.main([str(database), str(archive)]) == 0
+    capsys.readouterr()
+    assert backup.main(["--restore", str(archive), str(restored)]) == 1
+    output = capsys.readouterr().out
+    assert output.startswith("Backup or restore failed.")
+    assert "project" not in output
+    assert not restored.parent.exists()
 
 
 @pytest.mark.parametrize("arguments", [[], ["--verify", "a", "b"], ["a"], ["a", "b", "--replace"]])
