@@ -56,7 +56,7 @@ from mailbrief.storage.tables import (
     SyncRunTable,
     deadline_columns,
 )
-from mailbrief.text.prepare import truncate_at_boundary
+from mailbrief.text.prepare import clean_generated_text, truncate_at_boundary
 
 _NO_SUMMARY = "No summary available"
 _CATEGORIES = {category.value: category for category in InboxCategory}
@@ -792,10 +792,12 @@ class AnalysisRepository:
             deadline_at_utc=deadline_at_utc,
             deadline_timezone=deadline_timezone,
             confidence=row.confidence,
-            evidence=row.evidence,
+            # Quotes stored before they were cleaned on the way in are cleaned here.
+            evidence=clean_generated_text(row.evidence),
             suggestions=tuple(suggestion_from_row(item) for item in suggestions),
             follow_up=FollowUpKind(row.follow_up_kind),
-            follow_up_evidence=row.follow_up_evidence,
+            follow_up_evidence=row.follow_up_evidence
+            and clean_generated_text(row.follow_up_evidence),
         )
 
 
@@ -1151,7 +1153,9 @@ class DigestRepository:
                     ),
                     deadline_date=analysis_table.deadline_date if analysis_table else None,
                     deadline_at_utc=analysis_table.deadline_at_utc if analysis_table else None,
-                    evidence=analysis_table.evidence if analysis_table else None,
+                    evidence=(
+                        clean_generated_text(analysis_table.evidence) if analysis_table else None
+                    ),
                     source_url=HttpUrl(msg_table.web_link),
                     suggestions=views.get(msg_table.id, ()),
                 )

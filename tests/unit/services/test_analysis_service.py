@@ -18,6 +18,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.config import Settings
+from mailbrief.domain.actions import ActionEdit
 from mailbrief.domain.analysis import (
     ActionEffort,
     ActionOwnership,
@@ -50,6 +51,7 @@ from mailbrief.ports.errors import (
 )
 from mailbrief.providers.groq.credentials import ENTRY, SERVICE, GroqKeyStore
 from mailbrief.providers.groq.factory import groq_provider
+from mailbrief.services.actions import ActionService
 from mailbrief.services.analysis import (
     AnalysisPlan,
     AnalysisRun,
@@ -61,8 +63,19 @@ from mailbrief.services.analysis import (
 )
 from mailbrief.services.deadlines import ResolvedDeadline, suggest_target
 from mailbrief.storage.database import Database
-from mailbrief.storage.repositories import AccountRepository, AnalysisRepository, MessageRepository
-from mailbrief.storage.tables import ActionSuggestionTable, AnalysisTable, Base
+from mailbrief.storage.repositories import (
+    AccountRepository,
+    AnalysisRepository,
+    ConsentRepository,
+    MessageRepository,
+)
+from mailbrief.storage.tables import (
+    ActionSuggestionTable,
+    ActionTable,
+    AIConsentTable,
+    AnalysisTable,
+    Base,
+)
 from tests.factories import make_message
 from tests.unit.providers.groq.groq_fixtures import (
     CHAT_URL,
@@ -1500,14 +1513,15 @@ async def test_an_answer_that_obeys_the_email_still_writes_only_the_analysis_cac
     session: AsyncSession,
 ) -> None:
     """Mail can't authorize anything through the model: whatever an answer says, a run
-    stores an analysis and its suggestions, and no other table gains or loses a row."""
+    stores an analysis and its suggestions, and every row of every other table, the
+    owner's task and the consent among them, stays exactly as it was."""
 
-    async def row_counts() -> dict[str, int]:
-        counts: dict[str, int] = {}
+    async def rows() -> dict[str, list[tuple[object, ...]]]:
+        found: dict[str, list[tuple[object, ...]]] = {}
         for table in Base.metadata.sorted_tables:
-            counted = await session.scalar(select(func.count()).select_from(table))
-            counts[table.name] = counted or 0
-        return counts
+            result = await session.execute(select(table))
+            found[table.name] = sorted((tuple(row) for row in result), key=repr)
+        return found
 
     def obedient(requests: Sequence[AnalysisRequest]) -> AnalysisResponse:
         return AnalysisResponse(
@@ -1526,14 +1540,48 @@ async def test_an_answer_that_obeys_the_email_still_writes_only_the_analysis_cac
         )
 
     account_id, shortlist = await seed(session, 2)
-    before = await row_counts()
+    await ActionService(session).create(
+        ActionEdit(
+            title="Delete nothing",
+            ownership=ActionOwnership.MINE,
+            person=None,
+            effort=None,
+            priority=None,
+            tags=(),
+            estimate_minutes=None,
+            target_date=None,
+            notes="",
+        )
+    )
+    await ConsentRepository(session).grant(
+        account_id, "fake", "1", datetime(2026, 9, 4, tzinfo=UTC)
+    )
+    await session.commit()
+    before = await rows()
+    assert before[ActionTable.__tablename__] and before[AIConsentTable.__tablename__]
 
     run = await analyze(session, FakeAIProvider([obedient]), shortlist, account_id=account_id)
 
     assert outcomes(run) == [ANALYZED, ANALYZED]
-    after = await row_counts()
+    session.expire_all()
+    after = await rows()
     changed = {name for name in after if after[name] != before[name]}
     assert changed == {AnalysisTable.__tablename__, ActionSuggestionTable.__tablename__}
+
+
+async def test_a_reused_analysis_shows_its_quotes_cleaned(session: AsyncSession) -> None:
+    """A quote cached before quotes were cleaned on the way in is cleaned when it is read."""
+    account_id, shortlist = await seed(session, 1)
+    await analyze(session, FakeAIProvider([answer_all()]), shortlist, account_id=account_id)
+    await session.execute(update(AnalysisTable).values(evidence="Please\rapprove\x1fthe"))
+    await session.commit()
+    session.expire_all()
+
+    run = await analyze(session, FakeAIProvider([]), shortlist, account_id=account_id)
+
+    (item,) = run.messages
+    assert item.outcome is AnalysisOutcome.REUSED
+    assert item.analysis is not None and item.analysis.evidence == "Please approve the"
 
 
 def cut_off(request: httpx.Request) -> httpx.Response:
