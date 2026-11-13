@@ -516,7 +516,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   passes a private name (a token, key, headers, body, query, prompt, sender rules; `len()`
   of one and `*_count`-style names are fine); a Google scope other than the three read-only
   ones; a writing request in the Gmail, Calendar or shared Google request code; a naive
-  `datetime` clock; a network library, or a provider adapter, imported by `domain`,
+  `datetime` clock or the system's day (`date.today`, Qt's `currentDate`); a `QLabel` in
+  `ui` not promised plain text or an icon for its own variable; a network library, or a provider adapter, imported by `domain`,
   `storage`, `text`, `services` or `ports` (local setup alone reads the local adapter's
   manifest and download guard); workload, free time or scheduling imported, outside the
   desktop, by a module the scan doesn't list as local planning code; a forbidden dependency in `pyproject.toml`; and a function that opens a URL

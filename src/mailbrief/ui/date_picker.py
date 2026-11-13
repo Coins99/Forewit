@@ -8,7 +8,9 @@ Every date field gets it through `calendar_popup`; `tests/unit/test_source_rules
 refuses `setCalendarPopup` anywhere else.
 """
 
+from datetime import UTC, datetime
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QDate, QRect, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPaintEvent, QPen, QTextCharFormat
@@ -26,6 +28,21 @@ TODAY_RING: Final = 1.5
 PREVIOUS: Final = "qt_calendar_prevmonth"
 NEXT: Final = "qt_calendar_nextmonth"
 NAVIGATION_BAR: Final = "qt_calendar_navigationbar"
+
+# The zone whose day the pickers ring as today: the owner's, which the main window sets and
+# which can differ from the computer's. None is the computer's own.
+_owner_zone: ZoneInfo | None = None
+
+
+def set_owner_zone(zone: ZoneInfo | None) -> None:
+    global _owner_zone
+    _owner_zone = zone
+
+
+def picker_today() -> QDate:
+    """Today in the owner's zone (the computer's when none was set)."""
+    day = datetime.now(UTC).astimezone(_owner_zone).date()
+    return QDate(day.year, day.month, day.day)
 
 
 class DatePicker(QCalendarWidget):
@@ -77,7 +94,7 @@ class DatePicker(QCalendarWidget):
             text = tokens.on_primary
         else:
             text = tokens.text if shown and allowed else tokens.text_muted
-            if date == QDate.currentDate():
+            if date == picker_today():
                 inset = TODAY_RING / 2
                 painter.setPen(QPen(QColor(tokens.accent_fg), TODAY_RING))
                 painter.setBrush(QBrush())

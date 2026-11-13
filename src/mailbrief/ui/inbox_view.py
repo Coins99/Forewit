@@ -210,7 +210,6 @@ class EmptyInbox(QWidget):
         layout.setSpacing(16)
         layout.addStretch(1)
         self.glyph = QLabel()
-        self.glyph.setTextFormat(Qt.TextFormat.PlainText)
         self.glyph.setObjectName("inboxEmptyGlyph")
         self.glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
         follow_theme(self.glyph, self._paint_glyph)

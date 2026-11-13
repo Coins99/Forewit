@@ -2,6 +2,11 @@
 chevrons, weekday names without Qt's red weekends, the chosen day a rounded primary cell
 and today ringed in the accent."""
 
+from collections.abc import Iterator
+from datetime import UTC, datetime, tzinfo
+from typing import Self
+from zoneinfo import ZoneInfo
+
 import pytest
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QImage
@@ -15,13 +20,37 @@ from PySide6.QtWidgets import (
 )
 from pytestqt.qtbot import QtBot
 
+from mailbrief.ui import date_picker
 from mailbrief.ui.action_editor import ActionEditor
 from mailbrief.ui.block_editor import BlockEditor
 from mailbrief.ui.cached_view import CachedMailDialog
-from mailbrief.ui.date_picker import NEXT, PREVIOUS, DatePicker, calendar_popup
+from mailbrief.ui.date_picker import (
+    NEXT,
+    PREVIOUS,
+    DatePicker,
+    calendar_popup,
+    picker_today,
+    set_owner_zone,
+)
 from mailbrief.ui.event_editor import EventEditor
 from mailbrief.ui.focus_view import FocusDialog
 from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
+
+
+@pytest.fixture(autouse=True)
+def computer_zone() -> Iterator[None]:
+    """Each test starts with no owner zone, as a picker shown before any window is."""
+    set_owner_zone(None)
+    yield
+    set_owner_zone(None)
+
+
+class FrozenDatetime(datetime):
+    """``datetime`` whose ``now`` is 23:30 UTC on 13 November 2026."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(datetime(2026, 11, 13, 23, 30, tzinfo=UTC).timestamp(), tz)
 
 
 def picker(qtbot: QtBot) -> tuple[QDateEdit, DatePicker]:
@@ -91,7 +120,7 @@ def test_the_chosen_day_is_a_primary_cell_and_today_is_ringed(
     apply_theme(qapp, mode)
     tokens = current_tokens()
     _edit, calendar = picker(qtbot)
-    today = QDate.currentDate()
+    today = picker_today()
     other = today.addDays(1 if today.day() < 15 else -1)  # Same month, not today.
     calendar.setSelectedDate(other)
     calendar.resize(calendar.sizeHint())
@@ -102,6 +131,17 @@ def test_the_chosen_day_is_a_primary_cell_and_today_is_ringed(
     assert tokens.accent_fg in painted
     calendar.setSelectedDate(today)  # Chosen, today is a cell, not a ring.
     assert tokens.primary_fill in colours(calendar.grab().toImage())
+
+
+def test_today_is_the_owner_s_day_whatever_the_computer_s(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(date_picker, "datetime", FrozenDatetime)
+    set_owner_zone(ZoneInfo("Pacific/Kiritimati"))  # UTC+14: already the 14th.
+    assert picker_today() == QDate(2026, 11, 14)
+    set_owner_zone(ZoneInfo("Pacific/Pago_Pago"))  # UTC-11: still the 13th.
+    assert picker_today() == QDate(2026, 11, 13)
+    set_owner_zone(None)  # No window has said: the computer's own day.
+    local = FrozenDatetime.now(UTC).astimezone().date()
+    assert picker_today() == QDate(local.year, local.month, local.day)
 
 
 def test_every_date_field_uses_the_picker(qtbot: QtBot) -> None:
