@@ -383,11 +383,10 @@ def verify_proposal(snapshot: SchedulingSnapshot, proposal: SchedulingProposal) 
         task = choices[task_id]
         if len(pieces) > (4 if task.split else 1):
             raise ValueError("The proposal violates the split policy.")
-        if sum(
-            (piece.duration.days * 43200 + piece.duration.seconds) * 1_000_000
-            + piece.duration.microseconds
-            for piece in pieces
-        ) != round((demands[task_id].uncovered_seconds or 0) * 1_000_000):
+        # In whole microseconds, so a day counts all of its 86,400 seconds (C4-5).
+        if sum(piece.duration // timedelta(microseconds=1) for piece in pieces) != round(
+            (demands[task_id].uncovered_seconds or 0) * 1_000_000
+        ):
             raise ValueError("The proposal does not conserve the requested duration.")
         if task.split and any(
             piece.duration.total_seconds() < task.minimum_piece_minutes * 60

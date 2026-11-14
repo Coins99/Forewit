@@ -6,6 +6,8 @@ import pytest
 
 from mailbrief.domain.planning_intervals import UtcInterval
 from mailbrief.domain.scheduling import (
+    ProposedBlock,
+    SchedulingProposal,
     SchedulingRequest,
     SchedulingSnapshot,
     SchedulingTask,
@@ -189,6 +191,32 @@ def test_microsecond_credit_is_conserved_without_rounding_work() -> None:
     assert result.blocks[0].ends_at_utc - result.blocks[0].starts_at_utc == timedelta(
         minutes=30, microseconds=-1
     )
+
+
+def test_a_piece_of_a_day_or_more_conserves_every_second() -> None:
+    """C4-5: conservation counts a whole day as 86,400 seconds. A block lasts at most 12
+    hours today, so the piece is built by hand to reach the arithmetic."""
+    state = snapshot((demand(minutes=25 * 60),), working=(span(1, 26),))
+    piece = ProposedBlock.model_construct(
+        task_public_id=task_id(1),
+        starts_at_utc=NOW + timedelta(hours=1),
+        ends_at_utc=NOW + timedelta(hours=26),
+        time_zone="UTC",
+        locked=False,
+    )
+    proposal = SchedulingProposal.model_construct(
+        request=SchedulingRequest(
+            first_day=DAY,
+            last_day=DAY + timedelta(days=1),
+            tasks=(SchedulingTask(task_public_id=task_id(1)),),
+        ),
+        fingerprint=state.fingerprint,
+        generated_at_utc=NOW,
+        knowledge=state.knowledge,
+        blocks=(piece,),
+        unplaced=(),
+    )
+    verify_proposal(state, proposal)
 
 
 def test_missing_or_duplicate_task_outcomes_are_refused() -> None:
