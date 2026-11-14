@@ -1,8 +1,6 @@
 """Prepared-data chart spike: accessible precision, keyboard, states and native painting."""
 
-import os
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QRectF, Qt
@@ -13,8 +11,17 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.dashboards import ChartKind
 from mailbrief.domain.metric_results import MetricDisplay, MetricSample
-from mailbrief.ui.metric_chart import MetricChartCard, axis_label, label_marks, nice_ticks
+from mailbrief.ui.metric_chart import (
+    FOCUS_INSET,
+    FOCUS_RADIUS,
+    MetricChartCard,
+    MetricPlot,
+    axis_label,
+    label_marks,
+    nice_ticks,
+)
 from mailbrief.ui.theme import CAPTION_PX, ColorScheme, ThemeMode, apply_theme, ui_metrics
+from tests.ui.test_main_window_layout import save_shot
 
 
 def display(chart: ChartKind = ChartKind.LINE) -> MetricDisplay:
@@ -160,11 +167,7 @@ def test_chart_gallery(
     assert not rendered.isNull()
     assert card.width() == 420
     assert card.table.accessibleName()
-    directory = os.environ.get("MAILBRIEF_UI_SHOTS")
-    if directory:
-        root = Path(directory)
-        root.mkdir(parents=True, exist_ok=True)
-        assert rendered.save(str(root / f"metric-{case}-{mode.value}.png"))
+    save_shot(rendered, f"metric-{case}-{mode.value}")
 
 
 @pytest.mark.parametrize(
@@ -412,3 +415,16 @@ def test_a_selected_table_row_is_readable(
         for name in counts
     )
     assert contrast >= 4.5  # The row's text against its selected fill (WCAG AA).
+
+
+@pytest.mark.parametrize("width", [420, 120])
+def test_the_unit_label_clears_the_focus_ring(qtbot: QtBot, width: int) -> None:
+    plot = MetricPlot(MetricDisplay(title="T", unit="minutes", chart=ChartKind.LINE, samples=()))
+    qtbot.addWidget(plot)
+    plot.resize(width, 220)
+    rect = plot.unit_rect()
+    margin = FOCUS_INSET + FOCUS_RADIUS
+    assert rect.left() >= margin
+    assert rect.top() > FOCUS_INSET
+    assert rect.right() <= width - margin
+    assert rect.bottom() <= plot._area().top()

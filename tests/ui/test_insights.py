@@ -5,7 +5,6 @@ import os
 import threading
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QDate
@@ -25,6 +24,7 @@ from mailbrief.ui.insights_editors import MetricManager, WidgetEditor, custom_de
 from mailbrief.ui.insights_view import InsightsPage, MetricDetails
 from mailbrief.ui.metric_chart import MetricChartCard
 from mailbrief.ui.theme import ColorScheme, ThemeMode, apply_theme
+from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_palette import window_for
 from tests.ui.test_workflow import FakeBackend
 
@@ -338,22 +338,20 @@ async def test_gallery(
     page.show()
     page.attach(InsightsBackend(database, google_on=False), "America/Toronto", (), ())
     await refresh(page)
-    if folder := os.environ.get("MAILBRIEF_UI_SHOTS"):
-        root = Path(folder)
-        await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
+    if os.environ.get("MAILBRIEF_UI_SHOTS"):
         qapp.processEvents()
-        assert page.grab().save(str(root / f"insights-{mode.value}.png"))
+        save_shot(page.grab(), f"insights-{mode.value}")
         page._edit_widget()
         dialog = page.dialogs[-1]
         dialog.show()
         qapp.processEvents()
-        assert dialog.grab().save(str(root / f"widget-editor-{mode.value}.png"))
+        save_shot(dialog.grab(), f"widget-editor-{mode.value}")
         dialog.hide()
         page._manage()
         manager = page.dialogs[-1]
         await manager.drain()
         manager.show()
         qapp.processEvents()
-        assert manager.grab().save(str(root / f"metric-manager-{mode.value}.png"))
+        save_shot(manager.grab(), f"metric-manager-{mode.value}")
         manager.hide()
     await page.drain()
