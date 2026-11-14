@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Coroutine
 from datetime import date, datetime, timedelta
+from typing import Final
 
 from PySide6.QtCore import QDate, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QResizeEvent, QShowEvent
@@ -54,6 +55,10 @@ from mailbrief.ui.insights_editors import (
 from mailbrief.ui.labels import outline_button, wrap_label
 from mailbrief.ui.layouts import take_widget
 from mailbrief.ui.metric_chart import MetricChartCard
+
+NO_WIDGETS: Final = (
+    "No widgets yet. Add widget puts a chart here; Reset layout brings back the starter set."
+)
 
 
 class RecordTable(QTableWidget):
@@ -503,6 +508,8 @@ class InsightsPage(QWidget):
         self.status.setText(
             "Local records only. A dashboard filter applies where a widget has no override "
             "and its metric can take it. Edit a widget to inspect its saved range and filters."
+            if prepared
+            else NO_WIDGETS
         )
 
     def _rebuild(

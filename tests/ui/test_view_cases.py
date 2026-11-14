@@ -20,6 +20,7 @@ from mailbrief.ui.calendar_layout import CalendarView, entry_key
 from mailbrief.ui.calendar_view import EMPTY_DAY, CalendarPanel
 from mailbrief.ui.insights_backend import InsightsBackend
 from mailbrief.ui.insights_editors import MetricManager
+from mailbrief.ui.insights_view import NO_WIDGETS
 from mailbrief.ui.scheduling_view import SchedulingDialog
 from mailbrief.ui.theme import ColorScheme, ThemeMode, apply_theme
 from tests.ui.test_calendar_grid import TODAY, TORONTO, event
@@ -42,6 +43,19 @@ def studio(themed: None, qapp: QApplication) -> None:
 # Insights: the dashboard.
 
 
+async def test_an_empty_dashboard_says_how_to_fill_it(
+    qtbot: QtBot, database: Database, studio: None
+) -> None:
+    backend = InsightsBackend(database, google_on=False)
+    await save_layout(backend)
+    page = await open_page(qtbot, backend)
+    assert page.cards == [] and page.add.isEnabled()
+    assert page.status.text() == NO_WIDGETS
+    assert page.add.text() in NO_WIDGETS and page.reset.text() in NO_WIDGETS
+    save_shot(page.grab(), "insights-empty-light")
+    await page.drain()
+
+
 async def test_one_widget_is_one_card_and_a_full_dashboard_takes_no_more(
     qtbot: QtBot, database: Database
 ) -> None:
@@ -49,6 +63,7 @@ async def test_one_widget_is_one_card_and_a_full_dashboard_takes_no_more(
     await save_layout(backend, spec())
     page = await open_page(qtbot, backend)
     assert len(page.cards) == 1 and page.add.isEnabled()
+    assert page.status.text() != NO_WIDGETS
     await page.drain()
     await save_layout(backend, *(spec() for _ in range(MAX_DASHBOARD_WIDGETS)))
     full = await open_page(qtbot, backend)
