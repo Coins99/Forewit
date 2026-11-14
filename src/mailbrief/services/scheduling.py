@@ -233,7 +233,9 @@ class SchedulingService:
                         messages=tuple(item.label or item.kind.value for item in warnings),
                     )
                 )
-            elif shown.open and hours.is_set:
+            elif shown.open:
+                # A task's future blocks count toward it with or without working hours, so
+                # a scheduled task never reads as needing all of its time (C4-4).
                 valid.setdefault(task.public_id, []).append(
                     UtcInterval(start=max(now, row.starts_at_utc), end=row.ends_at_utc)
                 )

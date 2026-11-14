@@ -189,6 +189,19 @@ async def test_valid_outside_horizon_credit_and_invalid_booking_repair(
     assert not proposal.blocks and proposal.unplaced[0].reason == "Needs schedule repair"
 
 
+async def test_blocks_count_toward_a_task_without_working_hours(session: AsyncSession) -> None:
+    """C4-4: without working hours a task's future blocks still cover its estimate, so a
+    scheduled task doesn't read as needing all of its time."""
+    from mailbrief.services.work_blocks import WorkBlockService
+
+    _, _, task = await seeded(session)
+    service = SchedulingService(session, clock=lambda: NOW, zone=ZONE)
+    await WorkBlockService(session).schedule(task, edit(task))
+    snapshot = await service.snapshot(request(task))
+    assert snapshot.demands[0].credited_seconds == 3600
+    assert (await service.workload(request(task))).uncovered_minutes == 30
+
+
 async def test_a_done_task_s_block_takes_no_time_and_is_no_conflict(
     session: AsyncSession,
 ) -> None:
