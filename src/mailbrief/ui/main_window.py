@@ -3427,8 +3427,9 @@ class MainWindow(QMainWindow):
     def _open_scheduling(self) -> None:
         if self._closing or self._dialog_open():
             return
-        day = self.calendar_panel.focus_day() or self._local_today()
-        self.scheduling_dialog.open_range(day, day + timedelta(days=6), day)
+        today = self._local_today()
+        day = self.calendar_panel.focus_day() or today
+        self.scheduling_dialog.open_range(day, day + timedelta(days=6), day, today=today)
         self.dialog_guard.show_dialog(self.scheduling_dialog)
 
     def _scheduling_changed(self) -> None:

@@ -171,7 +171,7 @@ async def test_the_planning_drawer_says_when_no_task_is_found(
     parent = QWidget()
     qtbot.addWidget(parent)
     dialog = SchedulingDialog(parent, Backend(database))
-    dialog.open_range(DAY, DAY, DAY)
+    dialog.open_range(DAY, DAY, DAY, today=DAY)
     await ready(dialog)
     chooser = dialog.chooser
     assert chooser.tasks.count() == 0 and not chooser.more_button.isEnabled()
@@ -201,7 +201,7 @@ async def test_the_planning_drawer_pages_many_tasks_and_keeps_a_long_title_insid
     qtbot.addWidget(parent)
     dialog = SchedulingDialog(parent, Backend(database))
     width = dialog.minimumSizeHint().width()  # Before any task is listed.
-    dialog.open_range(DAY, DAY, DAY)
+    dialog.open_range(DAY, DAY, DAY, today=DAY)
     dialog.resize(390, 680)
     dialog.show()
     await ready(dialog)

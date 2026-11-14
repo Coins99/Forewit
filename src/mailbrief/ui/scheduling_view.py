@@ -52,10 +52,16 @@ def _minutes(value: float) -> str:
     return f"{value:g} min"
 
 
+def range_text(first_day: date, last_day: date, today: date) -> str:
+    """A planning range as the app writes days, "Mon Nov 9 – Sun Nov 15", or one day alone;
+    a day outside ``today``'s year shows its year."""
+    first = day_text(first_day, today=today)
+    return first if first_day == last_day else f"{first} – {day_text(last_day, today=today)}"
+
+
 def review_summary(shown: Workload, first_day: date, last_day: date, today: date) -> str:
     """The review's figures as labelled lines, every one shown even at zero."""
-    first = day_text(first_day, today=today)
-    days = first if first_day == last_day else f"{first} – {day_text(last_day, today=today)}"
+    days = range_text(first_day, last_day, today)
     free = "unknown" if shown.free_minutes is None else _minutes(shown.free_minutes)
     tasks = "task" if shown.unknown_tasks == 1 else "tasks"
     commitments = "commitment" if shown.all_day_commitments == 1 else "commitments"
@@ -132,7 +138,7 @@ class PlanningTaskPanel(QWidget):
         self.backend = backend
         self.setObjectName("planningTaskPanel")
         self.setAccessibleName("Tasks needing planned time")
-        self.first = self.last = date(2026, 1, 1)
+        self.first = self.last = self.today = date(2026, 1, 1)
         self.focus_day = self.first
         self._generation = 0
         self._closed = False
@@ -276,7 +282,7 @@ class PlanningTaskPanel(QWidget):
                 )
                 self.empty.setVisible(self.tasks.count() == 0)
                 self.status.setText(
-                    f"{self.first.isoformat()} – {self.last.isoformat()} · "
+                    f"{range_text(self.first, self.last, self.today)} · "
                     "Credit can include later dates."
                 )
             except Exception as exc:
@@ -469,8 +475,16 @@ class SchedulingDialog(QDialog):
         self._controls()
 
     def open_range(
-        self, first: date, last: date, focus: date, demands: tuple[TaskDemand, ...] = ()
+        self,
+        first: date,
+        last: date,
+        focus: date,
+        demands: tuple[TaskDemand, ...] = (),
+        *,
+        today: date,
     ) -> None:
+        """Open on ``first`` to ``last``. ``today`` is the owner's day, which decides
+        when a date shows its year."""
         if self.has_unsaved_input():
             self.status.setText("Apply or discard the existing preview first.")
             return
@@ -480,6 +494,7 @@ class SchedulingDialog(QDialog):
             field.blockSignals(True)
             field.setDate(qdate(day))
             field.blockSignals(False)
+        self.chooser.today = today
         self.chooser.show_range(first, last, focus)
         self._add(demands)
 
