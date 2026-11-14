@@ -1,13 +1,13 @@
 """Accepted actions: acceptance, decisions, edits, steps, lifecycle, lists and durability."""
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mailbrief.domain.actions import (
@@ -1084,6 +1084,30 @@ async def test_accept_into_takes_over_a_suggestion_whose_action_was_deleted(
     assert await count(session, SuggestionDecisionTable) == 2  # Re-pointed, not added.
 
 
+async def test_a_write_that_loses_a_race_names_the_action_not_a_repeat(
+    session: AsyncSession, service: ActionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C2-3: when another write reaches the action between this one's read and its flush,
+    the refusal names the action. This one has no repeat to blame."""
+    seeded = await seed(session)
+    action = await service.accept(seeded.suggestion_ids[0])
+    original: Callable[..., Awaitable[object]] = ActionRepository.record_activity
+
+    async def raced(
+        self: ActionRepository, row: ActionTable, *args: object, **kwargs: object
+    ) -> object:
+        await session.execute(
+            text("UPDATE actions SET revision = revision + 1 WHERE id = :id"), {"id": row.id}
+        )
+        return await original(self, row, *args, **kwargs)
+
+    monkeypatch.setattr(ActionRepository, "record_activity", raced)
+    with pytest.raises(ActionConflictError) as caught:
+        await service.accept_into(seeded.suggestion_ids[1], action.public_id, 1)
+    assert type(caught.value) is ActionConflictError  # Not the repeat's error class.
+    assert str(caught.value) == "The action changed since it was loaded; reload it and try again."
+
+
 # Undoing an addition
 
 
@@ -1139,6 +1163,32 @@ async def test_undo_add_never_removes_the_last_source(
         (SuggestionState.ACCEPTED, action.public_id),
         (SuggestionState.PENDING, None),
     ]
+
+
+async def test_undo_add_refuses_a_latest_change_that_was_not_this_addition(
+    session: AsyncSession, service: ActionService
+) -> None:
+    """C2-4: only the suggestion's own addition, still the action's latest change, is
+    undone: not the action's creation from a suggestion, nor a later addition of another
+    email, even one made in the same instant (the clock stands still here)."""
+    first, second, action = await added_into(session, service)
+    third = await seed(session, (suggestion(0, "Send the deck, once more"),), message="msg-3")
+    await service.accept_into(third.suggestion_ids[0], action.public_id, 2)
+    made = await seed(session, (suggestion(0, "Book the room"),), message="msg-4")
+    created = await service.accept(made.suggestion_ids[0])
+
+    for seeded, public_id, revision in (
+        (first, action.public_id, 3),
+        (second, action.public_id, 3),
+        (made, created.public_id, 1),
+    ):
+        with pytest.raises(ActionConflictError, match="unchanged addition"):
+            await service.undo_accept_into(
+                seeded.suggestion_ids[0], public_id, revision, True, previous=DecisionSnapshot()
+            )
+        assert (await states(session, seeded))[0] == (SuggestionState.ACCEPTED, public_id)
+    assert (await service.get(action.public_id)).revision == 3
+    assert (await service.get(created.public_id)).revision == 1
 
 
 async def decision_row(

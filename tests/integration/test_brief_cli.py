@@ -584,7 +584,10 @@ def test_incomplete_sync_without_messages_does_not_save_empty_brief(
 
     output = capsys.readouterr().out
     assert route.call_count == 0
-    assert "Brief: analysis_failed; items: 0" in output
+    # No analysis failed: the sync's own failure says why there is no brief (C5-5).
+    assert "Brief: sync_failed; items: 0" in output
+    assert "). Nothing was sent." in output
+    assert "Sync failed (unknown)" not in output
     assert "Brief: saved" not in output
     assert "Your last saved brief for today is unchanged." in output
     assert "sync complete: no" in output

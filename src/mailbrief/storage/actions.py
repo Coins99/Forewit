@@ -681,6 +681,16 @@ class ActionRepository:
         )
         return count or 0
 
+    async def newest_source(self, action_id: int) -> str | None:
+        """The provider message ID of the source added to the action last, if any."""
+        newest: str | None = await self._session.scalar(
+            select(ActionSourceTable.provider_message_id)
+            .where(ActionSourceTable.action_id == action_id)
+            .order_by(ActionSourceTable.id.desc())
+            .limit(1)
+        )
+        return newest
+
     async def get_series(self, series_id: int) -> ActionSeriesTable | None:
         # A session can outlive another writer's commit; validate the stored revision.
         return await self._session.get(ActionSeriesTable, series_id, populate_existing=True)

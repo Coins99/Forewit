@@ -1,6 +1,5 @@
 """Groq calendar planning: only the chosen parts are sent, and answers are parsed strictly."""
 
-import hashlib
 import json
 from collections.abc import AsyncIterator
 from datetime import date
@@ -35,8 +34,8 @@ from tests.unit.providers.groq.groq_fixtures import (
 )
 
 PINNED_PLANNING_PROMPT = (
-    "groq-calendar-2026-10-12.2",
-    hashlib.sha256(PLANNING_INSTRUCTIONS.encode()).hexdigest(),
+    "groq-calendar-2026-11-13.1",
+    "0c00727bedf47c3a443461c4729f9017f8505bb14fe6dfaed76e928b130dca75",
 )
 REQUEST = CalendarPlanningRequest(
     instruction="Move the dentist to Friday at 10",

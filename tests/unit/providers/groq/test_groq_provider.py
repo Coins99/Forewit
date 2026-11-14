@@ -67,8 +67,8 @@ BODY = "Please approve the quarterly budget by Friday 5 PM."
 MARKER = "GROQ-ERROR-MARKER-5d2e"
 REQUEST_KEYS = {"model", "messages", "response_format", "max_completion_tokens"}
 PINNED_PROMPT = (
-    "groq-2026-09-30.1",
-    "0c0075aa4a25fc79f0433d8605b138cbf2e7565446a395bf73c9de3889f3f8fd",
+    "groq-2026-11-13.1",
+    "10e8a81d8e639086a3a68317b3cdde822d290d22f0ddbc0aff3cda72ed487394",
 )
 STEP_5_3_KEYS = {
     "message_key",

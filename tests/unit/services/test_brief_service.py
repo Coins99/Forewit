@@ -15,7 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mailbrief.domain.analysis import AIUsage, AnalysisRequest, AnalysisResponse
 from mailbrief.domain.bodies import MAX_ANALYSIS_CHARS, BodySource, MessageBody
 from mailbrief.domain.briefs import SENT_FIELDS, BriefStatus, TransmissionPreview
-from mailbrief.domain.digests import DigestSection, DigestStatus, SyncProgress, SyncStage
+from mailbrief.domain.digests import (
+    DigestSection,
+    DigestStatus,
+    SyncProgress,
+    SyncStage,
+    SyncStatus,
+)
 from mailbrief.domain.messages import (
     AccountIdentity,
     EmailContact,
@@ -28,6 +34,7 @@ from mailbrief.ports.errors import (
     AIAuthenticationError,
     MessageUnavailableError,
     ProviderPermissionError,
+    ProviderRateLimitError,
 )
 from mailbrief.services.analysis import AnalysisPlan, AnalysisRun, AnalysisService
 from mailbrief.services.application import ApplicationService
@@ -308,6 +315,27 @@ async def test_a_cancelled_sync_saves_nothing(session: AsyncSession) -> None:
 
     assert result.status is BriefStatus.CANCELLED
     assert gate.previews == []
+    account_id = await account_id_of(session)
+    assert await DigestRepository(session).get_by_account_and_date(account_id, TODAY) is None
+
+
+async def test_a_partial_sync_that_left_nothing_to_brief_reports_the_sync(
+    session: AsyncSession,
+) -> None:
+    """C5-5: no analysis was sent or failed, so the sync's own code says why no brief was
+    saved, not the AI's."""
+    email = FakeEmailProvider(pages=[[], inbox()])
+    email.fail_at_page = 2
+    email.failure_exception = ProviderRateLimitError("slow down")
+    gate = RecordingGate(answer=True)
+
+    result = await build(session, FakeAIProvider(), gate, email=email).generate(tz_key=ZONE)
+
+    assert result.sync.status is SyncStatus.PARTIAL
+    assert result.status is BriefStatus.SYNC_FAILED
+    assert result.error_code is not None
+    assert result.error_code == result.sync.error_code
+    assert (result.ai_calls, gate.previews) == (0, [])
     account_id = await account_id_of(session)
     assert await DigestRepository(session).get_by_account_and_date(account_id, TODAY) is None
 

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from mailbrief.domain.availability import step_up
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.planning_intervals import UtcInterval, occupied_duration, subtract_intervals
 from mailbrief.domain.scheduling_time import all_day_intervals, planning_dates
@@ -208,10 +209,17 @@ def workload(snapshot: SchedulingSnapshot) -> Workload:
     )
 
 
+def earliest_start(snapshot: SchedulingSnapshot) -> datetime:
+    """Where suggestions may start, for placement and verification alike: at least
+    REVIEW_LEAD after the snapshot, on the first quarter hour of the owner's clock (C4-3).
+    """
+    return step_up(snapshot.captured_at_utc + REVIEW_LEAD, ZoneInfo(snapshot.owner_zone))
+
+
 def propose(snapshot: SchedulingSnapshot, request: SchedulingRequest) -> SchedulingProposal:
     """Greedy, stable and bounded. Failure is not proof that placement is impossible."""
     free = free_slots(snapshot)
-    earliest = snapshot.captured_at_utc + REVIEW_LEAD
+    earliest = earliest_start(snapshot)
     if free is not None:
         free = tuple(
             UtcInterval(start=max(slot.start, earliest), end=slot.end)
@@ -364,7 +372,7 @@ def verify_proposal(snapshot: SchedulingSnapshot, proposal: SchedulingProposal) 
             raise ValueError("A proposed task is not eligible.")
         interval = UtcInterval(start=block.starts_at_utc, end=block.ends_at_utc)
         if (
-            interval.start < snapshot.captured_at_utc + REVIEW_LEAD
+            interval.start < earliest_start(snapshot)
             or subtract_intervals((interval,), horizon)
             or block.time_zone != snapshot.owner_zone
             or (demand.deadline_utc is not None and interval.end > demand.deadline_utc)
@@ -381,11 +389,10 @@ def verify_proposal(snapshot: SchedulingSnapshot, proposal: SchedulingProposal) 
         task = choices[task_id]
         if len(pieces) > (4 if task.split else 1):
             raise ValueError("The proposal violates the split policy.")
-        if sum(
-            (piece.duration.days * 43200 + piece.duration.seconds) * 1_000_000
-            + piece.duration.microseconds
-            for piece in pieces
-        ) != round((demands[task_id].uncovered_seconds or 0) * 1_000_000):
+        # In whole microseconds, so a day counts all of its 86,400 seconds (C4-5).
+        if sum(piece.duration // timedelta(microseconds=1) for piece in pieces) != round(
+            (demands[task_id].uncovered_seconds or 0) * 1_000_000
+        ):
             raise ValueError("The proposal does not conserve the requested duration.")
         if task.split and any(
             piece.duration.total_seconds() < task.minimum_piece_minutes * 60

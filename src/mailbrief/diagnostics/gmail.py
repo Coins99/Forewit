@@ -985,7 +985,11 @@ def _print_result(result: BriefRunResult, *, model: str) -> None:
         print(partial_reason)
     if result.provider_detail:
         print(f"{provider_display_name(PROVIDER_NAME)} detail: {result.provider_detail}")
-    if result.status in (BriefStatus.ANALYSIS_FAILED, BriefStatus.READY_FOR_REVIEW):
+    if result.status in (
+        BriefStatus.ANALYSIS_FAILED,
+        BriefStatus.READY_FOR_REVIEW,
+        BriefStatus.SYNC_FAILED,
+    ):
         # Its own line: some messages end in a command, which must not run into this note.
         print("Your last saved brief for today is unchanged.")
     if _sync_incomplete(result):
