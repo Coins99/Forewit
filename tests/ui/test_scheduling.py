@@ -204,6 +204,8 @@ async def test_review_acknowledgement_lost_response_retry_and_undo(
     assert dialog._review is not None and dialog._review.proposal.blocks
     shown = dialog.summary.text() + dialog.preview.toPlainText()
     assert "Still to schedule:" in shown and "+00:00" not in shown
+    assert dialog.summary.text().startswith(day_text(DAY, today=DAY))
+    assert f"{day_text(DAY, today=DAY)}, " in dialog.preview.toPlainText()
     dialog._apply()
     assert dialog._write is not None
     await dialog._write
@@ -341,6 +343,8 @@ def test_review_summary_is_labelled_lines_with_the_apps_dates() -> None:
         "0 min counted from outside these dates"
     )
     assert lines[5] == "Calendar: complete"
+    one = workload().model_copy(update={"all_day_commitments": 1})
+    assert "1 all-day commitment" in review_summary(one, today, today, today).split("\n")[3]
     assert "quarter hour" in lines[6] and len(lines) == 7
     assert "2026-" not in text and "+00:00" not in text
     assert "Free time ahead: unknown" in review_summary(workload(None), today, today, today)

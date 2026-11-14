@@ -58,6 +58,7 @@ def review_summary(shown: Workload, first_day: date, last_day: date, today: date
     days = first if first_day == last_day else f"{first} – {day_text(last_day, today=today)}"
     free = "unknown" if shown.free_minutes is None else _minutes(shown.free_minutes)
     tasks = "task" if shown.unknown_tasks == 1 else "tasks"
+    commitments = "commitment" if shown.all_day_commitments == 1 else "commitments"
     return "\n".join(
         (
             days,
@@ -66,7 +67,7 @@ def review_summary(shown: Workload, first_day: date, last_day: date, today: date
             f"{shown.repair_tasks} needing repair",
             f"Free time ahead: {free}",
             f"Busy: {_minutes(shown.timed_busy_minutes)} of timed events and buffers · "
-            f"{shown.all_day_commitments} all-day commitments",
+            f"{shown.all_day_commitments} all-day {commitments}",
             f"Already scheduled: {_minutes(shown.scheduled_minutes)}, "
             f"{_minutes(shown.unique_scheduled_minutes)} of calendar time · "
             f"{_minutes(shown.future_reserved_minutes)} still ahead · "
