@@ -117,6 +117,7 @@ from mailbrief.domain.routes import (
 )
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.weekly_review import WeeklyReview, WeeklyReviewRecord
 from mailbrief.domain.work_blocks import (
     BlockSaved,
     BlockTime,
@@ -307,6 +308,7 @@ from mailbrief.ui.theme import (
 from mailbrief.ui.today_view import DayOverview, DayPanel
 from mailbrief.ui.upcoming_view import UpcomingDialog
 from mailbrief.ui.weak import weak_method
+from mailbrief.ui.weekly_review_view import WeeklyReviewDialog
 from mailbrief.ui.workload_text import today_text
 from mailbrief.ui.workspace import PAGE_SHORTCUTS as PAGE_SHORTCUTS
 from mailbrief.ui.workspace import ThreePaneWorkspace
@@ -499,6 +501,13 @@ class DesktopBackend(Protocol):
         self, first_day: date, last_day: date, zone: ZoneInfo
     ) -> CalendarRange: ...
     async def today_summary(self, day: date, zone: ZoneInfo, now: datetime) -> DaySummary: ...
+    async def weekly_review(self, week: date, zone: ZoneInfo) -> WeeklyReview: ...
+    async def mark_week_reviewed(
+        self, week: date, revision: int | None, reviewed: bool
+    ) -> WeeklyReviewRecord: ...
+    async def attach_week_reflection(
+        self, week: date, revision: int | None, note_public_id: str
+    ) -> WeeklyReviewRecord: ...
     async def create_event(self, edit: EventEdit) -> CalendarEvent: ...
     async def save_event(self, public_id: str, revision: int, edit: EventEdit) -> CalendarEvent: ...
     async def delete_event(self, public_id: str, revision: int) -> None: ...
@@ -1342,6 +1351,19 @@ class MainWindow(QMainWindow):
         self.upcoming_button.setAccessibleName("Open seven or thirty days of known commitments")
         self.upcoming_button.clicked.connect(self._open_upcoming)
         workspace.add_header_action("today", self.upcoming_button)
+        self.weekly_review = WeeklyReviewDialog(self)
+        self._review_read = 0
+        self.weekly_review.week_requested.connect(self._read_weekly_review)
+        self.weekly_review.open_requested.connect(self._navigate)
+        self.weekly_review.focus_requested.connect(self._review_focus)
+        self.weekly_review.review_requested.connect(self._mark_week)
+        self.weekly_review.reflection_requested.connect(self._week_reflection)
+        self.weekly_review_button = outline_button("Weekly review", "openWeeklyReview")
+        self.weekly_review_button.setAccessibleName(
+            "Review a week's done and open tasks, and plan the next"
+        )
+        self.weekly_review_button.clicked.connect(self._open_weekly_review)
+        workspace.add_header_action("today", self.weekly_review_button)
         self.drafts_panel.draft_requested.connect(self._request_draft)
         self.drafts_panel.preview_requested.connect(self._request_draft_preview)
         workspace.add_page("drafts", _page(self.drafts_panel, "draftsPage", "Drafts", margins=0))
@@ -1502,6 +1524,7 @@ class MainWindow(QMainWindow):
             self.cancel_button,
             self.capture_button,
             self.upcoming_button,
+            self.weekly_review_button,
             self.capture_inbox_button,
             self.mail_view,
             workspace.sidebar.nav,
@@ -2083,6 +2106,111 @@ class MainWindow(QMainWindow):
     def _open_upcoming(self) -> None:
         self.dialog_guard.show_dialog(self.upcoming)
         self._read_upcoming(self.upcoming.range.currentData())
+
+    # The weekly review (P5-1): local records only; each change is one the owner chose.
+
+    def _open_weekly_review(self) -> None:
+        if self._closing:
+            return
+        self.dialog_guard.show_dialog(self.weekly_review)
+        today = self._local_today()
+        self.weekly_review.request(week_start(today), today)
+
+    def _read_weekly_review(self, week: object) -> None:
+        if not isinstance(week, date):
+            return
+        self._review_read += 1
+        generation, zone = self._review_read, self.zone
+
+        async def read() -> None:
+            try:
+                shown = await self.backend.weekly_review(week, zone)
+            except Exception as exc:
+                log_failure(exc)
+                if generation == self._review_read and not self._closing:
+                    self.weekly_review.show_failure("Could not read the week. Reopen to retry.")
+                return
+            if generation == self._review_read and zone == self.zone and not self._closing:
+                self.weekly_review.show_review(shown, zone, self._local_today())
+
+        self._review_task(read())
+
+    def _review_task(self, work: Coroutine[object, object, None]) -> None:
+        task = asyncio.get_running_loop().create_task(work)
+        self._calendar_reads.add(task)
+        task.add_done_callback(self._calendar_reads.discard)
+
+    def _review_changed(self, text: str) -> None:
+        if not self._closing:
+            self.weekly_review.show_failure(text)
+            if self.weekly_review.week is not None:
+                self._read_weekly_review(self.weekly_review.week)
+
+    def _mark_week(self, reviewed: bool) -> None:
+        shown = self.weekly_review.shown
+        if shown is None:
+            return
+        revision = None if shown.record is None else shown.record.revision
+
+        async def mark() -> None:
+            try:
+                await self.backend.mark_week_reviewed(shown.week_start, revision, reviewed)
+            except Exception as exc:
+                log_failure(exc)
+                self._review_changed("The review changed or could not be saved. Showing it again.")
+                return
+            self._review_changed("Week marked reviewed." if reviewed else "Review mark cleared.")
+
+        self._review_task(mark())
+
+    def _week_reflection(self) -> None:
+        shown = self.weekly_review.shown
+        if shown is None:
+            return
+        record = shown.record
+        if record is not None and record.reflection_note_public_id:
+            self.weekly_review.reject()
+            self._navigate(
+                WritingRoute(public_id=record.reflection_note_public_id, draft_kind=DraftKind.NOTE)
+            )
+            return
+        revision = None if record is None else record.revision
+
+        async def write() -> None:
+            try:
+                note = await self.backend.create_draft(DraftKind.NOTE)
+                await self.backend.attach_week_reflection(
+                    shown.week_start, revision, note.public_id
+                )
+            except Exception as exc:
+                log_failure(exc)
+                self._review_changed("Could not start the reflection note. Try again.")
+                return
+            if not self._closing:
+                self.weekly_review.reject()
+                self._navigate(WritingRoute(public_id=note.public_id, draft_kind=DraftKind.NOTE))
+
+        self._review_task(write())
+
+    def _review_focus(self, task_id: str, day: object) -> None:
+        if not isinstance(day, date):
+            return
+        zone = self.zone
+
+        async def add() -> None:
+            try:
+                summary = await self.backend.today_summary(day, zone, utc_now())
+                plan = summary.focus or DayPlan(day=day)
+                await self.backend.select_day_task(day, zone, task_id, plan.revision)
+            except Exception as exc:
+                log_failure(exc)
+                self._review_changed("Could not add the task to that day's focus.")
+                return
+            self._review_changed("Added to focus. Task dates are unchanged.")
+            if not self._closing:
+                await self._refresh_day()
+
+        self._review_task(add())
 
     def _read_upcoming(self, days: int) -> None:
         self._upcoming_read += 1
@@ -2738,6 +2866,8 @@ class MainWindow(QMainWindow):
                 self.focus_dialog.panel.show_plan(plan, zone, now)
             if self.upcoming.isVisible():
                 self._read_upcoming(self.upcoming.range.currentData())
+            if self.weekly_review.isVisible() and self.weekly_review.week is not None:
+                self._read_weekly_review(self.weekly_review.week)
 
     def _open_focus(self) -> None:
         if self._closing or self._dialog_open():
@@ -3233,6 +3363,11 @@ class MainWindow(QMainWindow):
         elif key == "new:note":
             self._show_page("notes")
             self._request_draft(NEW_DRAFT, DraftKind.NOTE)
+        elif kind == "review":
+            self._open_weekly_review()
+            if page == "last" and self.weekly_review.isVisible():
+                today = self._local_today()
+                self.weekly_review.request(week_start(today) - timedelta(days=7), today)
         else:
             button = {
                 "sync": self.generate_button,
@@ -5680,6 +5815,7 @@ class MainWindow(QMainWindow):
                 self.focus_dialog,
                 self.capture_inbox,
                 self.upcoming,
+                self.weekly_review,
             )
         )
 
