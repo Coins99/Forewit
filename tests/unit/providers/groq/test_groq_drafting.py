@@ -44,8 +44,8 @@ from tests.unit.providers.groq.groq_fixtures import (
 )
 
 PINNED_DRAFT_PROMPT = (
-    "groq-draft-2026-09-28.1",
-    "ad4901ae239c2a668a0762b309cfcaa27fbaf9f4110fc77a90b04452bc738070",
+    "groq-draft-2026-11-13.1",
+    "36882788045ac57ecb5e08dabc4eb05f4b56d94f1d4cfcd6963ffed27760c8ad",
 )
 REQUEST_KEYS = {"model", "messages", "response_format", "max_completion_tokens"}
 SOURCE = SourceContext(

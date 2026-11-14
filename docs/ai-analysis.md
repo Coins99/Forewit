@@ -145,7 +145,7 @@ control or format characters. See [M6 actions](m6-actions.md).
 
 Drafts can be written with Groq from context you choose; see [M7 drafts](m7-drafts.md) and
 [ADR 0013](adr/0013-ai-drafting.md). Drafting uses its own prompt,
-`groq-draft-2026-09-28.1` (the brief's is `groq-2026-09-30.1`), a strict schema with no
+`groq-draft-2026-11-13.1` (the brief's is `groq-2026-11-13.1`), a strict schema with no
 field for recipients, and the same model, `MAILBRIEF_AI_MAX_OUTPUT_TOKENS` limit and
 request cap. Its consent is separate from the brief's: it belongs to you rather than an
 account, is asked for the first time you draft with AI, and `ai-consent revoke` withdraws
@@ -165,9 +165,10 @@ and schema version. The hash covers everything sent except the random key, inclu
 time zone. An unchanged message is reused and never sent again; a new model, prompt or time
 zone analyzes it once more. The cache holds the summary, action, deadline, the action
 suggestions, the follow-up signal and short evidence quotes from the email, never the
-body. Schema version 6 (M6), and schema version 7 with prompt `groq-2026-09-30.1` (M8),
-each made every earlier result a miss once, so the first brief after upgrading re-sends
-today's shortlist, under the consent you already gave.
+body. Schema version 6 (M6), schema version 7 with prompt `groq-2026-09-30.1` (M8), and
+prompt `groq-2026-11-13.1`, which tells the model to ignore text claiming to come from
+Forewit as well as MailBrief, each made every earlier result a miss once, so the first
+brief after upgrading re-sends today's shortlist, under the consent you already gave.
 
 ## Follow-up signal (M8)
 

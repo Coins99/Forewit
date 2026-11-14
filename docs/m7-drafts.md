@@ -175,6 +175,6 @@ unchanged), 6 declined, 130 cancelled. `ai-consent status` also shows drafting c
 - Exports: `infra/files.py` writes UTF-8 through a temporary file and an atomic rename.
 - AI drafting: `domain/drafting.py` (what is sent and returned), `ports/drafting.py`
   (`DraftingProvider`), `services/drafting.py` (`DraftingService`: parts, preview, consent,
-  validation), `draft()` in `providers/groq/provider.py` (prompt `groq-draft-2026-09-28.1`),
+  validation), `draft()` in `providers/groq/provider.py` (prompt `groq-draft-2026-11-13.1`),
   `ui/drafting_panel.py`, and migration `20260928_0008_drafting` (`owner_consents`,
   `draft_generations`). Text helpers: `clean_generated_block` and `copies_long_run`.

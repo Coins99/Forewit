@@ -35,7 +35,7 @@ from tests.unit.providers.groq.groq_fixtures import (
 )
 
 PINNED_PLANNING_PROMPT = (
-    "groq-calendar-2026-10-12.2",
+    "groq-calendar-2026-11-13.1",
     hashlib.sha256(PLANNING_INSTRUCTIONS.encode()).hexdigest(),
 )
 REQUEST = CalendarPlanningRequest(
