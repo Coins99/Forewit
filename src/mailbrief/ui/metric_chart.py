@@ -48,6 +48,8 @@ from mailbrief.ui.theme import (
 
 type _Index = QModelIndex | QPersistentModelIndex
 _ROOT = QModelIndex()
+FOCUS_INSET: Final = 1.0  # The focus ring sits this far inside the plot widget.
+FOCUS_RADIUS: Final = 8.0
 LABEL_GAP: Final = 10.0  # Between two labels under the plot.
 CATEGORY_LABEL_MAX: Final = 120.0
 CATEGORY_LABEL_MIN: Final = 34.0
@@ -217,6 +219,11 @@ class MetricPlot(QWidget):
     def _area(self) -> QRectF:
         return QRectF(64, 24, max(1, self.width() - 78), max(1, self.height() - 58))
 
+    def unit_rect(self) -> QRectF:
+        """Where the unit is drawn: inside the focus ring's corner and above the axis."""
+        left = FOCUS_INSET + FOCUS_RADIUS + 3
+        return QRectF(left, FOCUS_INSET + 1, max(1.0, self.width() - 2 * left), 18)
+
     def select(self, index: int) -> None:
         if not self.display.samples:
             return
@@ -290,7 +297,7 @@ class MetricPlot(QWidget):
         tokens = current_tokens()
         painter.setFont(ui_font(CAPTION_PX, tabular=True))
         painter.setPen(QColor(tokens.text_secondary))
-        painter.drawText(QRectF(0, 0, self.width(), 20), self.display.unit)
+        painter.drawText(self.unit_rect(), self.display.unit)
         area = self._area()
         exact = [sample.value for sample in self.display.samples if sample.value is not None]
         if not exact:
@@ -366,7 +373,11 @@ class MetricPlot(QWidget):
         if self.hasFocus():
             painter.setPen(hairline_pen(tokens.accent_fg))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 8, 8)
+            painter.drawRoundedRect(
+                QRectF(self.rect()).adjusted(FOCUS_INSET, FOCUS_INSET, -FOCUS_INSET, -FOCUS_INSET),
+                FOCUS_RADIUS,
+                FOCUS_RADIUS,
+            )
 
 
 class MetricChartCard(HairlineFrame):
