@@ -1,12 +1,8 @@
 """Explicit local backup command, independent of Gmail and AI setup."""
 
 import argparse
-import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
-
-from alembic.util import CommandError
-from sqlalchemy.exc import SQLAlchemyError
 
 from mailbrief.errors import ConfigurationError
 from mailbrief.storage.backup import create_backup
@@ -56,7 +52,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
     except ConfigurationError as exc:
         print(str(exc))  # Static setup/lock messages; no archive data.
         return 1
-    except (OSError, sqlite3.Error, ValueError, SQLAlchemyError, CommandError):
+    except Exception:
+        # Whatever failed, a revision run on an old backup included: fixed text only, never
+        # a traceback or the exception's own words.
         print(
             "Backup or restore failed. Check the archive, database, permissions and disk space. "
             "Any existing database and backup have been retained."

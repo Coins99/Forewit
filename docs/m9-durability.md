@@ -34,8 +34,11 @@ Incoming full bodies are never downloaded by export. Text typed or pasted by the
 owner is exported exactly as stored.
 
 The envelope contains `format`, `version`, `created_at_utc` and `records`. Each
-`records` key is a table name: `actions`, `action_steps`, `action_sources`,
-`action_proposals`, `drafts`, `draft_versions`, `draft_sources`, `draft_generations`.
+`records` key is a table name, one for each of the 22 tables in `EXPORT_TABLES`
+(`services/data.py`): day plans and their items, life areas, projects, actions with
+their activity, steps, tags, repeats, sources and proposals, drafts with their versions,
+sources and generation records, calendar events, work blocks, working hours, metrics
+with their entries and corrections, and dashboards.
 Rows contain their named columns, preserving IDs and foreign-key relationships
 (a note's `project_public_id` and `action_id`, ADR 0027, among them);
 timestamps/dates are ISO 8601 and nulls remain JSON null. Rows are ordered by primary

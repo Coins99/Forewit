@@ -68,6 +68,12 @@ Defaults; the owner changes them here.
   half minutes: pass `--base origin/main` when the local `main` hasn't been pulled.
   The owner then had the session go on past the stop: the three findings left open were
   fixed and the helpers left unread were read, in the same session.
+- C3 stood at 46 points of the 5-hour window, 11 of the Fable week and 262,000 tokens of
+  context when its fixes were committed: over both stops. It began at 113,000 tokens,
+  because finding the slice took reading this file from another checkout, and its
+  experiments (four scripts, run and rerun) cost more than its reading, which was the
+  1,035 lines and six helpers. `qa.py changed` ran twice and `qa.py full` once, in the
+  background while this file was written. A slice with experiments needs its own budget.
 
 ## Fixing as we go
 
@@ -166,7 +172,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | B1 | Invariants: secrets, bodies, what goes to AI | For each AGENTS.md invariant, grep for the test that enforces it and confirm in 30 lines or fewer. A gap gets a test; rules a scan can check go in `tests/unit/test_source_rules.py` | Test names, short ranges | Sonnet | Done 2026-11-12, draft PR #114. Next: C1 (it takes the remaining AI-boundary checks marked "to C1" below) |
 | C1 | Deep read: what leaves the machine | `services/analysis.py`, `drafting.py`, `calendar_planning.py`, `consent.py`, `providers/groq/provider.py`. From B1: confirm that summary, action and suggestion text is stripped of control and format characters before it is stored, and that mail content cannot authorize an action | About 2,800 lines | Fable | Done 2026-11-12, draft PR #118 on `qa/c1-ai-boundary`. Two findings fixed, one open. Next: C2, in a fresh 5-hour window |
 | C2 | Deep read: owner-record writes | `services/actions.py`, `storage/actions.py`, `services/recurrence.py`, `services/writes.py` | About 2,600 | Fable | Done 2026-11-12, draft PR #119 on `qa/c2-owner-writes`. Two findings fixed, two open. Next: C3, in a fresh 5-hour window |
-| C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Not started |
+| C3 | Durability | `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`, `services/data.py`, `diagnostics/backup.py`, plus a real offline backup, verify and restore round trip and an upgrade from an early revision, on a synthetic database | About 1,050 | Fable | Done 2026-11-13, draft PR #124 on `qa/c3-durability`, from `main`. Three findings fixed, one open, one doc corrected. Next: the rest of D, or E (#123); every deep read is done |
 | B2 | Invariants: owner records | As B1: revisions, tags, repeats, deadlines, waiting, checklists, drafts and notes, preferences, receipts, work blocks, Busy/Free, workload, scheduling and Insights | Test names | Sonnet | Done 2026-11-12, draft PR on `qa/b2-owner-records` (stacked on B1). Next: B3 |
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Done 2026-11-13, draft PR on `qa/c4-scheduling`. Three findings fixed, three open. It branches from `qa/c1-ai-boundary`, which holds C2: #119 was merged into that branch after #118 reached `main`, so C2 reaches `main` with this pull request. Next: C3 or C5, in a fresh 5-hour window |
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
@@ -412,6 +418,44 @@ Not done: the large-profile probe in `p2-workspace.md` (Today summary, search, n
 commit). It has no script in the repository, only recorded results, so it cannot be
 re-run until one is written. That is a small follow-up.
 
+## Slice C3: durability
+
+Read whole: `storage/backup.py`, `recovery.py`, `migrate.py`, `migration_forks.py`,
+`services/data.py`, `diagnostics/backup.py`, and the helpers they lean on:
+`domain/backup.py`, `infra/files.py`, `infra/data_lock.py`, `migrations/env.py`,
+`storage/types.py`, `storage/database.py`, and `docs/m9-durability.md`. Run on macOS,
+on synthetic data only: the database the package scenario makes (`--smoke-test-dir`),
+with that scenario's metrics and a few rows added by hand, 28 tables holding rows.
+
+| Checked | Result |
+| --- | --- |
+| A real offline backup, verify and restore through `python -m mailbrief.diagnostics.backup` | 40 checks, all passed. The backup of a database another client holds open in WAL mode includes the rows still in the WAL and leaves the source as it was; the archive is two members, private (0600), with a matching checksum and no path; an existing archive is refused and kept. Restore to a new folder (a space and an accent in its name) gives a private, self-contained database that passes SQLite's integrity and foreign-key checks, and differs from the source only where restore is meant to: the automatic permission, local consent, the scan checkpoint and Google's cache. Non-ASCII owner text survives |
+| Replacing an existing database | Refused without `--replace`, while another SQLite client is open, and while the desktop's lock is held; nothing changes and no pre-restore copy is left. Once closed it succeeds, prints the path of the one pre-restore copy, and that copy holds what was written after the backup |
+| Damaged and hostile archives | One flipped byte, a truncated file, an empty file, text, a bare database, an extra member with a parent path, and a checksum that doesn't match are all refused by verify and by restore, with the fixed message, no traceback, no path, and no folder or file left behind |
+| The app's own code on the restored database | The ORM reads it; Export all writing gives readable JSON with no mail, account or consent table; all four cleanups preview and apply, and the owner's tasks, notes and events are still there after the account is removed |
+| An upgrade from an early revision | Databases at ten revisions from 0001 to 0036, both note branches among them, were filled generically (two rows in every table the filler could satisfy, 5 of 6 tables at 0001 and 28 of 37 at 0036), then upgraded in place and through a backup made at the old revision. Every one reaches the head and passes the full schema check; no table loses a row but Google's cache on restore; the pre-upgrade copy holds the old rows; the old database is untouched by its backup. A workspace-branch database with a project on a draft that is not a note, which the app could not make, fails the upgrade whole and changes nothing |
+| An upgrade that stops partway | Not atomic: C3-1, fixed. Then checked by stopping each of the 38 revisions after its last statement, and by ending a real process inside three of them |
+| `validate_snapshot`: only the released tables, no trigger or view, one known revision, and at the head the columns, keys, checks and indexes of a freshly migrated database | Confirmed by reading. A database holding both note-branch revisions at once (an upgrade stopped between them) is refused by backup until the upgrade finishes |
+| The archive reader: bounded before parsing, two fixed members, no path extracted, sizes and checksum checked while copying | Confirmed by reading and by the hostile archives above. Backups cannot be ZIP64: the snapshot is capped at 1 GiB |
+| Restore: staged beside the target, upgraded and checked there, the old database copied before the replace, sidecars refused | Confirmed by reading. A database too damaged to copy refuses replacement, as `m9-durability.md` says |
+| Cleanup: the preview is bound to a fingerprint of every table but Google's cache, rechecked under the write lock, deleted through ORM rows in batches | Confirmed by reading; `metric_entry_changes` and work blocks go by the schema's cascades, which the preview counts |
+| No column the export or the fingerprint cannot serialize | Confirmed: every column is text, a number, a boolean, a date, a time stamp or JSON |
+
+Not read: the desktop's Data and recovery dialog (`ui/data_view.py`) beyond its error
+handling, `storage/metric_validation.py` and `dashboard_validation.py`,
+`storage/day_plans.py`, the revisions themselves, `scripts/convert_p3_candidate.py`, and
+the test files beyond the tests changed. Not run: Windows (left to CI), a database near
+the 1 GiB limit, a full disk, and the owner's real database, which stays the owner's
+check in `m9-live-validation.md`.
+
+`qa.py changed --base origin/main` passed after the last fix. `qa.py full` on this Mac:
+Ruff, mypy for three platforms and the service gate pass; of 5,611 tests, six fail, none
+from this slice. One is the Havana day in `test_calendar.py`, which this Mac's zone data
+fails. Five are in the Cocoa run: a keyboard-focus test, which needs the desktop to
+activate the test window, and four cases of
+`test_day_preview_fits_content_and_recovers_after_resizing`, which fail the same way
+with `main`'s `migrations/env.py` put back. CI decides.
+
 ## Findings
 
 One line each: `ID | slice | severity | what is wrong | state`. Severity is high (data
@@ -438,4 +482,9 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C5-2 | C5 | low | A sync that honours a provider's rate-limit wait (up to 60 seconds) sleeps without watching Stop: the cancel is seen only when the next page arrives. Reproduced | fixed in `4881bb6`: the wait ends as soon as the cancel is set
 - C5-3 | C5 | low | A local-mode automatic run without local consent reports `ready` as the whole selection, carried messages included, where every other path counts only new ones (`brief.py`, the `locally_allowed` branch). Local AI is experimental. Reproduced | fixed in `cc3bea1`
 - C5-4 | C5 | low | Two handlers of a failing progress callback log the exception's text (`sync.py` `emit_progress`, and `application.py` before ranking); the third logs its type. The callbacks are the desktop's own and are handed counts only, so no mail text is known to have reached the log | fixed in `e523b99`: all three log the type. A scan now refuses an exception passed to a log call in its own `except` block (`test_no_log_call_passes_an_exception_s_text`); the two other places that did it log the type too
+- C3-1 | C3 | medium | An upgrade that stopped inside a revision could never be retried. SQLite's driver begins a transaction only before it changes rows, so a revision's schema statements were committed one by one, and its version was recorded last: a failure or the process ending in between left columns and tables the recorded version did not have, and every later upgrade failed on them (`duplicate column name`, `table … already exists`). So Forewit could not open its database until the owner put the pre-upgrade copy back by hand, where the in-app help says to retry. Reproduced for 35 of the 38 revisions. No data was lost: the pre-upgrade copy was whole | fixed in `048deb2`: the migration environment begins the transaction, so a revision and its version are committed together or not at all. All 38 revisions now leave nothing behind when stopped
+- C3-2 | C3 | low | Restore wrote the time it revoked local consent as `2026-11-13T22:49:56.163861+00:00`, where every other timestamp is stored as `2026-11-13 22:49:56.163861`. The ORM reads both, and nothing compares that column as text today, so nothing misbehaved | fixed in `12bb634`
+- C3-3 | C3 | low | The backup command listed the errors it turns into its fixed message. Restoring an old backup runs the revisions on it, and one that failed another way (a `RuntimeError` from the note-column check, reproduced) printed a 68-line traceback. Nothing was replaced and no folder was left | fixed in `9d1487d`: any failure prints the fixed message, as the desktop already does
+- C3-4 | C3 | low | A backup of a closed database leaves `forewit.sqlite3-shm` and an empty `forewit.sqlite3-wal` beside it: the read-only connection that takes the snapshot creates them and cannot remove them. They are harmless, the next launch or restore clears them, and restore's sidecar check is not tripped. But `m9-durability.md` tells the owner not to delete sidecar files and to close the clients that left them, and here there is none. Reproduced | open
+- C3-5 | C3 | low | `m9-durability.md` listed eight tables in Export all writing; the export has 22 (`EXPORT_TABLES`, pinned by `test_the_writing_export_names_no_mail_or_google_calendar_table`) | fixed: the doc now describes the 22
 - C5-5 | C5 | low | A run whose sync was partial and left nothing to select saves no brief, which is right, but reports `ANALYSIS_FAILED` with the code `ANALYSIS_FAILED`: the owner reads "No message could be analyzed. Review your selection and AI settings." when nothing was sent and the sync's own error code says why. Read, not reproduced | open

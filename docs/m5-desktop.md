@@ -222,6 +222,8 @@ No backup is made for a new or current database. A failed backup stops the upgra
 unknown/newer revisions are rejected before modification. Backups are never overwritten
 or automatically deleted, so retries preserve the original. They contain the same
 private cached metadata and derived content as the database; keep them in the profile.
+Each revision runs in one transaction with its version, so an upgrade that stops partway
+(a failure, or the process ending) leaves the last whole revision and can be retried.
 To recover, close Forewit and all diagnostic CLIs, preserve the failed database and
 its `-wal`/`-shm` files elsewhere, and copy the chosen backup to `mailbrief.sqlite3`
 with no old sidecars remaining. Reopen with the compatible app version. This is manual

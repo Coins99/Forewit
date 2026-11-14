@@ -283,6 +283,11 @@ def test_restore_revokes_all_local_disclosures_and_keeps_mode_and_writing(
     assert query(
         source, "SELECT count(*) FROM ai_consents WHERE provider='local' AND revoked_at_utc IS NULL"
     ) == [(2,)]
+    # The time is stored as every other timestamp is: UTC with a space and no offset.
+    ((revoked,),) = query(
+        restored, "SELECT DISTINCT revoked_at_utc FROM ai_consents WHERE provider='local'"
+    )
+    assert len(revoked) == len(STAMP) and revoked[10] == " " and revoked > STAMP
     assert query(
         restored, "SELECT revoked_at_utc,auto_send_limit FROM ai_consents WHERE provider='groq'"
     ) == [(None, 0)]
