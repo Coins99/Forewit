@@ -81,6 +81,10 @@ _NOT_FOUND: Final = "That action was not found."
 _SUGGESTION_NOT_FOUND: Final = "That suggestion was not found."
 _STALE: Final = "The action changed since it was loaded; reload it and try again."
 _UNDO_ADD: Final = "Only an unchanged addition can be undone."
+# What accept_into records: the only changes undo_accept_into reverses (C2-4).
+_ADDITIONS: Final = frozenset(
+    {ActionActivityKind.SOURCE_ADDED, ActionActivityKind.SUGGESTION_ACCEPTED}
+)
 _UNDO_STATUS: Final = "Only an unchanged completion, skip or reopening can be undone."
 _NO_STATED: Final = "This task has no deadline from an email to go back to."
 _CLOSED_PLAN: Final = "Reopen the task to change its plan."
@@ -686,8 +690,8 @@ class ActionService:
         With ``remove_source`` (accept_into's ``source_added``), its email stops being a
         source; an email-derived action keeps its last source, while a manual task returns
         to zero sources when the addition began there. Raises ActionConflictError unless
-        the action is live, still at ``expected_revision``, and the suggestion is still
-        accepted into it.
+        the action is live, still at ``expected_revision``, the suggestion is still
+        accepted into it, and that addition is the action's latest change.
         """
 
         async def run(now: datetime) -> Action:
@@ -697,7 +701,18 @@ class ActionService:
             if (
                 row is None
                 or row.revision != expected_revision
+                or decision is None
                 or _accepted_action_id(decision) != row.id
+            ):
+                raise ActionConflictError(_UNDO_ADD)
+            # The latest change must be this suggestion's addition: not the action's creation
+            # from it, and not a later addition of another email (C2-4).
+            latest = await self._repository.latest_activity(row.id)
+            if (
+                latest is None
+                or latest.revision != expected_revision
+                or latest.kind not in _ADDITIONS
+                or latest.occurred_at_utc != decision.decided_at_utc
             ):
                 raise ActionConflictError(_UNDO_ADD)
             if previous.decision is None or previous.decided_at_utc is None:
@@ -709,12 +724,7 @@ class ActionService:
                     action_id=previous.action_id,
                     decided_at_utc=previous.decided_at_utc,
                 )
-            latest = await self._repository.latest_activity(row.id)
-            manual_add = bool(
-                latest is not None
-                and latest.revision == expected_revision
-                and latest.previous_source_count == 0
-            )
+            manual_add = latest.previous_source_count == 0
             if remove_source and (manual_add or await self._repository.source_count(row.id) > 1):
                 await self._repository.remove_source(row.id, message.provider_message_id)
             touch(row, now)

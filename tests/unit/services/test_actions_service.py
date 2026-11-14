@@ -1164,6 +1164,33 @@ async def test_undo_add_never_removes_the_last_source(
     ]
 
 
+async def test_undo_add_refuses_a_latest_change_that_was_not_this_addition(
+    session: AsyncSession, service: ActionService, clock: Clock
+) -> None:
+    """C2-4: only the suggestion's own addition, still the action's latest change, is
+    undone: not the action's creation from a suggestion, nor a later addition of another
+    email."""
+    first, second, action = await added_into(session, service)
+    clock.advance(minutes=1)
+    third = await seed(session, (suggestion(0, "Send the deck, once more"),), message="msg-3")
+    await service.accept_into(third.suggestion_ids[0], action.public_id, 2)
+    made = await seed(session, (suggestion(0, "Book the room"),), message="msg-4")
+    created = await service.accept(made.suggestion_ids[0])
+
+    for seeded, public_id, revision in (
+        (first, action.public_id, 3),
+        (second, action.public_id, 3),
+        (made, created.public_id, 1),
+    ):
+        with pytest.raises(ActionConflictError, match="unchanged addition"):
+            await service.undo_accept_into(
+                seeded.suggestion_ids[0], public_id, revision, True, previous=DecisionSnapshot()
+            )
+        assert (await states(session, seeded))[0] == (SuggestionState.ACCEPTED, public_id)
+    assert (await service.get(action.public_id)).revision == 3
+    assert (await service.get(created.public_id)).revision == 1
+
+
 async def decision_row(
     session: AsyncSession, provider_message_id: str
 ) -> tuple[str, int | None, datetime]:
