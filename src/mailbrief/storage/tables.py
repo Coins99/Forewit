@@ -1490,3 +1490,26 @@ class DashboardCommandTable(Base):
     command_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     result_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class WeeklyReviewTable(Base):
+    """That the owner reviewed a Monday-to-Sunday week (P5-1). It holds no owner text: a
+    reflection is an ordinary note, linked by its public ID with no foreign key."""
+
+    __tablename__ = "weekly_reviews"
+    __table_args__ = (
+        UniqueConstraint("week_start", name="uq_weekly_reviews_week_start"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(
+            "reflection_note_public_id IS NULL OR length(reflection_note_public_id) = 36",
+            name="note_id_length",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    reviewed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    reflection_note_public_id: Mapped[str | None] = mapped_column(String(36))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}

@@ -60,6 +60,48 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   separate. Upcoming points to the Calendar for free time, and does not claim to plan capacity.
   Source: [p2-workspace](p2-workspace.md#owner-workflow),
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 7.
+## Weekly review
+
+P5-1, from Today's header or the palette. Test profile, Gmail disconnected.
+
+- [ ] **REV-01** On Today choose **Weekly review**, and in the palette (Ctrl/Cmd+K) **Open
+  weekly review**. Both open the current Monday-to-Sunday week, offline, with no sign-in. The
+  sidebar and Ctrl/Cmd+1 to 8 are unchanged.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-02** Complete two tasks this week and undo one completion; complete a repeating
+  task's occurrence and skip another. **Done this week** lists the kept task and the completed
+  occurrence; the skipped one is under **Skipped**. The count equals Insights' distinct
+  completed tasks for the same dates, and inspecting that Insights figure lists the same tasks.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-03** A task due yesterday, one planned for an earlier date and a focus task left
+  open this week appear under **Still open**, each once with its reason. A waiting task is
+  under **Waiting** with its days.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-04** **Next week** shows next week's dated commitments; with working hours set, a
+  day planned past its hours says "overfilled".
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-05** Open a still-open task from the review (double-click or Return): it opens on
+  Tasks (or Waiting). Change its target date there; reopen the review and it follows. Its
+  deadline did not move.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-06** Select a still-open task, pick next Monday and choose **Add to focus**: on that
+  date Today's focus lists the task, and nothing else about the task changed.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-07** **Mark week reviewed**, then **Write reflection** and type a sentence in the note
+  that opens. Restart: the week still shows as reviewed, **Open reflection** opens that note,
+  and it is on the Notes page. **Unmark reviewed** clears the mark and keeps the note.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-08** **Previous week**, **Next week** and **This week** move between weeks; a week
+  with nothing in it shows empty sections, not an error. **Review last week** in the palette
+  opens last week.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-09** Change the time zone in Settings across a week boundary: the week's tasks follow
+  the new zone. Complete a task while the review is open: the review updates.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **REV-10** Back up, restore into a test profile: reviewed weeks and reflection notes come
+  back. **Export all writing** contains the reflection note and no review record.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+
 ## Tasks
 
 - [ ] **TASK-01** On Tasks, create a task with notes, two steps and a target date. Edit its

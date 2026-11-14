@@ -69,6 +69,8 @@ COMMANDS: Final = (
     Command("new:task", "New task"),
     Command("new:event", "New event today"),
     Command("new:note", "New note"),
+    Command("review:week", "Open weekly review"),
+    Command("review:last", "Review last week"),
     Command("sync", "Sync and review"),
     Command("saved_mail", "Open saved mail"),
     Command("data", "Open data and recovery"),
