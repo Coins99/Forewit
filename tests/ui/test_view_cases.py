@@ -82,6 +82,18 @@ async def test_a_long_unbroken_widget_title_never_widens_the_page(
     await page.drain()
 
 
+async def test_a_card_says_when_it_was_refreshed_in_the_owner_s_time(
+    qtbot: QtBot, database: Database
+) -> None:
+    backend = InsightsBackend(database, google_on=False)
+    await save_layout(backend, spec())
+    page = await open_page(qtbot, backend)  # Its clock is 17:00 UTC, noon in Toronto.
+    caption = chart_of(page.cards[0]).caption.text()
+    assert f"{DATES.zone}. Refreshed 2026-11-08 12:00." in caption
+    assert "+00:00" not in caption and "T17:00" not in caption
+    await page.drain()
+
+
 # Insights: the metric manager.
 
 

@@ -180,9 +180,11 @@ def display_result(result: MetricQueryResult, widget: WidgetSpec, extra: str = "
         notes.append("Calendar coverage: " + "; ".join(states) + ".")
     if result.observation_date is not None:
         notes.append(f"Observed on {result.observation_date.isoformat()}.")
+    # In the zone the line names, to the minute: never UTC with microseconds.
+    refreshed = result.captured_at_utc.astimezone(ZoneInfo(result.query.dates.zone))
     notes.append(
         f"{result.query.dates.first} to {result.query.dates.last}; "
-        f"{result.query.dates.zone}. Refreshed {result.captured_at_utc.isoformat()}."
+        f"{result.query.dates.zone}. Refreshed {refreshed:%Y-%m-%d %H:%M}."
     )
     if widget.target is not None and widget.target.scope is TargetScope.RANGE:
         notes.append(
