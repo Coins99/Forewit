@@ -20,7 +20,9 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
 - **One task, the owner's choice.** A breakdown starts from one live, open task the owner
   selects. Nothing runs automatically, in bulk or across projects.
 - **Sent always:** a random request key, the task title, today's date in the owner's zone and
-  the owner's instruction (at most 1,000 characters).
+  the owner's instruction (at most 1,000 characters). The preview marks a title that came from
+  an email. While email analysis is in local mode, a task with an email source cannot be
+  broken down, so a title written from local-only mail never reaches the cloud.
 - **Sent only when ticked for that generation:** the notes (at most 2,000 characters), the
   existing steps in order with done marks (at most 2,000 in all), the project and area names,
   the deadline and target date as local values, and the owner's estimate. None is ticked by
@@ -40,16 +42,17 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
   already-present steps. Groq's HTTP 400 `json_validate_failed` is retried once.
 - **Apply.** Only the owner applies, after reviewing and optionally editing or unticking each
   step. Apply appends steps through the B04 checklist path as one `edited` revision, needing
-  the revision the generation read; it never changes, reorders, ticks or removes an existing
+  the revision the generation read, in the same transaction as the generation's record; it never changes, reorders, ticks or removes an existing
   step, and never touches title, notes, dates, deadline, priority, tags, estimate, person,
   project, focus or blocks. Undo removes exactly the added steps while the task is still at
   Apply's revision.
 - **Failure.** A failed, declined, cancelled, invalid, stale or dismissed generation leaves
   the task and every plan exactly as they were. Logs and exceptions carry codes and counts.
-- **Generation history.** `task_breakdowns` records each applied or dismissed generation
-  without owner text: provider, model, prompt and schema versions, the part codes, counts
-  proposed, applied and edited, the outcome, revisions read and produced and the added step
-  IDs (for Undo and as a retry receipt). It survives backup, restore and purge and is left out
+- **Generation history.** `task_breakdowns` records every generation that reaches the
+  preview, declined, cancelled and failed ones included, without owner text: provider, model,
+  prompt and schema versions, the part codes, counts proposed, applied and edited, the outcome,
+  an error code for a failure, revisions read and produced and the added step IDs (for Undo
+  and as a retry receipt that commits with the steps). It survives backup, restore and purge and is left out
   of writing exports.
 - **Provider.** A new `BreakdownProvider` port with a Groq adapter. No local-model breakdown
   while local AI is experimental, and no fallback between providers.
@@ -57,7 +60,8 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
 ## Consequences
 
 - A new additive migration adds `task_breakdowns`; consent needs none.
-- Settings > AI lists the new consent beside drafting and calendar planning.
+- Settings' AI card lists the active owner consents, breakdown among them, and its revoke
+  button names breakdown.
 - Trial evidence for "AI suggestions accepted, edited or dismissed" comes from the counts,
   with no step text kept outside the task.
 - Priority, estimate, subtask and multi-task suggestions need a new decision.
