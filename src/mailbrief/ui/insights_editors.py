@@ -68,6 +68,7 @@ from mailbrief.ui.lists import SafeList
 from mailbrief.ui.metric_chart import MetricChartCard
 
 GENERAL_REFUSAL: Final = "Choose compatible chart, grouping, dates and an exact target."
+NO_METRIC: Final = "No metric yet: create one below"
 UNAVAILABLE: Final = (
     "Unavailable for these dates or filters. Edit this widget or change the dashboard filters."
 )
@@ -180,9 +181,12 @@ def display_result(result: MetricQueryResult, widget: WidgetSpec, extra: str = "
         notes.append("Calendar coverage: " + "; ".join(states) + ".")
     if result.observation_date is not None:
         notes.append(f"Observed on {result.observation_date.isoformat()}.")
+    # In the zone the line names, to the minute: never UTC with microseconds. The
+    # abbreviation tells the two 01:30s apart when daylight saving ends.
+    refreshed = result.captured_at_utc.astimezone(ZoneInfo(result.query.dates.zone))
     notes.append(
         f"{result.query.dates.first} to {result.query.dates.last}; "
-        f"{result.query.dates.zone}. Refreshed {result.captured_at_utc.isoformat()}."
+        f"{result.query.dates.zone}. Refreshed {refreshed:%Y-%m-%d %H:%M %Z}."
     )
     if widget.target is not None and widget.target.scope is TargetScope.RANGE:
         notes.append(
@@ -795,6 +799,9 @@ class MetricManager(InsightsDialog):
         self.definitions = definitions
         self.metric_choice.blockSignals(True)
         self.metric_choice.clear()
+        # An empty box alone says nothing. Set only while there is no metric: a combo box
+        # with a placeholder stops choosing its first item by itself.
+        self.metric_choice.setPlaceholderText("" if self.definitions else NO_METRIC)
         for definition in self.definitions:
             self.metric_choice.addItem(
                 definition.name + (" (archived)" if definition.archived else ""),

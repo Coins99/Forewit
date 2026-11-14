@@ -182,7 +182,7 @@ In this order: privacy, then data, then durability, then the newest code.
 | C4 | Deep read: newest code | Scheduling and workload from PRs #107 and #109: `services/scheduling.py`, `domain/scheduling*.py`, `domain/workload.py`, `domain/planning_intervals.py`, `services/availability.py` | About 1,900 | Fable | Done 2026-11-13, draft PR on `qa/c4-scheduling`. Three findings fixed, three open. It branches from `qa/c1-ai-boundary`, which holds C2: #119 was merged into that branch after #118 reached `main`, so C2 reaches `main` with this pull request. Next: C3 or C5, in a fresh 5-hour window |
 | B3 | Invariants: mail and automation | As B1: ranking, brief dates, thread tracking, proposals, outside replies, automatic runs, read-only Gmail, Inbox browsing, Google Calendar | Test names | Sonnet | Done 2026-11-12, branch `qa/b3-mail-automation` (stacked on B2). Next: C2 or D |
 | C5 | Deep read: the daily run | `services/brief.py`, `proposals.py`, `threads.py`, `sync.py` | About 1,800 | Fable | Done 2026-11-13, draft PR on `qa/c5-daily-run`, from `main` (#122). Four findings fixed, one open. Next: C3, in a fresh 5-hour window |
-| D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Started 2026-11-13, draft PR #121: the two items B1 handed on (the system's day, plain-text labels). Open: the gallery, the empty, one, many and long-text cases, and the run-sheet fixes |
+| D | UI, without reading it | The `MAILBRIEF_UI_SHOTS` gallery at 1x in light and dark. For each view added since October (`insights_*`, `scheduling_view`, `date_picker`, the Day view), list its tests by name and add the missing empty, one, many and long-text cases. Fix what the run-sheet reports. From B1: check that every widget showing mail or AI text is plain text (`plain_label`, `wrap_label` or `drawText`), with a test or scan if one can hold it | Test names, 10 images at most | Sonnet with `/mailbrief-ui` | Started 2026-11-13, draft PR #121: the two items B1 handed on (the system's day, plain-text labels). Second part 2026-11-13 on `qa/d-ui-gallery`: the gallery, the cases and five fixes, see [Slice D](#slice-d-the-ui). Open: the run-sheet fixes, which wait for the owner's failed IDs |
 | E | Performance, optional | Re-run the large-profile probe in `p2-workspace.md` and `scripts/benchmark_insights.py`; look only at regressions against the recorded numbers | None | Sonnet | Done 2026-11-13 for the Insights benchmark, on a Mac: no regression, see [Slice E](#slice-e-performance). The p2 probe has no script, so it was not re-run |
 | F | Fix session: the open findings | Each finding's line is its brief: failing test first, then the fix, one commit each. The owner took the two decisions (C1-3, C4-3) on 2026-11-13 | The finding lines and short ranges | Opus 5.5 | Done 2026-11-13, draft PR #126 on `qa/open-findings`, from `qa/c3-durability` (#124). C1-3, C2-3, C2-4, C4-3, C4-4, C4-5 and C5-5 fixed; C3-4 explained in `m9-durability.md` on #124. Review of #126 at high effort: eight findings, all fixed. Next: the owner merges #124, then #126 |
 
@@ -400,6 +400,40 @@ as the C5-1 line says. The rate-limit wait has one path, and its tests replace t
 instead of running a timer. Still by wall clock: the scan's start against the time a
 message was cached. A traceback in a log line (`logger.exception`) is not scanned for.
 
+## Slice D: the UI
+
+The first part (#121) is recorded in the B1 table above: the system's day and the
+plain-text label scan. This is the second part, on a Mac.
+
+**Gallery.** `MAILBRIEF_UI_SHOTS` over all of `tests/ui` at 1x: 184 images, light and dark.
+Seven contact sheets were looked at, each several renders side by side: the Insights page,
+the Day view, the planning drawer and hours editor, the metric manager and widget editor,
+the chart gallery, and the new cases below. The window, the Today page and the dialogs
+outside the newer views were rendered but not looked at.
+
+**Cases.** New tests are in `tests/ui/test_view_cases.py`; the others existed.
+
+| View | Empty | One | Many | Long text |
+| --- | --- | --- | --- | --- |
+| Insights dashboard (`insights_view.py`) | new: `test_an_empty_dashboard_says_how_to_fill_it` | new: `test_one_widget_is_one_card_and_a_full_dashboard_takes_no_more` | the same test, at the limit of twelve; `test_offline_dashboard_reorder_resize_remove_undo_and_restart` | new: `test_a_long_unbroken_widget_title_never_widens_the_page` |
+| Metric manager (`insights_editors.py`) | new: `test_the_manager_says_so_when_there_is_no_metric_to_log` | `test_archive_and_reactivate_work_from_the_manager` | `test_the_observation_list_opens_on_the_newest` (three observations) | new: `test_a_long_unbroken_metric_name_never_widens_the_manager` |
+| Chart card (`metric_chart.py`) | `test_empty_data_table_does_not_activate` | `test_labels_under_the_plot_never_touch_and_always_name_the_last` (the labels only, from one bucket to 366) | the same test; `test_chart_gallery` renders a dense chart | `test_every_category_is_named_and_dates_are_never_cut` |
+| Planning drawer (`scheduling_view.py`) | new: `test_the_planning_drawer_says_when_no_task_is_found` | `test_review_acknowledgement_lost_response_retry_and_undo` | new: `test_the_planning_drawer_pages_many_tasks_and_keeps_a_long_title_inside` (55 tasks, two pages) | the same test, with 200-character titles |
+| Day view (`calendar_grid.py`, `days=1`) | new: `test_an_empty_day_says_so` | new: `test_one_event_takes_the_width_of_its_day` | new: `test_many_events_at_one_time_share_the_day_without_overlapping` | new: `test_a_long_unbroken_event_title_never_widens_the_day` |
+
+Not given cases: the date picker, which has no list and no free text (its seven tests are
+in `test_date_picker.py`); the widget editor and the contributing-records dialog, whose
+tests are `test_widget_preview_cancel_and_conflict_keep_input`,
+`test_a_blank_title_follows_the_metric`,
+`test_custom_log_correct_delete_restore_and_stale_details` and
+`test_return_or_enter_opens_a_contributing_record_once`.
+
+The empty, many and long cases save light-mode renders (`insights-empty`,
+`metric-manager-empty`, `p3-no-tasks`, `p3-many-long`, `calendar-day-empty`, `-many`,
+`-long`).
+
+**Run-sheet.** No failed ID has been sent, so nothing was fixed from it.
+
 ## Slice E: performance
 
 `python -m scripts.benchmark_insights` (10,000 tasks, 100,000 activity rows, 50,000
@@ -494,3 +528,11 @@ loss, or private data exposed), medium (wrong behaviour) or low (cosmetic, or do
 - C3-4 | C3 | low | A backup of a closed database leaves `forewit.sqlite3-shm` and an empty `forewit.sqlite3-wal` beside it: the read-only connection that takes the snapshot creates them and cannot remove them. They are harmless, the next launch or restore clears them, and restore's sidecar check is not tripped. But `m9-durability.md` tells the owner not to delete sidecar files and to close the clients that left them, and here there is none. Reproduced | fixed in the doc: `m9-durability.md` now says this pair needs no action
 - C3-5 | C3 | low | `m9-durability.md` listed eight tables in Export all writing; the export has 22 (`EXPORT_TABLES`, pinned by `test_the_writing_export_names_no_mail_or_google_calendar_table`) | fixed: the doc now describes the 22
 - C5-5 | C5 | low | A run whose sync was partial and left nothing to select saves no brief, which is right, but reports `ANALYSIS_FAILED` with the code `ANALYSIS_FAILED`: the owner reads "No message could be analyzed. Review your selection and AI settings." when nothing was sent and the sync's own error code says why. Read, not reproduced | fixed in `3c3cbb2` and the review of #126: with nothing selected it returns `SYNC_FAILED` with the sync's code. `test_incomplete_sync_without_messages_does_not_save_empty_brief` had pinned `analysis_failed` for this case; it now expects `sync_failed`
+- D-1 | D | low | The Calendar's legend read "Your events    ? Google Calendar    ? Action dates": a character was lost when the file was saved (`b834c27`) | fixed in `b2e2ab4`; a source rule now refuses a "?" standing alone in a string under `ui`
+- D-2 | D | low | An Insights card's caption gave its refresh time in UTC with microseconds ("Refreshed 2026-11-13T23:12:15.785228+00:00") beside the owner's zone | fixed in `527e950`: that zone's time, to the minute, with the zone's abbreviation so the repeated hour when daylight saving ends is told apart
+- D-3 | D | low | An Insights dashboard with every widget removed showed only the note about filters | fixed in `2fbf271`
+- D-4 | D | low | The metric manager with no custom metric opened on an empty, unlabelled box | fixed in `7b52096`. The placeholder is set only while the list is empty: a combo box that has one stops choosing its first item, which left the manager with no metric chosen
+- D-5 | D | low | The planning drawer's empty task list showed only the dates | fixed in `7a8f70a`, and then above the list itself, since in the 680-pixel-high drawer the status line is below the fold. It says when the search or a filter is the reason
+- D-6 | D | low | The planning drawer's review is one paragraph of fourteen figures, and its blocks give times as "2026-11-09T09:00+00:00 – 2026-11-09T10:30+00:00". Wording, seen in the render | open, owner decision
+- D-7 | D | low | On a chart with keyboard focus the unit label at the top left of the plot sits under the focus ring's corner. Seen in the render | open
+- D-8 | D | low | The Insights and chart gallery images (`insights-*`, `widget-editor-*`, `metric-*`) are saved without the scale in their names, so a 2x render overwrites the 1x one | open

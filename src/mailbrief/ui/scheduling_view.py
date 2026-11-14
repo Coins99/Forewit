@@ -121,6 +121,12 @@ class PlanningTaskPanel(QWidget):
         self.focus_only.setObjectName("planningFocusOnly")
         self.focus_only.setAccessibleName(self.focus_only.text())
         layout.addWidget(self.focus_only)
+        # Above the list, where an owner looks: the status line can be below the fold.
+        self.empty = wrap_label("", tone="muted")
+        self.empty.setObjectName("planningNoCandidates")
+        self.empty.setAccessibleName("No eligible tasks")
+        self.empty.hide()
+        layout.addWidget(self.empty)
         self.tasks = ActivatingList()
         self.tasks.setObjectName("planningCandidates")
         self.tasks.setAccessibleName("Eligible tasks with known and unknown remaining duration")
@@ -219,6 +225,12 @@ class PlanningTaskPanel(QWidget):
                         item.setSelected(True)
                 self._next = page.next_offset
                 self.more_button.setEnabled(self._next is not None)
+                self.empty.setText(
+                    "No task matches the search or filters."
+                    if query.strip() or project or focus
+                    else "No tasks found for these dates."
+                )
+                self.empty.setVisible(self.tasks.count() == 0)
                 self.status.setText(
                     f"{self.first.isoformat()} – {self.last.isoformat()} · "
                     "Credit can include later dates."
@@ -226,6 +238,7 @@ class PlanningTaskPanel(QWidget):
             except Exception as exc:
                 log_failure(exc)
                 if not self._closed and generation == self._generation:
+                    self.empty.hide()
                     self.status.setText(
                         "Task planning could not be loaded. Change the filter to retry."
                     )

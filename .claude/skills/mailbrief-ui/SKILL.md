@@ -138,6 +138,9 @@ collection, `SafeList`, `take_widget`).
   line, on a hex colour under `ui` outside `ui/theme/tokens.py`, on a `QListWidget` made or
   subclassed under `ui` outside `ui/lists.py`, and on a strftime directive that follows the
   system language (`%a`, `%A`, `%b`, `%B`, `%p`, `%c`, `%x`) anywhere in `src/mailbrief`.
+  It fails on a `?` standing alone inside a string, or opening one before a space, and on
+  U+FFFD, anywhere in `src/mailbrief` outside `storage` (whose SQL uses `?`): what a lost
+  non-ASCII character (a `·`, a dash, an arrow) leaves when a tool saves the file badly.
   It also fails on a function that calls `QDesktopServices.openUrl` without checking the
   link in that same function (`is_gmail_link`, `is_calendar_link`, `gmail_source`,
   `gmail_link` or the host comparison), and on a `QLabel` not promised plain text or an
