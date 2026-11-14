@@ -1,8 +1,9 @@
 """Synthetic proposal review, uncertain retry and additive editor controls."""
 
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from PySide6.QtWidgets import QWidget
@@ -16,6 +17,7 @@ from mailbrief.domain.scheduling import (
     PlanningUndo,
     SchedulingProposal,
     SchedulingRequest,
+    Workload,
 )
 from mailbrief.services.scheduling import (
     SchedulingChangedError,
@@ -23,8 +25,9 @@ from mailbrief.services.scheduling import (
     SchedulingService,
 )
 from mailbrief.storage.database import Database
+from mailbrief.ui.deadline_text import day_text
 from mailbrief.ui.hours_editor import HoursEditor
-from mailbrief.ui.scheduling_view import SchedulingDialog
+from mailbrief.ui.scheduling_view import SchedulingDialog, block_times, review_summary
 from mailbrief.ui.theme import ThemeMode, apply_theme
 from tests.ui.test_main_window_layout import save_shot
 from tests.unit.services.test_scheduling import DAY, NOW, ZONE, setup
@@ -199,6 +202,8 @@ async def test_review_acknowledgement_lost_response_retry_and_undo(
     dialog._generate()
     await ready(dialog)
     assert dialog._review is not None and dialog._review.proposal.blocks
+    shown = dialog.summary.text() + dialog.preview.toPlainText()
+    assert "Still to schedule:" in shown and "+00:00" not in shown
     dialog._apply()
     assert dialog._write is not None
     await dialog._write
@@ -301,3 +306,72 @@ async def test_calendar_entry_and_hours_drawer_fit_a_short_window(
     editor.force_close()
     window.close()
     await window.shutdown()
+
+
+def workload(free: float | None = 600) -> Workload:
+    return Workload(
+        working_minutes=None,
+        busy_minutes=120,
+        timed_busy_minutes=120,
+        scheduled_minutes=180,
+        unique_scheduled_minutes=150,
+        future_reserved_minutes=60,
+        free_minutes=free,
+        uncovered_minutes=90,
+        unknown_tasks=1,
+        repair_tasks=0,
+        outside_horizon_credit_minutes=0,
+        knowledge="complete",
+        conflicts=(),
+    )
+
+
+def test_review_summary_is_labelled_lines_with_the_apps_dates() -> None:
+    today = date(2026, 11, 9)
+    text = review_summary(workload(), today, date(2026, 11, 15), today)
+    lines = text.split("\n")
+    assert (
+        lines[0] == f"{day_text(today, today=today)} – {day_text(date(2026, 11, 15), today=today)}"
+    )
+    assert lines[1] == ("Still to schedule: 90 min · 1 task without an estimate · 0 needing repair")
+    assert lines[2] == "Free time ahead: 600 min"
+    assert lines[3] == "Busy: 120 min of timed events and buffers · 0 all-day commitments"
+    assert lines[4] == (
+        "Already scheduled: 180 min, 150 min of calendar time · 60 min still ahead · "
+        "0 min counted from outside these dates"
+    )
+    assert lines[5] == "Calendar: complete"
+    assert "quarter hour" in lines[6] and len(lines) == 7
+    assert "2026-" not in text and "+00:00" not in text
+    assert "Free time ahead: unknown" in review_summary(workload(None), today, today, today)
+    assert review_summary(workload(), today, today, today).split("\n")[0] == day_text(
+        today, today=today
+    )
+
+
+def test_a_review_in_a_later_year_shows_the_year() -> None:
+    text = review_summary(workload(), date(2027, 1, 4), date(2027, 1, 10), date(2026, 11, 9))
+    assert text.split("\n")[0] == "Mon Jan 4, 2027 – Sun Jan 10, 2027"
+
+
+def test_block_times_use_the_owner_zone_and_name_both_days_across_midnight() -> None:
+    toronto = ZoneInfo("America/Toronto")
+    today = date(2026, 11, 9)
+    start = datetime(2026, 11, 12, 14, 0, tzinfo=UTC)
+    assert block_times(start, datetime(2026, 11, 12, 15, 30, tzinfo=UTC), toronto, today) == (
+        "Thu Nov 12, 09:00–10:30"
+    )
+    crossing = block_times(
+        datetime(2026, 11, 13, 3, 0, tzinfo=UTC),
+        datetime(2026, 11, 13, 6, 0, tzinfo=UTC),
+        toronto,
+        today,
+    )
+    assert crossing == "Thu Nov 12, 22:00–Fri Nov 13, 01:00"
+    later = block_times(
+        datetime(2027, 1, 5, 14, 0, tzinfo=UTC),
+        datetime(2027, 1, 5, 15, 0, tzinfo=UTC),
+        toronto,
+        today,
+    )
+    assert later == "Tue Jan 5, 2027, 09:00–10:00"

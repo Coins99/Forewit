@@ -1,7 +1,7 @@
 """Local task chooser and guarded add-only scheduling review; no mail/AI dependency."""
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol, cast
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -34,15 +34,58 @@ from mailbrief.domain.scheduling import (
     SchedulingRequest,
     SchedulingTask,
     TaskDemand,
+    Workload,
 )
 from mailbrief.services.scheduling import SchedulingChangedError, SchedulingKnowledgeError
+from mailbrief.ui.calendar_layout import clock
 from mailbrief.ui.date_picker import calendar_popup
+from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.diagnostics import log_failure
 from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.event_editor import DateBox, qdate, qday
 from mailbrief.ui.fields import PopupChoice, fill_project_choice, takes_wheel
 from mailbrief.ui.labels import outline_button, wrap_label
 from mailbrief.ui.lists import ActivatingList, clear_list
+
+
+def _minutes(value: float) -> str:
+    return f"{value:g} min"
+
+
+def review_summary(shown: Workload, first_day: date, last_day: date, today: date) -> str:
+    """The review's figures as labelled lines, every one shown even at zero."""
+    first = day_text(first_day, today=today)
+    days = first if first_day == last_day else f"{first} – {day_text(last_day, today=today)}"
+    free = "unknown" if shown.free_minutes is None else _minutes(shown.free_minutes)
+    tasks = "task" if shown.unknown_tasks == 1 else "tasks"
+    return "\n".join(
+        (
+            days,
+            f"Still to schedule: {_minutes(shown.uncovered_minutes)} · "
+            f"{shown.unknown_tasks} {tasks} without an estimate · "
+            f"{shown.repair_tasks} needing repair",
+            f"Free time ahead: {free}",
+            f"Busy: {_minutes(shown.timed_busy_minutes)} of timed events and buffers · "
+            f"{shown.all_day_commitments} all-day commitments",
+            f"Already scheduled: {_minutes(shown.scheduled_minutes)}, "
+            f"{_minutes(shown.unique_scheduled_minutes)} of calendar time · "
+            f"{_minutes(shown.future_reserved_minutes)} still ahead · "
+            f"{_minutes(shown.outside_horizon_credit_minutes)} counted from outside these dates",
+            f"Calendar: {shown.knowledge}",
+            "Suggestions start on a quarter hour, at least five minutes ahead, for review. "
+            "Aggregate minutes do not prove every task fits. "
+            "Busy all-day events block their dates; planned time is not actual work.",
+        )
+    )
+
+
+def block_times(start: datetime, end: datetime, zone: ZoneInfo, today: date) -> str:
+    """A block's times in the app's format: "Thu Nov 12, 09:00–10:30", naming both days
+    when it crosses midnight."""
+    first = moment_text(start, zone, today=today)
+    same_day = start.astimezone(zone).date() == end.astimezone(zone).date()
+    last = clock(end, zone) if same_day else moment_text(end, zone, today=today)
+    return f"{first}–{last}"
 
 
 class PlanningBackend(Protocol):
@@ -545,22 +588,9 @@ class SchedulingDialog(QDialog):
                 )
                 zone = ZoneInfo(review.snapshot.owner_zone)
                 shown = review.workload
-                free = "unknown" if shown.free_minutes is None else f"{shown.free_minutes:g} min"
+                today = review.snapshot.captured_at_utc.astimezone(zone).date()
                 self.summary.setText(
-                    f"{request.first_day.isoformat()} · {request.last_day.isoformat()}. "
-                    f"Selected known demand still uncovered: {shown.uncovered_minutes:g} min; "
-                    f"unknown tasks: {shown.unknown_tasks}; repair needed: {shown.repair_tasks}. "
-                    f"Future known free time: {free}. "
-                    f"Timed fixed events/buffers: {shown.timed_busy_minutes:g} min; "
-                    f"all-day commitments: {shown.all_day_commitments}. "
-                    f"scheduled total/occupied: {shown.scheduled_minutes:g}/"
-                    f"{shown.unique_scheduled_minutes:g} min; "
-                    f"remaining reservations: {shown.future_reserved_minutes:g} min. "
-                    f"Credited outside these dates: {shown.outside_horizon_credit_minutes:g} min. "
-                    f"Calendar knowledge: {shown.knowledge}. "
-                    "Suggestions start at least five minutes ahead for review. "
-                    "Aggregate minutes do not prove every task fits. "
-                    "Busy all-day events block their dates; planned time is not actual work."
+                    review_summary(shown, request.first_day, request.last_day, today)
                 )
                 lines = []
                 proposed = set()
@@ -568,8 +598,7 @@ class SchedulingDialog(QDialog):
                     proposed.add(block.task_public_id)
                     lines.append(
                         f"Task block · {self._titles[block.task_public_id]}\n"
-                        f"{block.starts_at_utc.astimezone(zone).isoformat(timespec='minutes')} – "
-                        f"{block.ends_at_utc.astimezone(zone).isoformat(timespec='minutes')}"
+                        f"{block_times(block.starts_at_utc, block.ends_at_utc, zone, today)}"
                     )
                 lines.extend(
                     f"Not placed · {self._titles.get(item.task_public_id, 'Task')}: {item.reason}"
