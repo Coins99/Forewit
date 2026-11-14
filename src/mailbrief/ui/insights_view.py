@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from mailbrief.domain.common import new_public_id, utc_now
 from mailbrief.domain.dashboards import (
+    MAX_DASHBOARD_WIDGETS,
     DashboardLayout,
     SavedDashboard,
     WidgetSize,
@@ -58,6 +59,9 @@ from mailbrief.ui.metric_chart import MetricChartCard
 
 NO_WIDGETS: Final = (
     "No widgets yet. Add widget puts a chart here; Reset layout brings back the starter set."
+)
+NONE_AVAILABLE: Final = (
+    "No widget can show these dates or filters. Change the dashboard filters or edit a widget."
 )
 
 
@@ -502,15 +506,20 @@ class InsightsPage(QWidget):
         else:
             self._rebuild(saved, prepared, editing)
             self._shown = shown
-        self.add.setEnabled(len(saved.layout.widgets) < 12)
-        if any(result is not None for _, result, _ in prepared):
+        self.add.setEnabled(len(saved.layout.widgets) < MAX_DASHBOARD_WIDGETS)
+        available = any(result is not None for _, result, _ in prepared)
+        if available:
             self.data_ready.emit()
-        self.status.setText(
-            "Local records only. A dashboard filter applies where a widget has no override "
-            "and its metric can take it. Edit a widget to inspect its saved range and filters."
-            if prepared
-            else NO_WIDGETS
-        )
+        if not prepared:
+            self.status.setText(NO_WIDGETS)
+        elif not available:
+            self.status.setText(NONE_AVAILABLE)
+        else:
+            self.status.setText(
+                "Local records only. A dashboard filter applies where a widget has no override "
+                "and its metric can take it. Edit a widget to inspect its saved range and "
+                "filters."
+            )
 
     def _rebuild(
         self,

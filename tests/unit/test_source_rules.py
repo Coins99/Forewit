@@ -30,9 +30,11 @@ HEX_COLOUR: Final = re.compile(r"#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})(?![0-9A-Za-z
 PLAIN_LIST: Final = re.compile(r"\bQListWidget\(|\(QListWidget\)")
 # A date field's own drop-down calendar, which is Qt's unstyled one.
 CALENDAR_POPUP: Final = re.compile(r"\.setCalendarPopup\(")
-# A "?" standing alone inside a string: what a non-ASCII character (a dot, a dash, an
-# arrow) becomes when a tool that can't write it saves the file.
-LOST_CHARACTER: Final = re.compile(r"""["'][^"'\n]*\s\?\s[^"'\n]*["']""")
+# A "?" standing alone inside a string, or opening one before a space: what a non-ASCII
+# character (a dot, a dash, an arrow) becomes when a tool that can't write it saves the
+# file. U+FFFD is what a bad decode leaves. Storage's SQL placeholders are skipped.
+LOST_CHARACTER: Final = re.compile(r"""["'][^"'\n]*(?:\s|(?<=["']))\?\s[^"'\n]*["']|�""")
+STORAGE: Final = SOURCE / "storage"
 
 
 def offending_lines(files: Iterable[Path], pattern: re.Pattern[str]) -> list[str]:
@@ -59,7 +61,8 @@ def test_ui_colours_come_only_from_the_tokens() -> None:
 
 def test_no_ui_text_has_a_question_mark_where_a_character_was_lost() -> None:
     """The Calendar's legend read "Your events    ? Google Calendar    ? Action dates"."""
-    assert offending_lines(UI.rglob("*.py"), LOST_CHARACTER) == []
+    files = (path for path in SOURCE.rglob("*.py") if STORAGE not in path.parents)
+    assert offending_lines(files, LOST_CHARACTER) == []
 
 
 def test_ui_lists_clear_safely() -> None:
@@ -238,7 +241,12 @@ def test_the_rules_find_what_they_are_for() -> None:
         assert HEX_COLOUR.search(line), line
     for line in ("QListView#briefList", "# PR #38 and #2041", '"#1a1a1"', "#accent_fg"):
         assert not HEX_COLOUR.search(line), line
-    for line in ('"Your events    ? Google Calendar"', "'Today ? Tomorrow'"):
+    for line in (
+        '"Your events    ? Google Calendar"',
+        "'Today ? Tomorrow'",
+        '"? Needs schedule repair"',
+        '"Loading�"',
+    ):
         assert LOST_CHARACTER.search(line), line
     for line in ('"Discard it?"', '"WHERE id = ?"', "a if b else c  # why? because", '"Who? Me."'):
         assert not LOST_CHARACTER.search(line), line

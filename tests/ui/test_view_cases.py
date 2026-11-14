@@ -3,6 +3,7 @@ page and its metric manager, the planning drawer and the Calendar's Day view (QA
 Each test is one case an owner could meet; all records are synthetic."""
 
 from datetime import time
+from itertools import pairwise
 
 import pytest
 from PySide6.QtCore import QRectF
@@ -68,8 +69,10 @@ async def test_one_widget_is_one_card_and_a_full_dashboard_takes_no_more(
     await save_layout(backend, *(spec() for _ in range(MAX_DASHBOARD_WIDGETS)))
     full = await open_page(qtbot, backend)
     assert len(full.cards) == MAX_DASHBOARD_WIDGETS and not full.add.isEnabled()
-    qtbot.wait(30)
-    assert full.scroll_area.verticalScrollBar().maximum() > 0  # They scroll, none is cut.
+    # None is cut: every card is laid out at least at its own minimum height.
+    qtbot.waitUntil(
+        lambda: all(card.height() >= card.minimumSizeHint().height() > 0 for card in full.cards)
+    )
     await full.drain()
 
 
@@ -104,7 +107,7 @@ async def test_a_card_says_when_it_was_refreshed_in_the_owner_s_time(
     await save_layout(backend, spec())
     page = await open_page(qtbot, backend)  # Its clock is 17:00 UTC, noon in Toronto.
     caption = chart_of(page.cards[0]).caption.text()
-    assert f"{DATES.zone}. Refreshed 2026-11-08 12:00." in caption
+    assert f"{DATES.zone}. Refreshed 2026-11-08 12:00 EST." in caption
     assert "+00:00" not in caption and "T17:00" not in caption
     await page.drain()
 
@@ -172,10 +175,14 @@ async def test_the_planning_drawer_says_when_no_task_is_found(
     await ready(dialog)
     chooser = dialog.chooser
     assert chooser.tasks.count() == 0 and not chooser.more_button.isEnabled()
-    assert chooser.status.text().startswith("No tasks found.")
+    assert not chooser.empty.isHidden()
+    assert chooser.empty.text() == "No tasks found for these dates."
     dialog.show()
     qtbot.wait(30)
     save_shot(dialog.grab(), "p3-no-tasks-light")
+    chooser.focus_only.setChecked(True)  # A filter: the owner is told it is the reason.
+    await ready(dialog)
+    assert chooser.empty.text() == "No task matches the search or filters."
     dialog.force_close()
     await dialog.drain()
 
@@ -200,7 +207,7 @@ async def test_the_planning_drawer_pages_many_tasks_and_keeps_a_long_title_insid
     await ready(dialog)
     chooser = dialog.chooser
     assert chooser.tasks.count() == 50 and chooser.more_button.isEnabled()
-    assert not chooser.status.text().startswith("No tasks found.")
+    assert chooser.empty.isHidden()
     chooser.more_button.click()
     await ready(dialog)
     assert chooser.tasks.count() == 55 and not chooser.more_button.isEnabled()
@@ -270,7 +277,7 @@ def test_many_events_at_one_time_share_the_day_without_overlapping(
     rects = sorted(blocks(panel), key=lambda rect: rect.left())
     assert len(rects) == 12
     assert rects[0].left() >= grid.column_left(0) and rects[-1].right() <= grid.column_left(1)
-    for before, after in zip(rects, rects[1:], strict=False):
+    for before, after in pairwise(rects):
         assert before.right() <= after.left()
         assert before.width() >= 4
     save_shot(panel.grab(), "calendar-day-many-light")
