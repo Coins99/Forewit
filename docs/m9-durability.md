@@ -158,6 +158,11 @@ Restore refuses remaining WAL, shared-memory or journal files rather than allowi
 old pages to be replayed into a new database. Nothing is replaced then, so the
 pre-restore copy made for that attempt is removed. Do not delete sidecar files by hand:
 close the clients, preserve the original database and resolve its SQLite state first.
+One pair needs no action: a backup taken while Forewit is closed leaves a
+`forewit.sqlite3-shm` and an empty `forewit.sqlite3-wal` beside the database, because the
+read-only connection that takes the snapshot creates them and cannot remove them. No
+client is left open; they are harmless, restore accepts them, and the next launch or
+restore clears them.
 If the current database is too damaged to snapshot, recovery refuses replacement;
 restore the archive to a new filename while keeping the damaged database and sidecars.
 
