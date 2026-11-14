@@ -1,8 +1,6 @@
 """Prepared-data chart spike: accessible precision, keyboard, states and native painting."""
 
-import os
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QRectF, Qt
@@ -13,8 +11,17 @@ from pytestqt.qtbot import QtBot
 
 from mailbrief.domain.dashboards import ChartKind
 from mailbrief.domain.metric_results import MetricDisplay, MetricSample
-from mailbrief.ui.metric_chart import MetricChartCard, axis_label, label_marks, nice_ticks
+from mailbrief.ui.metric_chart import (
+    FOCUS_INSET,
+    FOCUS_RADIUS,
+    MetricChartCard,
+    MetricPlot,
+    axis_label,
+    label_marks,
+    nice_ticks,
+)
 from mailbrief.ui.theme import CAPTION_PX, ColorScheme, ThemeMode, apply_theme, ui_metrics
+from tests.ui.test_main_window_layout import save_shot
 
 
 def display(chart: ChartKind = ChartKind.LINE) -> MetricDisplay:
@@ -160,11 +167,7 @@ def test_chart_gallery(
     assert not rendered.isNull()
     assert card.width() == 420
     assert card.table.accessibleName()
-    directory = os.environ.get("MAILBRIEF_UI_SHOTS")
-    if directory:
-        root = Path(directory)
-        root.mkdir(parents=True, exist_ok=True)
-        assert rendered.save(str(root / f"metric-{case}-{mode.value}.png"))
+    save_shot(rendered, f"metric-{case}-{mode.value}")
 
 
 @pytest.mark.parametrize(
@@ -412,3 +415,46 @@ def test_a_selected_table_row_is_readable(
         for name in counts
     )
     assert contrast >= 4.5  # The row's text against its selected fill (WCAG AA).
+
+
+@pytest.mark.parametrize("width", [420, 120])
+def test_the_unit_label_clears_the_focus_ring(qtbot: QtBot, width: int) -> None:
+    plot = MetricPlot(MetricDisplay(title="T", unit="minutes", chart=ChartKind.LINE, samples=()))
+    qtbot.addWidget(plot)
+    plot.resize(width, 220)
+    rect = plot.unit_rect()
+    margin = FOCUS_INSET + FOCUS_RADIUS
+    assert rect.left() >= margin
+    assert rect.top() > FOCUS_INSET
+    assert rect.right() <= width - margin
+    assert rect.bottom() <= plot._area().top() - 8  # Above the top axis label's box.
+
+
+@pytest.mark.parametrize("unit", ["minutes", "a unit far too long to fit"])
+def test_the_painted_unit_stays_inside_its_rectangle(qtbot: QtBot, unit: str) -> None:
+    def shot(text: str) -> QImage:
+        plot = MetricPlot(MetricDisplay(title="T", unit=text, chart=ChartKind.LINE, samples=()))
+        qtbot.addWidget(plot)
+        plot.resize(110, 120)
+        plot.show()
+        plot.setFocus()
+        qtbot.wait(10)
+        assert plot.hasFocus()
+        return plot.grab().toImage()
+
+    with_unit, without = shot(unit), shot("x")
+    rows = [
+        (x, y)
+        for y in range(with_unit.height())
+        for x in range(with_unit.width())
+        if with_unit.pixel(x, y) != without.pixel(x, y)
+    ]
+    assert rows
+    ratio = with_unit.devicePixelRatio()
+    box = MetricPlot(MetricDisplay(title="T", unit=unit, chart=ChartKind.LINE, samples=()))
+    qtbot.addWidget(box)
+    box.resize(110, 120)
+    rect = box.unit_rect()
+    for x, y in rows:
+        assert rect.left() - 1 <= x / ratio <= rect.right() + 1
+        assert rect.top() - 1 <= y / ratio <= rect.bottom() + 1
