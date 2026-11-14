@@ -427,4 +427,34 @@ def test_the_unit_label_clears_the_focus_ring(qtbot: QtBot, width: int) -> None:
     assert rect.left() >= margin
     assert rect.top() > FOCUS_INSET
     assert rect.right() <= width - margin
-    assert rect.bottom() <= plot._area().top()
+    assert rect.bottom() <= plot._area().top() - 8  # Above the top axis label's box.
+
+
+@pytest.mark.parametrize("unit", ["minutes", "a unit far too long to fit"])
+def test_the_painted_unit_stays_inside_its_rectangle(qtbot: QtBot, unit: str) -> None:
+    def shot(text: str) -> QImage:
+        plot = MetricPlot(MetricDisplay(title="T", unit=text, chart=ChartKind.LINE, samples=()))
+        qtbot.addWidget(plot)
+        plot.resize(110, 120)
+        plot.show()
+        plot.setFocus()
+        qtbot.wait(10)
+        assert plot.hasFocus()
+        return plot.grab().toImage()
+
+    with_unit, without = shot(unit), shot("x")
+    rows = [
+        (x, y)
+        for y in range(with_unit.height())
+        for x in range(with_unit.width())
+        if with_unit.pixel(x, y) != without.pixel(x, y)
+    ]
+    assert rows
+    ratio = with_unit.devicePixelRatio()
+    box = MetricPlot(MetricDisplay(title="T", unit=unit, chart=ChartKind.LINE, samples=()))
+    qtbot.addWidget(box)
+    box.resize(110, 120)
+    rect = box.unit_rect()
+    for x, y in rows:
+        assert rect.left() - 1 <= x / ratio <= rect.right() + 1
+        assert rect.top() - 1 <= y / ratio <= rect.bottom() + 1

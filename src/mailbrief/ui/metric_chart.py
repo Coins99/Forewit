@@ -50,6 +50,8 @@ type _Index = QModelIndex | QPersistentModelIndex
 _ROOT = QModelIndex()
 FOCUS_INSET: Final = 1.0  # The focus ring sits this far inside the plot widget.
 FOCUS_RADIUS: Final = 8.0
+UNIT_PAD: Final = 3.0  # The unit's gap from the ring's corner.
+UNIT_HEIGHT: Final = 14.0  # One caption line, ending where the top axis label's box starts.
 LABEL_GAP: Final = 10.0  # Between two labels under the plot.
 CATEGORY_LABEL_MAX: Final = 120.0
 CATEGORY_LABEL_MIN: Final = 34.0
@@ -221,8 +223,8 @@ class MetricPlot(QWidget):
 
     def unit_rect(self) -> QRectF:
         """Where the unit is drawn: inside the focus ring's corner and above the axis."""
-        left = FOCUS_INSET + FOCUS_RADIUS + 3
-        return QRectF(left, FOCUS_INSET + 1, max(1.0, self.width() - 2 * left), 18)
+        left = FOCUS_INSET + FOCUS_RADIUS + UNIT_PAD
+        return QRectF(left, FOCUS_INSET + 1, max(1.0, self.width() - 2 * left), UNIT_HEIGHT)
 
     def select(self, index: int) -> None:
         if not self.display.samples:
@@ -297,7 +299,11 @@ class MetricPlot(QWidget):
         tokens = current_tokens()
         painter.setFont(ui_font(CAPTION_PX, tabular=True))
         painter.setPen(QColor(tokens.text_secondary))
-        painter.drawText(self.unit_rect(), self.display.unit)
+        unit = self.unit_rect()
+        unit_text = painter.fontMetrics().elidedText(
+            self.display.unit, Qt.TextElideMode.ElideRight, int(unit.width())
+        )
+        painter.drawText(unit, unit_text)
         area = self._area()
         exact = [sample.value for sample in self.display.samples if sample.value is not None]
         if not exact:
