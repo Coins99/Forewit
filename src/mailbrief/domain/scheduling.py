@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from mailbrief.domain.availability import step_up
 from mailbrief.domain.common import DomainModel, normalize_utc
 from mailbrief.domain.planning_intervals import UtcInterval, occupied_duration, subtract_intervals
 from mailbrief.domain.scheduling_time import all_day_intervals, planning_dates
@@ -211,7 +212,8 @@ def workload(snapshot: SchedulingSnapshot) -> Workload:
 def propose(snapshot: SchedulingSnapshot, request: SchedulingRequest) -> SchedulingProposal:
     """Greedy, stable and bounded. Failure is not proof that placement is impossible."""
     free = free_slots(snapshot)
-    earliest = snapshot.captured_at_utc + REVIEW_LEAD
+    # At least REVIEW_LEAD away, on the first quarter hour of the owner's clock (C4-3).
+    earliest = step_up(snapshot.captured_at_utc + REVIEW_LEAD, ZoneInfo(snapshot.owner_zone))
     if free is not None:
         free = tuple(
             UtcInterval(start=max(slot.start, earliest), end=slot.end)

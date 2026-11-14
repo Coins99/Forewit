@@ -29,7 +29,9 @@ task ownership, Busy/Free behavior, Day/Week/Month/List views, direct block edit
   repair before the planner adds more. Remote Busy/Free and shared conflict policies
   govern availability. Daily Calendar/Today workload remains its existing read model;
   the suggestion review adds selected-range demand and limitations.
-- Suggestions start at least five minutes after the captured clock. Review is read-only;
+- Suggestions start at least five minutes after the captured clock, on the first quarter
+  hour of the owner's clock at or after that (owner decision 2026-11-13, QA finding C4-3),
+  as the Calendar's next free time does. Review is read-only;
   apply requires explicit whole-task selection. Under a SQLite writer reservation,
   apply rereads the coherent inputs, compares the review fingerprint, independently
   checks placement constraints and current time, then writes blocks and the receipt

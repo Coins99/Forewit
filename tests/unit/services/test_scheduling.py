@@ -483,12 +483,14 @@ async def test_unreadable_owner_preferences_do_not_guess_deadline_zone(
 
 
 async def test_today_suggestion_leaves_time_for_review_before_apply(session: AsyncSession) -> None:
+    """At least five minutes ahead, on the first quarter hour of the clock (C4-3): reviewed
+    at 12:03:27, the suggestion starts at 12:15, not 12:08:27."""
     _, task = await setup(session)
-    noon = NOW.replace(hour=12)
-    service = SchedulingService(session, clock=lambda: noon, zone=ZONE)
+    reviewed = NOW.replace(hour=12, minute=3, second=27, microsecond=5)
+    service = SchedulingService(session, clock=lambda: reviewed, zone=ZONE)
     proposal = await service.suggest(request(task))
-    assert proposal.blocks[0].starts_at_utc == noon + timedelta(minutes=5)
-    applying = SchedulingService(session, clock=lambda: noon + timedelta(minutes=1), zone=ZONE)
+    assert proposal.blocks[0].starts_at_utc == NOW.replace(hour=12, minute=15)
+    applying = SchedulingService(session, clock=lambda: reviewed + timedelta(minutes=1), zone=ZONE)
     with pytest.raises(SchedulingKnowledgeError) as caught:
         await applying.apply(proposal, (task,), command_id())
     result = await applying.apply(
