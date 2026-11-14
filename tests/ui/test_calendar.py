@@ -229,6 +229,7 @@ def test_week_rows_order_each_day(panel: CalendarPanel) -> None:
     assert panel.empty.isHidden() and panel.note.isHidden()
     legend = panel.findChild(QLabel, "calendarLegend")
     assert legend is not None and legend.accessibleName() == MARKER_NOTE
+    assert legend.text() == "Your events · Google Calendar · Action dates"
     # Day headings are read but never selected.
     assert not panel.list.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
 
