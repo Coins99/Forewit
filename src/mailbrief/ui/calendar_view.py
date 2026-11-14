@@ -442,9 +442,7 @@ class CalendarPanel(QWidget):
         ):
             buttons.removeWidget(button)
             button.hide()
-        legend = plain_label(
-            "Your events    ? Google Calendar    ? Action dates", tone="muted", px=9
-        )
+        legend = plain_label("Your events · Google Calendar · Action dates", tone="muted", px=9)
         legend.setObjectName("calendarLegend")
         legend.setAccessibleName(MARKER_NOTE)
         buttons.addWidget(legend)
