@@ -1,7 +1,7 @@
 """Synthetic proposal review, uncertain retry and additive editor controls."""
 
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
@@ -118,7 +118,7 @@ async def test_project_selection_survives_reload_search_and_paging(
     parent = QWidget()
     qtbot.addWidget(parent)
     dialog = SchedulingDialog(parent, backend)
-    dialog.open_range(DAY, DAY, DAY)
+    dialog.open_range(DAY, DAY, DAY, today=DAY)
     await ready(dialog)
     chooser = dialog.chooser
     chooser.projects.setCurrentIndex(chooser.projects.findData(project.public_id))
@@ -157,7 +157,7 @@ async def test_definitive_retry_rejection_unfreezes_review(
     parent = QWidget()
     qtbot.addWidget(parent)
     dialog = SchedulingDialog(parent, backend)
-    dialog.open_range(DAY, DAY, DAY)
+    dialog.open_range(DAY, DAY, DAY, today=DAY)
     await ready(dialog)
     dialog.chooser.tasks.item(0).setSelected(True)
     dialog.chooser._review()
@@ -195,7 +195,7 @@ async def test_review_acknowledgement_lost_response_retry_and_undo(
     qtbot.addWidget(parent)
     backend = Backend(database)
     dialog = SchedulingDialog(parent, backend)
-    dialog.open_range(DAY, DAY, DAY)
+    dialog.open_range(DAY, DAY, DAY, today=DAY)
     await ready(dialog)
     dialog.chooser.tasks.item(0).setSelected(True)
     dialog.chooser._review()
@@ -249,7 +249,7 @@ async def test_new_drawers_render_at_narrow_width(
     parent = QWidget()
     qtbot.addWidget(parent)
     dialog = SchedulingDialog(parent, Backend(database))
-    dialog.open_range(DAY, DAY, DAY, page.items)
+    dialog.open_range(DAY, DAY, DAY, page.items, today=DAY)
     dialog.resize(390, 680)
     dialog.show()
     await ready(dialog)
@@ -379,3 +379,30 @@ def test_block_times_use_the_owner_zone_and_name_both_days_across_midnight() -> 
         today,
     )
     assert later == "Tue Jan 5, 2027, 09:00–10:00"
+
+
+async def test_the_chooser_names_its_dates_as_the_review_does(
+    qtbot: QtBot, database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = Backend(database)
+    empty = AsyncMock(return_value=PlanningCandidatePage(items=(), next_offset=None))
+    monkeypatch.setattr(backend, "list_projects", AsyncMock(return_value=()))
+    monkeypatch.setattr(backend, "planning_candidates", empty)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SchedulingDialog(parent, backend)
+    last = DAY + timedelta(days=6)
+    dialog.open_range(DAY, last, DAY, today=DAY)
+    await ready(dialog)
+    text = dialog.chooser.status.text()
+    assert text == (
+        f"{day_text(DAY, today=DAY)} – {day_text(last, today=DAY)} · "
+        "Credit can include later dates."
+    )
+    assert DAY.isoformat() not in text
+    later = date(DAY.year + 1, 1, 4)
+    dialog.open_range(later, later, later, today=DAY)
+    await ready(dialog)
+    text = dialog.chooser.status.text()
+    assert text.startswith(f"{day_text(later, today=DAY)} · ")
+    assert f", {DAY.year + 1}" in text
