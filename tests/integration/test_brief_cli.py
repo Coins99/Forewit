@@ -589,6 +589,7 @@ def test_incomplete_sync_without_messages_does_not_save_empty_brief(
     assert "). Nothing was sent." in output
     assert "Sync failed (unknown)" not in output
     assert "Brief: saved" not in output
+    assert "Your last saved brief for today is unchanged." in output
     assert "sync complete: no" in output
     assert "AI: nothing sent this run" in output
     assert "Inbox sync was incomplete, so this brief may be missing messages." in output

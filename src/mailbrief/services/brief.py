@@ -253,8 +253,8 @@ class BriefService:
         the number of carried messages it didn't refresh and ``ready`` to the number of new
         ones, and with CARRIED_BODY_FAILED as its error code when a body was the reason.
 
-        A run whose sync stopped early and left nothing to brief, with no analysis failed,
-        saves nothing and returns SYNC_FAILED with the sync's error code.
+        A run whose sync stopped early and left nothing to select saves nothing and returns
+        SYNC_FAILED with the sync's error code.
         """
         if automatic and (shortlist_gate is not None or include_ids or exclude_ids):
             raise ValueError("An automatic run has no review.")
@@ -506,8 +506,8 @@ class BriefService:
             outside_ids=sync.outside_ids,
         )
         if digest is None:
-            if coverage.failed == 0 and sync.status is not SyncStatus.COMPLETE:
-                # No analysis failed: the sync stopped early and left nothing to brief, so
+            if coverage.shortlisted == 0 and sync.status is not SyncStatus.COMPLETE:
+                # Nothing was selected: the sync stopped early and left nothing to brief, so
                 # its code says why, not the AI's (C5-5).
                 return BriefRunResult(
                     status=BriefStatus.SYNC_FAILED,
@@ -515,6 +515,7 @@ class BriefService:
                     coverage=coverage,
                     error_code=sync.error_code,
                     ai_calls=run.requests_sent,
+                    provider_detail=run.provider_detail,
                     deferred=coverage.deferred,
                 )
             return BriefRunResult(

@@ -219,6 +219,22 @@ def test_a_piece_of_a_day_or_more_conserves_every_second() -> None:
     verify_proposal(state, proposal)
 
 
+def test_verification_holds_suggestions_to_the_quarter_hour() -> None:
+    """C4-3: placement and verification share one earliest start, so a block at the bare
+    five minutes is refused as placement would never make it."""
+    state = snapshot((demand(),), working=(span(0, 9),))
+    result = propose(state, request(SchedulingTask(task_public_id=task_id(1))))
+    assert result.blocks[0].starts_at_utc == NOW + timedelta(minutes=15)
+    early = result.blocks[0].model_copy(
+        update={
+            "starts_at_utc": NOW + timedelta(minutes=5),
+            "ends_at_utc": NOW + timedelta(minutes=65),
+        }
+    )
+    with pytest.raises(ValueError, match="constraints"):
+        verify_proposal(state, result.model_copy(update={"blocks": (early,)}))
+
+
 def test_missing_or_duplicate_task_outcomes_are_refused() -> None:
     state = snapshot((demand(),), ())
     result = propose(state, request(SchedulingTask(task_public_id=task_id(1))))

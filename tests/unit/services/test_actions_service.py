@@ -1104,6 +1104,7 @@ async def test_a_write_that_loses_a_race_names_the_action_not_a_repeat(
     monkeypatch.setattr(ActionRepository, "record_activity", raced)
     with pytest.raises(ActionConflictError) as caught:
         await service.accept_into(seeded.suggestion_ids[1], action.public_id, 1)
+    assert type(caught.value) is ActionConflictError  # Not the repeat's error class.
     assert str(caught.value) == "The action changed since it was loaded; reload it and try again."
 
 
@@ -1165,13 +1166,12 @@ async def test_undo_add_never_removes_the_last_source(
 
 
 async def test_undo_add_refuses_a_latest_change_that_was_not_this_addition(
-    session: AsyncSession, service: ActionService, clock: Clock
+    session: AsyncSession, service: ActionService
 ) -> None:
     """C2-4: only the suggestion's own addition, still the action's latest change, is
     undone: not the action's creation from a suggestion, nor a later addition of another
-    email."""
+    email, even one made in the same instant (the clock stands still here)."""
     first, second, action = await added_into(session, service)
-    clock.advance(minutes=1)
     third = await seed(session, (suggestion(0, "Send the deck, once more"),), message="msg-3")
     await service.accept_into(third.suggestion_ids[0], action.public_id, 2)
     made = await seed(session, (suggestion(0, "Book the room"),), message="msg-4")

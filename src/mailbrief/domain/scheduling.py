@@ -209,11 +209,17 @@ def workload(snapshot: SchedulingSnapshot) -> Workload:
     )
 
 
+def earliest_start(snapshot: SchedulingSnapshot) -> datetime:
+    """Where suggestions may start, for placement and verification alike: at least
+    REVIEW_LEAD after the snapshot, on the first quarter hour of the owner's clock (C4-3).
+    """
+    return step_up(snapshot.captured_at_utc + REVIEW_LEAD, ZoneInfo(snapshot.owner_zone))
+
+
 def propose(snapshot: SchedulingSnapshot, request: SchedulingRequest) -> SchedulingProposal:
     """Greedy, stable and bounded. Failure is not proof that placement is impossible."""
     free = free_slots(snapshot)
-    # At least REVIEW_LEAD away, on the first quarter hour of the owner's clock (C4-3).
-    earliest = step_up(snapshot.captured_at_utc + REVIEW_LEAD, ZoneInfo(snapshot.owner_zone))
+    earliest = earliest_start(snapshot)
     if free is not None:
         free = tuple(
             UtcInterval(start=max(slot.start, earliest), end=slot.end)
@@ -366,7 +372,7 @@ def verify_proposal(snapshot: SchedulingSnapshot, proposal: SchedulingProposal) 
             raise ValueError("A proposed task is not eligible.")
         interval = UtcInterval(start=block.starts_at_utc, end=block.ends_at_utc)
         if (
-            interval.start < snapshot.captured_at_utc + REVIEW_LEAD
+            interval.start < earliest_start(snapshot)
             or subtract_intervals((interval,), horizon)
             or block.time_zone != snapshot.owner_zone
             or (demand.deadline_utc is not None and interval.end > demand.deadline_utc)

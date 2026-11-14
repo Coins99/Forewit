@@ -326,8 +326,8 @@ class ActionService:
             return await commit_once(self._session, self._clock, operation)
         except StaleDataError:
             # Another write reached the action or its repeat first. The flush can't say
-            # which, so the message names the action, which both belong to (C2-3).
-            raise ActionRepeatError(_STALE) from None
+            # which, so it is refused as the action's change, which both belong to (C2-3).
+            raise ActionConflictError(_STALE) from None
 
     async def _suggestion(
         self, suggestion_id: int
@@ -706,13 +706,17 @@ class ActionService:
             ):
                 raise ActionConflictError(_UNDO_ADD)
             # The latest change must be this suggestion's addition: not the action's creation
-            # from it, and not a later addition of another email (C2-4).
+            # from it, and not a later addition of another email, even in the same instant:
+            # a new source must be this email's (C2-4).
             latest = await self._repository.latest_activity(row.id)
             if (
                 latest is None
-                or latest.revision != expected_revision
                 or latest.kind not in _ADDITIONS
                 or latest.occurred_at_utc != decision.decided_at_utc
+                or (
+                    latest.kind == ActionActivityKind.SOURCE_ADDED
+                    and await self._repository.newest_source(row.id) != message.provider_message_id
+                )
             ):
                 raise ActionConflictError(_UNDO_ADD)
             if previous.decision is None or previous.decided_at_utc is None:

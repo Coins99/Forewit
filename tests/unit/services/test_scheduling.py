@@ -200,6 +200,15 @@ async def test_blocks_count_toward_a_task_without_working_hours(session: AsyncSe
     snapshot = await service.snapshot(request(task))
     assert snapshot.demands[0].credited_seconds == 3600
     assert (await service.workload(request(task))).uncovered_minutes == 30
+    rest = BlockTime(
+        starts_at_utc=START + timedelta(hours=2),
+        ends_at_utc=START + timedelta(hours=2, minutes=30),
+        time_zone="UTC",
+    )
+    await WorkBlockService(session).schedule(task, rest)
+    covered = await service.snapshot(request(task))
+    assert covered.demands[0].uncovered_seconds == 0  # Fully scheduled: needs no time.
+    assert (await service.workload(request(task))).uncovered_minutes == 0
 
 
 async def test_a_done_task_s_block_takes_no_time_and_is_no_conflict(

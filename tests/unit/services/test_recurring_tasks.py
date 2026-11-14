@@ -366,11 +366,12 @@ async def test_series_update_checks_the_revision_at_flush(database: Database) ->
         assert (saved.title, saved.revision) == ("Fresh template", 2)
 
 
-async def test_a_flush_conflict_rolls_back_and_reports_a_repeat_conflict(
+async def test_a_flush_conflict_rolls_back_and_reports_a_stale_action(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(session, "commit", AsyncMock(side_effect=StaleDataError()))
-    with pytest.raises(ActionRepeatError, match="repeat changed"):
+    # The flush cannot say which row was stale, so it names the action (C2-3).
+    with pytest.raises(ActionConflictError, match="action changed"):
         await service(session, Clock(START)).create(task(), (), DAILY)
     assert await session.scalar(select(func.count()).select_from(ActionTable)) == 0
     assert await session.scalar(select(func.count()).select_from(ActionSeriesTable)) == 0
