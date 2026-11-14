@@ -219,8 +219,9 @@ class PlanningTaskPanel(QWidget):
                         item.setSelected(True)
                 self._next = page.next_offset
                 self.more_button.setEnabled(self._next is not None)
+                found = "" if self.tasks.count() else "No tasks found. "
                 self.status.setText(
-                    f"{self.first.isoformat()} – {self.last.isoformat()} · "
+                    f"{found}{self.first.isoformat()} – {self.last.isoformat()} · "
                     "Credit can include later dates."
                 )
             except Exception as exc:

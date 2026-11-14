@@ -162,6 +162,24 @@ async def test_a_long_unbroken_metric_name_never_widens_the_manager(
 # The planning drawer.
 
 
+async def test_the_planning_drawer_says_when_no_task_is_found(
+    qtbot: QtBot, database: Database, studio: None
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SchedulingDialog(parent, Backend(database))
+    dialog.open_range(DAY, DAY, DAY)
+    await ready(dialog)
+    chooser = dialog.chooser
+    assert chooser.tasks.count() == 0 and not chooser.more_button.isEnabled()
+    assert chooser.status.text().startswith("No tasks found.")
+    dialog.show()
+    qtbot.wait(30)
+    save_shot(dialog.grab(), "p3-no-tasks-light")
+    dialog.force_close()
+    await dialog.drain()
+
+
 async def test_the_planning_drawer_pages_many_tasks_and_keeps_a_long_title_inside(
     qtbot: QtBot, database: Database, studio: None
 ) -> None:
