@@ -68,6 +68,7 @@ from mailbrief.ui.lists import SafeList
 from mailbrief.ui.metric_chart import MetricChartCard
 
 GENERAL_REFUSAL: Final = "Choose compatible chart, grouping, dates and an exact target."
+NO_METRIC: Final = "No metric yet: create one below"
 UNAVAILABLE: Final = (
     "Unavailable for these dates or filters. Edit this widget or change the dashboard filters."
 )
@@ -797,6 +798,9 @@ class MetricManager(InsightsDialog):
         self.definitions = definitions
         self.metric_choice.blockSignals(True)
         self.metric_choice.clear()
+        # An empty box alone says nothing. Set only while there is no metric: a combo box
+        # with a placeholder stops choosing its first item by itself.
+        self.metric_choice.setPlaceholderText("" if self.definitions else NO_METRIC)
         for definition in self.definitions:
             self.metric_choice.addItem(
                 definition.name + (" (archived)" if definition.archived else ""),

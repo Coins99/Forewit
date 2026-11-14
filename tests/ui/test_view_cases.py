@@ -19,7 +19,7 @@ from mailbrief.storage.database import Database
 from mailbrief.ui.calendar_layout import CalendarView, entry_key
 from mailbrief.ui.calendar_view import EMPTY_DAY, CalendarPanel
 from mailbrief.ui.insights_backend import InsightsBackend
-from mailbrief.ui.insights_editors import MetricManager
+from mailbrief.ui.insights_editors import NO_METRIC, MetricManager
 from mailbrief.ui.insights_view import NO_WIDGETS
 from mailbrief.ui.scheduling_view import SchedulingDialog
 from mailbrief.ui.theme import ColorScheme, ThemeMode, apply_theme
@@ -110,6 +110,32 @@ async def test_a_card_says_when_it_was_refreshed_in_the_owner_s_time(
 
 
 # Insights: the metric manager.
+
+
+async def test_the_manager_says_so_when_there_is_no_metric_to_log(
+    qtbot: QtBot, database: Database, studio: None
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    backend = InsightsBackend(database, google_on=False)
+    manager = MetricManager(backend, DATES.zone, (), parent)
+    await manager.reload()
+    assert manager.metric_choice.count() == 0 and manager.entries_list.count() == 0
+    assert manager.metric_choice.placeholderText() == NO_METRIC
+    assert not manager.entry_buttons["create"].isEnabled()
+    manager.show()
+    qtbot.wait(30)
+    save_shot(manager.grab(), "metric-manager-empty-light")
+    # The first metric made is chosen by itself: the placeholder goes with the empty list.
+    made = await backend.define(
+        MetricDefinitionSpec(name="Steps", unit="steps", kind=MeasurementKind.AMOUNT, scale=0),
+        new_public_id(),
+    )
+    await manager.reload()
+    assert manager.metric_choice.currentData() == made.public_id
+    assert manager.metric_choice.placeholderText() == ""
+    assert manager.entry_buttons["create"].isEnabled()
+    await manager.drain()
 
 
 async def test_a_long_unbroken_metric_name_never_widens_the_manager(
