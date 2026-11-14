@@ -321,9 +321,9 @@ class ActionService:
         try:
             return await commit_once(self._session, self._clock, operation)
         except StaleDataError:
-            raise ActionRepeatError(
-                "The repeat changed since it was loaded; reload it and try again."
-            ) from None
+            # Another write reached the action or its repeat first. The flush can't say
+            # which, so the message names the action, which both belong to (C2-3).
+            raise ActionRepeatError(_STALE) from None
 
     async def _suggestion(
         self, suggestion_id: int
