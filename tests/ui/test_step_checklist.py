@@ -401,12 +401,13 @@ def test_tab_runs_from_the_footer_through_the_steps_to_the_field(
         boxes = [row.box for row in rows(panel)]
         panel.delete_button.setFocus()
         visited: list[QWidget | None] = []
-        for _ in range(len(boxes) + 3):
+        for _ in range(len(boxes) + 4):
             panel.focusNextChild()
             visited.append(QApplication.focusWidget())
         assert visited == [
             *boxes,
             panel.detail.new_step,
+            panel.detail.breakdown_button,
             panel.detail.schedule_button,
             panel.seen_button,
         ]

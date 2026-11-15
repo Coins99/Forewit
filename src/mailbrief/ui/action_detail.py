@@ -311,7 +311,8 @@ class ActionDetailPane(QScrollArea):
         self.breakdown_reason.setObjectName("breakdownReason")
         self.breakdown_reason.setAccessibleName("Why AI breakdown is unavailable")
         self.breakdown_blocked: str | None = None  # Why not, for the action shown.
-        self._ai_ready = False
+        # Until the window says otherwise, only the task's own reasons are shown.
+        self._ai_ready = True
         self._local_mail = False
         self.empty = wrap_label("", tone="muted", px=TEXT_PX)
         self.empty.setObjectName("actionEmpty")

@@ -13,9 +13,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -101,7 +103,7 @@ class BreakdownDialog(QDialog):
         self.setWindowTitle("Break down with AI")
         self.setObjectName("breakdownDialog")
         self.setFont(ui_font(10))
-        self.setMinimumWidth(460)
+        self.setMinimumSize(480, 520)
         self._first_use = False
         self._free = 0
         self._shown = 0  # How many of the step rows hold a proposed step.
@@ -165,9 +167,24 @@ class BreakdownDialog(QDialog):
         self.consent = QCheckBox("I agree to send this to Groq to propose steps")
         self.consent.setObjectName("breakdownConsent")
         self.consent.toggled.connect(lambda _on: self._update_ask())
-        column.addWidget(self.preview_lines)
+        # The disclosure can be longer than the dialog, so it scrolls; the consent box and
+        # the buttons stay in view below it. The area takes no focus of its own.
+        holder = QWidget()
+        holder.setObjectName("breakdownPreviewHolder")
+        held = QVBoxLayout(holder)
+        held.setContentsMargins(0, 0, 8, 0)
+        held.addWidget(self.preview_lines)
+        held.addStretch(1)
+        self.preview_area = QScrollArea()
+        self.preview_area.setObjectName("breakdownPreviewArea")
+        self.preview_area.setAccessibleName("What is sent")
+        self.preview_area.setWidgetResizable(True)
+        self.preview_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.preview_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.preview_area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.preview_area.setWidget(holder)
+        column.addWidget(self.preview_area, 1)
         column.addWidget(self.consent)
-        column.addStretch(1)
         row = QHBoxLayout()
         self.back_button = outline_button("&Back", "breakdownBackButton", mnemonic=True)
         self.ask_button = outline_button(
