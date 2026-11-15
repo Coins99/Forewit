@@ -844,6 +844,12 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P5-2 update (2026-11-14): the optional AI breakdown of one selected task (limited J01 and J07)
+is implemented, awaiting owner live acceptance ([ADR 0033](adr/0033-task-breakdown.md)): its
+own consent scope, a preview of exactly what is sent, checklist steps only, Apply and Undo, and
+a text-free generation history. P5-1's weekly review (A07) is implemented too. P5's gate is
+still the two-week owner trial; P5-3 remains a stretch.
+
 P3-3 update (2026-11-06): C05 workload and conflicts are implemented, awaiting owner
 acceptance ([ADR 0030](adr/0030-workload.md)): §5.2's selected workload, scheduled task time
 (total and unique) and available time per local day, overfilled and provisional days, and

@@ -112,9 +112,17 @@ class SettingsDialog(QDialog):
         self.remove_key_button = QPushButton("&Remove stored Groq key")
         form.addRow(self.key_button)
         form.addRow(self.remove_key_button)
-        self.revoke_button = QPushButton("Revoke AI consent (briefs and &drafting)")
+        self.revoke_button = QPushButton(
+            "Revoke AI consent (briefs, &drafting, planning and breakdown)"
+        )
+        # Which of the owner's own AI uses have consent now (ADRs 0013, 0018 and 0033).
+        self.owner_consents = wrap_label("", tone="muted", px=SMALL_PX)
+        self.owner_consents.setObjectName("ownerConsents")
+        self.owner_consents.setAccessibleName("Active AI consents")
+        self.owner_consents.hide()
         connection_layout.addWidget(self.fields)
         connection_layout.addWidget(self.revoke_button)
+        connection_layout.addWidget(self.owner_consents)
         notice = QLabel(
             "Sign in with Google using Forewit's configuration. A custom Desktop OAuth "
             "client file is optional for development builds. Choose a Groq model that supports "
@@ -194,6 +202,12 @@ class SettingsDialog(QDialog):
         for button in (self.disconnect_button, self.sign_in_button):
             row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         return card
+
+    def set_owner_consents(self, text: str) -> None:
+        """Say which of drafting, calendar planning and breakdown have consent now; nothing
+        while that can't be read."""
+        self.owner_consents.setText(text)
+        self.owner_consents.setVisible(bool(text))
 
     def set_signed_in(self, signed_in: bool) -> None:
         """Disconnect while an account is connected; Sign in with Google while none is."""

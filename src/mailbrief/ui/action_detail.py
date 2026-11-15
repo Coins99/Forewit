@@ -42,6 +42,7 @@ from mailbrief.ui.action_text import (
     ActionDetails,
     action_details,
     block_lines,
+    breakdown_block,
     completed_text,
     follow_up_text,
     followed_up_at,
@@ -301,6 +302,18 @@ class ActionDetailPane(QScrollArea):
             "Schedule &time…", "scheduleTimeButton", mnemonic=True, icon_name="calendar"
         )
         self.schedule_button.setToolTip("Set aside time for this task on the calendar.")
+        # AI breakdown (ADR 0033): no mnemonic, since the window's letters are taken.
+        self.breakdown_button = outline_button("Break down with AI…", "breakdownButton")
+        self.breakdown_button.setToolTip(
+            "Ask Groq to propose steps for this task. You review them before anything is added."
+        )
+        self.breakdown_reason = wrap_label("", tone="muted", px=SMALL_PX)
+        self.breakdown_reason.setObjectName("breakdownReason")
+        self.breakdown_reason.setAccessibleName("Why AI breakdown is unavailable")
+        self.breakdown_blocked: str | None = None  # Why not, for the action shown.
+        # Until the window says otherwise, only the task's own reasons are shown.
+        self._ai_ready = True
+        self._local_mail = False
         self.empty = wrap_label("", tone="muted", px=TEXT_PX)
         self.empty.setObjectName("actionEmpty")
         self._top = _Section("actionSummary")
@@ -327,6 +340,7 @@ class ActionDetailPane(QScrollArea):
         self._schedule = _Section("actionSchedule")
         self._schedule.setAccessibleName("Scheduled time")
         self._schedule_row = _button_row("scheduleRow", self.schedule_button)
+        self._breakdown_row = _button_row("breakdownRow", self.breakdown_button)
         self._activity_summary = _Section("actionActivitySummary")
         self._seen_row = _button_row("seenRow", self.seen_button)
         self._proposals = _Section("actionProposals")
@@ -349,6 +363,8 @@ class ActionDetailPane(QScrollArea):
             self._top,
             self._footer,
             self._plan_box,
+            self._breakdown_row,
+            self.breakdown_reason,
             self._schedule,
             self._schedule_row,
             self._activity_summary,
@@ -382,19 +398,20 @@ class ActionDetailPane(QScrollArea):
 
     def _link_below_footer(self) -> None:
         """Tab goes from the footer's last button (Delete) to the plan's boxes and the field
-        that adds a step, then Schedule time, Mark seen, Proposals and Open source. The whole
-        run is linked each time the boxes are made: Qt skips a link that already holds, so a
-        partial one could leave other widgets between them."""
+        that adds a step, then Break down with AI, Schedule time, Mark seen, Proposals and Open
+        source. The whole run is linked each time the boxes are made: Qt skips a link that
+        already holds, so a partial one could leave other widgets between them."""
         chain = [self.delete_button, *self._below_footer()]
         for first, second in zip(chain, chain[1:], strict=False):
             QWidget.setTabOrder(first, second)
 
     def _below_footer(self) -> list[QWidget]:
         """The controls after the footer, in display order: the plan's boxes and field, then
-        Schedule time, Mark seen, Proposals and Open source."""
+        Break down with AI, Schedule time, Mark seen, Proposals and Open source."""
         return [
             *(row.box for row in self._step_rows),
             self.new_step,
+            self.breakdown_button,
             self.schedule_button,
             self.seen_button,
             self.proposals_button,
@@ -472,6 +489,7 @@ class ActionDetailPane(QScrollArea):
         """Every button, shown or not, in display order."""
         return [
             *self.all_footer_buttons(),
+            self.breakdown_button,
             self.schedule_button,
             self.seen_button,
             self.proposals_button,
@@ -504,8 +522,11 @@ class ActionDetailPane(QScrollArea):
             self._later_sources,
         ):
             section.set_widgets(())
+        self.breakdown_blocked = None
         for row in (
             self._plan_box,
+            self._breakdown_row,
+            self.breakdown_reason,
             self._schedule_row,
             self._seen_row,
             self._proposals_row,
@@ -513,6 +534,11 @@ class ActionDetailPane(QScrollArea):
             self._footer,
         ):
             row.hide()
+
+    def set_breakdown_access(self, *, ai_ready: bool, local_mail: bool) -> None:
+        """Whether a Groq key and model are saved, and whether email analysis runs on this
+        computer; the next action shown says from these why it can't be broken down."""
+        self._ai_ready, self._local_mail = ai_ready, local_mail
 
     def show_action(self, action: Action, *, today: date, zone: ZoneInfo, now: datetime) -> None:
         """Show ``action``; another action than the one shown starts at the top."""
@@ -643,6 +669,12 @@ class ActionDetailPane(QScrollArea):
         if action.public_id != self._shown:
             self.new_step.clear()  # A step typed for another action isn't this one's.
         self._show_plan(action, details)
+        self.breakdown_blocked = breakdown_block(
+            action, ai_ready=self._ai_ready, local_mail=self._local_mail
+        )
+        self._breakdown_row.show()
+        self.breakdown_reason.setText(self.breakdown_blocked or "")
+        self.breakdown_reason.setVisible(self.breakdown_blocked is not None)
         self._show_schedule(action, now=now, zone=zone, today=today)
         self._activity_summary.set_widgets(top)
         self._seen_row.setVisible(bool(activity))

@@ -25,6 +25,14 @@ from mailbrief.domain.actions import (
     ThreadLink,
 )
 from mailbrief.domain.availability import UnscheduledTasks
+from mailbrief.domain.breakdown import (
+    BreakdownApplied,
+    BreakdownEnding,
+    BreakdownOptions,
+    BreakdownOutcome,
+    BreakdownProposal,
+    KeptStep,
+)
 from mailbrief.domain.briefs import (
     AutoSendPermission,
     AutoSendStatus,
@@ -92,6 +100,7 @@ from mailbrief.providers.local.manifest import manifest_for
 from mailbrief.services.actions import AcceptedInto, ActionService, DecisionSnapshot
 from mailbrief.services.availability import AvailabilityService
 from mailbrief.services.bodies import BodyService
+from mailbrief.services.breakdown import BreakdownGate, BreakdownPlan, BreakdownService
 from mailbrief.services.brief import (
     CONSENT_DISCLOSURE_VERSION,
     ConsentGate,
@@ -122,6 +131,7 @@ from mailbrief.services.google_calendar import CalendarSyncService, forget_cache
 from mailbrief.services.history import BriefHistory, check_brief_date
 from mailbrief.services.inbox import InboxService
 from mailbrief.services.local_setup import LocalSetup, SetupProgress, SetupStatus
+from mailbrief.services.owner_consents import active_owner_uses
 from mailbrief.services.preferences import (
     PreferencesService,
     PreferencesUnavailableError,
@@ -1169,6 +1179,61 @@ class DesktopRuntime:
         """The Today page's "Your day": local data only, so it needs no Gmail or AI."""
         async with self._storage().session() as session:
             return await TodayService(session).summary(day, zone, now)
+
+    # AI breakdown of one task (ADR 0033). Groq is opened only to prepare and run a
+    # generation; applying, dismissing and undoing are local and need no key or model.
+
+    async def prepare_breakdown(self, public_id: str, options: BreakdownOptions) -> BreakdownPlan:
+        """Build exactly what would be sent, and its preview; nothing is sent or stored."""
+        preferences = await self.get_owner_preferences()
+        settings = await self._settings(preferences)
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await BreakdownService(
+                session,
+                ai,
+                zone=owner_zone(preferences),
+                local_mail=preferences.analysis_mode is AnalysisMode.LOCAL,
+            ).prepare(public_id, options)
+
+    async def run_breakdown(
+        self, plan: BreakdownPlan, gate: BreakdownGate, cancel: asyncio.Event
+    ) -> BreakdownOutcome:
+        preferences = await self.get_owner_preferences()
+        settings = await self._settings(preferences)
+        async with groq_provider(settings) as ai, self._storage().session() as session:
+            return await BreakdownService(session, ai).run(plan, gate, cancel)
+
+    @asynccontextmanager
+    async def _breakdowns(self) -> AsyncIterator[BreakdownService]:
+        """The local side of AI breakdown: no provider, so nothing here can send, and no
+        preferences, which recording, applying and undoing don't need."""
+        async with self._storage().session() as session:
+            yield BreakdownService(session)
+
+    async def close_breakdown(
+        self, plan: BreakdownPlan, ending: BreakdownEnding, error_code: str | None = None
+    ) -> None:
+        async with self._breakdowns() as service:
+            await service.close(plan, ending, error_code)
+
+    async def apply_breakdown(
+        self, proposal: BreakdownProposal, kept: Sequence[KeptStep]
+    ) -> BreakdownApplied:
+        async with self._breakdowns() as service:
+            return await service.apply(proposal, kept)
+
+    async def dismiss_breakdown(self, generation_id: str) -> None:
+        async with self._breakdowns() as service:
+            await service.dismiss(generation_id)
+
+    async def undo_breakdown(self, generation_id: str, revision: int) -> Action:
+        async with self._breakdowns() as service:
+            return await service.undo(generation_id, revision)
+
+    async def owner_consents(self) -> tuple[str, ...]:
+        """The owner's AI uses with active consent: drafting, calendar planning, breakdown."""
+        async with self._storage().session() as session:
+            return await active_owner_uses(session, "groq")
 
     # The weekly review (P5-1): local data only.
 

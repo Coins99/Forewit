@@ -21,6 +21,20 @@ later use after Microsoft Entra access is resolved.
   Archive button and a refresh that rebuilt every card each minute; all are fixed with
   regressions.
 
+- P5-2 implemented, awaiting owner live acceptance ([ADR 0033](adr/0033-task-breakdown.md),
+  migration `20261114_0040`): **Break down with AI…** in a task's detail asks Groq for
+  checklist steps for that one task. It sends the title, today's date and your instruction,
+  plus only the parts you tick; it has its own consent and shows a preview every time; you
+  untick or edit the steps before **Apply**, and **Undo** takes exactly those steps back. A
+  failed, declined or dismissed run changes nothing. The history it keeps holds no text.
+  `forewit-gmail-diagnostic breakdown TASK_ID --dry-run` prints sizes only. No test or agent
+  run has called Groq: steps BRK-01 to BRK-10 in
+  [the run-sheet](acceptance-runsheet.md#ai-breakdown) are the owner's. See
+  [the P5 plan](p5-review-assistance.md#p5-2-optional-ai-breakdown-of-one-selected-task-j01-j07).
+- P5-1 implemented, awaiting owner acceptance (migration `20261114_0039`): the weekly review,
+  from Today's header and the palette, with no AI. See
+  [the P5 plan](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+
 - P3-1 work blocks implemented, awaiting owner acceptance (ADR 0028, migration
   `20261105_0032`): set aside time for a task on the Calendar, as many blocks as you like,
   shown in Week, Month, List and Today; drag, resize, keyboard moves and unschedule with

@@ -315,7 +315,9 @@ async def test_quitting_mid_generation_cancels_and_closes_cleanly(
 async def test_revoking_consent_mentions_drafting(window: MainWindow) -> None:
     await window.initialize()
     await window._revoke_consent()
-    assert window.status.text().startswith("AI consent revoked for briefs and drafting")
+    assert window.status.text().startswith(
+        "AI consent revoked for briefs, drafting, planning and breakdown"
+    )
     assert "drafting" in window.settings_dialog.revoke_button.text()
 
 

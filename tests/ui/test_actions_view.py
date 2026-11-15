@@ -669,6 +669,7 @@ def test_the_detail_shows_every_section_with_its_buttons(panel: ActionsPanel) ->
         "draftButton",
         "editButton",
         "deleteButton",
+        "breakdownButton",
         "scheduleTimeButton",
         "seenButton",
         "proposalsButton",
@@ -714,6 +715,7 @@ def test_a_quiet_action_shows_only_what_it_has(panel: ActionsPanel) -> None:
         "completeButton",
         "editButton",
         "deleteButton",
+        "breakdownButton",
         "scheduleTimeButton",
     ]
 

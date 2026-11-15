@@ -1513,3 +1513,57 @@ class WeeklyReviewTable(Base):
     created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     __mapper_args__ = {"version_id_col": revision, "version_id_generator": False}
+
+
+_BREAKDOWN_OUTCOME_CHECK = (
+    "outcome IN ('proposed','applied','dismissed','undone','declined','cancelled','failed',"
+    "'no_steps')"
+)
+
+
+class TaskBreakdownTable(Base):
+    """One AI breakdown generation that reached its preview (ADR 0033): what was asked for
+    and how it ended. It holds no owner or AI text. The task is named by its public ID with
+    no foreign key, so the record outlives the task, and ``added_step_ids_json`` names the
+    step rows an Apply added, which is all an Undo may remove."""
+
+    __tablename__ = "task_breakdowns"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_task_breakdowns_public_id"),
+        CheckConstraint("length(public_id) = 36", name="public_id_length"),
+        CheckConstraint("length(task_public_id) = 36", name="task_id_length"),
+        CheckConstraint(_BREAKDOWN_OUTCOME_CHECK, name="outcome_known"),
+        CheckConstraint(
+            "proposed_count >= 0 AND applied_count >= 0 AND edited_count >= 0 "
+            "AND applied_count <= proposed_count AND edited_count <= applied_count",
+            name="counts_valid",
+        ),
+        CheckConstraint("schema_version >= 1", name="schema_version_positive"),
+        CheckConstraint("read_revision >= 1", name="read_revision_positive"),
+        CheckConstraint(
+            "result_revision IS NULL OR result_revision > read_revision",
+            name="result_revision_later",
+        ),
+        CheckConstraint(
+            "(error_code IS NOT NULL) = (outcome = 'failed')", name="error_code_for_failure"
+        ),
+        Index("ix_task_breakdowns_task_public_id", "task_public_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    task_public_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    parts_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    proposed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    applied_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    edited_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    read_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_revision: Mapped[int | None] = mapped_column(Integer)
+    added_step_ids_json: Mapped[list[int] | None] = mapped_column(JSON)
+    created_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    decided_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())

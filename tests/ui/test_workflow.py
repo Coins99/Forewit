@@ -31,6 +31,17 @@ from mailbrief.domain.actions import (
 )
 from mailbrief.domain.analysis import DeadlinePrecision
 from mailbrief.domain.availability import UnscheduledTasks
+from mailbrief.domain.breakdown import (
+    BreakdownApplied,
+    BreakdownEnding,
+    BreakdownOptions,
+    BreakdownOutcome,
+    BreakdownPreview,
+    BreakdownProposal,
+    BreakdownRequest,
+    BreakdownStatus,
+    KeptStep,
+)
 from mailbrief.domain.briefs import (
     AutoSendStatus,
     BriefRunResult,
@@ -86,6 +97,7 @@ from mailbrief.errors import ConfigurationError
 from mailbrief.ports.calendar import CalendarNotAllowedError
 from mailbrief.ports.errors import AuthenticationRequiredError, ProviderError
 from mailbrief.services.actions import AcceptedInto, DecisionSnapshot
+from mailbrief.services.breakdown import BreakdownGate, BreakdownPlan
 from mailbrief.services.brief import ConsentGate, ShortlistGate
 from mailbrief.services.calendar_planning import PlanningGate, PreparedPlan
 from mailbrief.services.consent import NO_CONSENT
@@ -270,6 +282,18 @@ class FakeBackend(FakeDrafts):
         self.planning_hold: asyncio.Event | None = None  # Asking waits on it when set.
         self.apply_fail: Exception | None = None
         self.undone: list[AppliedBatch] = []
+        # Break down with AI (ADR 0033): each call, what preparing and asking answer, and
+        # what applying fails with.
+        self.breakdown_calls: list[tuple[object, ...]] = []
+        self.breakdown_first_use = True
+        self.breakdown_steps: tuple[str, ...] = ("Book the room", "Send the invitations")
+        self.breakdown_missing: tuple[str, ...] = ()
+        self.breakdown_status = BreakdownStatus.PROPOSED
+        self.breakdown_error: str | None = None
+        self.breakdown_fail: Exception | None = None
+        self.breakdown_hold: asyncio.Event | None = None  # Asking waits on it when set.
+        self.breakdown_apply_fail: Exception | None = None
+        self.owner_uses: tuple[str, ...] = ()
         # Automatic runs: what each returns (or raises), how many ran, and an optional hold.
         self.automatic_calls = 0
         self.window: MainWindow | None = None  # Set by a test that watches the window's panels.
@@ -1277,6 +1301,119 @@ class FakeBackend(FakeDrafts):
     async def undo_calendar_changes(self, batch: AppliedBatch) -> None:
         self.planning_calls.append(("undo",))
         self.undone.append(batch)
+
+    async def prepare_breakdown(self, public_id: str, options: BreakdownOptions) -> BreakdownPlan:
+        self.breakdown_calls.append(("prepare", public_id, options))
+        if self.breakdown_fail is not None:
+            raise self.breakdown_fail
+        listed = [
+            a for actions in self.actions.values() for a in actions if a.public_id == public_id
+        ]
+        task = listed[0] if listed else make_action(public_id=public_id)
+        request = BreakdownRequest(
+            request_key="k1",
+            title=task.title,
+            today=date(2026, 9, 4),
+            instruction=options.instruction,
+        )
+        preview = BreakdownPreview(
+            provider="groq",
+            model="test-model",
+            privacy_notice="Groq processes the request under its terms.",
+            first_use=self.breakdown_first_use,
+            email_source=bool(task.sources),
+            lines=(
+                PreviewLine(
+                    label="Always: the task's title, today's date and your instruction",
+                    characters=len(task.title) + 10 + len(options.instruction),
+                ),
+            ),
+        )
+        return BreakdownPlan(
+            generation_id="00000000-0000-4000-8000-000000000777",
+            task_public_id=public_id,
+            read_revision=task.revision,
+            free_slots=30 - len(task.steps),
+            prompt_version="test-1",
+            existing=frozenset(),
+            request=request,
+            preview=preview,
+        )
+
+    async def run_breakdown(
+        self, plan: BreakdownPlan, gate: BreakdownGate, cancel: asyncio.Event
+    ) -> BreakdownOutcome:
+        self.breakdown_calls.append(("run",))
+        if not await gate.request_breakdown_consent(plan.preview):
+            return BreakdownOutcome(status=BreakdownStatus.DECLINED)
+        if self.breakdown_hold is not None:
+            try:
+                await self.breakdown_hold.wait()
+            except asyncio.CancelledError:
+                self.breakdown_calls.append(("cancelled",))
+                raise
+        self.breakdown_first_use = False
+        self.owner_uses = (*(use for use in self.owner_uses if use != "breakdown"), "breakdown")
+        if self.breakdown_status is not BreakdownStatus.PROPOSED:
+            return BreakdownOutcome(status=self.breakdown_status, error_code=self.breakdown_error)
+        return BreakdownOutcome(
+            status=BreakdownStatus.PROPOSED,
+            proposal=BreakdownProposal(
+                generation_id=plan.generation_id,
+                task_public_id=plan.task_public_id,
+                read_revision=plan.read_revision,
+                steps=self.breakdown_steps,
+                missing_context=self.breakdown_missing,
+                free_slots=plan.free_slots,
+            ),
+        )
+
+    async def close_breakdown(
+        self, plan: BreakdownPlan, ending: BreakdownEnding, error_code: str | None = None
+    ) -> None:
+        self.breakdown_calls.append(("close", plan.generation_id, ending))
+        if error_code is not None:
+            self.breakdown_calls.append(("close_code", error_code))
+
+    async def apply_breakdown(
+        self, proposal: BreakdownProposal, kept: Sequence[KeptStep]
+    ) -> BreakdownApplied:
+        self.breakdown_calls.append(("apply", tuple(kept)))
+        if self.breakdown_apply_fail is not None:
+            raise self.breakdown_apply_fail
+
+        def added(action: Action) -> dict[str, object]:
+            first = max((step.step_id for step in action.steps), default=0) + 1
+            return {
+                "steps": (
+                    *action.steps,
+                    *(
+                        ActionStep(
+                            step_id=first + offset,
+                            position=len(action.steps) + offset,
+                            text=step.text,
+                            done=False,
+                        )
+                        for offset, step in enumerate(kept)
+                    ),
+                )
+            }
+
+        return BreakdownApplied(
+            action=self._changed_action(proposal.task_public_id, proposal.read_revision, added),
+            generation_id=proposal.generation_id,
+            added=len(kept),
+        )
+
+    async def dismiss_breakdown(self, generation_id: str) -> None:
+        self.breakdown_calls.append(("dismiss", generation_id))
+
+    async def undo_breakdown(self, generation_id: str, revision: int) -> Action:
+        self.breakdown_calls.append(("undo", generation_id, revision))
+        return make_action(revision=revision + 1)
+
+    async def owner_consents(self) -> tuple[str, ...]:
+        return self.owner_uses
 
     async def close(self) -> None:
         self.closed = True

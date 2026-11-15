@@ -1,7 +1,7 @@
 # P5: Review and optional assistance (plan)
 
-Status: P5-1 implemented 2026-11-14, owner acceptance open; P5-2 and P5-3 planned. Base: `main` at `a863c21` (#127).
-Contract for the AI path: [ADR 0033](adr/0033-task-breakdown.md) (proposed).
+Status: P5-1 and P5-2 implemented 2026-11-14, owner acceptance open; P5-3 planned. Base: `main` at `a863c21` (#127).
+Contract for the AI path: [ADR 0033](adr/0033-task-breakdown.md) (accepted with P5-2).
 
 P5 is the last phase of the general-planner proof of concept
 ([future implementations §7](future-implementations.md#7-delivery-sequence-and-gates)).
@@ -166,10 +166,16 @@ readers were updated. `qa.py changed` and `qa.py full`, mypy for win32 and darwi
 
 ### P5-2: Optional AI breakdown of one selected task (J01, J07)
 
-**Use.** In a live, open task's detail, **Break down with AI…** proposes checklist steps for
-that task only. It is unavailable, with the reason shown, when the task is done or deleted,
-already has the 30-step maximum, or no Groq key is set. Every generation follows the drafting
-pattern (ADR 0013): choose parts, preview, approve, review the result, apply.
+Implemented on `feat/p5-task-breakdown` (2026-11-14); owner live acceptance open. This
+section describes what was built; where it differs from the first draft of this plan, it says
+so, and [ADR 0033](adr/0033-task-breakdown.md) records the decisions made on the way.
+
+**Use.** In a task's detail on the Tasks page, under its plan, **Break down with AI…**
+proposes checklist steps for that task only. It is unavailable, with the reason shown under
+it, when the task is done, already has the 30-step maximum, or no Groq key or model is saved,
+and for a task with an email source while email analysis runs on this computer. A deleted
+task isn't shown, and the service refuses it. Every generation follows the drafting pattern
+(ADR 0013): choose parts, preview, approve, review the result, apply.
 
 1. **Choose context.** Always sent: the task title, today's date in the owner's zone and the
    owner's instruction (optional, at most 1,000 characters). The preview says when the title
@@ -187,8 +193,9 @@ pattern (ADR 0013): choose parts, preview, approve, review the result, apply.
 4. **Validate** against the versioned breakdown schema (version 1): one to eight steps of at
    most 120 characters and up to three missing-context items of at most 200, and nothing else.
    Python strips control and format characters, collapses whitespace, and drops empty steps,
-   repeats and steps that repeat an existing step (case-folded). No usable step means "no
-   steps proposed" and no change.
+   steps over 120 characters (dropped, never cut), repeats and steps that repeat an existing
+   step (case-folded). At most eight are kept, and never more than the task has room for. No
+   usable step means "no new steps" and no change.
 5. **Review** the proposed steps as plain-text rows: untick, edit (1–500 characters, the step
    limit) and see how many slots remain under 30. Missing-context items are shown, not stored.
 6. **Apply** appends the ticked steps after the existing ones as one task revision recorded as
@@ -206,16 +213,18 @@ blocks, focus and dates exactly as they were.
 
 **Data and migration.** Consent reuses `owner_consents` with the new scope: no migration, and
 the existing Revoke AI consent (`OwnerConsentRepository.revoke_all`) already revokes every
-scope for the provider. The next dated revision (`YYYYMMDD_NNNN`, after P5-1's
-`20261114_0039`) adds `task_breakdowns`, the generation
+scope for the provider. Revision `20261114_0040` (after P5-1's `20261114_0039`) adds
+`task_breakdowns`, the generation
 history J07 asks for, with no owner text: `public_id`, `task_public_id` (snapshot, no foreign
 key, as activity stores IDs), `provider`, `model`, `prompt_version`, `schema_version`,
 `parts_json` (the ticked part codes), `proposed_count`, `applied_count`, `edited_count`,
 `outcome` (`proposed`, `applied`, `dismissed`, `undone`, `declined`, `cancelled`, `failed` or
 `no_steps`), `error_code` (a code only, for `failed`), `read_revision`, `result_revision`,
 `added_step_ids_json`, `created_at_utc` and `decided_at_utc`. Every generation that reaches
-the preview writes one row when its run ends, declined, cancelled and failed ones included, so
-the trial can count them; Apply, Dismiss and Undo then update that row. Apply needs the row
+the preview writes one row when it ends, declined, cancelled and failed ones included, so
+the trial can count them: the run writes it, or the window does when the owner closes the
+preview (`declined`) or stops the call (`cancelled`). Previewing again with other ticks
+replaces the prepared generation without a row. Apply, Dismiss and Undo then update that row. Apply needs the row
 still `proposed`; applying a generation that is already applied returns the current task,
 so a double click or a retry cannot add steps twice. The
 table joins backup, verify and restore, survives purge and is left out of writing exports.
@@ -229,15 +238,26 @@ table joins backup, verify and restore, survives purge and is left out of writin
   `break_down(request)`), mirroring `DraftingProvider`.
 - `providers/groq/`: the Structured Outputs implementation with its own prompt; provider JSON
   stays in the adapter.
-- `services/breakdown.py`: `BreakdownService.prepare / run / apply / dismiss / undo`, with a
-  `BreakdownGate` protocol for approval, as `DraftingService` and `CalendarPlanningService`.
-- `ui/breakdown_dialog.py`: parts with sizes, the preview and consent text, a busy state with
-  Cancel, then the review. The status line stays outside the scrolled fields.
+- `services/breakdown.py`: `BreakdownService.prepare / run / close / apply / dismiss / undo`,
+  with a `BreakdownGate` protocol for approval, as `DraftingService` and
+  `CalendarPlanningService`. Preparing and running need the provider; the rest are local.
+- `ui/breakdown_dialog.py`: the instruction and the parts the task has (none ticked), the
+  preview and consent text in a scrolling area, a busy state with **Cancel request**, then
+  the review with a tick and an editable field per step. The status line stays outside the
+  scrolled fields. `ui/action_detail.py` holds the button and its reason line;
+  `ui/action_text.breakdown_block` is the wording.
 - Settings' AI card: under **Revoke AI consent**, relabelled **Revoke AI consent (briefs,
   drafting, planning and breakdown)**, a plain line lists the owner consents now active
-  (drafting, calendar planning, breakdown), read from `owner_consents`.
-- A diagnostic `forewit-gmail-diagnostic breakdown TASK_ID --dry-run` prints the preview sizes
-  only (no text), for support; it holds `desktop.lock` like the other database commands.
+  (drafting, calendar planning, breakdown), read from `owner_consents` by
+  `services/owner_consents.py`.
+- A diagnostic `forewit-gmail-diagnostic breakdown TASK_ID --dry-run` (with `--notes`,
+  `--steps`, `--project`, `--dates`, `--estimate`) prints the preview sizes only (no text),
+  for support; it calls nothing, writes no history row and holds `desktop.lock` like the
+  other database commands. `ai-consent status` lists the three owner consents.
+
+Differences from the draft: the button has no mnemonic (the window's letters are taken); the
+consent helper is its own module, since `services/consent.py` is imported by the brief; the
+deadline is sent as a local value only, never an email's words for it.
 
 **Privacy boundary** (ADR 0033). Never sent: the task's person (B08), tags, source-email
 snapshots (subject, sender, links), email bodies, other tasks, notes or drafts, work blocks,
@@ -249,11 +269,12 @@ text is untrusted input to the model: instructions inside notes authorize nothin
 
 **Acceptance steps** (test profile; a Groq key in the vault; Zero Data Retention on):
 
-- [ ] **BRK-01** On a done task, a deleted task and a task with 30 steps, **Break down with AI…**
-  is unavailable and says why. With no Groq key it says the key is missing.
-- [ ] **BRK-02** On an open task with notes and two steps, open the breakdown. Only the title,
-  date and instruction are always included; untick notes and the preview omits them. The
-  preview shows each part's size, Groq, the model and the privacy notice.
+- [ ] **BRK-01** On a done task and a task with 30 steps, **Break down with AI…** is
+  unavailable and says why underneath. With no Groq key it says to add one in Settings.
+- [ ] **BRK-02** On an open task with notes and two steps, open the breakdown. Nothing is
+  ticked: only the title, date and instruction are always included. Tick notes and the preview
+  lists them with their size; untick them and it omits them. The preview names Groq, the
+  model and the privacy notice.
 - [ ] **BRK-03** First use asks for consent. Decline: nothing is sent, the task is unchanged
   and its revision is the same. Approve: consent is recorded, and the next generation does not
   ask again but still shows the preview.
@@ -277,16 +298,19 @@ text is untrusted input to the model: instructions inside notes authorize nothin
   breakdown records survive; **Export all writing** contains the steps (as the task's) and no
   breakdown record.
 
-**Tests and checks.** A dummy `BreakdownProvider` for the service; `respx` for the Groq
-adapter (schema, `json_validate_failed` retry, timeouts, HTTP errors); hostile-text fixtures
-(instructions, control characters, oversized and duplicate steps, extra JSON fields) that end
-in rejection or dropped steps; a request-shape test that fails if a forbidden field (person,
-tags, sources, IDs) is ever present; consent grant/decline/revoke; apply/undo/dismiss with
-stale revisions, a closed or deleted task, the 30-step limit and a double apply; a test that a
-failed or declined run leaves the task row, day plans and work blocks byte-identical; log
-privacy (codes and counts only); migration, backup/restore/export as in P5-1; dialog screenshots
-light/dark at 1x and 2x. The source-rule scan must still find no network import outside
-providers and no private log names. Same `qa.py`, mypy and coverage gates.
+**Tests and checks.** `tests/unit/services/test_breakdown.py` (a dummy `BreakdownProvider`:
+what is sent, a request shape that fails if a person, tag, source or ID is ever present,
+consent grant, decline and revoke, hostile text, every outcome's history row, apply, undo and
+dismiss with stale revisions, closed and deleted tasks, the 30-step limit and a double apply,
+a failed or declined run leaving the task, day-plan and work-block rows identical, logs with
+codes and counts only, and backup, restore, export and cleanup);
+`tests/unit/providers/groq/test_groq_breakdown.py` (`respx`: the strict schema, extra fields,
+`json_validate_failed`, timeouts, HTTP errors, a pinned prompt);
+`tests/unit/services/test_owner_consents.py`; `tests/ui/test_breakdown.py` (the dialog and
+the window's flow, unavailable reasons, Undo, plain text, light and dark renders);
+`tests/integration/test_breakdown_cli.py`. Migration head pins, the table list, the owner
+tables rule and the Tab order were updated. `qa.py changed` and `qa.py full`, mypy for win32
+and darwin.
 
 ### P5-3 (stretch): Modest daily schedule proposal
 
@@ -358,7 +382,7 @@ test that the dialog receives the request, and the existing scheduling suite unc
 ## Order of work
 
 1. P5-1 (independent of P5-2 and P5-3).
-2. P5-2, with ADR 0033 moving from proposed to accepted in its PR.
+2. P5-2, with ADR 0033 moving from proposed to accepted in its PR (done).
 3. P5-3 only if the owner keeps the stretch (question 9).
 4. The two-week trial, recorded against the POC criteria, then the P5 gate decision.
 

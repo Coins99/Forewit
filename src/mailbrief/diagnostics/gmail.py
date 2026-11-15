@@ -36,6 +36,7 @@ from mailbrief.domain.actions import (
 )
 from mailbrief.domain.analysis import ActionOwnership, DeadlinePrecision, FollowUpKind
 from mailbrief.domain.bodies import BodyStatus, PreparedBody
+from mailbrief.domain.breakdown import PART_ORDER, BreakdownOptions, BreakdownPart
 from mailbrief.domain.briefs import (
     AUTO_SEND_LIMIT_MAX,
     BriefRunResult,
@@ -91,6 +92,11 @@ from mailbrief.services.actions import (
 )
 from mailbrief.services.application import ApplicationService
 from mailbrief.services.bodies import BodyService
+from mailbrief.services.breakdown import (
+    BreakdownNotFoundError,
+    BreakdownService,
+    BreakdownUnavailableError,
+)
 from mailbrief.services.brief import (
     CONSENT_DISCLOSURE_VERSION,
     NeverAsks,
@@ -119,8 +125,6 @@ from mailbrief.services.consent import (
     set_auto_send,
 )
 from mailbrief.services.drafting import (
-    DRAFTING_DISCLOSURE_VERSION,
-    DRAFTING_SCOPE,
     DraftingContextError,
     DraftingService,
 )
@@ -145,6 +149,7 @@ from mailbrief.services.local_setup import (
     gigabytes,
     setup_lines,
 )
+from mailbrief.services.owner_consents import OWNER_USES
 from mailbrief.services.preferences import (
     PreferencesService,
     PreferencesUnavailableError,
@@ -174,7 +179,14 @@ from mailbrief.text.prepare import clean_generated_text
 
 _AI_COMMANDS = frozenset({"brief", "ai-key", "ai-consent"})
 # Commands whose setup errors are shown as they are: static, actionable messages.
-_OWN_MESSAGE_COMMANDS = _AI_COMMANDS | {"actions", "drafts", "preferences", "briefs", "local-ai"}
+_OWN_MESSAGE_COMMANDS = _AI_COMMANDS | {
+    "actions",
+    "drafts",
+    "preferences",
+    "briefs",
+    "local-ai",
+    "breakdown",
+}
 _CONNECT_FIRST = "Connect Gmail first."
 _NO_BRIEF = "No saved brief for that date."
 _SEVERAL_BRIEFS = "Several accounts have a brief for that date; pass --account."
@@ -641,22 +653,22 @@ async def ai_consent(
                     f"Account {account.id}: Local email analysis consent "
                     f"{_granted(None if local is None else local.granted_at_utc)}"
                 )
-            drafting = await owner.get_active(
-                PROVIDER_NAME, DRAFTING_SCOPE, DRAFTING_DISCLOSURE_VERSION
-            )
-            when = None if drafting is None else drafting.granted_at_utc
-            print(f"AI drafting: Groq consent {_granted(when)}")
+            # The owner's own uses (ADRs 0013, 0018 and 0033): each has its own consent.
+            for name, scope, version in OWNER_USES:
+                use = await owner.get_active(PROVIDER_NAME, scope, version)
+                when = None if use is None else use.granted_at_utc
+                print(f"AI {name}: Groq consent {_granted(when)}")
             print(f"Automatic analysis: {await _connected_permission_text(session)}")
             return 0
         now = datetime.now(UTC)
         briefs = 0
         for account in accounts:
             briefs += await consents.revoke_all(account.id, PROVIDER_NAME, now)
-        drafting_revoked = await owner.revoke_all(PROVIDER_NAME, now)
+        owner_revoked = await owner.revoke_all(PROVIDER_NAME, now)
         await session.commit()
         print(
-            f"Groq consent revoked: {briefs + drafting_revoked} "
-            f"(briefs {briefs}, drafting {drafting_revoked})"
+            f"Groq consent revoked: {briefs + owner_revoked} "
+            f"(briefs {briefs}, drafting, planning and breakdown {owner_revoked})"
         )
         return 0
 
@@ -804,6 +816,41 @@ class CliDraftingGate:
         if self._assume_yes:
             return True
         return (await _ask("Send? [y/N] ")).lower() in {"y", "yes"}
+
+
+async def breakdown_dry_run(
+    public_id: str, *, database_path: Path | None, parts: frozenset[BreakdownPart]
+) -> int:
+    """Say what an AI breakdown of one task would send, as sizes only (ADR 0033).
+
+    It prints no task text, sends nothing and records nothing: Groq is never called, and no
+    generation is written to the history. A task that can't be broken down says why.
+    """
+    owner = await _owner(database_path, None)
+    async with (
+        owner.database() as database,
+        groq_provider(owner.settings) as ai,
+        database.session() as session,
+    ):
+        service = BreakdownService(
+            session,
+            ai,
+            zone=owner.zone,
+            local_mail=owner.preferences.analysis_mode is AnalysisMode.LOCAL,
+        )
+        try:
+            plan = await service.prepare(public_id, BreakdownOptions(parts=parts))
+        except (BreakdownNotFoundError, BreakdownUnavailableError) as exc:
+            print(str(exc))  # Static messages that name no task.
+            return 3
+    preview = plan.preview
+    print(f"Dry run: nothing is sent to {provider_display_name(preview.provider)} or saved.")
+    print(f"Provider and model: {provider_display_name(preview.provider)} / {preview.model}")
+    for line in preview.lines:
+        print(f"- {line.label}: {line.characters:,} characters")
+    print(f"Total: {preview.total_characters:,} characters")
+    print("First use would ask for consent." if preview.first_use else "Consent is on record.")
+    return 0
 
 
 def _drafting_exit_code(outcome: DraftingOutcome) -> int:
@@ -1972,6 +2019,28 @@ def main(arguments: Sequence[str] | None = None) -> int:
         subcommand.add_argument(
             "--database", type=Path, help="Optional SQLite path; defaults to app data."
         )
+    breakdown_parser = commands.add_parser(
+        "breakdown",
+        help="Show what an AI breakdown of one task would send, as sizes only (--dry-run).",
+    )
+    breakdown_parser.add_argument("public_id", metavar="TASK_ID", help="The task's ID.")
+    breakdown_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        required=True,
+        help="Required: print part sizes only. Nothing is sent, and no text is printed.",
+    )
+    for part in PART_ORDER:
+        breakdown_parser.add_argument(
+            f"--{part.value}",
+            dest="breakdown_parts",
+            action="append_const",
+            const=part,
+            help=f"Count the task's {part.value} as a part to send.",
+        )
+    breakdown_parser.add_argument(
+        "--database", type=Path, help="Optional SQLite path; defaults to app data."
+    )
     preferences_parser = commands.add_parser(
         "preferences", help="Show your saved preferences; set them in the desktop's Settings."
     )
@@ -2016,7 +2085,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         logging.getLogger(name).setLevel(logging.CRITICAL)
     locks = contextlib.ExitStack()
     try:
-        if args.command in {"sync", "bodies", "brief"} or (
+        if args.command in {"sync", "bodies", "brief", "breakdown"} or (
             args.command == "drafts" and args.action == "generate"
         ):
             _load_settings()  # Reject invalid configuration before touching the data folder.
@@ -2090,6 +2159,14 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     limit=args.limit,
                     assume_yes=args.yes,
                     local_action=args.local_action,
+                )
+            )
+        if args.command == "breakdown":
+            return asyncio.run(
+                breakdown_dry_run(
+                    args.public_id,
+                    database_path=args.database,
+                    parts=frozenset(args.breakdown_parts or ()),
                 )
             )
         if args.command == "preferences":

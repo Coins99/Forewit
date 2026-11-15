@@ -1,7 +1,7 @@
 # ADR 0033: AI breakdown of one task from context the owner chooses
 
-Date: 2026-11-14. Status: proposed (P5-2 plan, [P5 plan](../p5-review-assistance.md)); not
-implemented.
+Date: 2026-11-14. Status: accepted with P5-2 ([P5 plan](../p5-review-assistance.md));
+implemented, owner live acceptance open.
 
 Builds on ADR 0010 (Groq), ADR 0013 (drafting consent and previews), ADR 0018 (proposals the
 owner applies), ADR 0022 (the task's person) and ADR 0024 (retry receipts).
@@ -59,9 +59,46 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
 
 ## Consequences
 
-- A new additive migration adds `task_breakdowns`; consent needs none.
+- Migration `20261114_0040` adds `task_breakdowns`; consent needs none.
 - Settings' AI card lists the active owner consents, breakdown among them, and its revoke
   button names breakdown.
 - Trial evidence for "AI suggestions accepted, edited or dismissed" comes from the counts,
   with no step text kept outside the task.
 - Priority, estimate, subtask and multi-task suggestions need a new decision.
+
+## Decided while building (2026-11-14)
+
+- **When the history row is written.** At the end of a run: `proposed`, `no_steps`, `failed`
+  with its code, `declined` or `cancelled`. When the owner closes the preview without asking,
+  the window records `declined`; when they stop a call, `cancelled`. Previewing again with
+  other ticks replaces the prepared generation without a row, so one sitting is one row.
+  The diagnostic's `--dry-run` writes none. A run that breaks before it can answer is
+  recorded as `failed` with a code, and a preview or proposal left open when the app quits
+  is recorded as `declined` or `dismissed`.
+- **Two keys.** The request key is random, sent and never stored. The generation's public ID
+  is stored and never sent, since Forewit IDs never go.
+- **Oversized steps are dropped, not cut.** A step over 120 characters is left out; half an
+  instruction is worse than none. More than eight steps, or more than the task has room
+  for, keep the first ones.
+- **The deadline is sent as a local value only**, never the words an email stated it in:
+  those are the email's.
+- **Apply writes the steps itself.** `BreakdownService.apply` adds the step rows, the task's
+  revision and its `edited` activity, and updates the generation's row, in one commit.
+  `edited_count` is worked out there from the proposal in memory, so no step text is kept
+  outside the task. Applying an already applied generation returns the task as it is.
+- **Undo** records an `undo` activity that names Apply's revision, as the other undos do.
+- **Where it is refused.** The service refuses a missing, deleted, closed or full task, and
+  in local mode a task with an email source; the desktop's button says the same reasons and
+  also when no Groq key or model is saved. A caller that doesn't say whether analysis is
+  local can't skip the rule: the service then reads the owner's saved mode itself, and
+  unreadable preferences stop the generation.
+- **The review is held while Apply saves**, so closing it can't turn down what is being
+  applied.
+
+## Known limit
+
+The local-mode rule looks at the mode now. A task made from mail while analysis ran on this
+computer can be broken down after the owner switches email analysis to the cloud: its title
+would then reach Groq. The preview marks every task that has an email source, and the owner
+approves each send. Recording which analysis wrote a task's title would need new storage and
+a new decision.

@@ -14,7 +14,8 @@ before any change under `src/mailbrief/ui`; AGENTS.md's invariants still win.
   choice is saved in `appearance.json` beside the database by `appearance.py`, never in
   `desktop-settings.json`, which older builds would refuse) and the Briefs page for saved briefs and missed
   days (`history_view.py`), the Proposals dialog for one action and the wording of a
-  proposal's effect (`proposals_view.py`), the Inbox page (`inbox_view.py`; its rows by
+  proposal's effect (`proposals_view.py`), Break down with AI for one task (`breakdown_dialog.py`,
+  ADR 0033; its button and reason line are in `action_detail.py`), the Inbox page (`inbox_view.py`; its rows by
   day in `inbox_list.py`, its reading pane in `inbox_reader.py`); `lists.py` holds
   `ActivatingList`, where
   Return or Enter activates a row once on every platform, `clear_list`, which empties a

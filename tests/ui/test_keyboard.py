@@ -375,12 +375,12 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
     panel = window.actions_panel
     detail = [button.objectName() for button in panel.detail.buttons()]
     footer = ["completeButton", "draftButton", "editButton", "deleteButton"]
-    assert detail == [*footer, "scheduleTimeButton"]
+    assert detail == [*footer, "breakdownButton", "scheduleTimeButton"]
 
     chain = tab_chain(window, panel.new_task_button)
 
     # After the footer's buttons comes its plan's field (this task has no steps yet, B04),
-    # then Schedule time (ADR 0028).
+    # then Break down with AI (ADR 0033) and Schedule time (ADR 0028).
     assert chain == [
         "newTaskButton",
         "actionGroup",
@@ -389,6 +389,7 @@ async def test_tab_on_the_actions_page_runs_views_list_then_detail(window: MainW
         "actionList",
         *footer,
         "newStepField",
+        "breakdownButton",
         "scheduleTimeButton",
         "planFocusButton",
         "globalCapture",

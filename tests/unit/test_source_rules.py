@@ -797,6 +797,7 @@ OWNER_TABLES: Final = [
     "PlanningCommand",
     "MetricCommand",
     "DashboardCommand",
+    "TaskBreakdown",
 ]
 BULK_OWNER_WRITE: Final = re.compile(
     rf"(?:update|delete|insert)\(\s*(?:{'|'.join(OWNER_TABLES)})Table\b"

@@ -175,7 +175,10 @@ def test_consent_status_and_revoke_cover_drafting(
     assert gmail.main(["ai-consent", "status", "--database", str(path)]) == 0
     assert "AI drafting: Groq consent granted" in capsys.readouterr().out
     assert gmail.main(["ai-consent", "revoke", "--database", str(path)]) == 0
-    assert "Groq consent revoked: 2 (briefs 1, drafting 1)" in capsys.readouterr().out
+    assert (
+        "Groq consent revoked: 2 (briefs 1, drafting, planning and breakdown 1)"
+        in capsys.readouterr().out
+    )
 
     assert generate(path, public_id, "--use-text", "--yes") == 6  # It asks again.
 
