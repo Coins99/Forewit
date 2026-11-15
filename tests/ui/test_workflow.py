@@ -47,6 +47,7 @@ from mailbrief.domain.calendar_planning import (
     PlanningStatus,
 )
 from mailbrief.domain.capture import CaptureRequest
+from mailbrief.domain.common import utc_now
 from mailbrief.domain.day_plans import DayPlan, DayPlanItem, PlanTransfer
 from mailbrief.domain.digests import (
     DailyDigest,
@@ -78,6 +79,7 @@ from mailbrief.domain.projects import AreaEdit, LifeArea, Project, ProjectEdit
 from mailbrief.domain.recurrence import RepeatEdit, RepeatRule
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.weekly_review import WeeklyReview, WeeklyReviewRecord
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
 from mailbrief.domain.working_hours import HoursEdit, WorkingHours
 from mailbrief.errors import ConfigurationError
@@ -92,6 +94,8 @@ from mailbrief.services.google_calendar import sync_window
 from mailbrief.services.local_setup import SetupProgress, SetupState, SetupStatus
 from mailbrief.services.preferences import PreferencesConflictError
 from mailbrief.services.today import needs_attention, new_replies
+from mailbrief.services.upcoming import overview
+from mailbrief.services.weekly_review import WeeklyReviewConflictError, still_open
 from mailbrief.ui.insights_backend import InsightsBackend
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.preferences import DesktopPreferences
@@ -205,6 +209,9 @@ class FakeBackend(FakeDrafts):
         # The owner's preferences, as the database would hold them.
         self.owner_preferences = OwnerPreferences.defaults()
         self.focus_plans: dict[date, DayPlan] = {}
+        # The weekly review (P5-1): each week read, and the review records by week.
+        self.review_calls: list[date] = []
+        self.week_records: dict[date, WeeklyReviewRecord] = {}
         self.owner_fail: Exception | None = None
         self.owner_saves: list[tuple[PreferencesEdit, int]] = []
         # Saved briefs by account and day, the missed days offered, and each generate's day.
@@ -858,6 +865,58 @@ class FakeBackend(FakeDrafts):
             calendar=self._range(day, day, zone),
             focus=plan,
         )
+
+    async def weekly_review(self, week: date, zone: ZoneInfo) -> WeeklyReview:
+        """The real still-open rules over these actions; day_fail makes it raise."""
+        self.review_calls.append(week)
+        if self.day_fail is not None:
+            raise self.day_fail
+        last = week + timedelta(days=6)
+        actions = [
+            *self.actions.get(ActionFilter.OPEN, ()),
+            *self.actions.get(ActionFilter.WAITING, ()),
+        ]
+        focus = {
+            item.task_public_id: day
+            for day, plan in sorted(self.focus_plans.items())
+            if week <= day <= last
+            for item in plan.items
+        }
+        now = utc_now()
+        listed, waiting = still_open(actions, focus, last, zone, now)
+        following = last + timedelta(days=1)
+        return WeeklyReview(
+            week_start=week,
+            zone=zone.key,
+            captured_at_utc=now,
+            still_open=listed,
+            waiting=waiting,
+            next_week=overview(self._range(following, following + timedelta(days=6), zone), zone),
+            record=self.week_records.get(week),
+        )
+
+    def _week_record(
+        self, week: date, revision: int | None, **changes: object
+    ) -> WeeklyReviewRecord:
+        found = self.week_records.get(week)
+        if (None if found is None else found.revision) != revision:
+            raise WeeklyReviewConflictError()
+        base = found or WeeklyReviewRecord(week_start=week, revision=1)
+        record = base.model_copy(
+            update={**changes, "revision": 1 if found is None else found.revision + 1}
+        )
+        self.week_records[week] = record
+        return record
+
+    async def mark_week_reviewed(
+        self, week: date, revision: int | None, reviewed: bool
+    ) -> WeeklyReviewRecord:
+        return self._week_record(week, revision, reviewed_at_utc=utc_now() if reviewed else None)
+
+    async def attach_week_reflection(
+        self, week: date, revision: int | None, note_public_id: str
+    ) -> WeeklyReviewRecord:
+        return self._week_record(week, revision, reflection_note_public_id=note_public_id)
 
     async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]:
         selected = {

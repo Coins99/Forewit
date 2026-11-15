@@ -72,6 +72,7 @@ from mailbrief.domain.scheduling import (
 )
 from mailbrief.domain.search import SearchResults
 from mailbrief.domain.today import DaySummary
+from mailbrief.domain.weekly_review import WeeklyReview, WeeklyReviewRecord
 from mailbrief.domain.work_blocks import BlockSaved, BlockTime, WorkBlock
 from mailbrief.domain.working_hours import HoursEdit, WorkingHours
 from mailbrief.ports.calendar import CalendarNotAllowedError
@@ -133,6 +134,7 @@ from mailbrief.services.scheduling import SchedulingService
 from mailbrief.services.search import SearchService
 from mailbrief.services.sync import SyncService
 from mailbrief.services.today import TodayService
+from mailbrief.services.weekly_review import WeeklyReviewService
 from mailbrief.services.work_blocks import WorkBlockService
 from mailbrief.storage.database import Database
 from mailbrief.storage.inbox_scan import InboxScanRepository
@@ -1167,6 +1169,24 @@ class DesktopRuntime:
         """The Today page's "Your day": local data only, so it needs no Gmail or AI."""
         async with self._storage().session() as session:
             return await TodayService(session).summary(day, zone, now)
+
+    # The weekly review (P5-1): local data only.
+
+    def _weekly_review(self) -> WeeklyReviewService:
+        return WeeklyReviewService(self._storage(), google_on=self._calendar_allowed is True)
+
+    async def weekly_review(self, week: date, zone: ZoneInfo) -> WeeklyReview:
+        return await self._weekly_review().load(week, zone)
+
+    async def mark_week_reviewed(
+        self, week: date, revision: int | None, reviewed: bool
+    ) -> WeeklyReviewRecord:
+        return await self._weekly_review().mark_reviewed(week, revision, reviewed=reviewed)
+
+    async def attach_week_reflection(
+        self, week: date, revision: int | None, note_public_id: str
+    ) -> WeeklyReviewRecord:
+        return await self._weekly_review().attach_reflection(week, revision, note_public_id)
 
     async def create_event(self, edit: EventEdit) -> CalendarEvent:
         async with self._storage().session() as session:

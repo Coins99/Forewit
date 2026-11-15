@@ -1,6 +1,6 @@
 # P5: Review and optional assistance (plan)
 
-Status: plan, 2026-11-14. Nothing here is implemented. Base: `main` at `a863c21` (#127).
+Status: P5-1 implemented 2026-11-14, owner acceptance open; P5-2 and P5-3 planned. Base: `main` at `a863c21` (#127).
 Contract for the AI path: [ADR 0033](adr/0033-task-breakdown.md) (proposed).
 
 P5 is the last phase of the general-planner proof of concept
@@ -56,105 +56,113 @@ number otherwise, and never edit a revision once any real database has run it.
 
 ### P5-1: Deterministic weekly review (A07)
 
-**Use.** From Today (a **Weekly review** button beside **Plan today**) or the palette, the owner
-opens the review for a week: Monday to Sunday in the owner's saved zone, as recurrence and the
-Calendar's planning window already count weeks. It opens on the current week, with Previous
-and Next week and a date picker. It reads only local SQLite and works offline, with Gmail
-disconnected and no AI set up.
+Implemented on `feat/p5-weekly-review` (2026-11-14); owner acceptance open. This section
+describes what was built; where it differs from the first draft of this plan, it says so.
 
-**Sections**, each a read projection with counts that match their rows:
+**Use.** **Weekly review** in the Today page's header, beside **Upcoming**, or **Open weekly
+review** and **Review last week** in the palette, opens a dialog for one week: Monday to
+Sunday in the owner's saved zone, as recurrence and the Calendar count weeks. It opens on the
+current week, with **Previous week**, **This week** and **Next week** (no date picker). It
+reads only local SQLite and works offline, with Gmail disconnected and no AI set up. While it
+is open it is read again whenever Today refreshes (a task, focus, event, zone or midnight
+change).
 
-1. **Done this week**: tasks whose effective completion falls in the week, from task history
-   (`domain/task_history.py`), net of undo (a reopen keeps the completion, as Insights'
-   contract says), grouped by project and area. Skipped repeat occurrences are listed apart and
-   never counted as done. The count is the `tasks.distinct_completed` metric for the same
-   dates, computed with `read_metric_sources` and `calculate_metric` inside the same read
-   snapshot as every other section, so the review and Insights cannot disagree and no section
-   sees a later moment than another; a partial (legacy or gapped) history is marked as in
-   Insights.
-2. **Still open**: open tasks with a deadline or target date in the week or before it
-   (Today's overdue and planned-earlier rules, `services/today.py`), this week's focus
-   selections that are still open, and waiting tasks with their age since `waiting_since_utc`.
-3. **Next week**: deadlines and target dates in the next seven dates, events, work blocks and
-   each day's workload from the existing read models (`UpcomingService`, `domain/workload.py`),
-   with provisional days shown as provisional. Tasks with no estimate are listed, not guessed.
-4. **Metrics this week** (only when the owner has metrics with targets): the week's value and
-   target per metric, from `MetricService.compare`, linking to Insights' record inspection.
+**Sections**, each with a count that matches its rows:
 
-**Reset.** Every change is the owner's choice on one row, through commands that already exist,
-each needing the revision the window read:
+1. **Done this week**: the distinct tasks with an effective completion in the week, from task
+   history, net of undo (a reopen keeps the completion, as in Insights). The count and the
+   tasks are the `tasks.distinct_completed` metric for the same dates, computed by the same
+   `calculate_metric` over the same read snapshot, so the review and Insights cannot disagree;
+   tasks with partial (legacy or gapped) history are counted in the heading, as in Insights.
+   **Skipped** lists repeat occurrences skipped in the week, never counted as done.
+2. **Still open**: open tasks that are overdue now, or whose deadline or target date falls on or
+   before the week's Sunday, or that were in one of the week's focus days, each once with its
+   reason (`still_open` in `services/weekly_review.py`, reusing Today's `due_day`).
+3. **Waiting**: tasks waiting on someone, with days since `waiting_since_utc`.
+4. **Next week**: each of the next seven dates' load line where flags apply (spare time, or
+   "overfilled"), from `domain/workload.py`, then the dated commitments from the existing
+   Upcoming read model (`services/upcoming.overview`).
 
-- **Plan for…** sets the target date to a date the owner picks (one revision, `edited`);
-  **Clear date** removes it. Deadlines are never moved from the review.
-- **Add to focus** puts the task into a chosen next-week day's focus (`DayPlanService.select`).
-- **Complete** and **Open** use the task's existing paths with Undo.
+Not built in P5-1: a **Metrics this week** section (Insights already shows a week's values and
+targets; add it if the trial asks for it).
+
+**Reset.** Every change is the owner's choice on one row, through commands that already exist:
+
+- Double-click a task row, or select it and press Return, to open it where it lives (Tasks or
+  Waiting); its editor changes the target date, deadline or status, with Undo. The draft's
+  inline **Plan for…** and **Clear date** buttons were left out: they would duplicate the
+  task editor.
+- **Add to focus** puts the selected open task into one of next week's days' focus
+  (`DayPlanService.select`, with the plan's revision). The task itself is unchanged.
 
 There is no bulk carryover and nothing happens at the end of a week by itself.
 
-**Mark reviewed.** **Mark week reviewed** saves a small review record; **Write reflection**
-creates an ordinary empty note (`DraftService.create`, as **New note** does; not capture)
-and links it to the record, then opens it on the Notes page for the owner to write. A reviewed week shows when it was reviewed and its note.
-Marking again after changes updates the time; **Unmark** clears it.
+**Mark reviewed.** **Mark week reviewed** saves the review record (the primary button);
+**Unmark reviewed** clears the mark. Marking again later updates the time. **Write reflection**
+creates an ordinary empty note, links it to the record and opens it on the Notes page; once
+linked, the button is **Open reflection**.
 
-**Data and migration.** Revision `20261114_0039` (file `20261114_0039_weekly_reviews.py`) adds `weekly_reviews`: `week_start`
-(a Monday, unique), `reviewed_at_utc` (nullable), `reflection_note_public_id` (nullable, no
-foreign key, as a task link's snapshot), `revision`, `created_at_utc`, `updated_at_utc`. It
-holds no owner text: the reflection is a note and is exported as one. The table joins backup,
-verify and restore; writing exports skip it (no text); purge keeps it like a receipt. Writes go
-through ORM objects and `writes.committed()`, with the revision the caller saw.
+**Data and migration.** Revision `20261114_0039` adds `weekly_reviews`: `week_start` (a Monday,
+unique), `reviewed_at_utc` (nullable), `reflection_note_public_id` (nullable, no foreign key),
+`revision`, `created_at_utc`, `updated_at_utc`. It holds no owner text: the reflection is a
+note and is exported as one. Backup, verify and restore carry the table with the rest of the
+database; **Export all writing** leaves it out. A change needs the revision the caller read
+(None when there was no record) and makes one revision; a change that alters nothing makes
+none. Writes go through the ORM and `writes.commit_once()`.
 
 **Services and UI.**
 
-- `domain/weekly_review.py`: `ReviewWeek` (Monday-based, zone-aware half-open UTC bounds from
-  `domain/intervals.py`) and the frozen `WeeklyReview` read model.
-- `services/weekly_review.py`: `WeeklyReviewService.load(week, zone, now)` composes the
-  sections in one read snapshot from `read_metric_sources`/`calculate_metric`, `TodayService`
-  rules, `DayPlanService`, `UpcomingService` and workload; `mark_reviewed`, `unmark` and
-  `attach_reflection`. Read-only except the record.
-- `ui/weekly_review.py`: a page reached from Today and the palette (not the sidebar), using
-  `SafeList`/`ui/lists.py` rows, plain-text labels, Studio tokens and the Today card style.
-  It refreshes in place on task, plan, event, zone and midnight changes, as Today does.
-  Wiring into `ui/main_window.py` stays a few lines; the page lives in its own module.
-- Palette commands: **Weekly review**, **Review last week**.
+- `domain/weekly_review.py`: `week_start`, `week_dates`, `WeeklyReviewRecord`, `ReviewTask`
+  and the frozen `WeeklyReview` read model.
+- `services/weekly_review.py`: `WeeklyReviewService(database, google_on=…)` with `load(week,
+  zone)`, `record`, `mark_reviewed(week, revision, reviewed=…)` and `attach_reflection`.
+  `load` reads every section in one SQLite snapshot. It and `domain/weekly_review.py` are on
+  the source rules' list of local planning readers.
+- `ui/weekly_review_view.py`: `WeeklyReviewDialog`, an `ActivatingList` with muted section
+  headings that the keyboard skips, plain text throughout. `MainWindow` holds it as
+  `weekly_review` and its button as `weekly_review_button` (next in the Tab order after
+  Upcoming); the backend gains `weekly_review`, `mark_week_reviewed` and
+  `attach_week_reflection`.
 
-**Privacy boundary.** Local only: no provider, no network, no Google read (it shows the cached
-busy times the Calendar already holds). Logs carry counts and codes, never titles or notes.
+**Privacy boundary.** Local only: no provider, no network, no Google read (next week's load
+uses the cached busy times the Calendar already holds). Logs carry counts only.
 
 **Acceptance steps** (for the run-sheet; test profile, Gmail disconnected):
 
-- [ ] **REV-01** From Today choose **Weekly review**, and from the palette **Weekly review**.
-  Both open the current Monday-to-Sunday week, offline, with no sign-in. The sidebar and
-  Ctrl/Cmd+1 to 8 are unchanged.
+- [ ] **REV-01** On Today choose **Weekly review**, and in the palette (Ctrl/Cmd+K) **Open
+  weekly review**. Both open the current Monday-to-Sunday week, offline, with no sign-in. The
+  sidebar and Ctrl/Cmd+1 to 8 are unchanged.
 - [ ] **REV-02** Complete two tasks this week and undo one completion; complete a repeating
   task's occurrence and skip another. **Done this week** lists the kept task and the completed
-  occurrence (a task completed and then reopened would still be listed, as in Insights); the skipped one is listed apart. The count equals Insights' distinct completed
-  tasks for the same dates, and inspecting that Insights figure lists the same tasks.
-- [ ] **REV-03** A task due yesterday, one planned for an earlier date, a waiting task and a
-  focus task left open this week all appear under **Still open**, each once, with its reason.
-- [ ] **REV-04** **Next week** shows next week's deadlines, target dates, events and work
-  blocks; a day over its hours is marked overfilled, and a task without an estimate is listed
-  as unknown, not counted.
-- [ ] **REV-05** On a still-open task choose **Plan for…** Wednesday next week. Its target date
-  changes, its deadline does not, and Undo puts it back. **Clear date** removes a target date.
-- [ ] **REV-06** **Add to focus** for next Monday: on that date Today's focus lists the task,
-  and nothing else about the task changed.
-- [ ] **REV-07** **Mark week reviewed**, then **Write reflection** and type a sentence. Restart:
-  the week still shows as reviewed with its note, and the note is on the Notes page.
-- [ ] **REV-08** Previous week and the date picker open earlier weeks; a week with nothing in
-  it shows empty sections, not an error.
-- [ ] **REV-09** Change the time zone in Settings across a week boundary: the week's tasks
-  follow the new zone. Change a task in another window: the review updates in place.
+  occurrence; the skipped one is under **Skipped**. The count equals Insights' distinct
+  completed tasks for the same dates, and inspecting that Insights figure lists the same tasks.
+- [ ] **REV-03** A task due yesterday, one planned for an earlier date and a focus task left
+  open this week appear under **Still open**, each once with its reason. A waiting task is
+  under **Waiting** with its days.
+- [ ] **REV-04** **Next week** shows next week's dated commitments; with working hours set, a
+  day planned past its hours says "overfilled".
+- [ ] **REV-05** Open a still-open task from the review (double-click or Return): it opens on
+  Tasks (or Waiting). Change its target date there; reopen the review and it follows. Its
+  deadline did not move.
+- [ ] **REV-06** Select a still-open task, pick next Monday and choose **Add to focus**: on that
+  date Today's focus lists the task, and nothing else about the task changed.
+- [ ] **REV-07** **Mark week reviewed**, then **Write reflection** and type a sentence in the note
+  that opens. Restart: the week still shows as reviewed, **Open reflection** opens that note,
+  and it is on the Notes page. **Unmark reviewed** clears the mark and keeps the note.
+- [ ] **REV-08** **Previous week**, **Next week** and **This week** move between weeks; a week
+  with nothing in it shows empty sections, not an error. **Review last week** in the palette
+  opens last week.
+- [ ] **REV-09** Change the time zone in Settings across a week boundary: the week's tasks follow
+  the new zone. Complete a task while the review is open: the review updates.
 - [ ] **REV-10** Back up, restore into a test profile: reviewed weeks and reflection notes come
   back. **Export all writing** contains the reflection note and no review record.
 
-**Tests and checks.** Unit tests for week bounds across DST in Toronto and Tokyo, effective
-completions with undo/reopen/skip and partial history, the open-task reasons, and totals equal
-to `MetricService` for the same range; service tests for mark/unmark/attach with stale
-revisions; the migration upgrading a 0038 database with its pre-upgrade snapshot; backup,
-verify, restore and writing-export coverage; UI tests with the paused collection, screenshot
-gallery light/dark at 1x and 2x (the `/mailbrief-ui` loop); source rules (no system-language
-`strftime`, plain-text labels, no private log names). `qa.py changed`, then `qa.py full`,
-mypy for win32 and darwin, 90% coverage for the new service.
+**Tests and checks.** `tests/unit/services/test_weekly_review.py` (Monday weeks; done equals
+Insights' figure and tasks; undo and skips; still-open, focus and waiting reasons; next week;
+record revisions, conflicts and no-op saves) and `tests/ui/test_weekly_review.py` (reading,
+focus, marking, week navigation, reflection note, palette commands, a failed read, light and
+dark renders). Migration head pins, the table list, the Tab order and the source rules' planning
+readers were updated. `qa.py changed` and `qa.py full`, mypy for win32 and darwin.
 
 ### P5-2: Optional AI breakdown of one selected task (J01, J07)
 

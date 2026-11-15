@@ -350,10 +350,12 @@ PLANNING_READERS: Final = frozenset(
         "domain/availability.py",
         "domain/scheduling.py",
         "domain/scheduling_time.py",
+        "domain/weekly_review.py",
         "domain/workload.py",
         "services/availability.py",
         "services/metric_calculations.py",
         "services/scheduling.py",
+        "services/weekly_review.py",
         "services/work_blocks.py",
         "storage/metric_sources.py",
     }
