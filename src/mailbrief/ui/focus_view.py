@@ -72,7 +72,8 @@ class FocusPanel(HairlineFrame):
         self.schedule_button = outline_button("Schedule my focus", "focusSchedule")
         self.schedule_button.setAccessibleName("Suggest time for this day's focus tasks")
         self.schedule_button.clicked.connect(self._schedule)
-        header.addWidget(self.schedule_button)
+        if compact:  # The full panel puts it beside Move up and Move down, at no extra height.
+            header.addWidget(self.schedule_button)
         self.plan_button = outline_button("Plan today", "focusPlanToday")
         self.plan_button.setAccessibleName("Choose and organize today's focus")
         header.addWidget(self.plan_button)
@@ -116,6 +117,7 @@ class FocusPanel(HairlineFrame):
             for button in (self.up_button, self.down_button):
                 button.setAccessibleName(button.text())
                 order.addWidget(button)
+            order.addWidget(self.schedule_button)
             layout.addLayout(order)
         else:
             # Hidden controls still own the same actions for keyboard shortcuts.
