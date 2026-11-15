@@ -45,6 +45,16 @@ from mailbrief.domain.actions import (
 from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.domain.availability import UnscheduledTask, UnscheduledTasks, local_moment
 from mailbrief.domain.backup import BackupMetadata
+from mailbrief.domain.breakdown import (
+    BreakdownApplied,
+    BreakdownEnding,
+    BreakdownOptions,
+    BreakdownOutcome,
+    BreakdownPreview,
+    BreakdownProposal,
+    BreakdownStatus,
+    KeptStep,
+)
 from mailbrief.domain.briefs import (
     AutoSendStatus,
     BriefRunResult,
@@ -150,6 +160,13 @@ from mailbrief.services.actions import (
     SuggestionNotFoundError,
 )
 from mailbrief.services.availability import HoursConflictError
+from mailbrief.services.breakdown import (
+    BreakdownConflictError,
+    BreakdownGate,
+    BreakdownNotFoundError,
+    BreakdownPlan,
+    BreakdownUnavailableError,
+)
 from mailbrief.services.brief import (
     ConsentGate,
     ShortlistGate,
@@ -184,6 +201,7 @@ from mailbrief.services.local_setup import (
     SetupStatus,
     setup_lines,
 )
+from mailbrief.services.owner_consents import owner_consents_text
 from mailbrief.services.preferences import (
     PreferencesConflictError,
     PreferencesUnavailableError,
@@ -202,6 +220,7 @@ from mailbrief.services.work_blocks import BlockConflictError, BlockNotFoundErro
 from mailbrief.ui.action_editor import ActionEditor
 from mailbrief.ui.action_text import steps_status
 from mailbrief.ui.actions_view import (
+    BREAKDOWN,
     COMPLETE,
     DELETE,
     EDIT,
@@ -222,6 +241,7 @@ from mailbrief.ui.appearance import (
 from mailbrief.ui.auto_send_view import AutoSendDialog
 from mailbrief.ui.block_editor import LENGTH as BLOCK_LENGTH
 from mailbrief.ui.block_editor import BlockEditor
+from mailbrief.ui.breakdown_dialog import BreakdownDialog
 from mailbrief.ui.brief_detail import ACCEPT, APPLY, DISMISS, is_gmail_link
 from mailbrief.ui.cached_view import CachedMailDialog
 from mailbrief.ui.calendar_layout import (
@@ -542,6 +562,19 @@ class DesktopBackend(Protocol):
     ) -> PlanningOutcome: ...
     async def apply_calendar_changes(self, changes: Sequence[EventChange]) -> AppliedBatch: ...
     async def undo_calendar_changes(self, batch: AppliedBatch) -> None: ...
+    async def prepare_breakdown(
+        self, public_id: str, options: BreakdownOptions
+    ) -> BreakdownPlan: ...
+    async def run_breakdown(
+        self, plan: BreakdownPlan, gate: BreakdownGate, cancel: asyncio.Event
+    ) -> BreakdownOutcome: ...
+    async def close_breakdown(self, plan: BreakdownPlan, ending: BreakdownEnding) -> None: ...
+    async def apply_breakdown(
+        self, proposal: BreakdownProposal, kept: Sequence[KeptStep]
+    ) -> BreakdownApplied: ...
+    async def dismiss_breakdown(self, generation_id: str) -> None: ...
+    async def undo_breakdown(self, generation_id: str, revision: int) -> Action: ...
+    async def owner_consents(self) -> tuple[str, ...]: ...
 
 
 class _Gone(Enum):
@@ -565,6 +598,8 @@ _STALE = (
     EventNotFoundError,
     BlockConflictError,
     BlockNotFoundError,
+    BreakdownConflictError,
+    BreakdownNotFoundError,
 )
 # Raised when the open draft changed elsewhere; the editor keeps the text.
 _DRAFT_STALE = (DraftConflictError, DraftNotFoundError)
@@ -746,6 +781,32 @@ _PLAN_STALE: Final = (
 def planning_problem_text(code: str | None) -> str:
     """What a failed request means, in the calendar's words; other codes keep their own."""
     return _PLAN_PROBLEMS.get(code or "") or error_guidance(code or "AI_PROVIDER_ERROR")
+
+
+class _ApprovedBreakdown:
+    """The dialog's preview already asked; first use also needs the ticked consent box."""
+
+    def __init__(self, agreed: bool) -> None:
+        self._agreed = agreed
+
+    async def request_breakdown_consent(self, preview: BreakdownPreview) -> bool:
+        return self._agreed or not preview.first_use
+
+
+_BREAKDOWN_PROBLEMS: Final = {
+    "AI_OUTPUT_INCOMPLETE": "Groq's answer was cut off. Your task is unchanged; try again.",
+    "AI_INVALID_OUTPUT": "Groq's answer couldn't be used. Your task is unchanged; try again.",
+    "AI_REFUSED": "Groq declined this request. Your task is unchanged.",
+}
+_BREAKDOWN_FAILED: Final = "Breaking down with AI failed. Your task is unchanged; try again."
+_BREAKDOWN_DECLINED: Final = "Nothing was sent. Your task is unchanged."
+_BREAKDOWN_CANCELLED: Final = "Cancelled. Your task is unchanged."
+_BREAKDOWN_NO_STEPS: Final = "Groq proposed no new steps for this task. Your task is unchanged."
+
+
+def breakdown_problem_text(code: str | None) -> str:
+    """What a failed breakdown means, in the task's words; other codes keep their own."""
+    return _BREAKDOWN_PROBLEMS.get(code or "") or error_guidance(code or "AI_PROVIDER_ERROR")
 
 
 class DraftWrites:
@@ -935,6 +996,21 @@ class MainWindow(QMainWindow):
         self.google_event_dialog.event_requested.connect(self._request_event)
         self.event_editor.save_requested.connect(self._request_save_event)
         self.planning_dialog = PlanningDialog(self)
+        # Break down with AI (ADR 0033): the prepared plan until it is asked, the proposal
+        # until it is applied or turned down, and the request in progress.
+        self.breakdown_dialog = BreakdownDialog(self)
+        self.breakdown_dialog.preview_requested.connect(self._request_breakdown_preview)
+        self.breakdown_dialog.ask_requested.connect(self._request_breakdown_ask)
+        self.breakdown_dialog.apply_requested.connect(self._request_apply_breakdown)
+        self.breakdown_dialog.cancel_requested.connect(self._cancel_breakdown)
+        self.breakdown_dialog.finished.connect(self._breakdown_finished)
+        self._breakdown_task_id: str | None = None
+        self._breakdown_plan: BreakdownPlan | None = None
+        self._breakdown_proposal: BreakdownProposal | None = None
+        self._breakdown_request = 0  # Each opening; a stale prepare is dropped.
+        self._breakdown_cancel: asyncio.Event | None = None
+        self._breakdown_run: asyncio.Task[BreakdownOutcome] | None = None
+        self._ai_ready = False  # A Groq key and model are saved.
         # Work blocks (ADR 0028): choose a task, then its time; or open a block.
         self.block_editor = BlockEditor(self)
         self.scheduling_dialog = SchedulingDialog(self, cast(PlanningBackend, backend))
@@ -1907,6 +1983,7 @@ class MainWindow(QMainWindow):
             or self.hours_editor.isVisible()
             or self.scheduling_dialog.isVisible()
             or self.planning_dialog.isVisible()
+            or self.breakdown_dialog.isVisible()
             or not self.draft_writes.idle
         ):
             self.status.setText(
@@ -2444,6 +2521,8 @@ class MainWindow(QMainWindow):
         elif kind == PROPOSALS:
             self.proposals_dialog.show_proposals(action, self.zone, self._local_today())
             self.dialog_guard.show_dialog(self.proposals_dialog)
+        elif kind == BREAKDOWN:
+            self._request_breakdown(action)
         elif kind == SCHEDULE:
             today = self._local_today()
             target = action.target_date
@@ -4262,6 +4341,174 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Applied {count} change{'s' if count != 1 else ''} from Groq.")
         await self._refresh_views()
 
+    # Break down with AI (ADR 0033). Preparing and asking open Groq; applying, dismissing and
+    # undoing are local. The service enforces every rule; the window only walks the dialog.
+
+    def _request_breakdown(self, action: Action) -> None:
+        self._breakdown_plan = self._breakdown_proposal = None
+        self._breakdown_request += 1
+        self._breakdown_task_id = action.public_id
+        self.breakdown_dialog.start_new(action)
+        self.dialog_guard.show_dialog(self.breakdown_dialog)
+
+    def _request_breakdown_preview(self, options: object) -> None:
+        if isinstance(options, BreakdownOptions):
+            chosen = options
+            started = self.start(
+                lambda: self._prepare_breakdown(chosen), cancelled=_BREAKDOWN_CANCELLED
+            )
+            if not started:
+                self.breakdown_dialog.show_problem(_BUSY)
+
+    async def _prepare_breakdown(self, options: BreakdownOptions) -> None:
+        """Build the preview. A dialog opened again meanwhile is a new request: it gets
+        nothing of this one. Preparing again replaces the plan; only what the owner ends
+        (by asking, or by closing the preview) is recorded."""
+        request = self._breakdown_request
+        public_id = self._breakdown_task_id
+        if public_id is None:
+            return
+        try:
+            plan = await self.backend.prepare_breakdown(public_id, options)
+        except ConfigurationError as exc:
+            log_failure(exc)
+            if request == self._breakdown_request:
+                self.breakdown_dialog.show_problem(configuration_guidance(exc))
+            return
+        except (BreakdownUnavailableError, BreakdownNotFoundError) as exc:
+            log_failure(exc)
+            if request == self._breakdown_request:
+                self.breakdown_dialog.show_problem(str(exc))  # Static; names no task.
+            await self._refresh_actions()
+            return
+        except Exception as exc:
+            log_failure(exc)
+            if request == self._breakdown_request:
+                self.breakdown_dialog.show_problem(_BREAKDOWN_FAILED)
+            return
+        if request != self._breakdown_request or self.breakdown_dialog.isHidden():
+            return
+        self._breakdown_plan = plan
+        self.breakdown_dialog.show_preview(plan.preview)
+
+    def _request_breakdown_ask(self, agreed: bool) -> None:
+        if not self.start(lambda: self._ask_breakdown(agreed), cancellable=False):
+            self.breakdown_dialog.show_problem(_BUSY)
+
+    async def _ask_breakdown(self, agreed: bool) -> None:
+        plan, self._breakdown_plan = self._breakdown_plan, None
+        if plan is None:
+            return
+        self.breakdown_dialog.show_working()
+        cancel = asyncio.Event()
+        task = asyncio.create_task(
+            self.backend.run_breakdown(plan, _ApprovedBreakdown(agreed), cancel)
+        )
+        self._breakdown_cancel, self._breakdown_run = cancel, task
+        try:
+            outcome = await task
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise  # This operation itself was cancelled.
+            await self._close_breakdown(plan, BreakdownEnding.CANCELLED)
+            self.breakdown_dialog.show_problem(_BREAKDOWN_CANCELLED)
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.breakdown_dialog.show_problem(_BREAKDOWN_FAILED)
+            return
+        finally:
+            self._breakdown_cancel = self._breakdown_run = None
+        await self._refresh_ai_status()  # A first use recorded its consent.
+        if outcome.status is BreakdownStatus.PROPOSED:
+            assert outcome.proposal is not None
+            if self.breakdown_dialog.isHidden():  # Closed as the answer arrived.
+                await self._dismiss_breakdown(outcome.proposal.generation_id)
+                return
+            self._breakdown_proposal = outcome.proposal
+            self.breakdown_dialog.show_proposal(outcome.proposal)
+        elif outcome.status is BreakdownStatus.NO_STEPS:
+            self.breakdown_dialog.show_problem(_BREAKDOWN_NO_STEPS)
+        elif outcome.status is BreakdownStatus.DECLINED:
+            self.breakdown_dialog.show_problem(_BREAKDOWN_DECLINED)
+        elif outcome.status is BreakdownStatus.CANCELLED:
+            self.breakdown_dialog.show_problem(_BREAKDOWN_CANCELLED)
+        else:
+            self.breakdown_dialog.show_problem(breakdown_problem_text(outcome.error_code))
+
+    def _cancel_breakdown(self) -> None:
+        if self._breakdown_cancel is not None:
+            self._breakdown_cancel.set()
+        if self._breakdown_run is not None:
+            self._breakdown_run.cancel()
+
+    async def _close_breakdown(self, plan: BreakdownPlan, ending: BreakdownEnding) -> None:
+        """Record a generation the owner ended; a failure to record changes nothing else."""
+        try:
+            await self.backend.close_breakdown(plan, ending)
+        except Exception as exc:
+            log_failure(exc)
+
+    async def _dismiss_breakdown(self, generation_id: str) -> None:
+        try:
+            await self.backend.dismiss_breakdown(generation_id)
+        except Exception as exc:
+            log_failure(exc)
+
+    def _breakdown_finished(self, _result: int) -> None:
+        """The dialog closed: a preview nobody asked is declined, and a proposal nobody
+        applied is dismissed. Neither changes the task."""
+        plan, self._breakdown_plan = self._breakdown_plan, None
+        proposal, self._breakdown_proposal = self._breakdown_proposal, None
+        self._breakdown_request += 1  # A prepare still running shows nothing.
+        if self._closing:
+            return
+        if plan is not None:
+            self._review_task(self._close_breakdown(plan, BreakdownEnding.DECLINED))
+        if proposal is not None:
+            self._review_task(self._dismiss_breakdown(proposal.generation_id))
+
+    def _request_apply_breakdown(self, kept: object) -> None:
+        if isinstance(kept, tuple) and kept:
+            chosen: tuple[KeptStep, ...] = kept
+            if not self.start(lambda: self._apply_breakdown(chosen), cancellable=False):
+                self.breakdown_dialog.keep_reviewing(_BUSY)
+
+    async def _apply_breakdown(self, kept: tuple[KeptStep, ...]) -> None:
+        proposal = self._breakdown_proposal
+        if proposal is None:
+            return
+        try:
+            applied = await self.backend.apply_breakdown(proposal, kept)
+        except (BreakdownConflictError, BreakdownNotFoundError) as exc:
+            log_failure(exc)
+            self.breakdown_dialog.keep_reviewing(str(exc))  # Static; names no task.
+            await self._refresh_actions()
+            return
+        except Exception as exc:
+            log_failure(exc)
+            self.breakdown_dialog.keep_reviewing(_BREAKDOWN_FAILED)
+            return
+        self._breakdown_proposal = None  # Applied: closing has nothing to dismiss.
+        self.breakdown_dialog.finish_applied()
+        generation_id, revision = applied.generation_id, applied.action.revision
+
+        async def undo() -> None:
+            await self.backend.undo_breakdown(generation_id, revision)
+
+        self._offer_undo("Undo breakdown", undo)
+        count = applied.added
+        self.status.setText(f"Added {count} step{'s' if count != 1 else ''} from Groq.")
+        await self._refresh_plan()
+
+    def _set_breakdown_access(self) -> None:
+        """Whether Break down with AI can be offered: a Groq key and model, and email
+        analysis that isn't on this computer for tasks made from mail."""
+        self.actions_panel.set_breakdown_access(
+            ai_ready=self._ai_ready,
+            local_mail=self._email_analysis_mode is AnalysisMode.LOCAL,
+        )
+
     def _open_calendar_link(self, event: GoogleEvent) -> None:
         link = None if event.web_link is None else str(event.web_link)
         if link is not None and is_calendar_link(link):
@@ -5089,6 +5336,7 @@ class MainWindow(QMainWindow):
         set_owner_zone(self.zone)
         self.insights_page.follow_day(self._local_today(), self.zone.key)
         self._email_analysis_mode = preferences.analysis_mode
+        self._set_breakdown_access()
         self.generate_button.setText(
             "&Sync and summarize"
             if preferences.analysis_mode is AnalysisMode.LOCAL
@@ -5295,9 +5543,10 @@ class MainWindow(QMainWindow):
         count = await self.backend.revoke_consent()
         await self._show_auto_send()
         self.status.setText(
-            f"AI consent revoked for briefs and drafting ({count} consent records). "
-            "Forewit asks again before local analysis or sending anything."
+            f"AI consent revoked for briefs, drafting, planning and breakdown ({count} consent "
+            "records). Forewit asks again before local analysis or sending anything."
         )
+        await self._refresh_ai_status()
 
     def _request_revoke_consent(self) -> None:
         active = [
@@ -5324,13 +5573,20 @@ class MainWindow(QMainWindow):
     async def _refresh_ai_status(self) -> None:
         try:
             self.ai.setText(await self.backend.ai_status())
-            self.draft_editor.set_ai_ready(await self.backend.drafting_ready())
+            self._ai_ready = await self.backend.drafting_ready()
+            self.draft_editor.set_ai_ready(self._ai_ready)
+            self.settings_dialog.set_owner_consents(
+                owner_consents_text(await self.backend.owner_consents())
+            )
         except Exception as exc:
             log_failure(exc)
             self.ai.setText("AI: configuration or secure key store unavailable.")
+            self._ai_ready = False
             self.draft_editor.set_ai_ready(False)
+            self.settings_dialog.set_owner_consents("")
             if not self.settings_dialog.isVisible():  # The AI line is in Settings.
                 self.status.setText(self.ai.text())
+        self._set_breakdown_access()
 
     async def initialize(self) -> None:
         """Load what is saved, then check the saved Google session. Google sign-in shows in
@@ -6187,6 +6443,7 @@ class MainWindow(QMainWindow):
             (self.scheduling_dialog, "your task scheduling review"),
             (self.settings_dialog, "Settings"),
             (self.capture_dialog, "this capture"),
+            (self.breakdown_dialog, "this breakdown"),
         ):
             if (
                 not dialog.isHidden() or getattr(dialog, "embedded", False)
