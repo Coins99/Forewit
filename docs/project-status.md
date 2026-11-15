@@ -21,6 +21,12 @@ later use after Microsoft Entra access is resolved.
   Archive button and a refresh that rebuilt every card each minute; all are fixed with
   regressions.
 
+- P5-3 implemented, awaiting owner acceptance (no migration, no ADR change): **Schedule my
+  focus** on Today and in the Plan today dialog, and **Suggest time for next week** in the
+  weekly review, open the existing local Suggest time (ADR 0031) with the day's or the
+  week's open focus tasks already chosen. Nothing is planned or changed until you apply
+  there. Steps DAYP-01 to DAYP-04 are in [the run-sheet](acceptance-runsheet.md). See
+  [the P5 plan](p5-review-assistance.md#p5-3-stretch-modest-daily-schedule-proposal).
 - P5-2 implemented, awaiting owner live acceptance ([ADR 0033](adr/0033-task-breakdown.md),
   migration `20261114_0040`): **Break down with AI…** in a task's detail asks Groq for
   checklist steps for that one task. It sends the title, today's date and your instruction,
