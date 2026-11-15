@@ -58,11 +58,15 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   `resolved_widget_query` (dashboard filters only where the metric takes them, forward
   plans from today); Insights combo boxes come from `combo()` and its tables carry the
   theme's `dataTable` property; a dialog's status line stays outside its scrolled fields.
-- P5 (review and optional assistance) is planned in `docs/p5-review-assistance.md`, with a
-  proposed ADR 0033 for the AI task breakdown (P5-2, not built). P5-1, the deterministic weekly
-  review, is implemented (migration 0039 `weekly_reviews`, text-free; `services/weekly_review.py`
-  and `ui/weekly_review_view.py`, opened from Today's header and the palette); owner acceptance
-  is open. Its done count must stay the `tasks.distinct_completed` metric over the same snapshot.
+- P5 (review and optional assistance) is planned in `docs/p5-review-assistance.md`. P5-1, the
+  deterministic weekly review, is implemented (migration 0039 `weekly_reviews`, text-free;
+  `services/weekly_review.py` and `ui/weekly_review_view.py`, opened from Today's header and
+  the palette); owner acceptance is open. Its done count must stay the
+  `tasks.distinct_completed` metric over the same snapshot. P5-2, the optional AI breakdown of
+  one task (ADR 0033), is implemented, awaiting owner live acceptance: **Break down with AI…**
+  in a task's detail, its own consent scope, a preview every time, Apply and Undo of checklist
+  steps only, and a text-free history (migration 0040 `task_breakdowns`); also
+  `forewit-gmail-diagnostic breakdown TASK_ID --dry-run`. P5-3 is not built.
 
 - Where each feature is specified (behavior, acceptance steps and limits):
 
@@ -84,11 +88,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   | P2 navigation, capture, focus, notes, workspace | `p2-navigation.md`, `p2-capture.md`, `p2-focus.md`, `p2-notes.md`, `p2-workspace.md` | 0025–0027 |
   | Desktop UI look | `ui/studio.md`, `ui/liquid-glass.md`, `.claude/skills/mailbrief-ui/` | |
   | QA sweep: rules, budget, slices, findings | `qa.md` | |
-  | P5 weekly review and AI breakdown | `p5-review-assistance.md` | 0033 (proposed) |
+  | P5 weekly review and AI breakdown | `p5-review-assistance.md` | 0033 |
   | Owner acceptance run-sheet (one checklist for the real app) | `acceptance-runsheet.md` | |
 
 - The diagnostic CLI is `forewit-gmail-diagnostic` (subcommands such as `sync`,
-  `bodies`, `brief`, `actions`, `drafts`, `preferences show`, `ai-consent`,
+  `bodies`, `brief`, `actions`, `drafts`, `breakdown`, `preferences show`, `ai-consent`,
   `local-ai`); offline backup, verify and restore is `python -m
   mailbrief.diagnostics.backup`. Gmail diagnostic database commands hold `desktop.lock`
   for their whole run: they exit 5 while the desktop is open, and the desktop reports
@@ -115,7 +119,8 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   one `utc_now()` clock and `new_public_id()`; `DeadlineFields` (`domain/analysis.py`) is
   the deadline every suggestion, analysis, action and proposal carries.
 - `src/mailbrief/ports/`: `EmailProvider` / `AIProvider` / `DraftingProvider` protocols
-  (`drafting.py`), `ThreadReader` (`threads.py`) and provider-neutral errors.
+  (`drafting.py`), `BreakdownProvider` (`breakdown.py`, ADR 0033), `ThreadReader`
+  (`threads.py`) and provider-neutral errors.
 - `src/mailbrief/providers/gmail/`: active adapter. `providers/microsoft/`: dormant adapter.
   `providers/gcal/`: Google Calendar, read-only (ADR 0018): its own sign-in, the calendar
   list and event reads, behind `ports/calendar.py`. `providers/google/`: what Gmail and
@@ -140,8 +145,9 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   (AI drafting: parts, preview, consent, validation); `events` for the owner's calendar
   (ADR 0018), `google_calendar` for reading Google Calendar into its cache, and
   `projects` for owner projects and life areas, `calendar_planning` for AI-proposed
-  calendar changes, and `work_blocks` for time set aside for a task (ADR 0028).
-  `calendar.py` is day boundaries and time zones, not the calendar feature.
+  calendar changes, `work_blocks` for time set aside for a task (ADR 0028), `breakdown` for
+  AI-proposed steps of one task and `owner_consents` for the owner's own AI consents
+  (ADR 0033). `calendar.py` is day boundaries and time zones, not the calendar feature.
   `domain/intervals.py` is the half-open UTC interval arithmetic (union, clip, lengths)
   calendar counts go through, so overlaps never count twice.
   `writes.py`: `committed()` commits one change and rolls it back on any failure, and
@@ -488,6 +494,37 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   local warnings ("Task · title") and are never sent (ADR 0028).
 - Apply all kept changes in one transaction (`EventService.apply_changes`), and undo them
   together only while every event is as the apply left it (`undo_changes`).
+
+## AI breakdown rules (P5-2, ADR 0033)
+
+- One live, open task the owner selects; nothing runs automatically, in bulk or across
+  projects. `BreakdownService` (`services/breakdown.py`) enforces it; the desktop only says
+  why a task can't be broken down (`ui/action_text.breakdown_block`).
+- Always sent: a random request key, the task's title, today's date in the owner's zone and
+  the owner's instruction (at most 1,000 characters). Sent only when ticked for that
+  generation, none by default: the notes (at most 2,000 characters), the existing steps with
+  done marks (whole steps, at most 2,000 in all), the project's and area's names, the deadline
+  and target date as local values (never an email's words for a deadline) and the estimate.
+- Never send the task's person, tags, source snapshots, email bodies, other tasks, notes or
+  drafts, work blocks, events, metrics, Gmail or Forewit IDs (the generation's ID included),
+  the owner's address or credentials. A new field in `BreakdownRequest` fails a test.
+- While email analysis is in local mode, a task with an email source can't be broken down.
+- Consent is its own: scope `breakdown`, disclosure `1`, in `owner_consents`. Brief, drafting
+  and planning consent grant nothing here; Revoke AI consent revokes it with the rest. Every
+  generation shows the preview and waits for approval; declining sends nothing.
+- The output is step text only: one to eight steps of at most 120 characters and up to three
+  missing-context items of 200. `validate_steps` cleans them and drops empty, oversized,
+  repeated and already-present steps; it never cuts a step. The model can't name a task or
+  change a date, priority, tag, estimate, person, project, focus or block.
+- Apply appends the kept steps (1–500 characters as the owner left them) as one `edited`
+  revision, needs the revision the generation read, and commits with the generation's row in
+  one transaction; a second Apply adds nothing. Undo removes exactly those steps while the
+  task is at Apply's revision. Existing steps are never changed, reordered, ticked or removed.
+- `task_breakdowns` records every generation that reached its preview, with no owner or AI
+  text: counts, the outcome, a code for a failure, revisions and the added step IDs. It is
+  left out of writing exports and outlives the task. Logs carry codes and counts only.
+- A failed, declined, cancelled or dismissed generation leaves the task and every plan as
+  they were. No local-model breakdown, and no fallback between providers.
 
 ## Dependencies
 

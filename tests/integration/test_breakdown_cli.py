@@ -18,11 +18,8 @@ from mailbrief.domain.analysis import ActionOwnership
 from mailbrief.services.actions import ActionService
 from mailbrief.storage.database import Database
 from mailbrief.storage.migrate import upgrade_database
-from tests.integration.test_brief_cli import (  # noqa: F401 - fixtures used by name
-    MemoryVault,
-    vault,
-)
-from tests.unit.providers.groq.groq_fixtures import CHAT_URL
+from tests.integration.test_brief_cli import vault  # noqa: F401 - a fixture used by name
+from tests.unit.providers.groq.groq_fixtures import CHAT_URL, MemoryVault
 
 TITLE = "Plan the secret launch"
 NOTES = "Budget is 2,000 for sam@example.com."
