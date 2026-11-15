@@ -91,6 +91,7 @@ def test_metadata_contains_all_initial_tables() -> None:
         "dashboards",
         "dashboard_commands",
         "weekly_reviews",
+        "task_breakdowns",
         "google_calendar_state",
         "google_calendars",
         "google_events",

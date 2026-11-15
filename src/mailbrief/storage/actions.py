@@ -613,17 +613,18 @@ class ActionRepository:
 
     def add_step(
         self, action_id: int, position: int, text: str, done_at_utc: datetime | None
-    ) -> None:
-        """Add a step; it is done exactly when it has a completion time."""
-        self._session.add(
-            ActionStepTable(
-                action_id=action_id,
-                position=position,
-                text=text,
-                done=done_at_utc is not None,
-                done_at_utc=done_at_utc,
-            )
+    ) -> ActionStepTable:
+        """Add a step; it is done exactly when it has a completion time. The row has its ID
+        once the session is flushed."""
+        row = ActionStepTable(
+            action_id=action_id,
+            position=position,
+            text=text,
+            done=done_at_utc is not None,
+            done_at_utc=done_at_utc,
         )
+        self._session.add(row)
+        return row
 
     async def delete_step(self, row: ActionStepTable) -> None:
         await self._session.delete(row)
