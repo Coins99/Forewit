@@ -109,6 +109,7 @@ SEEN = "seen"
 PROPOSALS = "proposals"
 SKIP = "skip"
 SCHEDULE = "schedule"  # Set aside time for the task on the calendar (ADR 0028).
+BREAKDOWN = "breakdown"  # Ask the AI provider to propose steps for the task (ADR 0033).
 
 NO_DATES: Final = "No target or deadline"
 _TAB_NAMES = {
@@ -499,6 +500,7 @@ class ActionsPanel(QWidget):
         self.seen_button = detail.seen_button
         self.proposals_button = detail.proposals_button
         self.schedule_button = detail.schedule_button
+        self.breakdown_button = detail.breakdown_button
         self.draft_button = detail.draft_button
         self.draft_menu = QMenu(self.draft_button)
         self.reply_draft = self.draft_menu.addAction("Reply to its email")
@@ -522,6 +524,7 @@ class ActionsPanel(QWidget):
         self.seen_button.clicked.connect(self._mark_seen)
         self.proposals_button.clicked.connect(self._show_proposals)
         self.schedule_button.clicked.connect(self._schedule)
+        self.breakdown_button.clicked.connect(self._break_down)
         self.source_button.clicked.connect(self._open_source)
         detail.step_toggled.connect(self._toggle_step)
         detail.step_added.connect(self._add_step)
@@ -742,8 +745,16 @@ class ActionsPanel(QWidget):
         self.schedule_button.setEnabled(
             enabled and action is not None and action.status is ActionStatus.OPEN
         )
+        self.breakdown_button.setEnabled(
+            enabled and action is not None and self.detail.breakdown_blocked is None
+        )
         self.reply_draft.setEnabled(action is not None and can_reply(action))
         self.detail.arrange_controls()
+
+    def set_breakdown_access(self, *, ai_ready: bool, local_mail: bool) -> None:
+        """Whether AI breakdown can be offered at all (ADR 0033); the task shown follows."""
+        self.detail.set_breakdown_access(ai_ready=ai_ready, local_mail=local_mail)
+        self._refresh()
 
     def _request(self, kind: str) -> None:
         action = self.selected()
@@ -784,6 +795,10 @@ class ActionsPanel(QWidget):
         action = self.selected()
         if action is not None and action.status is ActionStatus.OPEN:
             self._request(SCHEDULE)
+
+    def _break_down(self) -> None:
+        if self.selected() is not None and self.detail.breakdown_blocked is None:
+            self._request(BREAKDOWN)
 
     def _show_proposals(self) -> None:
         action = self.selected()

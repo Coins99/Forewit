@@ -16,6 +16,7 @@ from mailbrief.domain.actions import (
     clean_person,
 )
 from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.breakdown import blocked_reason
 from mailbrief.domain.recurrence import (
     ALL_WEEKDAYS,
     WORKING_WEEKDAYS,
@@ -34,6 +35,19 @@ from mailbrief.ui.deadline_text import (
 )
 from mailbrief.ui.proposals_view import pending_proposals
 from mailbrief.ui.who_text import who_text
+
+NO_BREAKDOWN_AI: Final = "Add a Groq API key and model in Settings to break tasks down with AI."
+
+
+def breakdown_block(action: Action, *, ai_ready: bool, local_mail: bool) -> str | None:
+    """Why Break down with AI is unavailable for ``action``, or None when it can be used:
+    the task's own reasons first (closed, full, or made from mail analysed on this computer
+    while ``local_mail``), then a missing Groq key or model. The service refuses the same
+    tasks; this only says why."""
+    reason = blocked_reason(action, local_mail=local_mail)
+    if reason is not None:
+        return reason
+    return None if ai_ready else NO_BREAKDOWN_AI
 
 
 @dataclass(frozen=True)
