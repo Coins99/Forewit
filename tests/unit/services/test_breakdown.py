@@ -47,6 +47,7 @@ from mailbrief.domain.breakdown import (
     part_sizes,
 )
 from mailbrief.domain.drafting import DraftingProblem
+from mailbrief.domain.preferences import PreferencesEdit
 from mailbrief.domain.projects import AreaEdit, ProjectEdit
 from mailbrief.domain.work_blocks import BlockTime
 from mailbrief.ports.errors import ProviderRateLimitError
@@ -78,6 +79,7 @@ from mailbrief.services.data import (
     preview_cleanup,
 )
 from mailbrief.services.day_plans import DayPlanService
+from mailbrief.services.preferences import PreferencesService
 from mailbrief.services.projects import ProjectService
 from mailbrief.services.work_blocks import WorkBlockService
 from mailbrief.storage.backup import create_backup
@@ -408,6 +410,41 @@ async def test_mail_analysed_on_this_computer_keeps_its_tasks_here(
     assert await records(session) == []
 
 
+async def test_the_owner_s_saved_mode_and_zone_apply_when_none_are_given(
+    session: AsyncSession, provider: Provider, tasks: ActionService, clock: Clock
+) -> None:
+    """A caller that says nothing about local mail can't skip the rule: the service reads
+    the owner's preferences itself."""
+    unconfigured = BreakdownService(session, provider, clock=clock)
+    accepted = await tasks.accept((await seed(session)).suggestion_ids[0])
+    manual = await tasks.create(edit())
+    assert (await unconfigured.prepare(accepted.public_id, BreakdownOptions())).preview.email_source
+    preferences = PreferencesService(session)
+    await preferences.save(
+        PreferencesEdit(analysis_mode="local", time_zone="Asia/Tokyo"),
+        (await preferences.get()).revision,
+    )
+    with pytest.raises(BreakdownUnavailableError, match=LOCAL_MAIL):
+        await unconfigured.prepare(accepted.public_id, BreakdownOptions())
+    plan = await unconfigured.prepare(manual.public_id, BreakdownOptions())
+    assert plan.request.today == date(2026, 11, 17)  # Already Tuesday in Tokyo.
+    explicit = BreakdownService(session, provider, clock=clock, zone=TORONTO, local_mail=False)
+    assert (await explicit.prepare(accepted.public_id, BreakdownOptions())).request.today == TODAY
+    assert provider.requests == []
+
+
+async def test_a_run_that_broke_is_recorded_as_failed_with_its_code(
+    session: AsyncSession, service: BreakdownService, tasks: ActionService
+) -> None:
+    task = await tasks.create(edit())
+    plan = await service.prepare(task.public_id, BreakdownOptions())
+    await service.close(plan, BreakdownEnding.FAILED, "BREAKDOWN_UNEXPECTED_ERROR")
+    await service.close(plan, BreakdownEnding.DECLINED)
+    (record,) = await records(session)
+    assert (record.outcome, record.error_code) == ("failed", "BREAKDOWN_UNEXPECTED_ERROR")
+    assert (await tasks.get(task.public_id)).revision == task.revision
+
+
 def test_the_disclosure_names_every_part_and_what_never_goes() -> None:
     preview = BreakdownPreview(
         provider="groq",
@@ -694,8 +731,13 @@ async def test_closing_the_preview_records_a_declined_generation_once(
     await service.close(plan, BreakdownEnding.CANCELLED)
     (record,) = await records(session)
     assert (record.outcome, record.decided_at_utc is not None) == ("declined", True)
-    with pytest.raises(ValueError, match="declined or cancelled"):
-        await service.close(plan, BreakdownEnding.APPLIED)
+    for ending, code in (
+        (BreakdownEnding.APPLIED, None),
+        (BreakdownEnding.FAILED, None),  # A failure needs its code.
+        (BreakdownEnding.DECLINED, "X"),
+    ):
+        with pytest.raises(ValueError, match="declined, cancelled or failed with a code"):
+            await service.close(plan, ending, code)
     # A result the owner never saw, because they stopped as it arrived, is not left open.
     seen = await proposed(service, provider, task)
     late = BreakdownPlan(

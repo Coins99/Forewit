@@ -85,7 +85,8 @@ _PART_LABELS: Final = {
     DraftContextPart.CURRENT_TEXT: "Your current text: title and body",
 }
 _ALWAYS_LABEL: Final = "Always: kind, tone, length, today's date and your instructions"
-_PROBLEM_CODES: Final = {
+# Shared by every AI path that asks for one structured answer (ADRs 0013, 0018, 0033).
+PROBLEM_CODES: Final = {
     DraftingProblem.INCOMPLETE: OUTPUT_INCOMPLETE,
     DraftingProblem.INVALID_OUTPUT: INVALID_OUTPUT,
     DraftingProblem.REFUSED: REFUSED,
@@ -146,7 +147,8 @@ def disclosure_lines(preview: DraftingPreview) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _bounded(text: str, limit: int) -> str:
+def bounded(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters at a line or word break."""
     return truncate_at_boundary(text, limit)[0]
 
 
@@ -161,7 +163,7 @@ def validate_generated(
     """
     subject = None
     if kind in _SUBJECT_KINDS and candidate.subject is not None:
-        subject = _bounded(clean_generated_text(candidate.subject), GENERATED_SUBJECT_MAX_CHARS)
+        subject = bounded(clean_generated_text(candidate.subject), GENERATED_SUBJECT_MAX_CHARS)
     body, _ = trim_quoted_history(clean_generated_block(candidate.body))
     body = body.strip("\n")
     if not body.strip() or len(body) > GENERATED_BODY_MAX_CHARS:
@@ -170,7 +172,7 @@ def validate_generated(
     if source is not None and copies_long_run(body, source.body, COPIED_RUN_LIMIT):
         raise ValueError("the generated body copies the email")
     missing = [
-        _bounded(cleaned, MISSING_CONTEXT_MAX_CHARS)
+        bounded(cleaned, MISSING_CONTEXT_MAX_CHARS)
         for item in candidate.missing_context
         if (cleaned := clean_generated_text(item))
     ]
@@ -253,7 +255,7 @@ class DraftingService:
             await self._action(draft) if DraftContextPart.ACTION in options.parts else (None, False)
         )
         current = (
-            CurrentText(title=draft.title, body=_bounded(draft.body, CURRENT_TEXT_SENT_CHARS))
+            CurrentText(title=draft.title, body=bounded(draft.body, CURRENT_TEXT_SENT_CHARS))
             if DraftContextPart.CURRENT_TEXT in options.parts
             else None
         )
@@ -426,7 +428,7 @@ class DraftingService:
         if cancelled():
             return DraftingOutcome(status=DraftingStatus.CANCELLED)
         if generated is None:
-            code = _PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
+            code = PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
             logger.info("AI drafting answer unusable: %s", code)
             return DraftingOutcome(status=DraftingStatus.FAILED, error_code=code)
         info = DraftGenerationInfo(

@@ -1368,8 +1368,12 @@ class FakeBackend(FakeDrafts):
             ),
         )
 
-    async def close_breakdown(self, plan: BreakdownPlan, ending: BreakdownEnding) -> None:
+    async def close_breakdown(
+        self, plan: BreakdownPlan, ending: BreakdownEnding, error_code: str | None = None
+    ) -> None:
         self.breakdown_calls.append(("close", plan.generation_id, ending))
+        if error_code is not None:
+            self.breakdown_calls.append(("close_code", error_code))
 
     async def apply_breakdown(
         self, proposal: BreakdownProposal, kept: Sequence[KeptStep]

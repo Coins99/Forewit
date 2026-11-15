@@ -10,7 +10,13 @@ import pytest
 from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
-from mailbrief.domain.actions import MAX_ACTION_STEPS, ActionFilter, ActionStatus, ActionStep
+from mailbrief.domain.actions import (
+    MAX_ACTION_STEPS,
+    ActionFilter,
+    ActionSource,
+    ActionStatus,
+    ActionStep,
+)
 from mailbrief.domain.breakdown import (
     FULL,
     LOCAL_MAIL,
@@ -170,20 +176,59 @@ def test_the_button_follows_the_task_and_says_why_not(panel: ActionsPanel) -> No
 async def test_local_mail_analysis_keeps_mail_tasks_on_this_computer(
     window: MainWindow, backend: FakeBackend
 ) -> None:
-    from tests.ui.test_actions_view import action as numbered
-
-    assert numbered(1).sources == ()
+    from_mail = PARTY.model_copy(
+        update={
+            "public_id": "00000000-0000-4000-8000-000000000042",
+            "title": "Approve the budget",
+            "sources": (
+                ActionSource(
+                    provider_message_id="m1",
+                    subject="Budget",
+                    sender_address="alex@example.com",
+                    web_link="https://mail.google.com/mail/u/0/#all/m1",
+                    received_at_utc=NOW,
+                    available=True,
+                ),
+            ),
+        }
+    )
+    backend.actions = {ActionFilter.OPEN: (from_mail, PARTY)}
     backend.owner_preferences = OwnerPreferences(
         revision=1, time_zone="UTC", analysis_mode=AnalysisMode.LOCAL
     )
     await window.initialize()
-    assert window.actions_panel.breakdown_button.isEnabled()  # No email source: still offered.
-    assert breakdown_block(PARTY, ai_ready=True, local_mail=True) is None
+    panel = window.actions_panel
+    reason = panel.detail.breakdown_reason
+
+    def select(task_id: str) -> None:
+        listing = panel.lists[ActionFilter.OPEN]
+        for row in range(listing.count()):
+            listing.setCurrentRow(row)
+            shown = panel.selected()
+            if shown is not None and shown.public_id == task_id:
+                return
+        raise AssertionError("the task isn't listed")
+
+    select(from_mail.public_id)
+    assert panel.selected() == from_mail
+    assert not panel.breakdown_button.isEnabled()
+    assert reason.text() == LOCAL_MAIL and not reason.isHidden()
+    panel.breakdown_button.click()
+    assert not window.breakdown_dialog.isVisible() and backend.breakdown_calls == []
+
+    select(PARTY.public_id)  # No email source: still offered, as its own Groq capability.
+    assert panel.breakdown_button.isEnabled() and reason.isHidden()
+
+    # With email analysis in the cloud again, the mail task is offered too.
+    backend.owner_preferences = OwnerPreferences(revision=2, time_zone="UTC")
+    await window._load_owner_preferences()
+    select(from_mail.public_id)
+    assert panel.breakdown_button.isEnabled() and reason.isHidden()
+
     backend.ai_ready = False
     await window._refresh_ai_status()
-    assert not window.actions_panel.breakdown_button.isEnabled()
-    assert window.actions_panel.detail.breakdown_reason.text() == NO_BREAKDOWN_AI
-    assert LOCAL_MAIL  # Shown for a task with an email source; see the service's tests.
+    assert not panel.breakdown_button.isEnabled()
+    assert reason.text() == NO_BREAKDOWN_AI
 
 
 # --- The dialog -------------------------------------------------------------------------------
@@ -502,6 +547,85 @@ async def test_a_changed_task_refuses_apply_and_keeps_the_review(
     dialog.reject()
     await settle(window)
     assert calls(backend, "dismiss") == [("dismiss", GENERATION)]
+
+
+async def test_the_review_is_held_while_apply_is_saving(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    """Dismiss or Esc while Apply is in flight would turn down what is being applied."""
+    await window.initialize()
+    dialog = await to_review(window)
+    dialog.apply_button.click()
+    assert window.task is not None and not window.task.done()
+    assert not dialog.apply_button.isEnabled() and not dialog.dismiss_button.isEnabled()
+    dialog.reject()  # Esc, Dismiss or the window's close button.
+    assert dialog.isVisible()
+    await finish(window)
+    await settle(window)
+    assert not dialog.isVisible()
+    assert len(calls(backend, "apply")) == 1 and not calls(backend, "dismiss")
+    assert window.undo_button.text() == "&Undo breakdown"
+
+
+async def test_an_apply_that_fails_gives_the_review_back(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    dialog = await to_review(window)
+    backend.breakdown_apply_fail = BreakdownConflictError(TASK_CHANGED)
+    dialog.apply_button.click()
+    await finish(window)
+    assert dialog.apply_button.isEnabled() and dialog.dismiss_button.isEnabled()
+    dialog.dismiss_button.click()
+    await settle(window)
+    assert not dialog.isVisible() and calls(backend, "dismiss") == [("dismiss", GENERATION)]
+
+
+async def test_a_run_that_breaks_is_recorded_as_failed(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+
+    async def broken(*_args: object) -> object:
+        raise RuntimeError("secret text")
+
+    backend.run_breakdown = broken  # type: ignore[method-assign, assignment]
+    dialog = await to_review(window)
+    assert dialog.pages.currentIndex() == 0
+    assert dialog.status.text().startswith("Breaking down with AI failed")
+    assert calls(backend, "close") == [("close", GENERATION, BreakdownEnding.FAILED)]
+    assert calls(backend, "close_code") == [("close_code", "BREAKDOWN_UNEXPECTED_ERROR")]
+    dialog.reject()
+    await settle(window)
+    assert len(calls(backend, "close")) == 1  # Nothing more to record.
+
+
+async def test_quitting_with_a_preview_open_records_it_as_declined(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    await window.initialize()
+    dialog = window.breakdown_dialog
+    window.actions_panel.breakdown_button.click()
+    dialog.preview_button.click()
+    await finish(window)
+    await window.shutdown()
+    assert calls(backend, "close") == [("close", GENERATION, BreakdownEnding.DECLINED)]
+
+
+async def test_the_ai_line_survives_a_consent_read_that_fails(
+    window: MainWindow, backend: FakeBackend
+) -> None:
+    """Without open storage the consents can't be read; the key and model are still fine."""
+    await window.initialize()
+
+    async def no_storage() -> tuple[str, ...]:
+        raise RuntimeError("Desktop storage is not initialized.")
+
+    backend.owner_consents = no_storage  # type: ignore[method-assign]
+    await window._refresh_ai_status()
+    assert window.ai.text() == await backend.ai_status()
+    assert window.actions_panel.breakdown_button.isEnabled()
+    assert window.settings_dialog.owner_consents.isHidden()
 
 
 async def test_an_undo_that_is_refused_says_so(window: MainWindow, backend: FakeBackend) -> None:

@@ -72,7 +72,9 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
   with its code, `declined` or `cancelled`. When the owner closes the preview without asking,
   the window records `declined`; when they stop a call, `cancelled`. Previewing again with
   other ticks replaces the prepared generation without a row, so one sitting is one row.
-  The diagnostic's `--dry-run` writes none.
+  The diagnostic's `--dry-run` writes none. A run that breaks before it can answer is
+  recorded as `failed` with a code, and a preview or proposal left open when the app quits
+  is recorded as `declined` or `dismissed`.
 - **Two keys.** The request key is random, sent and never stored. The generation's public ID
   is stored and never sent, since Forewit IDs never go.
 - **Oversized steps are dropped, not cut.** A step over 120 characters is left out; half an
@@ -87,7 +89,11 @@ the model stays untrusted: a task's notes may hold pasted email text that tries 
 - **Undo** records an `undo` activity that names Apply's revision, as the other undos do.
 - **Where it is refused.** The service refuses a missing, deleted, closed or full task, and
   in local mode a task with an email source; the desktop's button says the same reasons and
-  also when no Groq key or model is saved.
+  also when no Groq key or model is saved. A caller that doesn't say whether analysis is
+  local can't skip the rule: the service then reads the owner's saved mode itself, and
+  unreadable preferences stop the generation.
+- **The review is held while Apply saves**, so closing it can't turn down what is being
+  applied.
 
 ## Known limit
 

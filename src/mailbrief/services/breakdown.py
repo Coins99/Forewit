@@ -57,16 +57,19 @@ from mailbrief.domain.breakdown import (
 )
 from mailbrief.domain.common import new_public_id, normalize_utc, utc_now
 from mailbrief.domain.drafting import DraftingProblem, PreviewLine
+from mailbrief.domain.preferences import AnalysisMode
 from mailbrief.ports.breakdown import BreakdownProvider
 from mailbrief.ports.errors import ProviderError
 from mailbrief.services.actions import touch
 from mailbrief.services.analysis import KEY_MISSING, provider_detail, provider_error_code
 from mailbrief.services.brief import provider_display_name
+from mailbrief.services.drafting import PROBLEM_CODES, bounded
+from mailbrief.services.preferences import PreferencesService, owner_zone
 from mailbrief.services.writes import commit_once
 from mailbrief.storage.actions import ActionRepository
 from mailbrief.storage.repositories import OwnerConsentRepository
 from mailbrief.storage.tables import ActionTable, TaskBreakdownTable
-from mailbrief.text.prepare import clean_generated_text, truncate_at_boundary
+from mailbrief.text.prepare import clean_generated_text
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +86,6 @@ TOO_MANY_STEPS: Final = f"A task has at most {MAX_ACTION_STEPS} steps."
 _NO_PROVIDER: Final = "AI breakdown needs a provider to prepare or run a generation."
 _ATTEMPTS: Final = 2  # An unusable answer is tried once more.
 _ERROR_CODE_CHARS: Final = 64
-_PROBLEM_CODES: Final = {
-    DraftingProblem.INCOMPLETE: "AI_OUTPUT_INCOMPLETE",
-    DraftingProblem.INVALID_OUTPUT: "AI_INVALID_OUTPUT",
-    DraftingProblem.REFUSED: "AI_REFUSED",
-}
 _ALWAYS_LABEL: Final = "Always: the task's title, today's date and your instruction"
 _ALWAYS_EMAIL_LABEL: Final = (
     "Always: the task's title (this task has an email source), today's date and your instruction"
@@ -175,10 +173,6 @@ def step_key(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
-def _bounded(text: str, limit: int) -> str:
-    return truncate_at_boundary(text, limit)[0]
-
-
 def _deadline_local(action: Action, zone: ZoneInfo) -> str | None:
     """The deadline as a local value ("2026-10-02" or "2026-10-02 17:00"): never the words
     an email stated it in, which are the email's."""
@@ -230,7 +224,7 @@ def validate_steps(
         seen.add(key)
         steps.append(cleaned)
     missing = [
-        _bounded(cleaned, MISSING_CONTEXT_MAX_CHARS)
+        bounded(cleaned, MISSING_CONTEXT_MAX_CHARS)
         for item in candidate.missing_context
         if (cleaned := clean_generated_text(item))
     ]
@@ -244,7 +238,9 @@ class BreakdownService:
 
     ``provider`` is needed only to prepare and run; applying, dismissing and undoing are
     local. ``local_mail`` says email analysis runs on this computer: a task with an email
-    source can't be broken down then.
+    source can't be broken down then. Left out, it and ``zone`` are read from the owner's
+    saved preferences when a generation is prepared, so the rule holds for every caller;
+    unreadable preferences stop the generation (PreferencesUnavailableError).
     """
 
     def __init__(
@@ -253,8 +249,8 @@ class BreakdownService:
         provider: BreakdownProvider | None = None,
         *,
         clock: Callable[[], datetime] = utc_now,
-        zone: ZoneInfo,
-        local_mail: bool = False,
+        zone: ZoneInfo | None = None,
+        local_mail: bool | None = None,
         id_factory: Callable[[], str] = new_public_id,
         key_factory: Callable[[], str] = lambda: secrets.token_hex(8),
     ) -> None:
@@ -279,6 +275,19 @@ class BreakdownService:
         )
         return consent is not None
 
+    async def _owner(self) -> tuple[ZoneInfo, bool]:
+        """The owner's zone, and whether email analysis runs on this computer: as given, else
+        from the saved preferences."""
+        if self._zone is not None and self._local_mail is not None:
+            return self._zone, self._local_mail
+        preferences = await PreferencesService(self._session).get()
+        return (
+            self._zone or owner_zone(preferences),
+            preferences.analysis_mode is AnalysisMode.LOCAL
+            if self._local_mail is None
+            else self._local_mail,
+        )
+
     async def _action(self, row: ActionTable) -> Action:
         return (await self._actions.load([row]))[0]
 
@@ -296,17 +305,18 @@ class BreakdownService:
         on this computer, or when a ticked part is no longer there.
         """
         provider = self._ai()
+        zone, local_mail = await self._owner()
         row = await self._actions.get_action(public_id)
         if row is None:
             raise BreakdownNotFoundError(TASK_NOT_FOUND)
         action = await self._action(row)
-        reason = blocked_reason(action, local_mail=self._local_mail)
+        reason = blocked_reason(action, local_mail=local_mail)
         if reason is not None:
             raise BreakdownUnavailableError(reason)
         if not options.parts <= available_parts(action):
             raise BreakdownUnavailableError(PARTS_CHANGED)
         notes = (
-            _bounded(action.notes.strip(), BREAKDOWN_NOTES_SENT_CHARS)
+            bounded(action.notes.strip(), BREAKDOWN_NOTES_SENT_CHARS)
             if BreakdownPart.NOTES in options.parts
             else None
         )
@@ -318,14 +328,14 @@ class BreakdownService:
         request = BreakdownRequest(
             request_key=self._key_factory(),
             title=action.title,
-            today=normalize_utc(self._clock()).astimezone(self._zone).date(),
+            today=normalize_utc(self._clock()).astimezone(zone).date(),
             instruction=options.instruction,
             notes=notes,
             steps=steps,
             project=None if project is None else project.name,
             area=None if project is None else project.area_name,
             dates_sent=dated,
-            deadline_local=_deadline_local(action, self._zone) if dated else None,
+            deadline_local=_deadline_local(action, zone) if dated else None,
             target_date=action.target_date if dated else None,
             estimate_minutes=(
                 action.estimate_minutes if BreakdownPart.ESTIMATE in options.parts else None
@@ -479,7 +489,7 @@ class BreakdownService:
         if cancelled():
             return await self._ended(plan, BreakdownStatus.CANCELLED)
         if checked is None:
-            code = _PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
+            code = PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
             logger.info("AI breakdown answer unusable: %s", code)
             return await self._ended(plan, BreakdownStatus.FAILED, error_code=code)
         logger.info("AI breakdown: %d steps kept, %d dropped", len(checked.steps), checked.dropped)
@@ -496,12 +506,17 @@ class BreakdownService:
         await self._write_record(plan, BreakdownEnding.PROPOSED, proposed=len(checked.steps))
         return BreakdownOutcome(status=BreakdownStatus.PROPOSED, proposal=proposal)
 
-    async def close(self, plan: BreakdownPlan, ending: BreakdownEnding) -> None:
+    async def close(
+        self, plan: BreakdownPlan, ending: BreakdownEnding, error_code: str | None = None
+    ) -> None:
         """Record a generation that ended without ``run`` saying so: the owner closed the
-        preview (declined) or stopped the call (cancelled). Recording twice changes nothing."""
-        if ending not in {BreakdownEnding.DECLINED, BreakdownEnding.CANCELLED}:
-            raise ValueError("only a declined or cancelled generation is closed this way")
-        await self._write_record(plan, ending)
+        preview (declined) or stopped the call (cancelled), or the run broke before it could
+        answer (failed, with ``error_code``, a code and never text). Recording twice changes
+        nothing."""
+        allowed = {BreakdownEnding.DECLINED, BreakdownEnding.CANCELLED, BreakdownEnding.FAILED}
+        if ending not in allowed or (ending is BreakdownEnding.FAILED) != (error_code is not None):
+            raise ValueError("a generation is closed as declined, cancelled or failed with a code")
+        await self._write_record(plan, ending, error_code=error_code)
 
     @staticmethod
     def _kept_texts(proposal: BreakdownProposal, kept: Sequence[KeptStep]) -> list[str]:

@@ -107,6 +107,7 @@ class BreakdownDialog(QDialog):
         self._first_use = False
         self._free = 0
         self._shown = 0  # How many of the step rows hold a proposed step.
+        self._applying = False  # Apply was asked; the review waits for its answer.
         layout = QVBoxLayout(self)
         dialog_heading(
             self,
@@ -240,6 +241,7 @@ class BreakdownDialog(QDialog):
         row.addStretch(1)
         column.addLayout(row)
         self.pages.addWidget(review)
+        self._review_page = review
         self._show(_COMPOSE)
 
     def start_new(self, action: Action) -> None:
@@ -252,11 +254,18 @@ class BreakdownDialog(QDialog):
             box.setChecked(False)
             box.setVisible(part in offered)
         self._set_composing(True)
+        self._set_applying(False)
         self.consent.setChecked(False)
         self._clear_steps()
         self._show(_COMPOSE)
         self._say("")
         self.instruction.setFocus()
+
+    def _set_applying(self, applying: bool) -> None:
+        """While Apply is saving, the review can't be changed, applied again or closed, so
+        nothing turns the proposal down as it is being applied."""
+        self._applying = applying
+        self._review_page.setEnabled(not applying)
 
     def _clear_steps(self) -> None:
         self._shown = 0
@@ -371,6 +380,7 @@ class BreakdownDialog(QDialog):
             self._say(EMPTY_STEP)
         elif ticked <= self._free:
             self._say("")
+            self._set_applying(True)
             self.apply_requested.emit(kept)
 
     def show_problem(self, message: str) -> None:
@@ -381,17 +391,22 @@ class BreakdownDialog(QDialog):
 
     def keep_reviewing(self, message: str) -> None:
         """Applying failed: stay on the proposed steps and say why."""
+        self._set_applying(False)
         self._say(message)
 
     def finish_applied(self) -> None:
         """The steps were applied: close without anything left to turn down."""
+        self._set_applying(False)
         self.instruction.setPlainText("")
         self._clear_steps()
         self._show(_COMPOSE)
         self.accept()
 
     def reject(self) -> None:
-        """Close, Esc or Dismiss; closing while Groq is being asked stops the request too."""
+        """Close, Esc or Dismiss; closing while Groq is being asked stops the request too.
+        While Apply is saving, the dialog stays until it has its answer."""
+        if self._applying:
+            return
         if self.pages.currentIndex() == _WORKING:
             self.cancel_requested.emit()
         super().reject()

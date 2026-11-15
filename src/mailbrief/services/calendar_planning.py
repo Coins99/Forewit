@@ -60,6 +60,7 @@ from mailbrief.domain.google_calendar import GoogleCoverage, GoogleEvent
 from mailbrief.ports.calendar_planning import CalendarPlanningProvider
 from mailbrief.ports.errors import ProviderError
 from mailbrief.services.analysis import KEY_MISSING, provider_detail, provider_error_code
+from mailbrief.services.drafting import PROBLEM_CODES
 from mailbrief.services.events import EventService
 from mailbrief.storage.repositories import OwnerConsentRepository
 from mailbrief.text.prepare import clean_generated_text
@@ -69,11 +70,6 @@ logger = logging.getLogger(__name__)
 CALENDAR_SCOPE: Final = "calendar"
 CALENDAR_DISCLOSURE_VERSION: Final = "1"
 _ATTEMPTS: Final = 2
-_PROBLEM_CODES: Final = {
-    DraftingProblem.INCOMPLETE: "AI_OUTPUT_INCOMPLETE",
-    DraftingProblem.INVALID_OUTPUT: "AI_INVALID_OUTPUT",
-    DraftingProblem.REFUSED: "AI_REFUSED",
-}
 _DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _CLOCK = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 _WEEKDAYS: Final = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -640,7 +636,7 @@ class CalendarPlanningService:
         if cancelled():
             return PlanningOutcome(status=PlanningStatus.CANCELLED)
         if checked is None:
-            code = _PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
+            code = PROBLEM_CODES[problem or DraftingProblem.INVALID_OUTPUT]
             logger.info("AI calendar planning answer unusable: %s", code)
             return PlanningOutcome(status=PlanningStatus.FAILED, error_code=code)
         logger.info(

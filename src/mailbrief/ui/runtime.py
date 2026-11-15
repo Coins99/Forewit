@@ -1201,20 +1201,20 @@ class DesktopRuntime:
         preferences = await self.get_owner_preferences()
         settings = await self._settings(preferences)
         async with groq_provider(settings) as ai, self._storage().session() as session:
-            return await BreakdownService(session, ai, zone=owner_zone(preferences)).run(
-                plan, gate, cancel
-            )
+            return await BreakdownService(session, ai).run(plan, gate, cancel)
 
     @asynccontextmanager
     async def _breakdowns(self) -> AsyncIterator[BreakdownService]:
-        """The local side of AI breakdown: no provider, so nothing here can send."""
-        zone = owner_zone(await self.get_owner_preferences())
+        """The local side of AI breakdown: no provider, so nothing here can send, and no
+        preferences, which recording, applying and undoing don't need."""
         async with self._storage().session() as session:
-            yield BreakdownService(session, zone=zone)
+            yield BreakdownService(session)
 
-    async def close_breakdown(self, plan: BreakdownPlan, ending: BreakdownEnding) -> None:
+    async def close_breakdown(
+        self, plan: BreakdownPlan, ending: BreakdownEnding, error_code: str | None = None
+    ) -> None:
         async with self._breakdowns() as service:
-            await service.close(plan, ending)
+            await service.close(plan, ending, error_code)
 
     async def apply_breakdown(
         self, proposal: BreakdownProposal, kept: Sequence[KeptStep]
