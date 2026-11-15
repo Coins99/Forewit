@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mailbrief.domain.weekly_review import ReviewTask, WeeklyReview, week_dates
+from mailbrief.domain.weekly_review import WEEK_DAYS, ReviewTask, WeeklyReview, week_dates
 from mailbrief.ui.deadline_text import day_text, moment_text
 from mailbrief.ui.labels import outline_button, plain_label, wrap_label
 from mailbrief.ui.lists import ActivatingList
@@ -39,6 +39,7 @@ class WeeklyReviewDialog(QDialog):
     focus_requested = Signal(str, object)  # A task's public ID and the focus day.
     review_requested = Signal(bool)  # Mark (True) or unmark (False) the week reviewed.
     reflection_requested = Signal()
+    schedule_requested = Signal(object)  # Next week's Monday: Suggest time for it (P5-3).
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -89,8 +90,14 @@ class WeeklyReviewDialog(QDialog):
         self.focus_button = outline_button("Add to focus", "reviewAddToFocus")
         self.focus_button.setAccessibleName("Add the selected open task to that day's focus")
         self.focus_button.clicked.connect(self._focus)
+        self.schedule_button = outline_button("Suggest time for next week", "reviewSuggestNextWeek")
+        self.schedule_button.setAccessibleName(
+            "Suggest time for next week's dates with its focus tasks chosen"
+        )
+        self.schedule_button.clicked.connect(self._schedule)
         focus.addWidget(self.focus_day, 1)
         focus.addWidget(self.focus_button)
+        focus.addWidget(self.schedule_button)
         layout.addLayout(focus)
 
         actions = QHBoxLayout()
@@ -219,6 +226,11 @@ class WeeklyReviewDialog(QDialog):
             ready and chosen is not None and chosen.public_id in self._open_ids
         )
         self.focus_day.setEnabled(ready)
+        # Suggest time plans today or later: a week whose next seven dates are over has none.
+        self.schedule_button.setEnabled(
+            self.shown is not None
+            and self.shown.next_start + timedelta(days=WEEK_DAYS - 1) >= self.today
+        )
         self.reflection_button.setEnabled(ready)
         record = None if self.shown is None else self.shown.record
         self.reflection_button.setText(
@@ -241,6 +253,10 @@ class WeeklyReviewDialog(QDialog):
         chosen, day = self.selected(), self.focus_day.currentData()
         if chosen is not None and isinstance(day, date):
             self.focus_requested.emit(chosen.public_id, day)
+
+    def _schedule(self) -> None:
+        if self.shown is not None:
+            self.schedule_requested.emit(self.shown.next_start)
 
     def _toggle_review(self) -> None:
         record = None if self.shown is None else self.shown.record

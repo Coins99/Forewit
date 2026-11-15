@@ -9,6 +9,9 @@ import pytest
 from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
+from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.day_plans import DayPlan, DayPlanItem
 from mailbrief.domain.projects import Project
 from mailbrief.domain.scheduling import (
     PlanningCandidatePage,
@@ -27,8 +30,14 @@ from mailbrief.services.scheduling import (
 from mailbrief.storage.database import Database
 from mailbrief.ui.deadline_text import day_text
 from mailbrief.ui.hours_editor import HoursEditor
-from mailbrief.ui.scheduling_view import SchedulingDialog, block_times, review_summary
+from mailbrief.ui.scheduling_view import (
+    SchedulingDialog,
+    block_times,
+    focus_demands,
+    review_summary,
+)
 from mailbrief.ui.theme import ThemeMode, apply_theme
+from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.unit.services.test_scheduling import DAY, NOW, ZONE, setup
 
@@ -406,3 +415,61 @@ async def test_the_chooser_names_its_dates_as_the_review_does(
     text = dialog.chooser.status.text()
     assert text.startswith(f"{day_text(later, today=DAY)} · ")
     assert f", {DAY.year + 1}" in text
+
+
+def _task(number: int, **fields: object) -> DayPlanItem:
+    public_id = f"00000000-0000-4000-8000-{number:012d}"
+    return DayPlanItem(
+        public_id=f"10000000-0000-4000-8000-{number:012d}",
+        task_public_id=public_id,
+        position=0,
+        action=make_action(public_id=public_id, title=f"Task {number}", **fields),
+    )
+
+
+def _plan(day: date, *items: DayPlanItem) -> DayPlan:
+    """A day's focus with ``items`` in the order given."""
+    placed = tuple(item.model_copy(update={"position": at}) for at, item in enumerate(items))
+    return DayPlan(day=day, items=placed)
+
+
+def test_focus_demands_keep_focus_order_and_what_suggest_time_offers() -> None:
+    """P5-3's prefill: the day's open tasks of the owner's own, in focus order."""
+    done = _task(3, status=ActionStatus.COMPLETED, completed_at_utc=NOW)
+    waiting = _task(4, ownership=ActionOwnership.WAITING_FOR)
+    gone = DayPlanItem(
+        public_id="10000000-0000-4000-8000-000000000005",
+        task_public_id="00000000-0000-4000-8000-000000000005",
+        position=0,
+    )
+    plan = _plan(DAY, _task(2), done, waiting, gone, _task(1, estimate_minutes=45, revision=7))
+
+    demands = focus_demands([plan])
+
+    assert [demand.title for demand in demands] == ["Task 2", "Task 1"]
+    first, second = demands
+    assert (first.requested_minutes, first.focus_position) == (None, 0)  # Unknown demand stays.
+    assert (second.requested_minutes, second.task_revision, second.focus_position) == (45, 7, 4)
+    assert second.task_public_id == "00000000-0000-4000-8000-000000000001"
+    assert focus_demands([]) == ()
+    assert focus_demands([DayPlan(day=DAY)]) == ()
+    assert focus_demands([_plan(DAY, done, waiting, gone)]) == ()
+
+
+def test_focus_demands_take_days_in_date_order_and_each_task_once() -> None:
+    monday, tuesday = DAY, DAY + timedelta(days=1)
+    plans = [_plan(tuesday, _task(1), _task(3)), _plan(monday, _task(2), _task(1))]
+
+    assert [demand.title for demand in focus_demands(plans)] == ["Task 2", "Task 1", "Task 3"]
+
+
+def test_focus_demands_stop_at_suggest_time_s_limit() -> None:
+    many = [
+        _plan(DAY + timedelta(days=day), *(_task(day * 20 + n) for n in range(20)))
+        for day in range(7)
+    ]
+
+    demands = focus_demands(many)
+
+    assert len(demands) == 100
+    assert demands[-1].title == "Task 99"  # The first hundred, in day and focus order.

@@ -32,16 +32,21 @@ from mailbrief.ui.dialog_chrome import dialog_heading
 from mailbrief.ui.hairline import HairlineFrame
 from mailbrief.ui.labels import ElidedLabel, outline_button, wrap_label
 from mailbrief.ui.lists import ActivatingList, clear_list
+from mailbrief.ui.scheduling_view import focus_demands
 from mailbrief.ui.theme import CARD_RADIUS
 from mailbrief.ui.today_view import DayRow, DayRowDelegate, agenda_row, attention_row
 
 _ITEM = Qt.ItemDataRole.UserRole
+SCHEDULE_TIP = "Open Suggest time for this day with its open focus tasks already chosen."
+SCHEDULE_NOTHING = "Add an open task of your own to this day's focus first."
+SCHEDULE_PAST = "Suggest time plans today or later."
 
 
 class FocusPanel(HairlineFrame):
     change_requested = Signal(str, object, object)
     open_requested = Signal(object)
     plan_requested = Signal()
+    schedule_requested = Signal()  # Suggest time for the plan shown (P5-3).
     agenda_requested = Signal()
     attention_requested = Signal()
 
@@ -54,6 +59,7 @@ class FocusPanel(HairlineFrame):
         self.setAccessibleName("My focus")
         self.compact = compact
         self.plan: DayPlan | None = None
+        self._today: date | None = None  # The owner's day, from the last plan shown.
         self._busy = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
@@ -63,6 +69,10 @@ class FocusPanel(HairlineFrame):
         self.heading.setObjectName("focusHeading")
         self.heading.setAccessibleName("My focus")
         header.addWidget(self.heading, 1)
+        self.schedule_button = outline_button("Schedule my focus", "focusSchedule")
+        self.schedule_button.setAccessibleName("Suggest time for this day's focus tasks")
+        self.schedule_button.clicked.connect(self._schedule)
+        header.addWidget(self.schedule_button)
         self.plan_button = outline_button("Plan today", "focusPlanToday")
         self.plan_button.setAccessibleName("Choose and organize today's focus")
         header.addWidget(self.plan_button)
@@ -167,6 +177,7 @@ class FocusPanel(HairlineFrame):
     def show_plan(self, plan: DayPlan, zone: ZoneInfo, now: datetime) -> None:
         kept = self.selected()
         self.plan = plan
+        self._today = now.astimezone(zone).date()
         clear_list(self.list)
         for item in plan.items:
             action = item.action
@@ -258,6 +269,21 @@ class FocusPanel(HairlineFrame):
         self.down_button.setEnabled(not self._busy and 0 <= row < self.list.count() - 1)
         for button in (self.open_button, self.complete_button, self.remove_button):
             button.setVisible(item is not None)
+        tip = self._schedule_block() or SCHEDULE_TIP
+        self.schedule_button.setEnabled(tip is SCHEDULE_TIP and not self._busy)
+        self.schedule_button.setToolTip(tip)
+
+    def _schedule_block(self) -> str | None:
+        """Why Suggest time can't be opened for the plan shown, or None when it can."""
+        if self.plan is None or not focus_demands([self.plan]):
+            return SCHEDULE_NOTHING
+        if self._today is not None and self.plan.day < self._today:
+            return SCHEDULE_PAST
+        return None
+
+    def _schedule(self) -> None:
+        if not self._busy and self._schedule_block() is None:
+            self.schedule_requested.emit()
 
     def _open(self) -> None:
         item = self.selected()

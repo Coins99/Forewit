@@ -18,6 +18,9 @@ from mailbrief.domain.day_plans import DayPlan
 from mailbrief.domain.events import CalendarRange
 from mailbrief.domain.today import DaySummary
 from mailbrief.services.day_plans import DayPlanConflictError
+from mailbrief.ui.event_editor import qday
+from mailbrief.ui.focus_view import SCHEDULE_NOTHING, SCHEDULE_PAST, SCHEDULE_TIP
+from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.runtime import DesktopRuntime
 from mailbrief.ui.theme import ThemeMode, apply_theme, current_tokens
 from tests.factories import make_action
@@ -304,6 +307,98 @@ async def test_runtime_plan_survives_restart_and_task_completion(tmp_path: Path)
         assert summary.focus.items[0].action.status is ActionStatus.COMPLETED
     finally:
         await reopened.close()
+
+
+def chosen_titles(window: MainWindow) -> list[str]:
+    chosen = window.scheduling_dialog.chosen
+    return [chosen.item(row).text() for row in range(chosen.count())]
+
+
+def suggest_range(window: MainWindow) -> tuple[date, date]:
+    dialog = window.scheduling_dialog
+    return qday(dialog.first_day.date()), qday(dialog.last_day.date())
+
+
+async def test_schedule_my_focus_opens_suggest_time_for_today_in_focus_order(
+    qtbot: QtBot,
+) -> None:
+    """P5-3: a prefill only. Focus and tasks stay as they are; Suggest time does the rest."""
+    backend = backend_for_focus()
+    window = await window_for(qtbot, backend)
+    today = NOW.astimezone(ZONE).date()
+    button = window.focus_panel.schedule_button
+    assert not button.isEnabled() and button.toolTip() == SCHEDULE_NOTHING
+    for action in (B, WAITING, A):
+        window._add_captured_today(action)
+        await window.drain_focus()
+    await window.drain_calendar_reads()
+    assert button.isEnabled() and button.toolTip() == SCHEDULE_TIP
+    before = backend.focus_plans[today]
+
+    button.click()
+
+    assert window.scheduling_dialog.isVisible()
+    assert suggest_range(window) == (today, today)
+    # The unestimated task stays (unknown demand); the waiting follow-up isn't the owner's.
+    assert chosen_titles(window) == ["Book dentist", "Prepare the report"]
+    assert backend.focus_plans[today] == before
+    assert backend.actions[ActionFilter.OPEN] == (A, B)
+    window.scheduling_dialog.force_close()
+    window.scheduling_dialog.reject()
+    await window.drain_calendar_reads()
+
+
+async def test_schedule_my_focus_follows_the_browsed_day_and_refuses_the_past(
+    qtbot: QtBot,
+) -> None:
+    backend = backend_for_focus()
+    window = await window_for(qtbot, backend)
+    today = NOW.astimezone(ZONE).date()
+    yesterday, friday = today - timedelta(days=1), today + timedelta(days=3)
+    for day in (yesterday, friday):
+        await backend.select_day_task(day, ZONE, A.public_id, 0)
+    window._open_focus()
+    await window.drain_calendar_reads()
+    panel = window.focus_dialog.panel
+
+    window._browse_focus_date(yesterday)
+    await window.drain_calendar_reads()
+    assert panel.plan is not None and panel.plan.day == yesterday
+    assert not panel.schedule_button.isEnabled()
+    assert panel.schedule_button.toolTip() == SCHEDULE_PAST
+    window._schedule_focus(True)  # Asked anyway: nothing opens.
+    assert not window.scheduling_dialog.isVisible() and window.focus_dialog.isVisible()
+
+    window._browse_focus_date(friday)
+    await window.drain_calendar_reads()
+    assert panel.schedule_button.isEnabled()
+    panel.schedule_button.click()
+    assert not window.focus_dialog.isVisible()  # One dialog at a time.
+    assert window.scheduling_dialog.isVisible()
+    assert suggest_range(window) == (friday, friday)
+    assert chosen_titles(window) == ["Prepare the report"]
+    window.scheduling_dialog.force_close()
+    window.scheduling_dialog.reject()
+    await window.drain_calendar_reads()
+
+
+async def test_runtime_reads_a_run_of_day_plans(tmp_path: Path) -> None:
+    runtime = DesktopRuntime(tmp_path / "owner.sqlite3")
+    await runtime.load_saved()
+    try:
+        from tests.unit.services.test_manual_tasks import EDIT
+
+        task = await runtime.create_action(EDIT, ())
+        monday = date(2026, 10, 19)
+        wednesday = monday + timedelta(days=2)
+        saved = await runtime.select_day_task(wednesday, ZONE, task.public_id, 0)
+        plans = await runtime.day_plans(monday, monday + timedelta(days=6))
+        assert [plan.day for plan in plans] == [monday + timedelta(days=n) for n in range(7)]
+        assert plans[2] == saved
+        assert all(not plan.items for index, plan in enumerate(plans) if index != 2)
+        assert await runtime.day_plans(wednesday, wednesday) == (saved,)
+    finally:
+        await runtime.close()
 
 
 async def test_shutdown_waits_for_inflight_focus_save(qtbot: QtBot) -> None:

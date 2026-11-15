@@ -221,6 +221,7 @@ class FakeBackend(FakeDrafts):
         # The owner's preferences, as the database would hold them.
         self.owner_preferences = OwnerPreferences.defaults()
         self.focus_plans: dict[date, DayPlan] = {}
+        self.day_plan_calls: list[tuple[date, date]] = []  # Each read of a run of days.
         # The weekly review (P5-1): each week read, and the review records by week.
         self.review_calls: list[date] = []
         self.week_records: dict[date, WeeklyReviewRecord] = {}
@@ -952,6 +953,16 @@ class FakeBackend(FakeDrafts):
             for a in self.actions.get(view, ())
             if text.casefold() in a.title.casefold() and a.public_id not in selected
         )[:50]
+
+    async def day_plans(self, first: date, last: date) -> tuple[DayPlan, ...]:
+        self.day_plan_calls.append((first, last))
+        if self.day_fail is not None:
+            raise self.day_fail
+        return tuple(
+            self.focus_plans.get(first + timedelta(days=offset))
+            or DayPlan(day=first + timedelta(days=offset))
+            for offset in range((last - first).days + 1)
+        )
 
     async def select_day_task(
         self, day: date, zone: ZoneInfo, task_id: str, revision: int
