@@ -20,6 +20,7 @@ from mailbrief.domain.scheduling import (
     PlanningUndo,
     SchedulingProposal,
     SchedulingRequest,
+    TaskDemand,
     Workload,
 )
 from mailbrief.services.scheduling import (
@@ -448,8 +449,11 @@ def test_focus_demands_keep_focus_order_and_what_suggest_time_offers() -> None:
 
     assert [demand.title for demand in demands] == ["Task 2", "Task 1"]
     first, second = demands
-    assert (first.requested_minutes, first.focus_position) == (None, 0)  # Unknown demand stays.
-    assert (second.requested_minutes, second.task_revision, second.focus_position) == (45, 7, 4)
+    assert first.requested_minutes is None  # Unknown demand stays.
+    assert (second.requested_minutes, second.task_revision) == (45, 7)
+    # The review reads focus positions afresh; the prefill carries none.
+    unset = TaskDemand.model_fields["focus_position"].default
+    assert {demand.focus_position for demand in demands} == {unset}
     assert second.task_public_id == "00000000-0000-4000-8000-000000000001"
     assert focus_demands([]) == ()
     assert focus_demands([DayPlan(day=DAY)]) == ()

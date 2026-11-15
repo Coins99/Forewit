@@ -334,7 +334,11 @@ and applies in Suggest time as now.
 
 The weekly review has **Suggest time for next week** beside **Add to focus**: it closes the
 review and opens Suggest time for the seven dates after the week shown, from today on, with
-those days' focus tasks chosen. It is unavailable once those dates are over.
+those days' focus tasks chosen. It is unavailable once those dates are over, and while another
+week loads. When those days' focus holds no open task of the owner's own, the review stays open
+and says so. Suggest time's focus tie-break follows the first date's focus order, then each
+later requested date's in date order, a task ranking at its first place; this holds for
+Calendar's Suggest time too, which used the first date's focus alone.
 
 Only what Suggest time's own chooser offers is handed over: tasks that are still there, open
 and the owner's own (a waiting follow-up is not), each once. A task without an estimate is
@@ -342,7 +346,8 @@ handed over too, and Suggest time lists it as unknown demand.
 
 **Data.** None: no migration. The prefill is `focus_demands` in `ui/scheduling_view.py`, built
 in the UI layer from `DayPlan` and passed to `SchedulingDialog.open_range`; the review's read of
-next week's plans is `DesktopRuntime.day_plans`. Apply, Undo and receipts are ADR 0031's.
+next week's plans is `DesktopRuntime.day_plans` (`DayPlanService.load_range`, three reads for
+the run of days). Apply, Undo and receipts are ADR 0031's.
 Opening Suggest time changes neither focus nor task dates.
 
 **Privacy boundary.** Unchanged from ADR 0031: local planning code, no network call; the
@@ -363,9 +368,11 @@ source-rule scan for scheduling imports must still pass.
 **Tests and checks.** `tests/ui/test_scheduling.py` (the prefill: focus order, days in date
 order, each task once, closed, waiting and missing tasks left out, the 100-task limit, no
 focus tasks), `tests/ui/test_focus.py` (Today's button and its reasons, the browsed date, a
-past date, the runtime's read of a run of days) and `tests/ui/test_weekly_review.py` (the
-range and tasks Suggest time receives, a week whose next dates are over, a failed read). The
-existing scheduling suite is unchanged.
+past date, a day that ended after it was shown, the runtime's read of a run of days) and
+`tests/ui/test_weekly_review.py` (the range and tasks Suggest time receives, a week still
+loading, no focus tasks, a week whose next dates are over, a failed read).
+`tests/unit/services/test_scheduling.py` adds the focus ranking across requested dates and
+`tests/unit/services/test_day_plans.py` the range read.
 
 ## What acceptance of P1–P4 could change
 

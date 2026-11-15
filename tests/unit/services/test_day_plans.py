@@ -43,6 +43,25 @@ async def test_empty_read_does_not_create_a_plan(session: AsyncSession) -> None:
     assert await session.scalar(select(func.count()).select_from(DayPlanTable)) == 0
 
 
+async def test_load_range_reads_each_date_in_order(session: AsyncSession) -> None:
+    service, actions = DayPlanService(session), ActionService(session)
+    early, late = [
+        (await actions.create(EDIT.model_copy(update={"title": title}))).public_id
+        for title in ("Early", "Late")
+    ]
+    second = await service.select(DAY + timedelta(days=1), ZONE, late, 0)
+    second = await service.select(DAY + timedelta(days=1), ZONE, early, second.revision)
+    fourth = await service.select(DAY + timedelta(days=3), ZONE, early, 0)
+
+    plans = await service.load_range(DAY, DAY + timedelta(days=3))
+
+    assert [plan.day for plan in plans] == [DAY + timedelta(days=n) for n in range(4)]
+    assert plans[1] == second and plans[3] == fourth  # Each plan keeps its own items, in order.
+    assert [item.task_public_id for item in plans[1].items] == [late, early]
+    assert plans[0] == DayPlan(day=DAY) and plans[2] == DayPlan(day=DAY + timedelta(days=2))
+    assert await service.load_range(DAY + timedelta(days=1), DAY) == ()
+
+
 async def test_select_deselect_and_noop_leave_task_fields_and_history_unchanged(
     session: AsyncSession,
 ) -> None:

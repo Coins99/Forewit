@@ -42,6 +42,16 @@ SCHEDULE_NOTHING = "Add an open task of your own to this day's focus first."
 SCHEDULE_PAST = "Suggest time plans today or later."
 
 
+def schedule_block(plan: DayPlan | None, today: date) -> str | None:
+    """Why Suggest time can't be opened for ``plan`` on ``today``, or None when it can (P5-3).
+    The panel's button and the window's click handler both ask this."""
+    if plan is None or not focus_demands([plan]):
+        return SCHEDULE_NOTHING
+    if plan.day < today:
+        return SCHEDULE_PAST
+    return None
+
+
 class FocusPanel(HairlineFrame):
     change_requested = Signal(str, object, object)
     open_requested = Signal(object)
@@ -59,7 +69,7 @@ class FocusPanel(HairlineFrame):
         self.setAccessibleName("My focus")
         self.compact = compact
         self.plan: DayPlan | None = None
-        self._today: date | None = None  # The owner's day, from the last plan shown.
+        self._today = date.min  # The owner's day, from the last plan shown or refusal.
         self._busy = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
@@ -271,21 +281,21 @@ class FocusPanel(HairlineFrame):
         self.down_button.setEnabled(not self._busy and 0 <= row < self.list.count() - 1)
         for button in (self.open_button, self.complete_button, self.remove_button):
             button.setVisible(item is not None)
-        tip = self._schedule_block() or SCHEDULE_TIP
-        self.schedule_button.setEnabled(tip is SCHEDULE_TIP and not self._busy)
-        self.schedule_button.setToolTip(tip)
-
-    def _schedule_block(self) -> str | None:
-        """Why Suggest time can't be opened for the plan shown, or None when it can."""
-        if self.plan is None or not focus_demands([self.plan]):
-            return SCHEDULE_NOTHING
-        if self._today is not None and self.plan.day < self._today:
-            return SCHEDULE_PAST
-        return None
+        block = schedule_block(self.plan, self._today)
+        self.schedule_button.setEnabled(block is None and not self._busy)
+        self.schedule_button.setToolTip(block or SCHEDULE_TIP)
 
     def _schedule(self) -> None:
-        if not self._busy and self._schedule_block() is None:
+        if not self._busy and schedule_block(self.plan, self._today) is None:
             self.schedule_requested.emit()
+
+    def refuse_schedule(self, reason: str, today: date) -> None:
+        """The window found on ``today`` that the plan shown can't be scheduled (the day
+        ended since it was shown): say why, and keep the button off."""
+        self._today = today
+        self._buttons()
+        self.status.setText(reason)
+        self.status.show()
 
     def _open(self) -> None:
         item = self.selected()

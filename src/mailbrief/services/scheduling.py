@@ -200,22 +200,27 @@ class SchedulingService:
         )
         tasks = {task.public_id: task for task in task_rows}
         positions: dict[str, int] = {}
-        focus = None
+        focus: list[tuple[str, int]] = []
         if request.focus_day is not None:
-            focus = (
-                await self.session.scalars(
-                    select(DayPlanTable).where(DayPlanTable.local_date == request.focus_day)
+            # The focus day's order, then each later requested date's in date order (P5-3):
+            # a task in several days' focus ranks at its first place.
+            dated = (
+                DayPlanTable.local_date >= request.focus_day,
+                DayPlanTable.local_date <= max(request.focus_day, last),
+            )
+            focus = [
+                (plan.public_id, plan.revision)
+                for plan in await self.session.scalars(
+                    select(DayPlanTable).where(*dated).order_by(DayPlanTable.local_date)
                 )
-            ).one_or_none()
-            if focus is not None:
-                positions = {
-                    item.task_public_id: item.position
-                    for item in (
-                        await self.session.scalars(
-                            select(DayPlanItemTable).where(DayPlanItemTable.plan_id == focus.id)
-                        )
-                    ).all()
-                }
+            ]
+            for task_id in await self.session.scalars(
+                select(DayPlanItemTable.task_public_id)
+                .join(DayPlanTable, DayPlanItemTable.plan_id == DayPlanTable.id)
+                .where(*dated)
+                .order_by(DayPlanTable.local_date, DayPlanItemTable.position)
+            ):
+                positions.setdefault(task_id, len(positions))
         conflicts: list[ScheduleConflict] = []
         valid: dict[str, list[UtcInterval]] = {}
         repair: set[str] = set()
@@ -287,7 +292,7 @@ class SchedulingService:
                 )
                 for task in task_rows
             ],
-            "focus": None if focus is None else (focus.public_id, focus.revision, positions),
+            "focus": (focus, positions) if focus else None,
         }
         knowledge = ranges[0].google_knowledge.status(credit_first, credit_last, zone, now)
         in_range = tuple(

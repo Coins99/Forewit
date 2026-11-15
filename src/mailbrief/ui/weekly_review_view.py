@@ -26,6 +26,8 @@ from mailbrief.ui.lists import ActivatingList
 from mailbrief.ui.theme import SMALL_PX, current_tokens, ui_font
 from mailbrief.ui.workload_text import header_text
 
+NEXT_WEEK_NOTHING = "Add an open task of your own to next week's focus first."
+
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
@@ -117,6 +119,7 @@ class WeeklyReviewDialog(QDialog):
         self.week, self.today = week, today
         self.title.setText(self._week_text(week))
         self.status.setText("Loading the week…")
+        self._enable()
         self.week_requested.emit(week)
 
     def show_failure(self, text: str) -> None:
@@ -227,9 +230,9 @@ class WeeklyReviewDialog(QDialog):
         )
         self.focus_day.setEnabled(ready)
         # Suggest time plans today or later: a week whose next seven dates are over has none.
+        current = self._current()
         self.schedule_button.setEnabled(
-            self.shown is not None
-            and self.shown.next_start + timedelta(days=WEEK_DAYS - 1) >= self.today
+            current is not None and current.next_start + timedelta(days=WEEK_DAYS - 1) >= self.today
         )
         self.reflection_button.setEnabled(ready)
         record = None if self.shown is None else self.shown.record
@@ -254,9 +257,15 @@ class WeeklyReviewDialog(QDialog):
         if chosen is not None and isinstance(day, date):
             self.focus_requested.emit(chosen.public_id, day)
 
+    def _current(self) -> WeeklyReview | None:
+        """The review shown while it is the week the title names: none while another week
+        loads, or after its read failed."""
+        shown = self.shown
+        return shown if shown is not None and shown.week_start == self.week else None
+
     def _schedule(self) -> None:
-        if self.shown is not None:
-            self.schedule_requested.emit(self.shown.next_start)
+        if (current := self._current()) is not None:
+            self.schedule_requested.emit(current.next_start)
 
     def _toggle_review(self) -> None:
         record = None if self.shown is None else self.shown.record

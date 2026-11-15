@@ -818,13 +818,7 @@ class DesktopRuntime:
     async def day_plans(self, first: date, last: date) -> tuple[DayPlan, ...]:
         """Each day's focus from ``first`` to ``last``, in date order: local data only."""
         async with self._storage().session() as session:
-            service = DayPlanService(session)
-            return tuple(
-                [
-                    await service.load(first + timedelta(days=offset))
-                    for offset in range((last - first).days + 1)
-                ]
-            )
+            return await DayPlanService(session).load_range(first, last)
 
     async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]:
         async with self._storage().session() as session:

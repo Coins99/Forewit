@@ -366,8 +366,13 @@ async def test_schedule_my_focus_follows_the_browsed_day_and_refuses_the_past(
     assert panel.plan is not None and panel.plan.day == yesterday
     assert not panel.schedule_button.isEnabled()
     assert panel.schedule_button.toolTip() == SCHEDULE_PAST
-    window._schedule_focus(True)  # Asked anyway: nothing opens.
+    # Shown before midnight, chosen after it: the window refuses and says why.
+    panel.show_plan(panel.plan, ZONE, NOW - timedelta(days=1))
+    assert panel.schedule_button.isEnabled()
+    panel.schedule_button.click()
     assert not window.scheduling_dialog.isVisible() and window.focus_dialog.isVisible()
+    assert not panel.schedule_button.isEnabled()
+    assert panel.status.text() == SCHEDULE_PAST
 
     window._browse_focus_date(friday)
     await window.drain_calendar_reads()

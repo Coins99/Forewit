@@ -288,7 +288,7 @@ from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor, suggested_start
-from mailbrief.ui.focus_view import FocusDialog, FocusPanel
+from mailbrief.ui.focus_view import FocusDialog, FocusPanel, schedule_block
 from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
@@ -328,7 +328,7 @@ from mailbrief.ui.theme import (
 from mailbrief.ui.today_view import DayOverview, DayPanel
 from mailbrief.ui.upcoming_view import UpcomingDialog
 from mailbrief.ui.weak import weak_method
-from mailbrief.ui.weekly_review_view import WeeklyReviewDialog
+from mailbrief.ui.weekly_review_view import NEXT_WEEK_NOTHING, WeeklyReviewDialog
 from mailbrief.ui.workload_text import today_text
 from mailbrief.ui.workspace import PAGE_SHORTCUTS as PAGE_SHORTCUTS
 from mailbrief.ui.workspace import ThreePaneWorkspace
@@ -2314,8 +2314,11 @@ class MainWindow(QMainWindow):
                 return
             if self._closing or self.weekly_review.isHidden():
                 return
+            if not (demands := focus_demands(plans)):
+                self.weekly_review.show_failure(NEXT_WEEK_NOTHING)
+                return
             self.weekly_review.reject()
-            self.scheduling_dialog.open_range(first, last, first, focus_demands(plans), today=today)
+            self.scheduling_dialog.open_range(first, last, first, demands, today=today)
             self.dialog_guard.show_dialog(self.scheduling_dialog)
 
         self._review_task(read())
@@ -2994,11 +2997,12 @@ class MainWindow(QMainWindow):
         and task dates are not changed."""
         panel = self.focus_dialog.panel if browsed else self.focus_panel
         plan, today = panel.plan, self._local_today()
-        if self._closing or plan is None or plan.day < today:
+        if self._closing or plan is None:
+            return
+        if (block := schedule_block(plan, today)) is not None:
+            panel.refuse_schedule(block, today)  # The day ended since the plan was shown.
             return
         demands = focus_demands([plan])
-        if not demands:
-            return
         if browsed:
             self.focus_dialog.reject()
         if self._dialog_open():

@@ -13,6 +13,7 @@ from mailbrief.ui.event_editor import qday
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.palette import COMMANDS
 from mailbrief.ui.theme import ThemeMode, apply_theme
+from mailbrief.ui.weekly_review_view import NEXT_WEEK_NOTHING
 from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend, finish
@@ -167,20 +168,19 @@ async def test_suggest_time_for_next_week_needs_dates_that_are_not_over(qtbot: Q
         window.weekly_review_button.click()
         await settle(window)
         dialog = window.weekly_review
+        assert dialog.schedule_button.isEnabled()
         dialog.previous_button.click()  # Its "next week" is this week: today is in it.
+        assert not dialog.schedule_button.isEnabled()  # Not while that week loads.
         await settle(window)
         assert dialog.schedule_button.isEnabled()
         dialog.schedule_button.click()
         await settle(window)
         first, last = backend.day_plan_calls[-1]
         assert first == window._local_today() and last == monday + timedelta(days=6)
-        window.scheduling_dialog.force_close()
-        window.scheduling_dialog.reject()
+        # This week's focus holds nothing: the review stays and says so.
+        assert dialog.isVisible() and window.scheduling_dialog.isHidden()
+        assert dialog.status.text() == NEXT_WEEK_NOTHING
 
-        window._open_weekly_review()
-        await settle(window)
-        dialog.previous_button.click()
-        await settle(window)
         dialog.previous_button.click()  # Two weeks back: the week after it is over.
         await settle(window)
         assert not dialog.schedule_button.isEnabled()

@@ -105,7 +105,9 @@ def focus_demands(plans: Iterable[DayPlan]) -> tuple[TaskDemand, ...]:
     order and, within a day, in focus order. Only what Suggest time's own chooser offers is
     kept: tasks that are still there, open and the owner's own. A task in several days is
     taken once, at its first, and at most MAX_TASKS are returned. A task without an estimate
-    stays: Suggest time lists it as unknown demand. Nothing is read or changed here."""
+    stays: Suggest time lists it as unknown demand. The dialog keeps each task's ID and title;
+    its review reads the rest afresh, focus positions included. Nothing is read or changed
+    here."""
     found: dict[str, TaskDemand] = {}
     for plan in sorted(plans, key=lambda plan: plan.day):
         for item in sorted(plan.items, key=lambda item: item.position):
@@ -124,7 +126,6 @@ def focus_demands(plans: Iterable[DayPlan]) -> tuple[TaskDemand, ...]:
                 task_revision=action.revision,
                 title=action.title,
                 requested_minutes=action.estimate_minutes,
-                focus_position=item.position,
             )
     return tuple(found.values())
 
