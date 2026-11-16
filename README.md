@@ -42,6 +42,22 @@ implemented, but live-account and packaged-app acceptance checks remain open.
 See [project status](docs/project-status.md) for the milestone record and
 [platform acceptance](docs/m5-acceptance.md) for outstanding checks.
 
+## Engineering overview
+
+Forewit combines a **Python 3.13 / PySide6** desktop with **SQLite, SQLAlchemy and Alembic**, provider interfaces, and validated **Pydantic** contracts for optional AI assistance.
+
+| Design decision | Why it matters |
+| --- | --- |
+| Provider adapters behind shared interfaces | Keeps Gmail, AI and retained Microsoft integrations separate from application workflows |
+| Local SQLite persistence and additive migrations | Preserves tasks, notes and plans across upgrades; supports backup and recovery |
+| Preview and consent before AI transmission | Lets the owner choose what context leaves the device |
+| Revision-aware changes and explicit Apply/Undo workflows | Refuses stale changes and keeps AI proposals under the owner's control |
+| Tests with fake providers and temporary databases | Makes behavior repeatable without real accounts or paid AI |
+
+The repository includes Windows/macOS CI, strict type checks, formatting and lint checks, and coverage gates of 80% overall and 90% for each service module. Passing CI does not establish owner acceptance or real-account reliability.
+
+For a guided code review, start with [the engineering tour](docs/engineering.md), then [architecture decisions](docs/adr/) and [the contributor guide](CONTRIBUTING.md). The public product is Forewit; the internal Python package remains `mailbrief`.
+
 ## Get started
 
 Forewit retains the internal Python package and distribution name `mailbrief`,
