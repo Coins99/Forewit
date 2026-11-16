@@ -83,6 +83,7 @@ check links, commands and accuracy against the current code and docs.
 | `scripts/` | Build, package and coverage checks |
 | `docs/` | Setup guides, design decisions and validation records |
 
-Start with the [file change map](docs/change-map.md) and
-[architecture diagram](docs/architecture.puml) for implementation work.
+Start with the [engineering tour](docs/engineering.md) and
+[architecture decision records](docs/adr/) for implementation work.
+The older Gmail migration file map and PlantUML diagram are historical references.
 [AGENTS.md](AGENTS.md) contains detailed repository guidance for coding agents.
