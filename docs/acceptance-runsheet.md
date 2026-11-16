@@ -60,6 +60,18 @@ Questions where two docs disagree, or a step may describe an older screen, are a
   separate. Upcoming points to the Calendar for free time, and does not claim to plan capacity.
   Source: [p2-workspace](p2-workspace.md#owner-workflow),
   [p3-calendar](p3-calendar.md#owner-acceptance-desktop) step 7.
+- [ ] **DAYP-01** With three focus tasks today, two with estimates, choose **Schedule my focus**
+  in My focus. Suggest time opens for today with those tasks in focus order; the unestimated one
+  is listed as unknown demand. A waiting follow-up in focus is not handed over.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-3-stretch-modest-daily-schedule-proposal).
+- [ ] **DAYP-02** Apply: blocks appear today inside working hours and after the current time;
+  task dates and focus are unchanged. Undo removes the batch.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-3-stretch-modest-daily-schedule-proposal).
+- [ ] **DAYP-03** Late in the day, with too little time left, the review says which tasks do
+  not fit and why, and Apply offers only those that fit. With an empty focus, or in **Plan
+  today** on a past date, **Schedule my focus** is unavailable and its tooltip says why.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-3-stretch-modest-daily-schedule-proposal).
+
 ## Weekly review
 
 P5-1, from Today's header or the palette. Test profile, Gmail disconnected.
@@ -101,6 +113,10 @@ P5-1, from Today's header or the palette. Test profile, Gmail disconnected.
 - [ ] **REV-10** Back up, restore into a test profile: reviewed weeks and reflection notes come
   back. **Export all writing** contains the reflection note and no review record.
   Source: [p5-review-assistance](p5-review-assistance.md#p5-1-deterministic-weekly-review-a07).
+- [ ] **DAYP-04** In the weekly review choose **Suggest time for next week**. The review closes
+  and Suggest time opens with next week's seven dates and that week's focus tasks, each once.
+  Two weeks back, where the following week is over, the button is unavailable.
+  Source: [p5-review-assistance](p5-review-assistance.md#p5-3-stretch-modest-daily-schedule-proposal).
 
 ## Tasks
 

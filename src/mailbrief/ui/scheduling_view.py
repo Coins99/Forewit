@@ -1,6 +1,7 @@
 """Local task chooser and guarded add-only scheduling review; no mail/AI dependency."""
 
 import asyncio
+from collections.abc import Iterable
 from datetime import date, datetime
 from typing import Protocol, cast
 from uuid import uuid4
@@ -24,8 +25,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mailbrief.domain.actions import ActionStatus
+from mailbrief.domain.analysis import ActionOwnership
+from mailbrief.domain.day_plans import DayPlan
 from mailbrief.domain.projects import Project
 from mailbrief.domain.scheduling import (
+    MAX_TASKS,
     PlanningCandidatePage,
     PlanningResult,
     PlanningReview,
@@ -93,6 +98,36 @@ def block_times(start: datetime, end: datetime, zone: ZoneInfo, today: date) -> 
     same_day = start.astimezone(zone).date() == end.astimezone(zone).date()
     last = clock(end, zone) if same_day else moment_text(end, zone, today=today)
     return f"{first}–{last}"
+
+
+def focus_demands(plans: Iterable[DayPlan]) -> tuple[TaskDemand, ...]:
+    """The tasks a focus selection hands to Suggest time (P5-3): each day's focus in date
+    order and, within a day, in focus order. Only what Suggest time's own chooser offers is
+    kept: tasks that are still there, open and the owner's own. A task in several days is
+    taken once, at its first, and at most MAX_TASKS are returned. A task without an estimate
+    stays: Suggest time lists it as unknown demand. The dialog keeps each task's ID and title;
+    its review reads the rest afresh, focus positions included. Nothing is read or changed
+    here."""
+    found: dict[str, TaskDemand] = {}
+    for plan in sorted(plans, key=lambda plan: plan.day):
+        for item in sorted(plan.items, key=lambda item: item.position):
+            action = item.action
+            if (
+                action is None
+                or action.status is not ActionStatus.OPEN
+                or action.ownership is not ActionOwnership.MINE
+                or action.public_id in found
+            ):
+                continue
+            if len(found) == MAX_TASKS:
+                return tuple(found.values())
+            found[action.public_id] = TaskDemand(
+                task_public_id=action.public_id,
+                task_revision=action.revision,
+                title=action.title,
+                requested_minutes=action.estimate_minutes,
+            )
+    return tuple(found.values())
 
 
 class PlanningBackend(Protocol):

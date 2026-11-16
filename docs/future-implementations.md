@@ -844,6 +844,11 @@ offline while Gmail/AI operations report their own availability.
 
 ## 7. Delivery sequence and gates
 
+P5-3 update (2026-11-15): the stretch is implemented, awaiting owner acceptance: two shorter
+ways into the existing local Suggest time, from Today's focus and from the weekly review, with
+focus tasks already chosen. It adds no planner, AI or storage. With it, every increment of P5
+is built; the gate is still the two-week owner trial.
+
 P5-2 update (2026-11-14): the optional AI breakdown of one selected task (limited J01 and J07)
 is implemented, awaiting owner live acceptance ([ADR 0033](adr/0033-task-breakdown.md)): its
 own consent scope, a preview of exactly what is sent, checklist steps only, Apply and Undo, and

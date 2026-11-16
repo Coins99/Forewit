@@ -1,6 +1,6 @@
 # P5: Review and optional assistance (plan)
 
-Status: P5-1 and P5-2 implemented 2026-11-14, owner acceptance open; P5-3 planned. Base: `main` at `a863c21` (#127).
+Status: P5-1 and P5-2 implemented 2026-11-14 and P5-3 on 2026-11-15; owner acceptance open. Base: `main` at `a863c21` (#127).
 Contract for the AI path: [ADR 0033](adr/0033-task-breakdown.md) (accepted with P5-2).
 
 P5 is the last phase of the general-planner proof of concept
@@ -321,14 +321,34 @@ unplaced reasons and knowledge limits, whole-task Apply under a fingerprint chec
 and retry-safe receipts, and a start at least five minutes ahead on a quarter hour. That is
 the daily proposal's engine; P5-3 adds no planner, no AI and no storage.
 
-**Use.** On Today, **Schedule my focus** opens Suggest time prefilled for today (or the
-browsed focus date) with that day's open focus tasks in focus order, no splitting, and the
-remaining time of the day. The owner reviews and applies there as now. The weekly review's
-**Next week** section gets **Suggest time for next week**, prefilled with the seven dates and
-next week's focus tasks.
+Implemented on `feat/p5-focus-scheduling` (2026-11-15); owner acceptance open. This section
+describes what was built.
 
-**Data.** None: no migration. The prefill is a `SchedulingRequest` built in the UI layer from
-`DayPlan`; Apply, Undo and receipts are ADR 0031's.
+**Use.** On Today, **Schedule my focus** (in My focus, beside **Plan today**) opens Suggest
+time for today with the day's open focus tasks already chosen, in focus order and without
+splitting. Opened for today, Suggest time already starts at least five minutes ahead, so it
+plans the rest of the day. The same button in the **Plan today** dialog does it for the date
+browsed there, closing that dialog first; it is unavailable for a past date, and when the day's
+focus holds no open task of the owner's own, with the reason in its tooltip. The owner reviews
+and applies in Suggest time as now.
+
+The weekly review has **Suggest time for next week** beside **Add to focus**: it closes the
+review and opens Suggest time for the seven dates after the week shown, from today on, with
+those days' focus tasks chosen. It is unavailable once those dates are over, and while another
+week loads. When those days' focus holds no open task of the owner's own, the review stays open
+and says so. Suggest time's focus tie-break follows the first date's focus order, then each
+later requested date's in date order, a task ranking at its first place; this holds for
+Calendar's Suggest time too, which used the first date's focus alone.
+
+Only what Suggest time's own chooser offers is handed over: tasks that are still there, open
+and the owner's own (a waiting follow-up is not), each once. A task without an estimate is
+handed over too, and Suggest time lists it as unknown demand.
+
+**Data.** None: no migration. The prefill is `focus_demands` in `ui/scheduling_view.py`, built
+in the UI layer from `DayPlan` and passed to `SchedulingDialog.open_range`; the review's read of
+next week's plans is `DesktopRuntime.day_plans` (`DayPlanService.load_range`, three reads for
+the run of days). Apply, Undo and receipts are ADR 0031's.
+Opening Suggest time changes neither focus nor task dates.
 
 **Privacy boundary.** Unchanged from ADR 0031: local planning code, no network call; the
 source-rule scan for scheduling imports must still pass.
@@ -345,8 +365,14 @@ source-rule scan for scheduling imports must still pass.
 - [ ] **DAYP-04** From the weekly review, **Suggest time for next week** opens with next week's
   seven dates and its focus tasks.
 
-**Tests and checks.** Prefill tests (dates, order, zone, browsed date, no focus tasks), a UI
-test that the dialog receives the request, and the existing scheduling suite unchanged.
+**Tests and checks.** `tests/ui/test_scheduling.py` (the prefill: focus order, days in date
+order, each task once, closed, waiting and missing tasks left out, the 100-task limit, no
+focus tasks), `tests/ui/test_focus.py` (Today's button and its reasons, the browsed date, a
+past date, a day that ended after it was shown, the runtime's read of a run of days) and
+`tests/ui/test_weekly_review.py` (the range and tasks Suggest time receives, a week still
+loading, no focus tasks, a week whose next dates are over, a failed read).
+`tests/unit/services/test_scheduling.py` adds the focus ranking across requested dates and
+`tests/unit/services/test_day_plans.py` the range read.
 
 ## What acceptance of P1–P4 could change
 
@@ -383,7 +409,8 @@ test that the dialog receives the request, and the existing scheduling suite unc
 
 1. P5-1 (independent of P5-2 and P5-3).
 2. P5-2, with ADR 0033 moving from proposed to accepted in its PR (done).
-3. P5-3 only if the owner keeps the stretch (question 9).
+3. P5-3 only if the owner keeps the stretch (question 9): built on 2026-11-15 at the owner's
+   choice, ahead of the trial.
 4. The two-week trial, recorded against the POC criteria, then the P5 gate decision.
 
 ## Questions for the owner

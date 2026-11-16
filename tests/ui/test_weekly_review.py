@@ -9,9 +9,11 @@ from pytestqt.qtbot import QtBot
 from mailbrief.domain.actions import ActionFilter
 from mailbrief.domain.drafts import DraftKind
 from mailbrief.domain.weekly_review import week_start
+from mailbrief.ui.event_editor import qday
 from mailbrief.ui.main_window import MainWindow
 from mailbrief.ui.palette import COMMANDS
 from mailbrief.ui.theme import ThemeMode, apply_theme
+from mailbrief.ui.weekly_review_view import NEXT_WEEK_NOTHING
 from tests.factories import make_action
 from tests.ui.test_main_window_layout import save_shot
 from tests.ui.test_workflow import FakeBackend, finish
@@ -107,6 +109,94 @@ async def test_palette_opens_this_and_last_week(qtbot: QtBot) -> None:
         await settle(window)
         assert window.weekly_review.status.text() == "Could not read the week. Reopen to retry."
     finally:
+        window.weekly_review.reject()
+        window.close()
+        await window.shutdown()
+
+
+async def test_suggest_time_for_next_week_opens_with_its_dates_and_focus_tasks(
+    qtbot: QtBot,
+) -> None:
+    """P5-3: next week's seven dates and its focus tasks, handed to Suggest time as it is."""
+    backend = FakeBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window.initialize()
+    today = window._local_today()
+    monday = week_start(today)
+    next_monday = monday + timedelta(days=7)
+    report = make_action(title="Prepare the report", estimate_minutes=45)
+    slides = make_action(public_id="1c5e2c1d-6b8e-4f55-9d0e-2a7f3b9c1e44", title="Draft slides")
+    backend.actions[ActionFilter.OPEN] = (report, slides)
+    zone = window.zone
+    await backend.select_day_task(next_monday + timedelta(days=2), zone, slides.public_id, 0)
+    await backend.select_day_task(next_monday, zone, report.public_id, 0)
+    await backend.select_day_task(next_monday + timedelta(days=4), zone, report.public_id, 0)
+    before = dict(backend.focus_plans)
+    try:
+        window.weekly_review_button.click()
+        await settle(window)
+        dialog = window.weekly_review
+        assert dialog.schedule_button.isEnabled()
+        dialog.schedule_button.click()
+        await settle(window)
+
+        assert backend.day_plan_calls == [(next_monday, next_monday + timedelta(days=6))]
+        # Suggest time is a drawer inside the window, which this test doesn't show.
+        assert not dialog.isVisible() and not window.scheduling_dialog.isHidden()
+        suggest = window.scheduling_dialog
+        assert qday(suggest.first_day.date()) == next_monday
+        assert qday(suggest.last_day.date()) == next_monday + timedelta(days=6)
+        chosen = [suggest.chosen.item(row).text() for row in range(suggest.chosen.count())]
+        assert chosen == ["Prepare the report", "Draft slides"]  # By day; each task once.
+        assert backend.focus_plans == before
+    finally:
+        window.scheduling_dialog.force_close()
+        window.scheduling_dialog.reject()
+        window.weekly_review.reject()
+        window.close()
+        await window.shutdown()
+
+
+async def test_suggest_time_for_next_week_needs_dates_that_are_not_over(qtbot: QtBot) -> None:
+    backend = FakeBackend()
+    window = MainWindow(backend)
+    qtbot.addWidget(window)
+    await window.initialize()
+    monday = week_start(window._local_today())
+    try:
+        window.weekly_review_button.click()
+        await settle(window)
+        dialog = window.weekly_review
+        assert dialog.schedule_button.isEnabled()
+        dialog.previous_button.click()  # Its "next week" is this week: today is in it.
+        assert not dialog.schedule_button.isEnabled()  # Not while that week loads.
+        await settle(window)
+        assert dialog.schedule_button.isEnabled()
+        dialog.schedule_button.click()
+        await settle(window)
+        first, last = backend.day_plan_calls[-1]
+        assert first == window._local_today() and last == monday + timedelta(days=6)
+        # This week's focus holds nothing: the review stays and says so.
+        assert dialog.isVisible() and window.scheduling_dialog.isHidden()
+        assert dialog.status.text() == NEXT_WEEK_NOTHING
+
+        dialog.previous_button.click()  # Two weeks back: the week after it is over.
+        await settle(window)
+        assert not dialog.schedule_button.isEnabled()
+        window._review_schedule(monday - timedelta(days=7))  # Asked anyway: nothing is read.
+        await settle(window)
+        assert len(backend.day_plan_calls) == 1
+
+        dialog.this_week_button.click()
+        await settle(window)
+        backend.day_fail = RuntimeError("unreadable")
+        dialog.schedule_button.click()
+        await settle(window)
+        assert dialog.isVisible() and window.scheduling_dialog.isHidden()
+        assert dialog.status.text() == "Could not read next week's focus."
+    finally:
+        window.scheduling_dialog.force_close()
         window.weekly_review.reject()
         window.close()
         await window.shutdown()

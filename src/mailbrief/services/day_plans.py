@@ -1,7 +1,7 @@
 """Revisioned daily selection; no task dates, priorities or lifecycle are written here."""
 
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -39,10 +39,33 @@ class DayPlanService:
         self.actions = ActionRepository(session)
 
     async def load(self, day: date) -> DayPlan:
-        row = await plan_row(self.session, day)
-        if row is None:
-            return DayPlan(day=day)
-        items = await item_rows(self.session, row.id)
+        return (await self.load_range(day, day))[0]
+
+    async def load_range(self, first: date, last: date) -> tuple[DayPlan, ...]:
+        """Each date's plan from ``first`` to ``last`` in date order, with three reads in all;
+        a date without a plan is an empty one, and ``last`` before ``first`` reads none."""
+        if last < first:
+            return ()
+        rows = {
+            row.local_date: row
+            for row in await self.session.scalars(
+                select(DayPlanTable)
+                .where(DayPlanTable.local_date >= first, DayPlanTable.local_date <= last)
+                .execution_options(populate_existing=True)
+            )
+        }
+        items = (
+            list(
+                await self.session.scalars(
+                    select(DayPlanItemTable)
+                    .where(DayPlanItemTable.plan_id.in_([row.id for row in rows.values()]))
+                    .order_by(DayPlanItemTable.position)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            if rows
+            else []
+        )
         task_rows = (
             list(
                 await self.session.scalars(
@@ -58,23 +81,33 @@ class DayPlanService:
             else []
         )
         tasks = {action.public_id: action for action in await self.actions.load(task_rows)}
-        return DayPlan(
-            day=row.local_date,
-            public_id=row.public_id,
-            creation_zone=row.creation_zone,
-            revision=row.revision,
-            created_at_utc=row.created_at_utc,
-            updated_at_utc=row.updated_at_utc,
-            items=tuple(
-                DayPlanItem(
-                    public_id=item.public_id,
-                    task_public_id=item.task_public_id,
-                    position=item.position,
-                    action=tasks.get(item.task_public_id),
+        plans: list[DayPlan] = []
+        for offset in range((last - first).days + 1):
+            day = first + timedelta(days=offset)
+            row = rows.get(day)
+            plans.append(
+                DayPlan(day=day)
+                if row is None
+                else DayPlan(
+                    day=row.local_date,
+                    public_id=row.public_id,
+                    creation_zone=row.creation_zone,
+                    revision=row.revision,
+                    created_at_utc=row.created_at_utc,
+                    updated_at_utc=row.updated_at_utc,
+                    items=tuple(
+                        DayPlanItem(
+                            public_id=item.public_id,
+                            task_public_id=item.task_public_id,
+                            position=item.position,
+                            action=tasks.get(item.task_public_id),
+                        )
+                        for item in items
+                        if item.plan_id == row.id
+                    ),
                 )
-                for item in items
-            ),
-        )
+            )
+        return tuple(plans)
 
     async def candidates(self, text: str = "", *, day: date | None = None) -> tuple[Action, ...]:
         terms = query_terms(text)

@@ -127,7 +127,7 @@ from mailbrief.domain.routes import (
 )
 from mailbrief.domain.search import SearchHit, SearchKind, SearchResults
 from mailbrief.domain.today import DaySummary
-from mailbrief.domain.weekly_review import WeeklyReview, WeeklyReviewRecord
+from mailbrief.domain.weekly_review import WEEK_DAYS, WeeklyReview, WeeklyReviewRecord
 from mailbrief.domain.work_blocks import (
     BlockSaved,
     BlockTime,
@@ -288,7 +288,7 @@ from mailbrief.ui.drafts_view import NEW as NEW_DRAFT
 from mailbrief.ui.drafts_view import OPEN as OPEN_DRAFT
 from mailbrief.ui.drafts_view import DraftsPanel
 from mailbrief.ui.event_editor import EventEditor, suggested_start
-from mailbrief.ui.focus_view import FocusDialog, FocusPanel
+from mailbrief.ui.focus_view import FocusDialog, FocusPanel, schedule_block
 from mailbrief.ui.glass.accessibility import GlassAccessibility
 from mailbrief.ui.glass.preferences import Motion, Transparency
 from mailbrief.ui.hairline import HairlineFrame
@@ -311,7 +311,7 @@ from mailbrief.ui.projects_view import ProjectsDialog
 from mailbrief.ui.proposals_view import ProposalsDialog
 from mailbrief.ui.run_view import ROW_ROLE, ShortlistDelegate, shortlist_row
 from mailbrief.ui.scheduler import RefreshScheduler
-from mailbrief.ui.scheduling_view import PlanningBackend, SchedulingDialog
+from mailbrief.ui.scheduling_view import PlanningBackend, SchedulingDialog, focus_demands
 from mailbrief.ui.settings_view import SIGN_IN_UNSAVED, SettingsDialog
 from mailbrief.ui.task_picker import TaskPickerDialog
 from mailbrief.ui.theme import (
@@ -328,7 +328,7 @@ from mailbrief.ui.theme import (
 from mailbrief.ui.today_view import DayOverview, DayPanel
 from mailbrief.ui.upcoming_view import UpcomingDialog
 from mailbrief.ui.weak import weak_method
-from mailbrief.ui.weekly_review_view import WeeklyReviewDialog
+from mailbrief.ui.weekly_review_view import NEXT_WEEK_NOTHING, WeeklyReviewDialog
 from mailbrief.ui.workload_text import today_text
 from mailbrief.ui.workspace import PAGE_SHORTCUTS as PAGE_SHORTCUTS
 from mailbrief.ui.workspace import ThreePaneWorkspace
@@ -403,6 +403,7 @@ class DesktopBackend(Protocol):
 
     async def get_action(self, public_id: str) -> Action: ...
     async def capture(self, request: CaptureRequest) -> Action | Draft: ...
+    async def day_plans(self, first: date, last: date) -> tuple[DayPlan, ...]: ...
     async def focus_candidates(self, day: date, text: str = "") -> tuple[Action, ...]: ...
     async def capture_inbox(self) -> tuple[Action | Draft, ...]: ...
     async def keep_capture(self, record: Action | Draft) -> Action | Draft: ...
@@ -1211,6 +1212,8 @@ class MainWindow(QMainWindow):
             panel.change_requested.connect(self._request_focus_change)
             panel.open_requested.connect(self._open_focus_task)
         self.focus_panel.plan_requested.connect(self._open_focus)
+        self.focus_panel.schedule_requested.connect(lambda: self._schedule_focus(False))
+        self.focus_dialog.panel.schedule_requested.connect(lambda: self._schedule_focus(True))
         self.focus_panel.agenda_requested.connect(self._open_focus_agenda)
         self.focus_dialog.search_requested.connect(self._search_focus)
         self.focus_dialog.select_requested.connect(self._add_captured_today)
@@ -1433,6 +1436,7 @@ class MainWindow(QMainWindow):
         self.weekly_review.focus_requested.connect(self._review_focus)
         self.weekly_review.review_requested.connect(self._mark_week)
         self.weekly_review.reflection_requested.connect(self._week_reflection)
+        self.weekly_review.schedule_requested.connect(self._review_schedule)
         self.weekly_review_button = outline_button("Weekly review", "openWeeklyReview")
         self.weekly_review_button.setAccessibleName(
             "Review a week's done and open tasks, and plan the next"
@@ -1609,6 +1613,7 @@ class MainWindow(QMainWindow):
             self.workspace.sidebar.account_button,
             self.latest_button,
             self.retry_button,
+            self.focus_panel.schedule_button,
             self.focus_panel.plan_button,
             self.focus_panel.list,
             self.focus_panel.open_button,
@@ -2288,6 +2293,36 @@ class MainWindow(QMainWindow):
 
         self._review_task(add())
 
+    def _review_schedule(self, start: object) -> None:
+        """Suggest time for the week after the one reviewed (P5-3): its dates from today on,
+        with that week's focus tasks chosen. Only a read happens here; Suggest time's own
+        review and Apply decide the rest."""
+        if not isinstance(start, date) or self._closing:
+            return
+        today = self._local_today()
+        first, last = max(start, today), start + timedelta(days=WEEK_DAYS - 1)
+        if last < today:
+            return
+
+        async def read() -> None:
+            try:
+                plans = await self.backend.day_plans(first, last)
+            except Exception as exc:
+                log_failure(exc)
+                if not self._closing:
+                    self.weekly_review.show_failure("Could not read next week's focus.")
+                return
+            if self._closing or self.weekly_review.isHidden():
+                return
+            if not (demands := focus_demands(plans)):
+                self.weekly_review.show_failure(NEXT_WEEK_NOTHING)
+                return
+            self.weekly_review.reject()
+            self.scheduling_dialog.open_range(first, last, first, demands, today=today)
+            self.dialog_guard.show_dialog(self.scheduling_dialog)
+
+        self._review_task(read())
+
     def _read_upcoming(self, days: int) -> None:
         self._upcoming_read += 1
         generation, day, zone = self._upcoming_read, self._local_today(), self.zone
@@ -2954,6 +2989,26 @@ class MainWindow(QMainWindow):
         self.focus_dialog.panel.status.clear()
         self.focus_dialog.panel.status.hide()
         self._read_focus()
+
+    def _schedule_focus(self, browsed: bool) -> None:
+        """Schedule my focus (P5-3): Suggest time for the day whose focus is shown, with its
+        open tasks chosen in focus order. ``browsed`` is the focus dialog's plan, which may be
+        another day's; that dialog closes first, since one dialog is open at a time. Focus
+        and task dates are not changed."""
+        panel = self.focus_dialog.panel if browsed else self.focus_panel
+        plan, today = panel.plan, self._local_today()
+        if self._closing or plan is None:
+            return
+        if (block := schedule_block(plan, today)) is not None:
+            panel.refuse_schedule(block, today)  # The day ended since the plan was shown.
+            return
+        demands = focus_demands([plan])
+        if browsed:
+            self.focus_dialog.reject()
+        if self._dialog_open():
+            return
+        self.scheduling_dialog.open_range(plan.day, plan.day, plan.day, demands, today=today)
+        self.dialog_guard.show_dialog(self.scheduling_dialog)
 
     def _invalidate_plan_transfer(self) -> None:
         self._plan_transfer = None

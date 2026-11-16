@@ -17,6 +17,7 @@ from mailbrief.domain.scheduling import (
     PlanningUndo,
     SchedulingRequest,
     SchedulingTask,
+    TaskDemand,
     verify_proposal,
 )
 from mailbrief.domain.work_blocks import BlockTime
@@ -333,6 +334,40 @@ async def test_candidate_paging_filters_unknown_and_focus(session: AsyncSession)
         DAY, DAY, query="Paged", needs_time=False, offset=page.next_offset
     )
     assert len(page.items) == 3 and page.next_offset is None
+
+
+async def test_focus_ranks_by_each_requested_date_in_order(session: AsyncSession) -> None:
+    """P5-3: the focus day's order, then each later date's; a task ranks at its first place,
+    and a date outside the request ranks nothing."""
+    from mailbrief.services.day_plans import DayPlanService
+
+    service, unfocused = await setup(session)
+    actions, plans = ActionService(session), DayPlanService(session)
+    first, later, outside = [
+        (await actions.create(EDIT.model_copy(update={"title": title}))).public_id
+        for title in ("First focus", "Later focus", "Outside focus")
+    ]
+    await plans.select(DAY, ZONE, first, 0)
+    tuesday = await plans.select(DAY + timedelta(days=1), ZONE, later, 0)
+    await plans.select(DAY + timedelta(days=1), ZONE, first, tuesday.revision)
+    await plans.select(DAY + timedelta(days=2), ZONE, outside, 0)
+    shown = SchedulingRequest(
+        first_day=DAY,
+        last_day=DAY + timedelta(days=1),
+        focus_day=DAY,
+        tasks=tuple(
+            SchedulingTask(task_public_id=task) for task in (unfocused, outside, later, first)
+        ),
+    )
+
+    snapshot = await service.snapshot(shown)
+
+    positions = {demand.task_public_id: demand.focus_position for demand in snapshot.demands}
+    unset = TaskDemand.model_fields["focus_position"].default
+    assert positions == {first: 0, later: 1, unfocused: unset, outside: unset}
+    # A later date's focus is part of what the review read.
+    await plans.select(DAY + timedelta(days=1), ZONE, unfocused, tuesday.revision + 1)
+    assert (await service.snapshot(shown)).fingerprint != snapshot.fingerprint
 
 
 async def test_inactive_all_day_and_missing_task(session: AsyncSession) -> None:

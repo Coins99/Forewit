@@ -66,7 +66,11 @@ file, this file wins. `docs/archive/` holds superseded plans and notes for refer
   one task (ADR 0033), is implemented, awaiting owner live acceptance: **Break down with AI…**
   in a task's detail, its own consent scope, a preview every time, Apply and Undo of checklist
   steps only, and a text-free history (migration 0040 `task_breakdowns`); also
-  `forewit-gmail-diagnostic breakdown TASK_ID --dry-run`. P5-3 is not built.
+  `forewit-gmail-diagnostic breakdown TASK_ID --dry-run`. P5-3, the stretch, is implemented,
+  awaiting owner acceptance: **Schedule my focus** (Today and the Plan today dialog) and
+  **Suggest time for next week** (the weekly review) open ADR 0031's Suggest time with focus
+  tasks chosen (`focus_demands` in `ui/scheduling_view.py`). It is a prefill only: no AI, no
+  storage, no migration, and it changes neither focus nor task dates.
 
 - Where each feature is specified (behavior, acceptance steps and limits):
 
